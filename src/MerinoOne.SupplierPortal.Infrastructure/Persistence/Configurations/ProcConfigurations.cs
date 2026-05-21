@@ -1,0 +1,264 @@
+using MerinoOne.SupplierPortal.Domain.Entities.Proc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Configurations;
+
+public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder>
+{
+    public void Configure(EntityTypeBuilder<PurchaseOrder> b)
+    {
+        b.ApplyBaseEntityConvention("PurchaseOrder", "proc", "purchaseOrder");
+        b.Property(x => x.PoNumber).HasColumnName("poNumber").HasMaxLength(50).IsRequired();
+        b.Property(x => x.SupplierId).HasColumnName("supplierId");
+        b.Property(x => x.BuyerUserId).HasColumnName("buyerUserId");
+        b.Property(x => x.PoType).HasColumnName("poType").HasConversion<string>().HasMaxLength(20);
+        b.Property(x => x.PoDate).HasColumnName("poDate").HasColumnType("datetime2");
+        b.Property(x => x.PaymentTerms).HasColumnName("paymentTerms").HasMaxLength(200);
+        b.Property(x => x.DeliveryTerms).HasColumnName("deliveryTerms").HasMaxLength(200);
+        b.Property(x => x.PoStatus).HasColumnName("poStatus").HasConversion<string>().HasMaxLength(30);
+        b.Property(x => x.AcknowledgmentAt).HasColumnName("acknowledgmentAt").HasColumnType("datetime2");
+        b.Property(x => x.AcceptedAt).HasColumnName("acceptedAt").HasColumnType("datetime2");
+        b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
+        b.Property(x => x.ProposedDeliveryDate).HasColumnName("proposedDeliveryDate").HasColumnType("datetime2");
+        b.Property(x => x.Version).HasColumnName("version");
+        b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
+        b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
+
+        b.ToTable(t => t.HasCheckConstraint("CK_PurchaseOrder_poType", "[poType] IN ('Material','Service')"));
+
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_PurchaseOrder_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.PoNumber).HasDatabaseName("UQ_PurchaseOrder_poNumber").IsUnique();
+        b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_PurchaseOrder_supplierId");
+        b.HasIndex(x => x.PoStatus).HasDatabaseName("IX_PurchaseOrder_poStatus");
+    }
+}
+
+public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseOrderLine>
+{
+    public void Configure(EntityTypeBuilder<PurchaseOrderLine> b)
+    {
+        b.ApplyBaseEntityConvention("PurchaseOrderLine", "proc", "purchaseOrderLine");
+        b.Property(x => x.PurchaseOrderId).HasColumnName("purchaseOrderId");
+        b.Property(x => x.PositionNo).HasColumnName("positionNo");
+        b.Property(x => x.SequenceNo).HasColumnName("sequenceNo");
+        b.Property(x => x.ItemCode).HasColumnName("itemCode").HasMaxLength(50).IsRequired();
+        b.Property(x => x.ItemDescription).HasColumnName("itemDescription").HasMaxLength(500);
+        b.Property(x => x.OrderUnit).HasColumnName("orderUnit").HasMaxLength(20);
+        b.Property(x => x.OrderQty).HasColumnName("orderQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.PriceUnit).HasColumnName("priceUnit").HasColumnType("decimal(18,4)");
+        b.Property(x => x.Price).HasColumnName("price").HasColumnType("decimal(18,4)");
+        b.Property(x => x.DiscountPct).HasColumnName("discountPct").HasColumnType("decimal(5,2)");
+        b.Property(x => x.DiscountAmount).HasColumnName("discountAmount").HasColumnType("decimal(18,4)");
+        b.Property(x => x.DeliveryDate).HasColumnName("deliveryDate").HasColumnType("datetime2");
+        b.Property(x => x.TaxCode).HasColumnName("taxCode").HasMaxLength(20);
+        b.Property(x => x.TaxDescription).HasColumnName("taxDescription").HasMaxLength(200);
+
+        b.HasOne(x => x.PurchaseOrder).WithMany(p => p.Lines).HasForeignKey(x => x.PurchaseOrderId)
+            .HasConstraintName("FK_PurchaseOrderLine_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class DeliveryScheduleConfiguration : IEntityTypeConfiguration<DeliverySchedule>
+{
+    public void Configure(EntityTypeBuilder<DeliverySchedule> b)
+    {
+        b.ApplyBaseEntityConvention("DeliverySchedule", "proc", "deliverySchedule");
+        b.Property(x => x.PurchaseOrderId).HasColumnName("purchaseOrderId");
+        b.Property(x => x.ProposedDate).HasColumnName("proposedDate").HasColumnType("datetime2");
+        b.Property(x => x.TimeWindow).HasColumnName("timeWindow").HasMaxLength(50);
+        b.Property(x => x.VehicleInfo).HasColumnName("vehicleInfo").HasMaxLength(200);
+        b.Property(x => x.ScheduleStatus).HasColumnName("scheduleStatus").HasConversion<string>().HasMaxLength(30);
+        b.Property(x => x.ApprovedBy).HasColumnName("approvedBy").HasMaxLength(100);
+        b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
+
+        b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
+            .HasConstraintName("FK_DeliverySchedule_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_DeliverySchedule_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class AsnConfiguration : IEntityTypeConfiguration<Asn>
+{
+    public void Configure(EntityTypeBuilder<Asn> b)
+    {
+        b.ApplyBaseEntityConvention("Asn", "proc", "asn");
+        b.Property(x => x.AsnNumber).HasColumnName("asnNumber").HasMaxLength(50).IsRequired();
+        b.Property(x => x.PurchaseOrderId).HasColumnName("purchaseOrderId");
+        b.Property(x => x.SupplierId).HasColumnName("supplierId");
+        b.Property(x => x.ExpectedDeliveryDate).HasColumnName("expectedDeliveryDate").HasColumnType("datetime2");
+        b.Property(x => x.TimeWindow).HasColumnName("timeWindow").HasMaxLength(50);
+        b.Property(x => x.CarrierName).HasColumnName("carrierName").HasMaxLength(200);
+        b.Property(x => x.TrackingNumber).HasColumnName("trackingNumber").HasMaxLength(100);
+        b.Property(x => x.VehicleNumber).HasColumnName("vehicleNumber").HasMaxLength(50);
+        b.Property(x => x.DriverName).HasColumnName("driverName").HasMaxLength(100);
+        b.Property(x => x.DriverPhone).HasColumnName("driverPhone").HasMaxLength(20);
+        b.Property(x => x.AsnStatus).HasColumnName("asnStatus").HasConversion<string>().HasMaxLength(30);
+        b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
+
+        b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
+            .HasConstraintName("FK_Asn_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_Asn_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.AsnNumber).HasDatabaseName("UQ_Asn_asnNumber").IsUnique();
+        b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_Asn_supplierId");
+    }
+}
+
+public class AsnLineConfiguration : IEntityTypeConfiguration<AsnLine>
+{
+    public void Configure(EntityTypeBuilder<AsnLine> b)
+    {
+        b.ApplyBaseEntityConvention("AsnLine", "proc", "asnLine");
+        b.Property(x => x.AsnId).HasColumnName("asnId");
+        b.Property(x => x.PurchaseOrderLineId).HasColumnName("purchaseOrderLineId");
+        b.Property(x => x.ShippedQty).HasColumnName("shippedQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.BatchNumber).HasColumnName("batchNumber").HasMaxLength(50);
+        b.Property(x => x.ExpiryDate).HasColumnName("expiryDate").HasColumnType("datetime2");
+
+        b.HasOne(x => x.Asn).WithMany(a => a.Lines).HasForeignKey(x => x.AsnId)
+            .HasConstraintName("FK_AsnLine_Asn_AsnId").OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)
+            .HasConstraintName("FK_AsnLine_PurchaseOrderLine_PurchaseOrderLineId").OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class GoodsReceiptConfiguration : IEntityTypeConfiguration<GoodsReceipt>
+{
+    public void Configure(EntityTypeBuilder<GoodsReceipt> b)
+    {
+        b.ApplyBaseEntityConvention("GoodsReceipt", "proc", "goodsReceipt");
+        b.Property(x => x.GrnNumber).HasColumnName("grnNumber").HasMaxLength(50).IsRequired();
+        b.Property(x => x.PurchaseOrderLineId).HasColumnName("purchaseOrderLineId");
+        b.Property(x => x.AsnId).HasColumnName("asnId");
+        b.Property(x => x.ReceivedQty).HasColumnName("receivedQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.ShortQty).HasColumnName("shortQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.RejectedQty).HasColumnName("rejectedQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.GrnDate).HasColumnName("grnDate").HasColumnType("datetime2");
+        b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
+
+        b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)
+            .HasConstraintName("FK_GoodsReceipt_PurchaseOrderLine_PurchaseOrderLineId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Asn).WithMany().HasForeignKey(x => x.AsnId)
+            .HasConstraintName("FK_GoodsReceipt_Asn_AsnId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_GoodsReceipt_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.GrnNumber).HasDatabaseName("IX_GoodsReceipt_grnNumber");
+    }
+}
+
+public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
+{
+    public void Configure(EntityTypeBuilder<Invoice> b)
+    {
+        b.ApplyBaseEntityConvention("Invoice", "proc", "invoice");
+        b.Property(x => x.InvoiceNumber).HasColumnName("invoiceNumber").HasMaxLength(50).IsRequired();
+        b.Property(x => x.PurchaseOrderId).HasColumnName("purchaseOrderId");
+        b.Property(x => x.AsnId).HasColumnName("asnId");
+        b.Property(x => x.SupplierId).HasColumnName("supplierId");
+        b.Property(x => x.InvoiceDate).HasColumnName("invoiceDate").HasColumnType("datetime2");
+        b.Property(x => x.InvoiceAmount).HasColumnName("invoiceAmount").HasColumnType("decimal(18,4)");
+        b.Property(x => x.TaxAmount).HasColumnName("taxAmount").HasColumnType("decimal(18,4)");
+        b.Property(x => x.NetAmount).HasColumnName("netAmount").HasColumnType("decimal(18,4)");
+        b.Property(x => x.CurrencyCode).HasColumnName("currencyCode").HasMaxLength(10);
+        b.Property(x => x.MatchingType).HasColumnName("matchingType").HasConversion<string>().HasMaxLength(20);
+        b.Property(x => x.GrnReference).HasColumnName("grnReference").HasMaxLength(50);
+        b.Property(x => x.InvoiceStatus).HasColumnName("invoiceStatus").HasConversion<string>().HasMaxLength(30);
+        b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
+        b.Property(x => x.EInvoiceIrn).HasColumnName("eInvoiceIrn").HasMaxLength(100);
+        b.Property(x => x.EInvoiceAckNo).HasColumnName("eInvoiceAckNo").HasMaxLength(100);
+        b.Property(x => x.EWayBillNumber).HasColumnName("eWayBillNumber").HasMaxLength(50);
+        b.Property(x => x.SubmittedBy).HasColumnName("submittedBy").HasMaxLength(100);
+        b.Property(x => x.ApprovedBy).HasColumnName("approvedBy").HasMaxLength(100);
+        b.Property(x => x.ApprovedAt).HasColumnName("approvedAt").HasColumnType("datetime2");
+        b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
+
+        b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
+            .HasConstraintName("FK_Invoice_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Asn).WithMany().HasForeignKey(x => x.AsnId)
+            .HasConstraintName("FK_Invoice_Asn_AsnId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_Invoice_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => new { x.SupplierId, x.InvoiceNumber })
+            .HasDatabaseName("UQ_Invoice_supplier_invoiceNumber").IsUnique();
+        b.HasIndex(x => x.InvoiceStatus).HasDatabaseName("IX_Invoice_invoiceStatus");
+    }
+}
+
+public class InvoiceLineConfiguration : IEntityTypeConfiguration<InvoiceLine>
+{
+    public void Configure(EntityTypeBuilder<InvoiceLine> b)
+    {
+        b.ApplyBaseEntityConvention("InvoiceLine", "proc", "invoiceLine");
+        b.Property(x => x.InvoiceId).HasColumnName("invoiceId");
+        b.Property(x => x.PurchaseOrderLineId).HasColumnName("purchaseOrderLineId");
+        b.Property(x => x.ItemCode).HasColumnName("itemCode").HasMaxLength(50).IsRequired();
+        b.Property(x => x.ItemDescription).HasColumnName("itemDescription").HasMaxLength(500);
+        b.Property(x => x.BilledQty).HasColumnName("billedQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.UnitPrice).HasColumnName("unitPrice").HasColumnType("decimal(18,4)");
+        b.Property(x => x.LineAmount).HasColumnName("lineAmount").HasColumnType("decimal(18,4)");
+        b.Property(x => x.TaxCode).HasColumnName("taxCode").HasMaxLength(20);
+        b.Property(x => x.TaxAmount).HasColumnName("taxAmount").HasColumnType("decimal(18,4)");
+
+        b.HasOne(x => x.Invoice).WithMany(i => i.Lines).HasForeignKey(x => x.InvoiceId)
+            .HasConstraintName("FK_InvoiceLine_Invoice_InvoiceId").OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)
+            .HasConstraintName("FK_InvoiceLine_PurchaseOrderLine_PurchaseOrderLineId").OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class CreditDebitNoteConfiguration : IEntityTypeConfiguration<CreditDebitNote>
+{
+    public void Configure(EntityTypeBuilder<CreditDebitNote> b)
+    {
+        b.ApplyBaseEntityConvention("CreditDebitNote", "proc", "creditDebitNote");
+        b.Property(x => x.NoteNumber).HasColumnName("noteNumber").HasMaxLength(50).IsRequired();
+        b.Property(x => x.NoteType).HasColumnName("noteType").HasConversion<string>().HasMaxLength(2);
+        b.Property(x => x.InvoiceId).HasColumnName("invoiceId");
+        b.Property(x => x.Amount).HasColumnName("amount").HasColumnType("decimal(18,4)");
+        b.Property(x => x.Reason).HasColumnName("reason").HasMaxLength(1000);
+        b.Property(x => x.NoteStatus).HasColumnName("noteStatus").HasConversion<string>().HasMaxLength(30);
+
+        b.ToTable(t => t.HasCheckConstraint("CK_CreditDebitNote_noteType", "[noteType] IN ('CN','DN')"));
+
+        b.HasOne(x => x.Invoice).WithMany().HasForeignKey(x => x.InvoiceId)
+            .HasConstraintName("FK_CreditDebitNote_Invoice_InvoiceId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_CreditDebitNote_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
+{
+    public void Configure(EntityTypeBuilder<Payment> b)
+    {
+        b.ApplyBaseEntityConvention("Payment", "proc", "payment");
+        b.Property(x => x.PaymentReference).HasColumnName("paymentReference").HasMaxLength(50).IsRequired();
+        b.Property(x => x.InvoiceId).HasColumnName("invoiceId");
+        b.Property(x => x.SupplierId).HasColumnName("supplierId");
+        b.Property(x => x.PaymentDate).HasColumnName("paymentDate").HasColumnType("datetime2");
+        b.Property(x => x.PaymentAmount).HasColumnName("paymentAmount").HasColumnType("decimal(18,4)");
+        b.Property(x => x.PaymentMode).HasColumnName("paymentMode").HasMaxLength(50);
+        b.Property(x => x.BankName).HasColumnName("bankName").HasMaxLength(200);
+        b.Property(x => x.BankAccountRef).HasColumnName("bankAccountRef").HasMaxLength(100);
+        b.Property(x => x.TdsDeducted).HasColumnName("tdsDeducted").HasColumnType("decimal(18,4)");
+        b.Property(x => x.TdsSection).HasColumnName("tdsSection").HasMaxLength(20);
+        b.Property(x => x.NetPaid).HasColumnName("netPaid").HasColumnType("decimal(18,4)");
+        b.Property(x => x.Remarks).HasColumnName("remarks").HasMaxLength(1000);
+        b.Property(x => x.RemittancePdfUrl).HasColumnName("remittancePdfUrl").HasMaxLength(500);
+        b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
+
+        b.HasOne(x => x.Invoice).WithMany().HasForeignKey(x => x.InvoiceId)
+            .HasConstraintName("FK_Payment_Invoice_InvoiceId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_Payment_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_Payment_supplierId");
+    }
+}

@@ -1,0 +1,71 @@
+@page "/messages"
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Messages</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Messages</h1>
+                <span class="tl-count-chip">@(threads?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Threads you participate in</p>
+        </div>
+        <div class="tl-header__actions">
+            <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NewMessage">
+                <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">edit</span> New message
+            </button>
+        </div>
+    </header>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (threads == null || threads.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">mail</span>
+            <div>No threads yet.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 1.5fr 2.5fr 110px 100px 160px; --tl-min-width: 900px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Sender</div>
+                <div class="tlg-col">Snippet</div>
+                <div class="tlg-col tlg-col--num">Messages</div>
+                <div class="tlg-col tlg-col--num">Unread</div>
+                <div class="tlg-col">Last activity</div>
+            </div>
+            @foreach (var t in threads)
+            {
+                <div class="tlg-row" @onclick="() => OpenThread(t.ThreadId)" style="cursor:pointer">
+                    <div class="tlg-col tlg-name">@t.LastSenderName</div>
+                    <div class="tlg-col tlg-desc">@t.LastSnippet</div>
+                    <div class="tlg-col tlg-col--num">@t.MessageCount</div>
+                    <div class="tlg-col tlg-col--num">@(t.UnreadCount > 0 ? t.UnreadCount.ToString() : "—")</div>
+                    <div class="tlg-col tlg-code">@t.LastMessageAt.ToString("yyyy-MM-dd HH:mm")</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<ThreadSummaryDto>? threads;
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await Api.GetAsync<List<ThreadSummaryDto>>("api/threads");
+        threads = resp?.Data;
+        loading = false;
+    }
+
+    private void OpenThread(Guid id) => Nav.NavigateTo($"/threads/{id}");
+    private void NewMessage() => Nav.NavigateTo("/messages/new");
+}

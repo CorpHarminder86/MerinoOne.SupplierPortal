@@ -1,0 +1,13 @@
+/* Tiny global resets — main tokens + styles live in merino.css / catalog-list.css */
+* { box-sizing: border-box; }
+body { margin: 0; }
+
+.valid.modified:not([type=checkbox]) { outline: 1px solid var(--mer-success); }
+.invalid { outline: 1px solid var(--mer-danger); }
+.validation-message { color: var(--mer-danger); font-size: 12px; }
+
+#blazor-error-ui { background: #FFFBEB; border-top: 1px solid var(--mer-warning); bottom: 0; left: 0; width: 100%; box-sizing: border-box; display: none; padding: 0.6rem 1.25rem; position: fixed; z-index: 1000; font-size: 13px; color: var(--mer-ink-900); }
+#blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 1rem; top: .5rem; }
+
+.blazor-error-boundary { background: var(--mer-danger); color: #FFFFFF; padding: 1rem 1.5rem; }
+.blazor-error-boundary::after { content: "An error has occurred."; }

@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MerinoOne.SupplierPortal.AppHost/MerinoOne.SupplierPortal.AppHost.csproj" />
+    <Project Path="src/MerinoOne.SupplierPortal.Application/MerinoOne.SupplierPortal.Application.csproj" />
+    <Project Path="src/MerinoOne.SupplierPortal.Contracts/MerinoOne.SupplierPortal.Contracts.csproj" />
+    <Project Path="src/MerinoOne.SupplierPortal.Domain/MerinoOne.SupplierPortal.Domain.csproj" />
+    <Project Path="src/MerinoOne.SupplierPortal.Infrastructure/MerinoOne.SupplierPortal.Infrastructure.csproj" />
+    <Project Path="src/MerinoOne.SupplierPortal.ServiceDefaults/MerinoOne.SupplierPortal.ServiceDefaults.csproj" />
+    <Project Path="src/MerinoOne.SupplierPortal/MerinoOne.SupplierPortal.csproj" />
+    <Project Path="src/MerinoOne.Web/MerinoOne.Web.csproj" />
+  </Folder>
+</Solution>

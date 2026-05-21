@@ -1,0 +1,206 @@
+@page "/suppliers/{Id:guid}"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+<PageTitle>@detail?.LegalName</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else if (detail == null)
+{
+    <div class="tl-empty">Supplier not found.</div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">@detail.LegalName</h1>
+                    <span class="tl-count-chip">@detail.SupplierCode</span>
+                    <span class="tlg-status @StatusClass(detail.RegistrationStatus)">@detail.RegistrationStatus</span>
+                </div>
+                <p class="tl-sub">Seq #@detail.Seq · @detail.SupplierType · @detail.TradeName</p>
+            </div>
+            <div class="tl-header__actions">
+                @if (Token.HasPermission("Supplier.VerifyNic"))
+                {
+                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="VerifyAll" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">verified</span> Verify NIC
+                    </button>
+                }
+                @if (Token.HasPermission("Supplier.Approve") && detail.RegistrationStatus != "Active" && detail.RegistrationStatus != "Approved")
+                {
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                    </button>
+                }
+            </div>
+        </header>
+
+        <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;">
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Identity</h3>
+                <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
+                    <dt style="color:var(--mer-ink-500);">GST number</dt><dd style="font-family:Inter,monospace;">@detail.GstNumber @(detail.GstValidated ? Tick("ok") : "")</dd>
+                    <dt style="color:var(--mer-ink-500);">PAN number</dt><dd style="font-family:Inter,monospace;">@detail.PanNumber @(detail.PanValidated ? Tick("ok") : "")</dd>
+                    <dt style="color:var(--mer-ink-500);">MSME number</dt><dd style="font-family:Inter,monospace;">@detail.MsmeRegNumber @(detail.MsmeValidated ? Tick("ok") : "")</dd>
+                    <dt style="color:var(--mer-ink-500);">Website</dt><dd>@detail.Website</dd>
+                    <dt style="color:var(--mer-ink-500);">Invited</dt><dd>@(detail.InvitedAt?.ToString("yyyy-MM-dd"))  by @detail.InvitedBy</dd>
+                    <dt style="color:var(--mer-ink-500);">Approved</dt><dd>@(detail.ApprovedAt?.ToString("yyyy-MM-dd"))  @(string.IsNullOrEmpty(detail.ApprovedBy) ? "" : "by " + detail.ApprovedBy)</dd>
+                    @if (!string.IsNullOrEmpty(detail.ApprovalOverrideComment))
+                    {
+                        <dt style="color:var(--mer-ink-500);">Override comment</dt><dd style="background:var(--mer-amber-50);padding:6px 10px;border-radius:4px;">@detail.ApprovalOverrideComment</dd>
+                    }
+                </dl>
+            </div>
+
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">NIC verifications</h3>
+                @if (detail.Verifications.Count == 0)
+                {
+                    <p style="color:var(--mer-ink-500);font-size:13px;">No verifications attempted yet.</p>
+                }
+                else
+                {
+                    <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                        <thead>
+                            <tr style="border-bottom:1px solid var(--mer-line);">
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Type</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">When</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">By</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Result</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var v in detail.Verifications)
+                        {
+                            <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                                <td style="padding:6px 4px;">@v.VerificationType</td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;">@v.AttemptedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td style="padding:6px 4px;">@v.AttemptedBy</td>
+                                <td style="padding:6px 4px;"><span class="tlg-status @VStatusClass(v.Result)">@v.Result</span></td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    </div>
+
+    @if (showApprove)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="success" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">task_alt</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Supplier</div>
+                        <h2 class="merino-dialog__title">Approve @detail.LegalName?</h2>
+                        @if (RequireOverride)
+                        {
+                            <p class="merino-dialog__subtitle" style="color:var(--mer-amber-800);">One or more verifications are <b>Fail</b>. An override comment is required.</p>
+                        }
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showApprove = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Override comment @(RequireOverride ? "(required)" : "(optional)")</label>
+                    <textarea class="rz-textbox" rows="4" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="overrideComment"></textarea>
+                    @if (!string.IsNullOrEmpty(approveError))
+                    {
+                        <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@approveError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApprove = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApprove" disabled="@busy">@(busy ? "Approving…" : "Approve")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private SupplierDetailDto? detail;
+    private bool loading = true;
+    private bool busy = false;
+    private bool showApprove = false;
+    private string overrideComment = string.Empty;
+    private string approveError = string.Empty;
+
+    private bool RequireOverride => detail?.Verifications
+        .GroupBy(v => v.VerificationType)
+        .Select(g => g.OrderByDescending(v => v.AttemptedAt).First())
+        .Any(v => v.Result == "Fail") == true;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<SupplierDetailDto>($"api/suppliers/{Id}");
+        detail = resp?.Data;
+        loading = false;
+    }
+
+    private async Task VerifyAll()
+    {
+        if (detail == null) return;
+        busy = true;
+        var types = new List<string>();
+        if (!string.IsNullOrEmpty(detail.GstNumber)) types.Add("GST");
+        if (!string.IsNullOrEmpty(detail.PanNumber)) types.Add("PAN");
+        if (!string.IsNullOrEmpty(detail.MsmeRegNumber)) types.Add("MSME");
+        var resp = await Api.PostAsync<List<SupplierVerificationDto>, VerifyNicRequest>(
+            $"api/suppliers/{Id}/verify-nic", new VerifyNicRequest(types.ToArray()));
+        Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Info, Summary = "Verification", Detail = $"{resp?.Data?.Count ?? 0} verifications recorded." });
+        await Load();
+        busy = false;
+    }
+
+    private void OpenApprove() { overrideComment = string.Empty; approveError = string.Empty; showApprove = true; }
+
+    private async Task DoApprove()
+    {
+        busy = true; approveError = string.Empty;
+        var resp = await Api.PostAsync<ApproveSupplierRequest>($"api/suppliers/{Id}/approve", new ApproveSupplierRequest(string.IsNullOrWhiteSpace(overrideComment) ? null : overrideComment));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Approved", Detail = $"{detail!.LegalName} is now Active." });
+            showApprove = false;
+            await Load();
+        }
+        else
+        {
+            approveError = resp?.Errors?.FirstOrDefault() ?? "Approval failed.";
+        }
+        busy = false;
+    }
+
+    private string StatusClass(string status) => status switch
+    {
+        "Active" or "Approved" => "tlg-status--active",
+        "Submitted" or "UnderReview" or "Registering" or "Invited" => "tlg-status--pending",
+        "Rejected" or "Suspended" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+
+    private string VStatusClass(string r) => r switch
+    {
+        "Pass" => "tlg-status--active",
+        "Fail" => "tlg-status--danger",
+        _ => "tlg-status--pending"
+    };
+
+    private MarkupString Tick(string kind) => new("<span class='material-symbols-outlined' style='font-size:14px;color:var(--mer-green);vertical-align:middle;'>verified</span>");
+}

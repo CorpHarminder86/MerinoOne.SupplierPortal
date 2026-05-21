@@ -1,0 +1,6 @@
+@MerinoOne.SupplierPortal_HostAddress = http://localhost:5186
+
+GET {{MerinoOne.SupplierPortal_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

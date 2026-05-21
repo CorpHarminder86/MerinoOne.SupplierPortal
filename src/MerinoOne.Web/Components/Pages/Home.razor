@@ -1,0 +1,44 @@
+@page "/"
+@inject TokenAccessor Token
+
+<PageTitle>Dashboard</PageTitle>
+
+<div class="dash">
+    <header class="dash__header">
+        <h1 class="dash__title">Dashboard</h1>
+        <p class="dash__subtitle">Welcome back, <strong>@Token.FullName</strong></p>
+    </header>
+
+    <section class="dash__kpis">
+        <div class="kpi">
+            <div class="kpi__label">Active suppliers</div>
+            <div class="kpi__value">5</div>
+            <div class="kpi__delta kpi__delta--up">▲ 2 this month</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi__label">Open POs</div>
+            <div class="kpi__value">50,000</div>
+            <div class="kpi__delta kpi__delta--up">▲ 12%</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi__label">Submitted invoices</div>
+            <div class="kpi__value">70,000</div>
+            <div class="kpi__delta kpi__delta--up">▲ 8%</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi__label">Payments processed</div>
+            <div class="kpi__value">25,000</div>
+            <div class="kpi__delta kpi__delta--down">▼ 3%</div>
+        </div>
+    </section>
+
+    <section class="dash__panel">
+        <header class="dash__panel-header">
+            <h2 class="dash__panel-title">Quick actions</h2>
+        </header>
+        <div style="padding:20px;display:flex;gap:12px;flex-wrap:wrap;">
+            <a href="/suppliers" class="rz-button rz-primary" style="padding:8px 16px;text-decoration:none;color:#fff;border-radius:6px;">View suppliers</a>
+            <a href="/messages" class="rz-button rz-secondary" style="padding:8px 16px;text-decoration:none;color:#fff;border-radius:6px;">Messages</a>
+        </div>
+    </section>
+</div>

@@ -1,0 +1,16 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.3.5">
+
+  <ItemGroup>
+    <ProjectReference Include="..\MerinoOne.SupplierPortal\MerinoOne.SupplierPortal.csproj" />
+    <ProjectReference Include="..\MerinoOne.Web\MerinoOne.Web.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>1d21afd9-445e-47c7-8bf0-daa861f1e58f</UserSecretsId>
+  </PropertyGroup>
+
+</Project>

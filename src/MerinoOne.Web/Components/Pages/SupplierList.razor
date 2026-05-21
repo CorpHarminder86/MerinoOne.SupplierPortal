@@ -1,0 +1,102 @@
+@page "/suppliers"
+@page "/suppliers/onboarding"
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Suppliers</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">@(IsOnboardingQueue ? "Onboarding Queue" : "Suppliers")</h1>
+                <span class="tl-count-chip">@(suppliers?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">@(IsOnboardingQueue ? "Suppliers awaiting review or approval" : "All suppliers visible to your seccode")</p>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar">
+        <input class="rz-textbox" placeholder="Search legal name / code…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="ApplyFilters" />
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (suppliers == null || suppliers.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">groups_3</span>
+            <div>No suppliers match.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 120px 1.5fr 1fr 140px 140px 160px 100px; --tl-min-width: 1100px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Code</div>
+                <div class="tlg-col">Legal name</div>
+                <div class="tlg-col">Trade name</div>
+                <div class="tlg-col">GST</div>
+                <div class="tlg-col">PAN</div>
+                <div class="tlg-col">Status</div>
+                <div class="tlg-col">Active</div>
+            </div>
+            @foreach (var s in suppliers)
+            {
+                <div class="tlg-row" @onclick="() => OpenDetail(s.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">@s.SupplierCode</div>
+                    <div class="tlg-col tlg-name">@s.LegalName</div>
+                    <div class="tlg-col tlg-desc">@s.TradeName</div>
+                    <div class="tlg-col tlg-code">@s.GstNumber</div>
+                    <div class="tlg-col tlg-code">@s.PanNumber</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(s.RegistrationStatus)">@s.RegistrationStatus</span></div>
+                    <div class="tlg-col">@(s.IsActiveSupplier ? "Yes" : "No")</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<SupplierListItemDto>? all;
+    private List<SupplierListItemDto>? suppliers;
+    private bool loading = true;
+    private string search = string.Empty;
+
+    private bool IsOnboardingQueue => Nav.Uri.Contains("/suppliers/onboarding");
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+        all = resp?.Data ?? new();
+        ApplyFilters();
+        loading = false;
+    }
+
+    private void ApplyFilters()
+    {
+        if (all == null) { suppliers = new(); return; }
+        IEnumerable<SupplierListItemDto> q = all;
+        if (IsOnboardingQueue)
+            q = q.Where(s => s.RegistrationStatus is "Submitted" or "UnderReview" or "Invited" or "Registering");
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x => x.LegalName.Contains(s, StringComparison.OrdinalIgnoreCase)
+                          || x.SupplierCode.Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+        suppliers = q.ToList();
+    }
+
+    private void OpenDetail(Guid id) => Nav.NavigateTo($"/suppliers/{id}");
+
+    private string StatusClass(string status) => status switch
+    {
+        "Active" or "Approved" => "tlg-status--active",
+        "Submitted" or "UnderReview" or "Registering" or "Invited" => "tlg-status--pending",
+        "Rejected" or "Suspended" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

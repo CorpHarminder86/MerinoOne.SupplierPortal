@@ -1,0 +1,99 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio files
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.sln.ide
+*.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Build artifacts
+[Dd]ebug/
+[Rr]elease/
+[Bb]uild/
+
+# ASP.NET Core
+appsettings.*.json
+!appsettings.json
+!appsettings.Development.json
+secrets.json
+*.db
+*.db-shm
+*.db-wal
+
+# User-specific files
+*.rsuser
+*.userprefs
+*.userosscache
+*.sln.docstates
+
+# NUnit / xUnit / MSTest
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Resharper / Rider
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+.idea/
+
+# DotCover
+*.dotCover
+
+# NCrunch
+*.ncrunch*
+.*crunch*.local.xml
+nCrunchTemp_*/
+
+# BenchmarkDotNet
+BenchmarkDotNet.Artifacts/
+
+# Coverage tools
+coverage/
+coverage.*
+*.opencover.xml
+*.coverage
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/*
+*.nuget.props
+*.nuget.targets
+project.lock.json
+
+# Paket
+.paket/
+paket-files/
+
+# Dotnet tools
+.dotnet/
+
+# EF Core
+**/Migrations/*.Designer.cs
+**/Migrations/*.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+
+# Misc
+*.tmp
+*.temp
+*.bak
+*.log
