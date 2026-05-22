@@ -22,7 +22,24 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<Result<LoginResponse>>> Login([FromBody] LoginRequest req, CancellationToken ct)
     {
-        var user = await _db.AppUsers.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.UserCode == req.UserCode && u.IsActive, ct);
+        var identifier = (req.Email ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(identifier))
+            return Unauthorized(Result<LoginResponse>.Fail("Invalid credentials."));
+
+        // Backwards-compat: the same field accepts email (contains '@') or a bare userCode.
+        Domain.Entities.Admin.AppUser? user;
+        if (identifier.Contains('@'))
+        {
+            var lowered = identifier.ToLowerInvariant();
+            user = await _db.AppUsers.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == lowered && u.IsActive, ct);
+        }
+        else
+        {
+            user = await _db.AppUsers.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(u => u.UserCode == identifier && u.IsActive, ct);
+        }
+
         if (user == null || !PasswordHasher.Verify(req.Password, user.PasswordHash))
             return Unauthorized(Result<LoginResponse>.Fail("Invalid credentials."));
 
@@ -59,6 +76,22 @@ public class AuthController : ControllerBase
             signingCredentials: creds);
 
         var jwtStr = new JwtSecurityTokenHandler().WriteToken(token);
-        return Ok(Result<LoginResponse>.Ok(new LoginResponse(jwtStr, expiry, user.UserCode, user.FullName, roles.ToArray(), perms.ToArray()), HttpContext.TraceIdentifier));
+
+        // Stamp lastLoginAt AFTER signing the JWT so a serialization failure won't pollute the audit.
+        user.LastLoginAt = DateTime.UtcNow;
+        user.UpdatedBy = "login";
+        user.UpdatedOn = user.LastLoginAt.Value;
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(Result<LoginResponse>.Ok(
+            new LoginResponse(
+                jwtStr,
+                expiry,
+                user.UserCode,
+                user.FullName,
+                roles.ToArray(),
+                perms.ToArray(),
+                user.MustChangePassword),
+            HttpContext.TraceIdentifier));
     }
 }

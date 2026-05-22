@@ -1,0 +1,354 @@
+@page "/purchase-orders/{Id:guid}"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+<PageTitle>@detail?.PoNumber</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else if (detail == null)
+{
+    <div class="tl-empty">Purchase order not found.</div>
+}
+else
+{
+    <div class="tl-page">
+        <a href="/purchase-orders" class="mer-back-link">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+            Back to list
+        </a>
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">@detail.PoNumber</h1>
+                    <span class="tlg-status @StatusClass(detail.PoStatus)">@detail.PoStatus</span>
+                    <span class="tl-count-chip">v@detail.Version</span>
+                </div>
+                <p class="tl-sub">@detail.SupplierName · @detail.PoType · @detail.PoDate.ToString("yyyy-MM-dd")</p>
+            </div>
+            <div class="tl-header__actions">
+                @if (Token.HasPermission("PurchaseOrder.Acknowledge") && detail.PoStatus == "Released")
+                {
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenAcknowledge" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">check_circle</span> Acknowledge
+                    </button>
+                }
+                @if (Token.HasPermission("PurchaseOrder.Accept") && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
+                {
+                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenAccept" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Accept
+                    </button>
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenReject" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject
+                    </button>
+                }
+                @if (Token.HasPermission("PurchaseOrder.ApproveProposal") && detail.PoStatus == "DateProposed")
+                {
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApproveProposal" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">event_available</span> Approve Proposal
+                    </button>
+                }
+            </div>
+        </header>
+
+        <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;">
+            <button class="mer-tab @(tab=="overview"?"mer-tab--active":"")" @onclick="TabOverview" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="overview"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="overview"?"var(--mer-blue)":"var(--mer-ink-700)");">Overview</button>
+            <button class="mer-tab @(tab=="history"?"mer-tab--active":"")" @onclick="TabHistory" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="history"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="history"?"var(--mer-blue)":"var(--mer-ink-700)");">History</button>
+        </div>
+
+        @if (tab == "history")
+        {
+            <AuditHistoryTab EntityName="PurchaseOrder" EntityId="@Id" />
+        }
+        else
+        {
+        <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;">
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Order details</h3>
+                <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
+                    <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
+                    <dt style="color:var(--mer-ink-500);">Buyer</dt><dd>@(detail.BuyerName ?? "—")</dd>
+                    <dt style="color:var(--mer-ink-500);">PO Date</dt><dd style="font-family:Inter,monospace;">@detail.PoDate.ToString("yyyy-MM-dd")</dd>
+                    <dt style="color:var(--mer-ink-500);">Payment terms</dt><dd>@(detail.PaymentTerms ?? "—")</dd>
+                    <dt style="color:var(--mer-ink-500);">Delivery terms</dt><dd>@(detail.DeliveryTerms ?? "—")</dd>
+                    @if (detail.AcknowledgmentAt.HasValue)
+                    {
+                        <dt style="color:var(--mer-ink-500);">Acknowledged</dt><dd style="font-family:Inter,monospace;">@detail.AcknowledgmentAt.Value.ToString("yyyy-MM-dd HH:mm")</dd>
+                    }
+                    @if (detail.AcceptedAt.HasValue)
+                    {
+                        <dt style="color:var(--mer-ink-500);">Accepted</dt><dd style="font-family:Inter,monospace;">@detail.AcceptedAt.Value.ToString("yyyy-MM-dd HH:mm")</dd>
+                    }
+                    @if (detail.ProposedDeliveryDate.HasValue)
+                    {
+                        <dt style="color:var(--mer-ink-500);">Proposed delivery</dt><dd style="font-family:Inter,monospace;color:var(--mer-amber-800);">@detail.ProposedDeliveryDate.Value.ToString("yyyy-MM-dd")</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(detail.RejectionReason))
+                    {
+                        <dt style="color:var(--mer-ink-500);">Rejection reason</dt><dd style="background:var(--mer-red-50);color:var(--mer-red);padding:6px 10px;border-radius:4px;">@detail.RejectionReason</dd>
+                    }
+                </dl>
+            </div>
+
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Notes</h3>
+                <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@(string.IsNullOrEmpty(detail.Notes) ? "No notes." : detail.Notes)</p>
+            </div>
+        </div>
+
+        <div class="rz-card" style="padding:20px;margin-top:16px;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)</h3>
+            @if (detail.Lines.Count == 0)
+            {
+                <p style="font-size:13px;color:var(--mer-ink-500);">No lines on this PO.</p>
+            }
+            else
+            {
+                <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                    <thead>
+                        <tr style="border-bottom:1px solid var(--mer-line);">
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Description</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Qty</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Unit</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Price</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Delivery</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var ln in detail.Lines.OrderBy(l => l.PositionNo))
+                    {
+                        <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PositionNo</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
+                            <td style="padding:6px 4px;">@ln.ItemDescription</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
+                            <td style="padding:6px 4px;">@ln.OrderUnit</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.Price.ToString("0.00")</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@(ln.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </div>
+        }
+    </div>
+
+    @if (showAcknowledge)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">check_circle</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Purchase Order</div>
+                        <h2 class="merino-dialog__title">Acknowledge @detail.PoNumber?</h2>
+                        <p class="merino-dialog__subtitle">Confirms you've seen the PO. Add any notes for the buyer.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showAcknowledge = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Notes (optional)</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="dialogNotes"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showAcknowledge = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoAcknowledge" disabled="@busy">@(busy ? "Working…" : "Acknowledge")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showAccept)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="success" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">task_alt</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Purchase Order</div>
+                        <h2 class="merino-dialog__title">Accept @detail.PoNumber</h2>
+                        <p class="merino-dialog__subtitle">Optionally propose an alternate delivery date.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showAccept = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="margin-bottom:10px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-bottom:4px;">
+                            <input type="radio" name="del" checked="@(!proposeAlt)" @onchange="() => proposeAlt = false" /> Accept as-is
+                        </label>
+                        <label style="display:block;font-size:12px;font-weight:600;color:var(--mer-ink-700);">
+                            <input type="radio" name="del" checked="@proposeAlt" @onchange="() => proposeAlt = true" /> Propose alternate date
+                        </label>
+                    </div>
+                    @if (proposeAlt)
+                    {
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Proposed date</label>
+                        <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="proposedDate" />
+                    }
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:8px;display:block;">Notes (optional)</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="dialogNotes"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showAccept = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoAccept" disabled="@busy">@(busy ? "Working…" : "Accept")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showReject)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="danger" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">cancel</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Purchase Order</div>
+                        <h2 class="merino-dialog__title">Reject @detail.PoNumber</h2>
+                        <p class="merino-dialog__subtitle">Provide a reason for rejection.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showReject = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Reason (required)</label>
+                    <textarea class="rz-textbox" rows="4" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="rejectionReason"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showReject = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="danger" @onclick="DoReject" disabled="@busy">@(busy ? "Working…" : "Reject")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showApproveProposal)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">event_available</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Buyer action</div>
+                        <h2 class="merino-dialog__title">Approve proposed date</h2>
+                        <p class="merino-dialog__subtitle">Proposed: <b>@(detail.ProposedDeliveryDate?.ToString("yyyy-MM-dd"))</b></p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showApproveProposal = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Comment (optional)</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="dialogNotes"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApproveProposal = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApproveProposal" disabled="@busy">@(busy ? "Working…" : "Approve")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private PurchaseOrderDetailDto? detail;
+    private bool loading = true;
+    private bool busy = false;
+    private string tab = "overview";
+
+    private void TabOverview() => tab = "overview";
+    private void TabHistory() => tab = "history";
+
+    private bool showAcknowledge = false;
+    private bool showAccept = false;
+    private bool showReject = false;
+    private bool showApproveProposal = false;
+    private bool proposeAlt = false;
+    private DateTime? proposedDate;
+    private string dialogNotes = string.Empty;
+    private string rejectionReason = string.Empty;
+    private string dialogError = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{Id}");
+        detail = resp?.Data;
+        loading = false;
+    }
+
+    private void OpenAcknowledge() { dialogNotes = string.Empty; dialogError = string.Empty; showAcknowledge = true; }
+    private void OpenAccept() { dialogNotes = string.Empty; dialogError = string.Empty; proposeAlt = false; proposedDate = null; showAccept = true; }
+    private void OpenReject() { rejectionReason = string.Empty; dialogError = string.Empty; showReject = true; }
+    private void OpenApproveProposal() { dialogNotes = string.Empty; dialogError = string.Empty; showApproveProposal = true; }
+
+    private async Task DoAcknowledge()
+    {
+        busy = true; dialogError = string.Empty;
+        var resp = await Api.PostAsync<PurchaseOrderDetailDto, AcknowledgePoRequest>($"api/purchase-orders/{Id}/acknowledge", new AcknowledgePoRequest(string.IsNullOrWhiteSpace(dialogNotes) ? null : dialogNotes));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Acknowledged" }); showAcknowledge = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task DoAccept()
+    {
+        busy = true; dialogError = string.Empty;
+        var req = new AcceptPoRequest(proposeAlt ? proposedDate : null, string.IsNullOrWhiteSpace(dialogNotes) ? null : dialogNotes);
+        // NOTE: AcceptPoRequest.ProposedDate maps to PO.ProposedDeliveryDate server-side per backend DTOs.
+        var resp = await Api.PostAsync<PurchaseOrderDetailDto, AcceptPoRequest>($"api/purchase-orders/{Id}/accept", req);
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Accepted" }); showAccept = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task DoReject()
+    {
+        if (string.IsNullOrWhiteSpace(rejectionReason)) { dialogError = "Reason is required."; return; }
+        busy = true; dialogError = string.Empty;
+        var resp = await Api.PostAsync<PurchaseOrderDetailDto, RejectPoRequest>($"api/purchase-orders/{Id}/reject", new RejectPoRequest(rejectionReason));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Rejected" }); showReject = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task DoApproveProposal()
+    {
+        busy = true; dialogError = string.Empty;
+        var resp = await Api.PostAsync<PurchaseOrderDetailDto, ApproveProposalRequest>($"api/purchase-orders/{Id}/approve-proposal", new ApproveProposalRequest(string.IsNullOrWhiteSpace(dialogNotes) ? null : dialogNotes));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Approved" }); showApproveProposal = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private string StatusClass(string status) => status switch
+    {
+        "Accepted" or "Delivered" or "Closed" => "tlg-status--active",
+        "Released" or "Acknowledged" or "DateProposed" or "PartiallyDelivered" => "tlg-status--pending",
+        "Rejected" or "Cancelled" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

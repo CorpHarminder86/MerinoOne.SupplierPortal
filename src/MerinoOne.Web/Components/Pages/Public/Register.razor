@@ -1,0 +1,522 @@
+@page "/register/{Token}"
+@layout EmptyLayout
+@using System.Net.Http
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.Forms
+@using MerinoOne.SupplierPortal.Contracts.Common
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Supplier registration</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty" style="background:var(--mer-surface);border:1px solid var(--mer-line);border-radius:var(--mer-radius-lg);padding:32px;">
+        Loading invite…
+    </div>
+}
+else if (invite == null)
+{
+    <div class="rz-card" style="padding:32px;text-align:center;">
+        <span class="material-symbols-outlined" style="font-size:48px;color:var(--mer-red);">error</span>
+        <h2 style="margin:12px 0 6px;color:var(--mer-blue-darker);">Invalid or expired invite</h2>
+        <p style="color:var(--mer-ink-500);font-size:13px;">This registration link is no longer valid. Please contact your Merino representative for a fresh invite.</p>
+    </div>
+}
+else if (registered)
+{
+    <div class="rz-card" style="padding:32px;text-align:center;">
+        <span class="material-symbols-outlined" style="font-size:48px;color:var(--mer-green-dark);">task_alt</span>
+        <h2 style="margin:12px 0 6px;color:var(--mer-blue-darker);">Registration submitted</h2>
+        <p style="color:var(--mer-ink-700);font-size:13px;max-width:520px;margin:0 auto;">
+            Thank you. Our team will review your details and contact you on <b>@invite.Email</b>. You will receive
+            a portal login once your supplier registration is approved.
+        </p>
+    </div>
+}
+else
+{
+    <div class="rz-card" style="padding:24px;">
+        <header style="margin-bottom:20px;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;color:var(--mer-ink-500);text-transform:uppercase;">Supplier onboarding</div>
+            <h1 style="margin:4px 0 4px;font-size:22px;color:var(--mer-blue-darker);">Register as a Merino supplier</h1>
+            <p style="color:var(--mer-ink-500);font-size:13px;">Invited as <b>@invite.LegalName</b> · expires @invite.ExpiresAt.ToString("yyyy-MM-dd HH:mm")</p>
+        </header>
+
+        <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--mer-line);overflow-x:auto;">
+            @for (int i = 1; i <= 6; i++)
+            {
+                var step = i;
+                var active = currentStep == step;
+                var done = currentStep > step;
+                <div style="padding:10px 16px;font-size:13px;font-weight:600;border-bottom:3px solid @(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "transparent");color:@(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "var(--mer-ink-500)");cursor:pointer;white-space:nowrap;" @onclick="@(() => GoStep(step))">
+                    @step. @StepLabel(step)
+                </div>
+            }
+        </div>
+
+        @if (currentStep == 1)
+        {
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Company details</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Legal name *</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="legalName" />
+                </div>
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Trade name</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="tradeName" />
+                </div>
+                <div style="grid-column:1 / span 2;">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Supplier type *</label>
+                    <div style="display:flex;gap:16px;margin-top:4px;">
+                        @foreach (var t in new[] { "Material", "Service", "Both" })
+                        {
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+                                <input type="radio" name="supplierType" value="@t" checked="@(supplierType == t)" @onchange="@(() => supplierType = t)" />
+                                @t
+                            </label>
+                        }
+                    </div>
+                </div>
+                <div style="grid-column:1 / span 2;">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Website</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="website" placeholder="https://example.com" />
+                </div>
+            </div>
+        }
+        else if (currentStep == 2)
+        {
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Statutory identifiers</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">GST number</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="gstNumber" />
+                </div>
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">PAN number</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="panNumber" />
+                </div>
+                <div style="grid-column:1 / span 2;">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">MSME registration number</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="msmeNumber" />
+                </div>
+            </div>
+        }
+        else if (currentStep == 3)
+        {
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);">Addresses (@addresses.Count)</h3>
+                <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="AddAddress">
+                    <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">add</span> Add address
+                </button>
+            </div>
+            @for (int i = 0; i < addresses.Count; i++)
+            {
+                var idx = i;
+                var a = addresses[idx];
+                <div style="border:1px solid var(--mer-line);border-radius:8px;padding:16px;margin-bottom:12px;background:var(--mer-ink-50);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:12px;font-weight:700;color:var(--mer-blue-darker);">Address #@(idx + 1)</span>
+                        @if (addresses.Count > 1)
+                        {
+                            <button @onclick="() => addresses.RemoveAt(idx)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;">
+                                <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
+                            </button>
+                        }
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                        <select class="rz-dropdown" style="padding:6px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);font-size:12px;" @bind="a.AddressType">
+                            <option value="Registered">Registered</option>
+                            <option value="Billing">Billing</option>
+                            <option value="Shipping">Shipping</option>
+                            <option value="Other">Other</option>
+                        </select>
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Postal code" @bind="a.PostalCode" />
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;grid-column:1 / span 2;" placeholder="Line 1 *" @bind="a.Line1" />
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;grid-column:1 / span 2;" placeholder="Line 2" @bind="a.Line2" />
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="City *" @bind="a.City" />
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="State *" @bind="a.State" />
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;grid-column:1 / span 2;" placeholder="Country *" @bind="a.Country" />
+                    </div>
+                </div>
+            }
+        }
+        else if (currentStep == 4)
+        {
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);">Contacts (@contacts.Count)</h3>
+                <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="AddContact">
+                    <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">add</span> Add contact
+                </button>
+            </div>
+            @for (int i = 0; i < contacts.Count; i++)
+            {
+                var idx = i;
+                var c = contacts[idx];
+                <div style="border:1px solid var(--mer-line);border-radius:8px;padding:16px;margin-bottom:12px;background:var(--mer-ink-50);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:12px;font-weight:700;color:var(--mer-blue-darker);">Contact #@(idx + 1)</span>
+                        @if (contacts.Count > 1)
+                        {
+                            <button @onclick="() => contacts.RemoveAt(idx)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;">
+                                <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
+                            </button>
+                        }
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Name *" @bind="c.Name" />
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Designation" @bind="c.Designation" />
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Email *" @bind="c.Email" />
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Phone" @bind="c.Phone" />
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+                            <input type="checkbox" checked="@c.IsPrimary" @onchange="@((ChangeEventArgs e) => SetPrimary(idx, (bool)(e.Value ?? false)))" />
+                            Primary contact
+                        </label>
+                    </div>
+                </div>
+            }
+        }
+        else if (currentStep == 5)
+        {
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:6px;color:var(--mer-blue-darker);">Onboarding documents</h3>
+            <p style="color:var(--mer-ink-500);font-size:12.5px;margin-bottom:14px;">Upload the documents required to complete your onboarding. PAN card and cancelled cheque are always required. GST and MSME certificates are required when you have provided those numbers.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                @foreach (var slot in DocSlots)
+                {
+                    var slotRef = slot;
+                    <div style="border:1px solid @(slot.File != null ? "var(--mer-green-dark)" : "var(--mer-line)");border-radius:8px;padding:14px;background:var(--mer-surface);display:flex;flex-direction:column;gap:8px;">
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <span class="material-symbols-outlined" style="font-size:22px;color:@(slot.File != null ? "var(--mer-green-dark)" : "var(--mer-blue)");">@slot.Icon</span>
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-size:13px;font-weight:600;color:var(--mer-ink-900);">@slot.Label @if (slot.Required) { <span style="color:var(--mer-danger);">*</span> }</div>
+                                <div style="font-size:11px;color:var(--mer-ink-500);">@slot.Hint</div>
+                            </div>
+                        </div>
+                        @if (slot.File == null)
+                        {
+                            <label class="rz-button" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;width:max-content;">
+                                <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
+                                Choose file
+                                <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelected(slotRef, e))" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" />
+                            </label>
+                        }
+                        else
+                        {
+                            <div style="font-size:12px;color:var(--mer-ink-700);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <span class="material-symbols-outlined" style="font-size:14px;color:var(--mer-green-dark);">check_circle</span>
+                                <span style="font-family:Inter,monospace;">@slot.File.FileName</span>
+                                <span style="color:var(--mer-ink-500);">(@slot.File.FileSizeKb KB)</span>
+                            </div>
+                            <label style="font-size:12px;color:var(--mer-blue);cursor:pointer;text-decoration:underline;width:max-content;">
+                                Replace file
+                                <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelected(slotRef, e))" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" />
+                            </label>
+                        }
+                        @if (!string.IsNullOrEmpty(slot.Error))
+                        {
+                            <div style="color:var(--mer-red);font-size:11px;">@slot.Error</div>
+                        }
+                    </div>
+                }
+            </div>
+            @if (DocSlots.Count == 0)
+            {
+                <div style="color:var(--mer-ink-500);font-size:12px;">No documents required.</div>
+            }
+        }
+        else if (currentStep == 6)
+        {
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Review and submit</h3>
+            <dl style="display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:13px;">
+                <dt style="color:var(--mer-ink-500);">Legal name</dt><dd>@legalName</dd>
+                <dt style="color:var(--mer-ink-500);">Trade name</dt><dd>@tradeName</dd>
+                <dt style="color:var(--mer-ink-500);">Supplier type</dt><dd>@supplierType</dd>
+                <dt style="color:var(--mer-ink-500);">Website</dt><dd>@website</dd>
+                <dt style="color:var(--mer-ink-500);">GST / PAN / MSME</dt><dd style="font-family:Inter,monospace;">@gstNumber · @panNumber · @msmeNumber</dd>
+                <dt style="color:var(--mer-ink-500);">Addresses</dt><dd>@addresses.Count</dd>
+                <dt style="color:var(--mer-ink-500);">Contacts</dt><dd>@contacts.Count (@(contacts.Count(c => c.IsPrimary)) primary)</dd>
+                <dt style="color:var(--mer-ink-500);">Documents</dt>
+                <dd>
+                    @{
+                        var uploaded = DocSlots.Count(s => s.File != null);
+                        var total = DocSlots.Count;
+                    }
+                    @uploaded of @total uploaded
+                </dd>
+            </dl>
+            @if (!string.IsNullOrEmpty(submitError))
+            {
+                <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;">@submitError</div>
+            }
+        }
+
+        <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--mer-line);">
+            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Prev" disabled="@(currentStep == 1)">Back</button>
+            @if (currentStep < 6)
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Next" disabled="@(!CanProceed)">Next</button>
+            }
+            else
+            {
+                <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Submit" disabled="@busy">@(busy ? "Submitting…" : "Submit registration")</button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+    private SupplierInviteDetailDto? invite;
+    private bool loading = true;
+    private bool busy = false;
+    private bool registered = false;
+    private int currentStep = 1;
+    private string submitError = string.Empty;
+
+    private string legalName = string.Empty;
+    private string tradeName = string.Empty;
+    private string supplierType = "Material";
+    private string website = string.Empty;
+    private string gstNumber = string.Empty;
+    private string panNumber = string.Empty;
+    private string msmeNumber = string.Empty;
+
+    private List<AddressRow> addresses = new();
+    private List<ContactRow> contacts = new();
+    private List<DocSlot> DocSlots = new();
+
+    private const long MaxFileBytes = 5 * 1024 * 1024; // 5 MB
+
+    private bool CanProceed => currentStep switch
+    {
+        1 => !string.IsNullOrWhiteSpace(legalName) && !string.IsNullOrWhiteSpace(supplierType),
+        2 => true,
+        3 => addresses.Count > 0 && addresses.All(a => !string.IsNullOrWhiteSpace(a.Line1) && !string.IsNullOrWhiteSpace(a.City) && !string.IsNullOrWhiteSpace(a.State) && !string.IsNullOrWhiteSpace(a.Country)),
+        4 => contacts.Count > 0 && contacts.All(c => !string.IsNullOrWhiteSpace(c.Name) && !string.IsNullOrWhiteSpace(c.Email) && c.Email.Contains('@')) && contacts.Any(c => c.IsPrimary),
+        5 => DocSlots.Where(s => s.Required).All(s => s.File != null),
+        _ => true
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var resp = await Api.GetAsync<SupplierInviteDetailDto>($"api/supplier-registration/invites/by-token/{Token}");
+            if (resp?.Success == true && resp.Data != null && resp.Data.Status == "Pending")
+            {
+                invite = resp.Data;
+                legalName = invite.LegalName;
+                addresses.Add(new AddressRow());
+                contacts.Add(new ContactRow { Email = invite.Email, IsPrimary = true });
+            }
+        }
+        catch
+        {
+            // invite stays null -> empty state
+        }
+        loading = false;
+    }
+
+    private void GoStep(int s) { if (s <= currentStep) currentStep = s; }
+    private void Prev() { if (currentStep > 1) currentStep--; }
+
+    private void Next()
+    {
+        if (currentStep < 6 && CanProceed)
+        {
+            // Build the document slot list when entering step 5.
+            if (currentStep == 4)
+            {
+                RebuildDocSlots();
+            }
+            currentStep++;
+        }
+    }
+
+    private void RebuildDocSlots()
+    {
+        // Preserve existing files for slots that survive.
+        var existing = DocSlots.ToDictionary(s => s.DocumentType, s => s);
+        DocSlots = new List<DocSlot>
+        {
+            BuildSlot(existing, "OnboardingPan",    "PAN card",          "id_card",     true,                                "PDF / JPG / PNG — up to 5 MB"),
+            BuildSlot(existing, "OnboardingCheque", "Cancelled cheque",  "account_balance", true,                            "PDF / JPG / PNG — up to 5 MB"),
+        };
+        if (!string.IsNullOrWhiteSpace(gstNumber))
+        {
+            DocSlots.Add(BuildSlot(existing, "OnboardingGst", "GST certificate", "verified", true, "Required because you entered a GST number"));
+        }
+        if (!string.IsNullOrWhiteSpace(msmeNumber))
+        {
+            DocSlots.Add(BuildSlot(existing, "OnboardingMsme", "MSME certificate", "workspace_premium", true, "Required because you entered an MSME number"));
+        }
+    }
+
+    private static DocSlot BuildSlot(Dictionary<string, DocSlot> existing, string type, string label, string icon, bool required, string hint)
+    {
+        if (existing.TryGetValue(type, out var prior)) return prior;
+        return new DocSlot { DocumentType = type, Label = label, Icon = icon, Required = required, Hint = hint };
+    }
+
+    private async Task OnFileSelected(DocSlot slot, InputFileChangeEventArgs e)
+    {
+        slot.Error = string.Empty;
+        var file = e.File;
+        if (file == null) return;
+        if (file.Size > MaxFileBytes)
+        {
+            slot.Error = $"File exceeds 5 MB ({(file.Size / 1024d / 1024d):0.0} MB).";
+            return;
+        }
+        try
+        {
+            // Read into memory to capture size + a synthetic file URL.
+            // Stage 1 mock: do not actually upload — backend IDocumentValidationService is mocked.
+            using var stream = file.OpenReadStream(MaxFileBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var sizeKb = (int)Math.Ceiling(ms.Length / 1024d);
+            slot.File = new UploadedFileInfo
+            {
+                FileName = file.Name,
+                FileSizeKb = sizeKb,
+                MimeType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType,
+                FileUrl = $"data:placeholder/{Guid.NewGuid()}"
+            };
+        }
+        catch (Exception ex)
+        {
+            slot.Error = $"Could not read file: {ex.Message}";
+        }
+    }
+
+    private string StepLabel(int s) => s switch
+    {
+        1 => "Company",
+        2 => "Statutory",
+        3 => "Addresses",
+        4 => "Contacts",
+        5 => "Documents",
+        6 => "Review",
+        _ => ""
+    };
+
+    private void AddAddress() => addresses.Add(new AddressRow { AddressType = "Billing" });
+    private void AddContact() => contacts.Add(new ContactRow());
+
+    private void SetPrimary(int idx, bool on)
+    {
+        if (on)
+        {
+            for (int i = 0; i < contacts.Count; i++) contacts[i].IsPrimary = (i == idx);
+        }
+        else
+        {
+            contacts[idx].IsPrimary = false;
+        }
+    }
+
+    private async Task Submit()
+    {
+        busy = true;
+        submitError = string.Empty;
+
+        // Construct a hybrid payload: positional record fields + documents[] added as anonymous extension.
+        // Posting as anonymous object so we can include `documents` alongside the existing contract.
+        var payload = new
+        {
+            token = Token,
+            legalName = legalName.Trim(),
+            tradeName = string.IsNullOrWhiteSpace(tradeName) ? null : tradeName.Trim(),
+            supplierType = supplierType,
+            gstNumber = string.IsNullOrWhiteSpace(gstNumber) ? null : gstNumber.Trim(),
+            panNumber = string.IsNullOrWhiteSpace(panNumber) ? null : panNumber.Trim(),
+            msmeRegNumber = string.IsNullOrWhiteSpace(msmeNumber) ? null : msmeNumber.Trim(),
+            website = string.IsNullOrWhiteSpace(website) ? null : website.Trim(),
+            addresses = addresses.Select(a => new
+            {
+                addressType = a.AddressType,
+                line1 = a.Line1.Trim(),
+                line2 = string.IsNullOrWhiteSpace(a.Line2) ? null : a.Line2.Trim(),
+                city = a.City.Trim(),
+                state = a.State.Trim(),
+                postalCode = a.PostalCode.Trim(),
+                country = a.Country.Trim()
+            }).ToList(),
+            contacts = contacts.Select(c => new
+            {
+                name = c.Name.Trim(),
+                designation = string.IsNullOrWhiteSpace(c.Designation) ? null : c.Designation.Trim(),
+                email = c.Email.Trim(),
+                phone = string.IsNullOrWhiteSpace(c.Phone) ? null : c.Phone.Trim(),
+                isPrimary = c.IsPrimary
+            }).ToList(),
+            documents = DocSlots.Where(s => s.File != null).Select(s => new
+            {
+                documentType = s.DocumentType,
+                fileName = s.File!.FileName,
+                fileUrl = s.File.FileUrl,
+                fileSizeKb = s.File.FileSizeKb,
+                mimeType = s.File.MimeType
+            }).ToList()
+        };
+
+        try
+        {
+            var resp = await Api.PostAsync<SupplierRegistrationResponse, object>("api/supplier-registration/register", payload);
+            if (resp?.Success == true)
+            {
+                registered = true;
+            }
+            else
+            {
+                submitError = resp?.Errors?.FirstOrDefault() ?? "Registration failed. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            submitError = $"Network error: {ex.Message}";
+        }
+        busy = false;
+    }
+
+    private class AddressRow
+    {
+        public string AddressType { get; set; } = "Registered";
+        public string Line1 { get; set; } = string.Empty;
+        public string? Line2 { get; set; }
+        public string City { get; set; } = string.Empty;
+        public string State { get; set; } = string.Empty;
+        public string PostalCode { get; set; } = string.Empty;
+        public string Country { get; set; } = "India";
+    }
+
+    private class ContactRow
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public string? Designation { get; set; }
+        public bool IsPrimary { get; set; }
+    }
+
+    private class DocSlot
+    {
+        public string DocumentType { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string Icon { get; set; } = "description";
+        public bool Required { get; set; }
+        public string Hint { get; set; } = string.Empty;
+        public UploadedFileInfo? File { get; set; }
+        public string Error { get; set; } = string.Empty;
+    }
+
+    private class UploadedFileInfo
+    {
+        public string FileName { get; set; } = string.Empty;
+        public string FileUrl { get; set; } = string.Empty;
+        public int FileSizeKb { get; set; }
+        public string MimeType { get; set; } = string.Empty;
+    }
+}

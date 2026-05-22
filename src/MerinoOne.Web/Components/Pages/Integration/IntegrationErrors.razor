@@ -1,0 +1,129 @@
+@page "/integrations/errors"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+<PageTitle>Integration Errors</PageTitle>
+
+@if (!Token.IsAdmin)
+{
+    <div class="tl-empty">Access denied — admin only.</div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Integration Errors</h1>
+                    <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+                </div>
+                <p class="tl-sub">Failed ERP sync attempts pending retry or resolution</p>
+            </div>
+        </header>
+
+        @if (loading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (notFound)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">construction</span>
+                <div>Integration errors endpoint not yet available.</div>
+                <div style="font-size:12px;color:var(--mer-ink-500);">Backend will expose <code>/api/integration/errors</code> in a later run.</div>
+            </div>
+        }
+        else if (paged == null || paged.Items.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">error</span>
+                <div>No integration errors.</div>
+            </div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 140px 130px 1fr 160px 80px 90px 110px; --tl-min-width: 1100px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Entity</div>
+                    <div class="tlg-col">Entity ID</div>
+                    <div class="tlg-col">Error</div>
+                    <div class="tlg-col">Occurred</div>
+                    <div class="tlg-col tlg-col--num">Retries</div>
+                    <div class="tlg-col">Status</div>
+                    <div class="tlg-col">Actions</div>
+                </div>
+                @foreach (var e in paged.Items)
+                {
+                    <div class="tlg-row">
+                        <div class="tlg-col">@e.EntityType</div>
+                        <div class="tlg-col tlg-code">@(e.EntityId?.ToString()?[..8] ?? "—")</div>
+                        <div class="tlg-col tlg-desc" title="@e.ErrorMessage">@e.ErrorMessage</div>
+                        <div class="tlg-col tlg-code">@e.OccurredAt.ToString("yyyy-MM-dd HH:mm")</div>
+                        <div class="tlg-col tlg-col--num">@e.RetryCount</div>
+                        <div class="tlg-col"><span class="tlg-status @(e.Resolved ? "tlg-status--active" : "tlg-status--danger")">@(e.Resolved ? "Resolved" : "Open")</span></div>
+                        <div class="tlg-col">
+                            @if (!e.Resolved)
+                            {
+                                <button class="rz-button rz-primary" style="padding:4px 8px;border-radius:4px;border:0;color:#fff;cursor:pointer;font-size:11px;" @onclick="() => Retry(e.Id)" disabled="@busy">
+                                    <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">refresh</span> Retry
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--mer-ink-600);">
+                <div>Page @paged.Page of @paged.TotalPages — @paged.TotalCount rows</div>
+                <div style="display:flex;gap:6px;">
+                    <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Prev" disabled="@(paged.Page <= 1)">Prev</button>
+                    <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Next" disabled="@(paged.Page >= paged.TotalPages)">Next</button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private PagedResult<IntegrationErrorDto>? paged;
+    private bool loading = true;
+    private bool busy = false;
+    private bool notFound = false;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        loading = true; notFound = false;
+        try
+        {
+            var resp = await Api.GetAsync<PagedResult<IntegrationErrorDto>>($"api/integration/errors?page={page}&pageSize={PageSize}");
+            if (resp == null || (!resp.Success && resp.Data == null)) { notFound = true; }
+            else paged = resp.Data;
+        }
+        catch { notFound = true; }
+        loading = false;
+    }
+
+    private async Task Prev() { if (page > 1) { page--; await Reload(); } }
+    private async Task Next() { if (paged != null && page < paged.TotalPages) { page++; await Reload(); } }
+
+    private async Task Retry(Guid id)
+    {
+        busy = true;
+        var resp = await Api.PostAsync<IntegrationErrorDto, object>($"api/integration/errors/{id}/retry", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Retry queued" });
+            await Reload();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Retry failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+}

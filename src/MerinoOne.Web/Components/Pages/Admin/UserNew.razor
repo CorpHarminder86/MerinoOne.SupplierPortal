@@ -1,0 +1,148 @@
+@page "/admin/users/new"
+@inject ApiClient Api
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+<PageTitle>New user</PageTitle>
+
+<div class="tl-page">
+    <a href="/admin/users" class="mer-back-link">
+        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+        Back to list
+    </a>
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">New user</h1>
+            </div>
+            <p class="tl-sub">Create a portal user with role assignments</p>
+        </div>
+    </header>
+
+    <div class="rz-card" style="padding:24px;max-width:760px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div>
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">User code *</label>
+                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="userCode" />
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Full name *</label>
+                <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="fullName" />
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Email *</label>
+                <input class="rz-textbox" type="email" style="width:100%;padding:8px 10px;" @bind="email" />
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Password *</label>
+                <input class="rz-textbox" type="password" style="width:100%;padding:8px 10px;" @bind="password" />
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Confirm password *</label>
+                <input class="rz-textbox" type="password" style="width:100%;padding:8px 10px;" @bind="passwordConfirm" />
+            </div>
+            <div style="display:flex;align-items:center;gap:24px;padding-top:24px;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                    <input type="checkbox" @bind="isInternal" />
+                    Internal user
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                    <input type="checkbox" @bind="mfaEnabled" />
+                    MFA enabled
+                </label>
+            </div>
+        </div>
+
+        <div style="margin-top:20px;">
+            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:8px;">Roles</label>
+            @if (availableRoles == null)
+            {
+                <p style="color:var(--mer-ink-500);font-size:12px;">Loading roles…</p>
+            }
+            else if (availableRoles.Count == 0)
+            {
+                <p style="color:var(--mer-ink-500);font-size:12px;">No roles available yet. Create them under /admin/roles first.</p>
+            }
+            else
+            {
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                    @foreach (var r in availableRoles)
+                    {
+                        var selected = selectedRoleNames.Contains(r.Name);
+                        <button type="button" @onclick="() => ToggleRole(r.Name)" style="padding:6px 12px;border-radius:999px;border:1px solid @(selected ? "var(--mer-blue)" : "var(--mer-ink-300)");background:@(selected ? "var(--mer-blue-50)" : "var(--mer-surface)");color:@(selected ? "var(--mer-blue-700)" : "var(--mer-ink-700)");font-size:12px;cursor:pointer;font-family:inherit;">
+                            @r.Name
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:16px;">@error</div>
+        }
+
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:24px;padding-top:16px;border-top:1px solid var(--mer-line);">
+            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Cancel">Cancel</button>
+            <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Submit" disabled="@busy">
+                @(busy ? "Creating…" : "Create user")
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string userCode = string.Empty;
+    private string fullName = string.Empty;
+    private string email = string.Empty;
+    private string password = string.Empty;
+    private string passwordConfirm = string.Empty;
+    private bool isInternal = true;
+    private bool mfaEnabled = false;
+    private HashSet<string> selectedRoleNames = new();
+    private List<RoleListItemDto>? availableRoles;
+    private bool busy = false;
+    private string error = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await Api.GetAsync<List<RoleListItemDto>>("api/roles");
+        availableRoles = resp?.Data ?? new();
+    }
+
+    private void ToggleRole(string name)
+    {
+        if (!selectedRoleNames.Add(name)) selectedRoleNames.Remove(name);
+    }
+
+    private bool Validate()
+    {
+        if (string.IsNullOrWhiteSpace(userCode)) { error = "User code is required."; return false; }
+        if (string.IsNullOrWhiteSpace(fullName)) { error = "Full name is required."; return false; }
+        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@')) { error = "Valid email is required."; return false; }
+        if (string.IsNullOrEmpty(password) || password.Length < 8) { error = "Password must be at least 8 characters."; return false; }
+        if (password != passwordConfirm) { error = "Passwords do not match."; return false; }
+        error = string.Empty;
+        return true;
+    }
+
+    private async Task Submit()
+    {
+        if (!Validate()) return;
+        busy = true;
+        var req = new CreateUserRequest(userCode.Trim(), fullName.Trim(), email.Trim(), password, isInternal, mfaEnabled, selectedRoleNames.ToArray());
+        var resp = await Api.PostAsync<Guid, CreateUserRequest>("api/users", req);
+        if (resp?.Success == true && resp.Data != Guid.Empty)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "User created" });
+            Nav.NavigateTo($"/admin/users/{resp.Data}");
+        }
+        else
+        {
+            error = resp?.Errors?.FirstOrDefault() ?? "Failed to create user.";
+        }
+        busy = false;
+    }
+
+    private void Cancel() => Nav.NavigateTo("/admin/users");
+}

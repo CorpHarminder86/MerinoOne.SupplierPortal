@@ -1,0 +1,120 @@
+@page "/invoices"
+@inject ApiClient Api
+@inject NavigationManager Nav
+@inject TokenAccessor Token
+
+<PageTitle>Invoices</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Invoices</h1>
+                <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+            </div>
+            <p class="tl-sub">Supplier invoices and matching status</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (Token.HasPermission("Invoice.Submit"))
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NewInvoice">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> New invoice
+                </button>
+            }
+        </div>
+    </header>
+
+    <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input class="rz-textbox" placeholder="Search invoice / PO #…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="OnSearchKeyup" />
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="Reload">
+            <option value="">All statuses</option>
+            <option value="Submitted">Submitted</option>
+            <option value="UnderReview">Under Review</option>
+            <option value="Matched">Matched</option>
+            <option value="MatchExceptions">Match Exceptions</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+            <option value="Paid">Paid</option>
+            <option value="PartiallyPaid">Partially Paid</option>
+            <option value="Cancelled">Cancelled</option>
+        </select>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (paged == null || paged.Items.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">receipt_long</span>
+            <div>No invoices match.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 150px 1.5fr 130px 140px 140px; --tl-min-width: 1100px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Invoice #</div>
+                <div class="tlg-col">PO #</div>
+                <div class="tlg-col">Supplier</div>
+                <div class="tlg-col">Date</div>
+                <div class="tlg-col tlg-col--num">Amount</div>
+                <div class="tlg-col">Status</div>
+            </div>
+            @foreach (var inv in paged.Items)
+            {
+                <div class="tlg-row" @onclick="() => OpenDetail(inv.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">@inv.InvoiceNumber</div>
+                    <div class="tlg-col tlg-code">@inv.PoNumber</div>
+                    <div class="tlg-col tlg-name">@inv.SupplierName</div>
+                    <div class="tlg-col tlg-code">@inv.InvoiceDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-col--num">@inv.CurrencyCode @inv.InvoiceAmount.ToString("N2")</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(inv.InvoiceStatus)">@inv.InvoiceStatus</span></div>
+                </div>
+            }
+        </div>
+
+        <Pager Page="page" PageSize="PageSize" TotalCount="paged.TotalCount" PageChanged="OnPageChanged" />
+    }
+</div>
+
+@code {
+    private PagedResult<InvoiceListItemDto>? paged;
+    private bool loading = true;
+    private string search = string.Empty;
+    private string statusFilter = string.Empty;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        loading = true;
+        var url = $"api/invoices?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search.Trim())}";
+        var resp = await Api.GetAsync<PagedResult<InvoiceListItemDto>>(url);
+        paged = resp?.Data;
+        loading = false;
+    }
+
+    private async Task OnSearchKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { page = 1; await Reload(); }
+    }
+
+    private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+
+    private void OpenDetail(Guid id) => Nav.NavigateTo($"/invoices/{id}");
+    private void NewInvoice() => Nav.NavigateTo("/invoices/new");
+
+    private string StatusClass(string status) => status switch
+    {
+        "Approved" or "Paid" => "tlg-status--active",
+        "Submitted" or "UnderReview" or "Matched" or "PartiallyPaid" => "tlg-status--pending",
+        "Rejected" or "Cancelled" or "MatchExceptions" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

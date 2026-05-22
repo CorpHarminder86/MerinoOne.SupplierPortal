@@ -1,8 +1,11 @@
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
+using MerinoOne.SupplierPortal.Domain.Entities.Audit;
 using MerinoOne.SupplierPortal.Domain.Entities.Comm;
 using MerinoOne.SupplierPortal.Domain.Entities.Doc;
 using MerinoOne.SupplierPortal.Domain.Entities.Integration;
+using MerinoOne.SupplierPortal.Domain.Entities.Inv;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
+using MerinoOne.SupplierPortal.Domain.Entities.Settings;
 using Microsoft.EntityFrameworkCore;
 using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplier;
 using SupplierVerificationEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierVerification;
@@ -21,7 +24,12 @@ public interface IAppDbContext
     DbSet<Seccode> Seccodes { get; }
     DbSet<SecRight> SecRights { get; }
     DbSet<SupplierUserMap> SupplierUserMaps { get; }
+    DbSet<SupplierInvite> SupplierInvites { get; }
     DbSet<Tenant> Tenants { get; }
+
+    DbSet<Item> Items { get; }
+    DbSet<DeliveryTerm> DeliveryTerms { get; }
+    DbSet<PaymentTerm> PaymentTerms { get; }
 
     DbSet<SupplierEntity> Suppliers { get; }
     DbSet<SupplierVerificationEntity> SupplierVerifications { get; }
@@ -45,6 +53,10 @@ public interface IAppDbContext
     DbSet<InforEndpointMap> InforEndpointMaps { get; }
     DbSet<InforSyncLog> InforSyncLogs { get; }
     DbSet<IntegrationError> IntegrationErrors { get; }
+
+    DbSet<AuditEntry> AuditEntries { get; }
+
+    DbSet<SystemSetting> SystemSettings { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

@@ -1,0 +1,27 @@
+@inherits LayoutComponentBase
+
+<div style="min-height:100vh;background:var(--mer-canvas);display:flex;flex-direction:column;">
+    <header style="background:var(--mer-blue-darker);padding:14px 32px;display:flex;align-items:center;gap:14px;color:#fff;">
+        <img src="img/merino-logo.png" alt="Merino" style="width:36px;height:36px;border-radius:8px;background:#fff;padding:4px;object-fit:contain;" />
+        <div>
+            <div style="font-size:16px;font-weight:800;letter-spacing:.14em;">MERIN<span class="infinity-symbol">∞</span>NE</div>
+            <div style="font-size:11px;color:var(--mer-green);letter-spacing:.18em;text-transform:uppercase;margin-top:2px;">SUPPLIER PORTAL</div>
+        </div>
+    </header>
+
+    <main style="flex:1;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;">
+        <div style="width:100%;max-width:880px;">
+            @Body
+        </div>
+    </main>
+
+    <footer style="text-align:center;padding:16px;font-size:11px;color:var(--mer-ink-500);">
+        © 2026 Merino Consulting Services Ltd.
+    </footer>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>

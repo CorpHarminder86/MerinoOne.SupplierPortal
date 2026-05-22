@@ -1,0 +1,235 @@
+@page "/admin/items"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+<PageTitle>Items</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Items</h1>
+                <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Item / material master</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (Token.HasPermission("Settings.Write"))
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add
+                </button>
+            }
+        </div>
+    </header>
+
+    <div class="tl-filter-bar">
+        <input class="rz-textbox" placeholder="Search code / description…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="ApplyFilters" />
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (rows == null || rows.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">inventory_2</span>
+            <div>No items match.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.5fr 90px 120px 90px 110px; --tl-min-width: 900px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Code</div>
+                <div class="tlg-col">Description</div>
+                <div class="tlg-col">UoM</div>
+                <div class="tlg-col">HSN</div>
+                <div class="tlg-col">Active</div>
+                <div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var r in rows)
+            {
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code">@r.Code</div>
+                    <div class="tlg-col tlg-desc">@r.Description</div>
+                    <div class="tlg-col">@r.Uom</div>
+                    <div class="tlg-col tlg-code">@r.HsnCode</div>
+                    <div class="tlg-col"><span class="tlg-status @(r.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(r.IsActive ? "Yes" : "No")</span></div>
+                    <div class="tlg-col tlg-col--actions">
+                        @if (Token.HasPermission("Settings.Write"))
+                        {
+                            <button @onclick="() => OpenEdit(r)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit">
+                                <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                            </button>
+                            @if (r.IsActive)
+                            {
+                                <button @onclick="() => Deactivate(r.Id)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                                </button>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" style="width:540px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">inventory_2</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Master</div>
+                    <h2 class="merino-dialog__title">@(editingId.HasValue ? "Edit item" : "New item")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showDialog = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div style="grid-column:1 / span 2;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Code @(editingId.HasValue ? "(immutable)" : "*")</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formCode" disabled="@editingId.HasValue" />
+                    </div>
+                    <div style="grid-column:1 / span 2;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Description *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formDescription" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">UoM *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formUom" placeholder="KG / PCS / MTR" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">HSN code</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formHsnCode" />
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;grid-column:1 / span 2;">
+                        <input type="checkbox" @bind="formIsActive" />
+                        Active
+                    </label>
+                </div>
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@formError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showDialog = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ItemDto>? all;
+    private List<ItemDto>? rows;
+    private bool loading = true;
+    private bool busy;
+    private bool showDialog;
+    private Guid? editingId;
+    private string formCode = string.Empty;
+    private string formDescription = string.Empty;
+    private string formUom = string.Empty;
+    private string? formHsnCode;
+    private bool formIsActive = true;
+    private string formError = string.Empty;
+    private string search = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<ItemDto>>("api/masters/items");
+        all = resp?.Data ?? new();
+        ApplyFilters();
+        loading = false;
+    }
+
+    private void ApplyFilters()
+    {
+        if (all == null) { rows = new(); return; }
+        IEnumerable<ItemDto> q = all;
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x => x.Code.Contains(s, StringComparison.OrdinalIgnoreCase)
+                          || x.Description.Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+        rows = q.ToList();
+    }
+
+    private void OpenNew()
+    {
+        editingId = null;
+        formCode = string.Empty;
+        formDescription = string.Empty;
+        formUom = string.Empty;
+        formHsnCode = null;
+        formIsActive = true;
+        formError = string.Empty;
+        showDialog = true;
+    }
+
+    private void OpenEdit(ItemDto r)
+    {
+        editingId = r.Id;
+        formCode = r.Code;
+        formDescription = r.Description;
+        formUom = r.Uom;
+        formHsnCode = r.HsnCode;
+        formIsActive = r.IsActive;
+        formError = string.Empty;
+        showDialog = true;
+    }
+
+    private async Task Save()
+    {
+        if (!editingId.HasValue && string.IsNullOrWhiteSpace(formCode)) { formError = "Code required."; return; }
+        if (string.IsNullOrWhiteSpace(formDescription)) { formError = "Description required."; return; }
+        if (string.IsNullOrWhiteSpace(formUom)) { formError = "UoM required."; return; }
+        busy = true;
+        ApiResult<ItemDto>? resp;
+        var hsn = string.IsNullOrWhiteSpace(formHsnCode) ? null : formHsnCode.Trim();
+        if (editingId.HasValue)
+        {
+            var req = new UpdateItemRequest(formDescription.Trim(), formUom.Trim(), hsn, formIsActive);
+            resp = await Api.PutAsync<ItemDto, UpdateItemRequest>($"api/masters/items/{editingId}", req);
+        }
+        else
+        {
+            var req = new CreateItemRequest(formCode.Trim(), formDescription.Trim(), formUom.Trim(), hsn, formIsActive);
+            resp = await Api.PostAsync<ItemDto, CreateItemRequest>("api/masters/items", req);
+        }
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+            showDialog = false;
+            await Load();
+        }
+        else { formError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task Deactivate(Guid id)
+    {
+        busy = true;
+        var resp = await Api.PostAsync<object>($"api/masters/items/{id}/deactivate", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" });
+            await Load();
+        }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+}

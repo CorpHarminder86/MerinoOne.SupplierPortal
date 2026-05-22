@@ -1,0 +1,165 @@
+@page "/search"
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Search results</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Search results</h1>
+                <span class="tl-count-chip">@(results?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">@(string.IsNullOrEmpty(Q) ? "Type a query to begin." : $"Showing matches for \"{Q}\"")</p>
+        </div>
+    </header>
+
+    <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;">
+        <button class="mer-tab @(module==null?"mer-tab--active":"")" @onclick="SetModuleAll" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(module==null?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(module==null?"var(--mer-blue)":"var(--mer-ink-700)");">All</button>
+        <button class="mer-tab @(module=="Supplier"?"mer-tab--active":"")" @onclick="SetModuleSupplier" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(module=="Supplier"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(module=="Supplier"?"var(--mer-blue)":"var(--mer-ink-700)");">Suppliers</button>
+        <button class="mer-tab @(module=="PurchaseOrder"?"mer-tab--active":"")" @onclick="SetModulePo" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(module=="PurchaseOrder"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(module=="PurchaseOrder"?"var(--mer-blue)":"var(--mer-ink-700)");">Purchase Orders</button>
+        <button class="mer-tab @(module=="Invoice"?"mer-tab--active":"")" @onclick="SetModuleInvoice" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(module=="Invoice"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(module=="Invoice"?"var(--mer-blue)":"var(--mer-ink-700)");">Invoices</button>
+        <button class="mer-tab @(module=="Asn"?"mer-tab--active":"")" @onclick="SetModuleAsn" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(module=="Asn"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(module=="Asn"?"var(--mer-blue)":"var(--mer-ink-700)");">Shipments</button>
+        <button class="mer-tab @(module=="CommunicationMessage"?"mer-tab--active":"")" @onclick="SetModuleComm" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(module=="CommunicationMessage"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(module=="CommunicationMessage"?"var(--mer-blue)":"var(--mer-ink-700)");">Communication</button>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Searching…</div>
+    }
+    else if (string.IsNullOrEmpty(Q))
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">search</span>
+            <div>Enter a search query in the top bar to find suppliers, POs, invoices and more.</div>
+        </div>
+    }
+    else if (results == null || results.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">search_off</span>
+            <div>No results for "@Q".</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 140px 160px 1fr 1.2fr 120px 150px; --tl-min-width: 900px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Module</div>
+                <div class="tlg-col">Code</div>
+                <div class="tlg-col">Title</div>
+                <div class="tlg-col">Detail</div>
+                <div class="tlg-col">Status</div>
+                <div class="tlg-col">When</div>
+            </div>
+            @foreach (var r in results)
+            {
+                <div class="tlg-row" @onclick="@(() => OpenResult(r))" style="cursor:pointer">
+                    <div class="tlg-col">
+                        <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;color:var(--mer-blue);">@IconFor(r.Module)</span>
+                        @r.Module
+                    </div>
+                    <div class="tlg-col tlg-code">@r.Code</div>
+                    <div class="tlg-col tlg-name">@r.Title</div>
+                    <div class="tlg-col tlg-desc">@r.Subtitle</div>
+                    <div class="tlg-col">
+                        @if (!string.IsNullOrEmpty(r.Status))
+                        {
+                            <span class="tlg-status @StatusClass(r.Status)">@r.Status</span>
+                        }
+                    </div>
+                    <div class="tlg-col tlg-code" style="font-variant-numeric:tabular-nums;">@r.When.ToString("yyyy-MM-dd HH:mm")</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "module")] public string? QueryModule { get; set; }
+
+    private string? module;
+    private List<SearchResultDto>? results;
+    private bool loading = false;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        module = QueryModule;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        if (string.IsNullOrWhiteSpace(Q))
+        {
+            results = null;
+            loading = false;
+            return;
+        }
+        loading = true;
+        try
+        {
+            var url = $"api/search?q={Uri.EscapeDataString(Q)}&limit=100";
+            if (!string.IsNullOrEmpty(module)) url += $"&module={Uri.EscapeDataString(module)}";
+            var resp = await Api.GetAsync<List<SearchResultDto>>(url);
+            results = resp?.Data;
+        }
+        catch
+        {
+            results = null;
+        }
+        loading = false;
+    }
+
+    private void SetModuleAll() => SetModule(null);
+    private void SetModuleSupplier() => SetModule("Supplier");
+    private void SetModulePo() => SetModule("PurchaseOrder");
+    private void SetModuleInvoice() => SetModule("Invoice");
+    private void SetModuleAsn() => SetModule("Asn");
+    private void SetModuleComm() => SetModule("CommunicationMessage");
+
+    private void SetModule(string? m)
+    {
+        module = m;
+        var url = $"/search?q={Uri.EscapeDataString(Q ?? string.Empty)}";
+        if (!string.IsNullOrEmpty(m)) url += $"&module={Uri.EscapeDataString(m)}";
+        Nav.NavigateTo(url);
+    }
+
+    private void OpenResult(SearchResultDto r)
+    {
+        var url = r.Module switch
+        {
+            "Supplier" => $"/suppliers/{r.Id}",
+            "PurchaseOrder" => $"/purchase-orders/{r.Id}",
+            "Invoice" => $"/invoices/{r.Id}",
+            "Asn" => $"/asns/{r.Id}",
+            "GoodsReceipt" => $"/goods-receipts/{r.Id}",
+            "Payment" => $"/payments/{r.Id}",
+            "CommunicationMessage" => $"/threads/{r.Id}",
+            _ => "/"
+        };
+        Nav.NavigateTo(url);
+    }
+
+    private string IconFor(string module) => module switch
+    {
+        "Supplier" => "groups",
+        "PurchaseOrder" => "description",
+        "Invoice" => "receipt_long",
+        "Asn" => "local_shipping",
+        "Payment" => "payments",
+        "CommunicationMessage" => "mail",
+        _ => "circle"
+    };
+
+    private string StatusClass(string status) => status switch
+    {
+        "Active" or "Approved" or "Accepted" or "Delivered" or "Closed" or "Paid" => "tlg-status--active",
+        "Submitted" or "UnderReview" or "Pending" or "Released" or "Acknowledged" or "PartiallyDelivered" or "Registering" or "Invited" => "tlg-status--pending",
+        "Rejected" or "Cancelled" or "Suspended" or "Failed" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

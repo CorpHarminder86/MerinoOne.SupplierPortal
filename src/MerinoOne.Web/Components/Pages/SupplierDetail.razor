@@ -17,6 +17,10 @@ else if (detail == null)
 else
 {
     <div class="tl-page">
+        <a href="/suppliers" class="mer-back-link">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+            Back to list
+        </a>
         <header class="tl-header">
             <div>
                 <div class="tl-title-row">
@@ -42,6 +46,17 @@ else
             </div>
         </header>
 
+        <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;">
+            <button class="mer-tab @(tab=="overview"?"mer-tab--active":"")" @onclick="TabOverview" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="overview"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="overview"?"var(--mer-blue)":"var(--mer-ink-700)");">Overview</button>
+            <button class="mer-tab @(tab=="history"?"mer-tab--active":"")" @onclick="TabHistory" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="history"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="history"?"var(--mer-blue)":"var(--mer-ink-700)");">History</button>
+        </div>
+
+        @if (tab == "history")
+        {
+            <AuditHistoryTab EntityName="Supplier" EntityId="@Id" />
+        }
+        else
+        {
         <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;">
             <div class="rz-card" style="padding:20px;">
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Identity</h3>
@@ -91,6 +106,7 @@ else
                 }
             </div>
         </div>
+        }
     </div>
 
     @if (showApprove)
@@ -137,6 +153,10 @@ else
     private bool showApprove = false;
     private string overrideComment = string.Empty;
     private string approveError = string.Empty;
+    private string tab = "overview";
+
+    private void TabOverview() => tab = "overview";
+    private void TabHistory() => tab = "history";
 
     private bool RequireOverride => detail?.Verifications
         .GroupBy(v => v.VerificationType)

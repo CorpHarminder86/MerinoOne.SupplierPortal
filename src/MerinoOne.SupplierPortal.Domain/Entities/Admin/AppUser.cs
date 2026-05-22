@@ -11,6 +11,8 @@ public class AppUser : AuditableEntity
     public bool IsInternal { get; set; }
     public bool IsMfaEnabled { get; set; }
     public bool IsActive { get; set; } = true;
+    public bool MustChangePassword { get; set; }
+    public DateTime? LastLoginAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
     public ICollection<SupplierUserMap> SupplierMaps { get; set; } = new List<SupplierUserMap>();

@@ -1,0 +1,126 @@
+@page "/integrations/sync-log"
+@inject ApiClient Api
+@inject TokenAccessor Token
+
+<PageTitle>Sync Log</PageTitle>
+
+@if (!Token.IsAdmin)
+{
+    <div class="tl-empty">Access denied — admin only.</div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Infor Sync Log</h1>
+                    <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+                </div>
+                <p class="tl-sub">Inbound/outbound ERP synchronization events</p>
+            </div>
+        </header>
+
+        <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;">
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="Reload">
+                <option value="">All statuses</option>
+                <option value="Pending">Pending</option>
+                <option value="Success">Success</option>
+                <option value="Failed">Failed</option>
+                <option value="Retrying">Retrying</option>
+                <option value="Reconciled">Reconciled</option>
+            </select>
+        </div>
+
+        @if (loading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (notFound)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">construction</span>
+                <div>Sync log endpoint not yet available.</div>
+                <div style="font-size:12px;color:var(--mer-ink-500);">Backend will expose <code>/api/integration/sync-log</code> in a later run.</div>
+            </div>
+        }
+        else if (paged == null || paged.Items.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">sync</span>
+                <div>No sync events.</div>
+            </div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 140px 130px 110px 110px 1fr 160px 80px; --tl-min-width: 1100px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Entity</div>
+                    <div class="tlg-col">Entity ID</div>
+                    <div class="tlg-col">Direction</div>
+                    <div class="tlg-col">Status</div>
+                    <div class="tlg-col">Idempotency key</div>
+                    <div class="tlg-col">Synced at</div>
+                    <div class="tlg-col tlg-col--num">Retries</div>
+                </div>
+                @foreach (var s in paged.Items)
+                {
+                    <div class="tlg-row">
+                        <div class="tlg-col">@s.EntityType</div>
+                        <div class="tlg-col tlg-code">@(s.EntityId?.ToString()?[..8] ?? "—")</div>
+                        <div class="tlg-col">@s.Direction</div>
+                        <div class="tlg-col"><span class="tlg-status @StatusClass(s.Status)">@s.Status</span></div>
+                        <div class="tlg-col tlg-code" title="@s.IdempotencyKey">@(string.IsNullOrEmpty(s.IdempotencyKey) ? "—" : s.IdempotencyKey[..Math.Min(24, s.IdempotencyKey.Length)])</div>
+                        <div class="tlg-col tlg-code">@s.SyncedAt.ToString("yyyy-MM-dd HH:mm:ss")</div>
+                        <div class="tlg-col tlg-col--num">@s.RetryCount</div>
+                    </div>
+                }
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--mer-ink-600);">
+                <div>Page @paged.Page of @paged.TotalPages — @paged.TotalCount rows</div>
+                <div style="display:flex;gap:6px;">
+                    <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Prev" disabled="@(paged.Page <= 1)">Prev</button>
+                    <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Next" disabled="@(paged.Page >= paged.TotalPages)">Next</button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private PagedResult<InforSyncLogDto>? paged;
+    private bool loading = true;
+    private bool notFound = false;
+    private string statusFilter = string.Empty;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        loading = true; notFound = false;
+        var url = $"api/integration/sync-log?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
+        try
+        {
+            var resp = await Api.GetAsync<PagedResult<InforSyncLogDto>>(url);
+            if (resp == null || (!resp.Success && resp.Data == null)) { notFound = true; }
+            else paged = resp.Data;
+        }
+        catch { notFound = true; }
+        loading = false;
+    }
+
+    private async Task Prev() { if (page > 1) { page--; await Reload(); } }
+    private async Task Next() { if (paged != null && page < paged.TotalPages) { page++; await Reload(); } }
+
+    private string StatusClass(string status) => status switch
+    {
+        "Success" or "Reconciled" => "tlg-status--active",
+        "Pending" or "Retrying" => "tlg-status--pending",
+        "Failed" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

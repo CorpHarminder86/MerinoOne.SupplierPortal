@@ -1,0 +1,90 @@
+@page "/payments"
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Payments</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Payments</h1>
+                <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+            </div>
+            <p class="tl-sub">Read-only — payments posted by Finance via ERP</p>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input class="rz-textbox" placeholder="Search payment ref / invoice…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="OnSearchKeyup" />
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (paged == null || paged.Items.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">payments</span>
+            <div>No payments yet.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 150px 1.4fr 130px 140px 110px 1fr; --tl-min-width: 1150px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Payment Ref</div>
+                <div class="tlg-col">Invoice #</div>
+                <div class="tlg-col">Supplier</div>
+                <div class="tlg-col">Payment Date</div>
+                <div class="tlg-col tlg-col--num">Amount</div>
+                <div class="tlg-col">Mode</div>
+                <div class="tlg-col">Bank</div>
+            </div>
+            @foreach (var p in paged.Items)
+            {
+                <div class="tlg-row" @onclick="() => OpenDetail(p.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">@p.PaymentReference</div>
+                    <div class="tlg-col tlg-code">@p.InvoiceNumber</div>
+                    <div class="tlg-col tlg-name">@p.SupplierName</div>
+                    <div class="tlg-col tlg-code">@p.PaymentDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-col--num">@p.PaymentAmount.ToString("N2")</div>
+                    <div class="tlg-col">@(p.PaymentMode ?? "—")</div>
+                    <div class="tlg-col">@(p.BankName ?? "—")</div>
+                </div>
+            }
+        </div>
+
+        <Pager Page="page" PageSize="PageSize" TotalCount="paged.TotalCount" PageChanged="OnPageChanged" />
+    }
+</div>
+
+@code {
+    private PagedResult<PaymentListItemDto>? paged;
+    private bool loading = true;
+    private string search = string.Empty;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        loading = true;
+        var url = $"api/payments?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search.Trim())}";
+        var resp = await Api.GetAsync<PagedResult<PaymentListItemDto>>(url);
+        paged = resp?.Data;
+        loading = false;
+    }
+
+    private async Task OnSearchKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { page = 1; await Reload(); }
+    }
+
+    private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+
+    private void OpenDetail(Guid id) => Nav.NavigateTo($"/payments/{id}");
+}

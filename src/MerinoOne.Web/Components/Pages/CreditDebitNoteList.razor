@@ -1,0 +1,112 @@
+@page "/credit-debit-notes"
+@inject ApiClient Api
+@inject NavigationManager Nav
+@inject TokenAccessor Token
+
+<PageTitle>Credit/Debit Notes</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Credit/Debit Notes</h1>
+                <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+            </div>
+            <p class="tl-sub">Adjustments issued against supplier invoices</p>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="typeFilter" @bind:after="Reload">
+            <option value="">All types</option>
+            <option value="CN">Credit Note</option>
+            <option value="DN">Debit Note</option>
+        </select>
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="Reload">
+            <option value="">All statuses</option>
+            <option value="Draft">Draft</option>
+            <option value="Submitted">Submitted</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+        </select>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (paged == null || paged.Items.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">request_quote</span>
+            <div>No credit or debit notes.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 110px 160px 140px 130px 130px; --tl-min-width: 950px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Note #</div>
+                <div class="tlg-col">Type</div>
+                <div class="tlg-col">Invoice #</div>
+                <div class="tlg-col tlg-col--num">Amount</div>
+                <div class="tlg-col">Status</div>
+                <div class="tlg-col">Created</div>
+            </div>
+            @foreach (var n in paged.Items)
+            {
+                <div class="tlg-row" @onclick="() => OpenDetail(n.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">@n.NoteNumber</div>
+                    <div class="tlg-col"><span class="tlg-status @TypeClass(n.NoteType)">@n.NoteType</span></div>
+                    <div class="tlg-col tlg-code">@n.InvoiceNumber</div>
+                    <div class="tlg-col tlg-col--num">@n.Amount.ToString("N2")</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(n.NoteStatus)">@n.NoteStatus</span></div>
+                    <div class="tlg-col tlg-code">@n.CreatedOn.ToString("yyyy-MM-dd")</div>
+                </div>
+            }
+        </div>
+
+        <Pager Page="page" PageSize="PageSize" TotalCount="paged.TotalCount" PageChanged="OnPageChanged" />
+    }
+</div>
+
+@code {
+    private PagedResult<CreditDebitNoteListItemDto>? paged;
+    private bool loading = true;
+    private string statusFilter = string.Empty;
+    private string typeFilter = string.Empty;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        loading = true;
+        var url = $"api/credit-debit-notes?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
+        if (!string.IsNullOrWhiteSpace(typeFilter)) url += $"&type={Uri.EscapeDataString(typeFilter)}";
+        var resp = await Api.GetAsync<PagedResult<CreditDebitNoteListItemDto>>(url);
+        paged = resp?.Data;
+        loading = false;
+    }
+
+    private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+
+    private void OpenDetail(Guid id) => Nav.NavigateTo($"/credit-debit-notes/{id}");
+
+    private string TypeClass(string type) => type switch
+    {
+        "CN" => "tlg-status--info",
+        "DN" => "tlg-status--pending",
+        _ => "tlg-status--info"
+    };
+
+    private string StatusClass(string status) => status switch
+    {
+        "Approved" => "tlg-status--active",
+        "Draft" or "Submitted" => "tlg-status--pending",
+        "Rejected" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

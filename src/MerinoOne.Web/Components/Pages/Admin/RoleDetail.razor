@@ -1,0 +1,143 @@
+@page "/admin/roles/{Id:guid}"
+@inject ApiClient Api
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+<PageTitle>@detail?.Name</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else if (detail == null)
+{
+    <div class="tl-empty">Role not found.</div>
+}
+else
+{
+    <div class="tl-page">
+        <a href="/admin/roles" class="mer-back-link">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+            Back to list
+        </a>
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">@detail.Name</h1>
+                    <span class="tl-count-chip">@selectedCodes.Count permissions</span>
+                </div>
+                <p class="tl-sub">Tick the permission boxes to grant capabilities to this role</p>
+            </div>
+            <div class="tl-header__actions">
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Save" disabled="@busy">
+                    @(busy ? "Saving…" : "Save permissions")
+                </button>
+            </div>
+        </header>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:16px;">
+            @foreach (var group in PermissionCatalog.GroupBy(p => p.Module).OrderBy(g => g.Key))
+            {
+                <div class="rz-card" style="padding:16px;">
+                    <h3 style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--mer-blue-darker);text-transform:uppercase;letter-spacing:0.05em;">@group.Key</h3>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                        @foreach (var p in group.OrderBy(x => x.Code))
+                        {
+                            var ck = selectedCodes.Contains(p.Code);
+                            <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer;padding:4px 6px;border-radius:4px;">
+                                <input type="checkbox" checked="@ck" @onchange="@((ChangeEventArgs e) => Toggle(p.Code, (bool)(e.Value ?? false)))" />
+                                <div style="display:flex;flex-direction:column;gap:1px;min-width:0;">
+                                    <span style="font-family:Inter,monospace;font-weight:600;color:var(--mer-ink-900);">@p.Code</span>
+                                    <span style="font-size:11px;color:var(--mer-ink-500);">@p.Description</span>
+                                </div>
+                            </label>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private RoleDetailDto? detail;
+    private bool loading = true;
+    private bool busy = false;
+    private HashSet<string> selectedCodes = new();
+
+    private record PermDef(string Code, string Module, string Description);
+
+    // Curated catalog mirroring [Authorize(Policy = "...")] usage across controllers.
+    // Backend treats permissions as opaque claim values, so this list is the source of truth for the UI.
+    private static readonly PermDef[] PermissionCatalog = new[]
+    {
+        // Users / Roles
+        new PermDef("User.Read",            "Users",      "View users"),
+        new PermDef("User.Write",           "Users",      "Create, edit, deactivate users; set passwords"),
+        new PermDef("Role.Read",            "Users",      "View roles"),
+        new PermDef("Role.Write",           "Users",      "Create or edit roles and permissions"),
+        // Suppliers
+        new PermDef("Supplier.Read",        "Suppliers",  "View suppliers"),
+        new PermDef("Supplier.Write",       "Suppliers",  "Edit supplier details"),
+        new PermDef("Supplier.Invite",      "Suppliers",  "Send onboarding invites"),
+        new PermDef("Supplier.Approve",     "Suppliers",  "Approve a registering supplier"),
+        new PermDef("Supplier.VerifyNic",   "Suppliers",  "Run GST/PAN/MSME NIC verification"),
+        new PermDef("Supplier.Provision",   "Suppliers",  "Map portal users to supplier accounts"),
+        // Procurement
+        new PermDef("PurchaseOrder.Read",        "Procurement", "View purchase orders"),
+        new PermDef("PurchaseOrder.Acknowledge", "Procurement", "Acknowledge a released PO"),
+        new PermDef("PurchaseOrder.Accept",       "Procurement", "Accept / reject PO lines"),
+        new PermDef("PurchaseOrder.ApproveProposal","Procurement","Approve a date proposal"),
+        new PermDef("DeliverySchedule.Read",    "Procurement", "View delivery schedules"),
+        new PermDef("DeliverySchedule.Propose", "Procurement", "Propose alternate delivery dates"),
+        new PermDef("DeliverySchedule.Approve", "Procurement", "Approve proposed schedules"),
+        new PermDef("Asn.Read",  "Procurement", "View ASNs"),
+        new PermDef("Asn.Write", "Procurement", "Create / submit ASNs"),
+        new PermDef("GoodsReceipt.Read", "Procurement", "View goods receipts"),
+        // Finance
+        new PermDef("Invoice.Read",    "Finance", "View invoices"),
+        new PermDef("Invoice.Submit",  "Finance", "Submit invoices"),
+        new PermDef("Invoice.Review",  "Finance", "Review invoices"),
+        new PermDef("Invoice.Approve", "Finance", "Approve / reject invoices"),
+        new PermDef("CreditDebitNote.Read",    "Finance", "View credit / debit notes"),
+        new PermDef("CreditDebitNote.Write",   "Finance", "Create or edit credit / debit notes"),
+        new PermDef("CreditDebitNote.Approve", "Finance", "Approve credit / debit notes"),
+        new PermDef("Payment.Read", "Finance", "View payment advice"),
+        // Settings & integration
+        new PermDef("Settings.Read",     "Settings", "View masters (delivery / payment / items)"),
+        new PermDef("Settings.Write",    "Settings", "Create or edit masters"),
+        new PermDef("Integration.Read",   "Settings", "View integration sync logs and errors"),
+        new PermDef("Integration.Manage", "Settings", "Replay / manage integration messages"),
+    };
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<RoleDetailDto>($"api/roles/{Id}");
+        detail = resp?.Data;
+        selectedCodes = detail?.PermissionCodes?.ToHashSet() ?? new();
+        loading = false;
+    }
+
+    private void Toggle(string code, bool on)
+    {
+        if (on) selectedCodes.Add(code);
+        else selectedCodes.Remove(code);
+    }
+
+    private async Task Save()
+    {
+        busy = true;
+        var resp = await Api.PostAsync<AssignPermissionsRequest>($"api/roles/{Id}/permissions", new AssignPermissionsRequest(selectedCodes.ToArray()));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Permissions saved" });
+            await Load();
+        }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+}

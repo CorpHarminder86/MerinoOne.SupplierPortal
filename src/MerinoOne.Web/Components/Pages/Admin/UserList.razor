@@ -1,0 +1,117 @@
+@page "/admin/users"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+
+<PageTitle>Users</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Users</h1>
+                <span class="tl-count-chip">@(users?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Portal users — both internal staff and supplier contacts</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (Token.HasPermission("User.Write"))
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="GoNew">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">person_add</span>
+                    New user
+                </button>
+            }
+        </div>
+    </header>
+
+    <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input class="rz-textbox" placeholder="Search code / name / email…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="ApplyFilters" />
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="internalFilter" @bind:after="ApplyFilters">
+            <option value="">Internal: all</option>
+            <option value="yes">Internal: Yes</option>
+            <option value="no">Internal: No</option>
+        </select>
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="activeFilter" @bind:after="ApplyFilters">
+            <option value="">Active: all</option>
+            <option value="yes">Active: Yes</option>
+            <option value="no">Active: No</option>
+        </select>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (users == null || users.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">group</span>
+            <div>No users match.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 130px 1.4fr 1.4fr 1.2fr 90px 110px 90px; --tl-min-width: 1100px;">
+            <div class="tlg-header">
+                <div class="tlg-col">User code</div>
+                <div class="tlg-col">Full name</div>
+                <div class="tlg-col">Email</div>
+                <div class="tlg-col">Roles</div>
+                <div class="tlg-col">Internal</div>
+                <div class="tlg-col tlg-col--num">Suppliers</div>
+                <div class="tlg-col">Active</div>
+            </div>
+            @foreach (var u in users)
+            {
+                <div class="tlg-row" @onclick="() => OpenDetail(u.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">@u.UserCode</div>
+                    <div class="tlg-col tlg-name">@u.FullName</div>
+                    <div class="tlg-col tlg-desc">@u.Email</div>
+                    <div class="tlg-col">@string.Join(", ", u.Roles ?? Array.Empty<string>())</div>
+                    <div class="tlg-col">@(u.IsInternal ? "Yes" : "No")</div>
+                    <div class="tlg-col tlg-col--num">@u.SupplierMapCount</div>
+                    <div class="tlg-col"><span class="tlg-status @(u.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(u.IsActive ? "Active" : "Inactive")</span></div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<UserListItemDto>? all;
+    private List<UserListItemDto>? users;
+    private bool loading = true;
+    private string search = string.Empty;
+    private string internalFilter = string.Empty;
+    private string activeFilter = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await Api.GetAsync<List<UserListItemDto>>("api/users");
+        all = resp?.Data ?? new();
+        ApplyFilters();
+        loading = false;
+    }
+
+    private void ApplyFilters()
+    {
+        if (all == null) { users = new(); return; }
+        IEnumerable<UserListItemDto> q = all;
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x => (x.UserCode ?? string.Empty).Contains(s, StringComparison.OrdinalIgnoreCase)
+                          || (x.FullName ?? string.Empty).Contains(s, StringComparison.OrdinalIgnoreCase)
+                          || (x.Email ?? string.Empty).Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+        if (internalFilter == "yes") q = q.Where(x => x.IsInternal);
+        else if (internalFilter == "no") q = q.Where(x => !x.IsInternal);
+        if (activeFilter == "yes") q = q.Where(x => x.IsActive);
+        else if (activeFilter == "no") q = q.Where(x => !x.IsActive);
+        users = q.ToList();
+    }
+
+    private void OpenDetail(Guid id) => Nav.NavigateTo($"/admin/users/{id}");
+    private void GoNew() => Nav.NavigateTo("/admin/users/new");
+}

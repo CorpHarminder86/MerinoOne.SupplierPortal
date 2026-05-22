@@ -1,5 +1,7 @@
 @page "/"
 @inject TokenAccessor Token
+@inject ApiClient Api
+@inject NavigationManager Nav
 
 <PageTitle>Dashboard</PageTitle>
 
@@ -10,35 +12,169 @@
     </header>
 
     <section class="dash__kpis">
-        <div class="kpi">
-            <div class="kpi__label">Active suppliers</div>
-            <div class="kpi__value">5</div>
-            <div class="kpi__delta kpi__delta--up">▲ 2 this month</div>
-        </div>
-        <div class="kpi">
-            <div class="kpi__label">Open POs</div>
-            <div class="kpi__value">50,000</div>
-            <div class="kpi__delta kpi__delta--up">▲ 12%</div>
-        </div>
-        <div class="kpi">
-            <div class="kpi__label">Submitted invoices</div>
-            <div class="kpi__value">70,000</div>
-            <div class="kpi__delta kpi__delta--up">▲ 8%</div>
-        </div>
-        <div class="kpi">
-            <div class="kpi__label">Payments processed</div>
-            <div class="kpi__value">25,000</div>
-            <div class="kpi__delta kpi__delta--down">▼ 3%</div>
-        </div>
+        @if (loading || summary == null)
+        {
+            @for (int i = 0; i < 4; i++)
+            {
+                <div class="kpi">
+                    <div class="kpi__label">Loading…</div>
+                    <div class="kpi__value" style="font-family:Inter,monospace;font-variant-numeric:tabular-nums;color:var(--mer-ink-300);">—</div>
+                    <div class="kpi__delta">&nbsp;</div>
+                </div>
+            }
+        }
+        else if (summary.Kpis.Count == 0)
+        {
+            <div class="kpi"><div class="kpi__label">No KPIs available</div><div class="kpi__value" style="font-family:Inter,monospace;">—</div><div class="kpi__delta">&nbsp;</div></div>
+        }
+        else
+        {
+            @foreach (var k in summary.Kpis)
+            {
+                <div class="kpi">
+                    <div class="kpi__label">@k.Label</div>
+                    <div class="kpi__value" style="font-family:Inter,monospace;font-variant-numeric:tabular-nums;">@FormatValue(k.Value)</div>
+                    <div class="kpi__delta @DeltaClass(k.DeltaSign)">@DeltaArrow(k.DeltaSign) @DeltaLabel(k)</div>
+                </div>
+            }
+        }
     </section>
 
     <section class="dash__panel">
         <header class="dash__panel-header">
+            <h2 class="dash__panel-title">Recent activity</h2>
+        </header>
+        @if (loading || summary == null)
+        {
+            <div class="tl-empty" style="padding:20px;">Loading…</div>
+        }
+        else if (summary.RecentActivity.Count == 0)
+        {
+            <div class="tl-empty" style="padding:20px;">
+                <span class="material-symbols-outlined" style="font-size:24px;">history</span>
+                <div>No recent activity.</div>
+            </div>
+        }
+        else
+        {
+            <table class="dash__table" style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--mer-line);">
+                        <th style="text-align:left;padding:10px 14px;color:var(--mer-ink-700);">When</th>
+                        <th style="text-align:left;padding:10px 14px;color:var(--mer-ink-700);">Module</th>
+                        <th style="text-align:left;padding:10px 14px;color:var(--mer-ink-700);">Title</th>
+                        <th style="text-align:left;padding:10px 14px;color:var(--mer-ink-700);">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var a in summary.RecentActivity)
+                    {
+                        <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                            <td style="padding:10px 14px;font-family:Inter,monospace;font-variant-numeric:tabular-nums;color:var(--mer-ink-700);">@a.When.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td style="padding:10px 14px;">
+                                <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;color:var(--mer-blue);">@IconFor(a.Module)</span>
+                                @a.Module
+                            </td>
+                            <td style="padding:10px 14px;">@a.Title</td>
+                            <td style="padding:10px 14px;">
+                                @if (!string.IsNullOrEmpty(a.Status))
+                                {
+                                    <span class="tlg-status @StatusClass(a.Status)">@a.Status</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="dash__panel" style="margin-top:16px;">
+        <header class="dash__panel-header">
             <h2 class="dash__panel-title">Quick actions</h2>
         </header>
         <div style="padding:20px;display:flex;gap:12px;flex-wrap:wrap;">
-            <a href="/suppliers" class="rz-button rz-primary" style="padding:8px 16px;text-decoration:none;color:#fff;border-radius:6px;">View suppliers</a>
-            <a href="/messages" class="rz-button rz-secondary" style="padding:8px 16px;text-decoration:none;color:#fff;border-radius:6px;">Messages</a>
+            <button class="rz-button rz-primary" style="padding:8px 16px;border:0;color:var(--mer-surface);border-radius:var(--mer-radius);background:var(--mer-blue);cursor:pointer;" @onclick="GoSuppliers">View suppliers</button>
+            <button class="rz-button rz-secondary" style="padding:8px 16px;border:0;color:var(--mer-surface);border-radius:var(--mer-radius);background:var(--mer-green-dark);cursor:pointer;" @onclick="GoMessages">Messages</button>
         </div>
     </section>
 </div>
+
+@code {
+    private DashboardSummaryDto? summary;
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var resp = await Api.GetAsync<DashboardSummaryDto>("api/dashboard/summary");
+            summary = resp?.Data;
+        }
+        catch
+        {
+            summary = null;
+        }
+        loading = false;
+    }
+
+    private void GoSuppliers() => Nav.NavigateTo("/suppliers");
+    private void GoMessages() => Nav.NavigateTo("/messages");
+
+    private static string DeltaClass(string? sign) => sign switch
+    {
+        "+" => "kpi__delta--up",
+        "-" => "kpi__delta--down",
+        _ => string.Empty
+    };
+
+    private static string DeltaArrow(string? sign) => sign switch
+    {
+        "+" => "▲",
+        "-" => "▼",
+        _ => string.Empty
+    };
+
+    private static string FormatValue(decimal v)
+    {
+        if (Math.Abs(v - Math.Truncate(v)) < 0.005m)
+        {
+            return v.ToString("N0");
+        }
+        return v.ToString("N2");
+    }
+
+    private static string DeltaLabel(DashboardKpiDto k)
+    {
+        if (k.PreviousValue.HasValue && k.PreviousValue.Value != 0m)
+        {
+            var pct = (k.Value - k.PreviousValue.Value) / Math.Abs(k.PreviousValue.Value) * 100m;
+            return $"{Math.Abs(pct):0.#}% vs prev";
+        }
+        if (k.PreviousValue.HasValue)
+        {
+            return $"prev: {FormatValue(k.PreviousValue.Value)}";
+        }
+        return string.Empty;
+    }
+
+    private string StatusClass(string status) => status switch
+    {
+        "Active" or "Approved" or "Accepted" or "Delivered" or "Closed" or "Paid" => "tlg-status--active",
+        "Submitted" or "UnderReview" or "Pending" or "Released" or "Acknowledged" or "PartiallyDelivered" or "Registering" or "Invited" => "tlg-status--pending",
+        "Rejected" or "Cancelled" or "Suspended" or "Failed" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+
+    private string IconFor(string module) => module switch
+    {
+        "Supplier" => "groups",
+        "PurchaseOrder" => "description",
+        "Invoice" => "receipt_long",
+        "Asn" => "local_shipping",
+        "Payment" => "payments",
+        "CommunicationMessage" => "mail",
+        "GoodsReceipt" => "inventory_2",
+        _ => "circle"
+    };
+}

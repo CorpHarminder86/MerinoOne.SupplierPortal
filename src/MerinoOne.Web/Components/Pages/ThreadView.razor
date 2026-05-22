@@ -5,6 +5,10 @@
 <PageTitle>Thread</PageTitle>
 
 <div class="tl-page" style="max-width:900px;">
+    <a href="/messages" class="mer-back-link">
+        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+        Back to list
+    </a>
     <header class="tl-header">
         <div>
             <div class="tl-title-row">
@@ -35,9 +39,13 @@
         </div>
 
         <div class="rz-card" style="padding:14px;">
-            <textarea class="rz-textbox" rows="3" placeholder="Reply…" style="width:100%;padding:8px 10px;font-family:inherit;margin-bottom:8px;" @bind="reply"></textarea>
+            <textarea class="rz-textbox" rows="3" placeholder="Reply…" style="width:100%;padding:8px 10px;font-family:inherit;margin-bottom:8px;" @bind="reply" @bind:event="oninput"></textarea>
+            @if (!string.IsNullOrEmpty(sendError))
+            {
+                <div class="validation-message" style="margin-bottom:8px;">@sendError</div>
+            }
             <div style="display:flex;justify-content:flex-end;">
-                <button class="rz-button rz-primary" style="padding:8px 16px;border-radius:6px;border:0;color:#fff;cursor:pointer;" disabled="@busy" @onclick="Send">@(busy ? "Sending…" : "Send")</button>
+                <button class="rz-button rz-primary" style="padding:8px 16px;border-radius:6px;border:0;color:#fff;cursor:pointer;" disabled="@(busy || string.IsNullOrWhiteSpace(reply))" @onclick="Send">@(busy ? "Sending…" : "Send")</button>
             </div>
         </div>
     }
@@ -49,6 +57,7 @@
     private bool loading = true;
     private string reply = string.Empty;
     private bool busy = false;
+    private string sendError = string.Empty;
 
     protected override async Task OnInitializedAsync() => await Load();
 
@@ -62,12 +71,19 @@
 
     private async Task Send()
     {
-        if (string.IsNullOrWhiteSpace(reply)) return;
-        busy = true;
-        await Api.PostAsync<MessageDto, SendMessageRequest>("api/messages",
+        if (string.IsNullOrWhiteSpace(reply)) { sendError = "Reply cannot be empty."; return; }
+        busy = true; sendError = string.Empty;
+        var resp = await Api.PostAsync<MessageDto, SendMessageRequest>("api/messages",
             new SendMessageRequest(ThreadId, null, null, reply, null));
-        reply = string.Empty;
-        await Load();
+        if (resp?.Success == true)
+        {
+            reply = string.Empty;
+            await Load();
+        }
+        else
+        {
+            sendError = resp?.Errors?.FirstOrDefault() ?? "Failed to send.";
+        }
         busy = false;
     }
 }

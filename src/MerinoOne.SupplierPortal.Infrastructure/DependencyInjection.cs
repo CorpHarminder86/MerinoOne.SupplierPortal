@@ -1,8 +1,14 @@
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
+using MerinoOne.SupplierPortal.Application.SystemSettings;
+using MerinoOne.SupplierPortal.Application.SystemSettings.EmailConfig;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Registry;
+using MerinoOne.SupplierPortal.Application.SystemSettings.SupplierInvite;
 using MerinoOne.SupplierPortal.Infrastructure.Identity;
 using MerinoOne.SupplierPortal.Infrastructure.Integration.Infor;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence.Interceptors;
+using MerinoOne.SupplierPortal.Infrastructure.Security;
 using MerinoOne.SupplierPortal.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -26,10 +32,41 @@ public static class DependencyInjection
 
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
+        // Dapper-backed raw SQL factory (global search, audit trail)
+        services.AddSingleton<ISqlConnectionFactory>(_ => new SqlConnectionFactory(cs));
+
         // Mock integration services (Stage 1)
         services.AddScoped<INicValidationService, MockNicValidationService>();
         services.AddScoped<IDocumentValidationService, MockDocumentValidationService>();
         services.AddScoped<IInforIntegrationService, MockInforIntegrationService>();
+        services.AddScoped<IEmailService, MockEmailService>();
+
+        // Password hashing — adapter over the static PasswordHasher (Application has no Infra ref).
+        services.AddSingleton<IPasswordHasher, PasswordHasherService>();
+
+        // System settings — generic shell, per-category seeds, password protection, cached readers.
+        services.AddDataProtection();
+        // Singleton — DataProtectorSettingProtector wraps the singleton IDataProtectionProvider
+        // and is consumed from singleton EmailConfigService and scoped MediatR handlers alike.
+        services.AddSingleton<ISettingProtector, DataProtectorSettingProtector>();
+
+        // Seeds: registered concretely so services can ctor-inject the typed seed and also as
+        // ISettingsCategorySeed so SettingsSeedRegistry enumerates them.
+        services.AddSingleton<EmailConfigSeed>();
+        services.AddSingleton<SupplierInviteSeed>();
+        services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<EmailConfigSeed>());
+        services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<SupplierInviteSeed>());
+        services.AddSingleton<SettingsSeedRegistry>();
+
+        // Cached readers — singleton so the cache persists across requests; expose both the
+        // typed reader and ISettingsCacheInvalidator so Save/Reset handlers fan invalidations out.
+        services.AddSingleton<EmailConfigService>();
+        services.AddSingleton<IEmailConfig>(sp => sp.GetRequiredService<EmailConfigService>());
+        services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<EmailConfigService>());
+
+        services.AddSingleton<SupplierInviteSettingsService>();
+        services.AddSingleton<ISupplierInviteSettings>(sp => sp.GetRequiredService<SupplierInviteSettingsService>());
+        services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<SupplierInviteSettingsService>());
 
         // ef tooling / migrations / seed contexts get the anonymous user
         services.TryAddCurrentUserFallback();

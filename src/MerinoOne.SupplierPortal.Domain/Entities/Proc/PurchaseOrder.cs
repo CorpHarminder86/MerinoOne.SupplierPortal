@@ -12,6 +12,10 @@ public class PurchaseOrder : BaseAggregateRoot
     public DateTime PoDate { get; set; }
     public string? PaymentTerms { get; set; }
     public string? DeliveryTerms { get; set; }
+    public Guid? DeliveryTermId { get; set; }
+    public DeliveryTerm? DeliveryTerm { get; set; }
+    public Guid? PaymentTermId { get; set; }
+    public PaymentTerm? PaymentTerm { get; set; }
     public PoStatus PoStatus { get; set; } = PoStatus.Released;
     public DateTime? AcknowledgmentAt { get; set; }
     public DateTime? AcceptedAt { get; set; }

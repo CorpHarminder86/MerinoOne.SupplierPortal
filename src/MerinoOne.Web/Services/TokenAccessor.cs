@@ -8,6 +8,7 @@ public class TokenAccessor
     public string[] Roles { get; set; } = Array.Empty<string>();
     public string[] Permissions { get; set; } = Array.Empty<string>();
     public DateTime? ExpiresAt { get; set; }
+    public bool MustChangePassword { get; set; }
 
     public bool IsAuthenticated => !string.IsNullOrEmpty(Token) && (!ExpiresAt.HasValue || ExpiresAt.Value > DateTime.UtcNow);
     public bool IsAdmin => Roles.Contains("Admin") || Roles.Contains("SuperAdmin");
@@ -18,5 +19,6 @@ public class TokenAccessor
     {
         Token = null; UserCode = null; FullName = null;
         Roles = Array.Empty<string>(); Permissions = Array.Empty<string>(); ExpiresAt = null;
+        MustChangePassword = false;
     }
 }

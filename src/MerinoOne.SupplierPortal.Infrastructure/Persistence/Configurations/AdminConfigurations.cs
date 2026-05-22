@@ -17,6 +17,8 @@ public class AppUserConfiguration : IEntityTypeConfiguration<AppUser>
         b.Property(x => x.IsInternal).HasColumnName("isInternal").HasDefaultValue(false);
         b.Property(x => x.IsMfaEnabled).HasColumnName("isMfaEnabled").HasDefaultValue(false);
         b.Property(x => x.IsActive).HasColumnName("isActive").HasDefaultValue(true);
+        b.Property(x => x.MustChangePassword).HasColumnName("mustChangePassword").HasDefaultValue(false);
+        b.Property(x => x.LastLoginAt).HasColumnName("lastLoginAt").HasColumnType("datetime2");
 
         b.HasIndex(x => x.UserCode).HasDatabaseName("UQ_AppUser_userCode").IsUnique();
         b.HasIndex(x => x.Email).HasDatabaseName("UQ_AppUser_email").IsUnique();

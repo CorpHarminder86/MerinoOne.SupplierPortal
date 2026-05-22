@@ -1,0 +1,338 @@
+@page "/asns/new"
+@page "/asns/{Id:guid}"
+@inject ApiClient Api
+@inject NavigationManager NavMgr
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+<PageTitle>@(IsNew ? "New ASN" : detail?.AsnNumber)</PageTitle>
+
+<div class="tl-page">
+    <a href="/asns" class="mer-back-link">
+        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+        Back to list
+    </a>
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">@(IsNew ? "Create ASN" : detail?.AsnNumber)</h1>
+                @if (!IsNew && detail != null)
+                {
+                    <span class="tlg-status @StatusClass(detail.AsnStatus)">@detail.AsnStatus</span>
+                }
+                <span class="tl-count-chip">Step @currentStep of 4</span>
+            </div>
+            <p class="tl-sub">@(IsNew ? "Submit shipping notice for a purchase order" : $"ASN for PO {detail?.PoNumber}")</p>
+        </div>
+        <div class="tl-header__actions">
+            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Cancel">Cancel</button>
+        </div>
+    </header>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else
+    {
+        <div class="rz-card" style="padding:20px;">
+            <!-- Stepper -->
+            <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--mer-line);">
+                @for (int i = 1; i <= 4; i++)
+                {
+                    var step = i;
+                    var active = currentStep == step;
+                    var done = currentStep > step;
+                    <div style="padding:10px 16px;font-size:13px;font-weight:600;border-bottom:3px solid @(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "transparent");color:@(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "var(--mer-ink-500)");cursor:pointer;" @onclick="@(() => GoStep(step))">
+                        @step. @StepLabel(step)
+                    </div>
+                }
+            </div>
+
+            @if (currentStep == 1)
+            {
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Select purchase order</h3>
+                @if (posLoading)
+                {
+                    <p style="color:var(--mer-ink-500);font-size:13px;">Loading POs…</p>
+                }
+                else if (availablePos == null || availablePos.Count == 0)
+                {
+                    <div class="tl-empty" style="padding:24px;text-align:left;">
+                        <span class="material-symbols-outlined" style="font-size:28px;color:var(--mer-ink-400);">inbox</span>
+                        <div style="font-size:13px;color:var(--mer-ink-600);margin-top:6px;">No open POs available for ASN creation.</div>
+                    </div>
+                }
+                else
+                {
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Purchase order (Released / Acknowledged / Accepted)</label>
+                    <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="selectedPoId" @bind:after="LoadPoLines">
+                        <option value="">— Select PO —</option>
+                        @foreach (var sg in availablePos.GroupBy(p => p.SupplierName).OrderBy(g => g.Key))
+                        {
+                            <optgroup label="@sg.Key">
+                                @foreach (var p in sg.OrderByDescending(x => x.PoDate))
+                                {
+                                    <option value="@p.Id">@p.PoNumber · @p.PoDate.ToString("yyyy-MM-dd") (@p.PoStatus)</option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                }
+            }
+            else if (currentStep == 2)
+            {
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@lines.Count)</h3>
+                @if (lines.Count == 0)
+                {
+                    <p style="color:var(--mer-ink-500);font-size:13px;">Select a PO to load lines.</p>
+                }
+                else
+                {
+                    <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                        <thead>
+                            <tr style="border-bottom:1px solid var(--mer-line);">
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Order Qty</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Ship Qty</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Batch</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Expiry</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var ln in lines)
+                        {
+                            <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                                <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PoPositionNo</td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
+                                <td style="padding:6px 4px;text-align:right;"><input type="number" step="0.001" class="rz-textbox" style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;" @bind="ln.ShippedQty" /></td>
+                                <td style="padding:6px 4px;"><input type="text" class="rz-textbox" style="width:120px;padding:4px 6px;" @bind="ln.BatchNumber" /></td>
+                                <td style="padding:6px 4px;"><input type="date" class="rz-textbox" style="width:130px;padding:4px 6px;" @bind="ln.ExpiryDate" /></td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            }
+            else if (currentStep == 3)
+            {
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Shipment details</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Expected delivery date</label>
+                        <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="expectedDeliveryDate" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Time window</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="e.g., 09:00–11:00" @bind="timeWindow" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Carrier name</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="carrierName" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Tracking number</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="trackingNumber" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Vehicle number</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="vehicleNumber" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Driver name</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="driverName" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Driver phone</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="driverPhone" />
+                    </div>
+                </div>
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:12px;display:block;">Notes</label>
+                <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="notes"></textarea>
+            }
+            else if (currentStep == 4)
+            {
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Review & submit</h3>
+                <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
+                    <dt style="color:var(--mer-ink-500);">PO</dt><dd>@(availablePos?.FirstOrDefault(p => p.Id == selectedPoId)?.PoNumber)</dd>
+                    <dt style="color:var(--mer-ink-500);">Expected delivery</dt><dd style="font-family:Inter,monospace;">@expectedDeliveryDate?.ToString("yyyy-MM-dd")</dd>
+                    <dt style="color:var(--mer-ink-500);">Carrier</dt><dd>@carrierName</dd>
+                    <dt style="color:var(--mer-ink-500);">Tracking</dt><dd style="font-family:Inter,monospace;">@trackingNumber</dd>
+                    <dt style="color:var(--mer-ink-500);">Vehicle</dt><dd style="font-family:Inter,monospace;">@vehicleNumber</dd>
+                    <dt style="color:var(--mer-ink-500);">Lines</dt><dd>@lines.Count(l => l.ShippedQty > 0) of @lines.Count being shipped</dd>
+                </dl>
+                @if (!string.IsNullOrEmpty(submitError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;">@submitError</div>
+                }
+            }
+
+            <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--mer-line);">
+                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="PrevStep" disabled="@(currentStep == 1)">Back</button>
+                @if (currentStep < 4)
+                {
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NextStep" disabled="@(!CanProceed)">Next</button>
+                }
+                else
+                {
+                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Submit" disabled="@busy">@(busy ? "Submitting…" : (IsNew ? "Create ASN" : "Save changes"))</button>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+    private AsnDetailDto? detail;
+    private bool loading = true;
+    private bool busy = false;
+    private int currentStep = 1;
+    private string submitError = string.Empty;
+
+    private List<PurchaseOrderListItemDto>? availablePos;
+    private bool posLoading = false;
+    private Guid? selectedPoId;
+    private List<LineRow> lines = new();
+    private DateTime? expectedDeliveryDate;
+    private string? timeWindow;
+    private string? carrierName;
+    private string? trackingNumber;
+    private string? vehicleNumber;
+    private string? driverName;
+    private string? driverPhone;
+    private string? notes;
+
+    private bool IsNew => NavMgr.Uri.EndsWith("/asns/new") || !Id.HasValue;
+
+    private bool CanProceed => currentStep switch
+    {
+        1 => selectedPoId.HasValue,
+        2 => lines.Any(l => l.ShippedQty > 0),
+        3 => expectedDeliveryDate.HasValue,
+        _ => true
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsNew)
+        {
+            posLoading = true;
+            // Backend `status` filter is single-valued — query each eligible status separately and merge.
+            // For supplier users the seccode filter on the backend already scopes results to their POs.
+            var eligibleStatuses = new[] { "Released", "Acknowledged", "Accepted", "PartiallyDelivered" };
+            var merged = new Dictionary<Guid, PurchaseOrderListItemDto>();
+            foreach (var st in eligibleStatuses)
+            {
+                var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>($"api/purchase-orders?page=1&pageSize=200&status={st}");
+                if (resp?.Data?.Items != null)
+                {
+                    foreach (var p in resp.Data.Items)
+                        merged[p.Id] = p;
+                }
+            }
+            availablePos = merged.Values.OrderByDescending(p => p.PoDate).ToList();
+            posLoading = false;
+            loading = false;
+        }
+        else
+        {
+            var resp = await Api.GetAsync<AsnDetailDto>($"api/asns/{Id}");
+            detail = resp?.Data;
+            if (detail != null)
+            {
+                selectedPoId = detail.PurchaseOrderId;
+                expectedDeliveryDate = detail.ExpectedDeliveryDate;
+                timeWindow = detail.TimeWindow;
+                carrierName = detail.CarrierName;
+                trackingNumber = detail.TrackingNumber;
+                vehicleNumber = detail.VehicleNumber;
+                driverName = detail.DriverName;
+                driverPhone = detail.DriverPhone;
+                notes = detail.Notes;
+                lines = detail.Lines.Select(l => new LineRow
+                {
+                    PurchaseOrderLineId = l.PurchaseOrderLineId,
+                    PoPositionNo = l.PoPositionNo,
+                    ItemCode = l.ItemCode,
+                    OrderQty = l.OrderQty,
+                    ShippedQty = l.ShippedQty,
+                    BatchNumber = l.BatchNumber,
+                    ExpiryDate = l.ExpiryDate
+                }).ToList();
+            }
+            loading = false;
+        }
+    }
+
+    private async Task LoadPoLines()
+    {
+        if (!selectedPoId.HasValue) { lines.Clear(); return; }
+        var resp = await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{selectedPoId}");
+        if (resp?.Data != null)
+        {
+            lines = resp.Data.Lines.Select(l => new LineRow
+            {
+                PurchaseOrderLineId = l.Id,
+                PoPositionNo = l.PositionNo,
+                ItemCode = l.ItemCode,
+                OrderQty = l.OrderQty,
+                ShippedQty = 0
+            }).ToList();
+        }
+    }
+
+    private void GoStep(int s) { if (s <= currentStep) currentStep = s; }
+    private void PrevStep() { if (currentStep > 1) currentStep--; }
+    private void NextStep() { if (currentStep < 4 && CanProceed) currentStep++; }
+
+    private string StepLabel(int s) => s switch { 1 => "PO", 2 => "Lines", 3 => "Shipment", 4 => "Review", _ => "" };
+
+    private async Task Submit()
+    {
+        if (!selectedPoId.HasValue || !expectedDeliveryDate.HasValue) { submitError = "Missing required fields."; return; }
+        busy = true; submitError = string.Empty;
+        var lineReqs = lines.Where(l => l.ShippedQty > 0)
+            .Select(l => new CreateAsnLineRequest(l.PurchaseOrderLineId, l.ShippedQty, l.BatchNumber, l.ExpiryDate))
+            .ToList();
+
+        if (IsNew)
+        {
+            var req = new CreateAsnRequest(selectedPoId.Value, expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
+            var resp = await Api.PostAsync<AsnDetailDto, CreateAsnRequest>("api/asns", req);
+            if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN created" }); NavMgr.NavigateTo("/asns"); }
+            else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        }
+        else
+        {
+            var req = new UpdateAsnRequest(expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
+            var resp = await Api.PostAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", req);
+            if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN updated" }); NavMgr.NavigateTo("/asns"); }
+            else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        }
+        busy = false;
+    }
+
+    private void Cancel() => NavMgr.NavigateTo("/asns");
+
+    private string StatusClass(string status) => status switch
+    {
+        "Delivered" => "tlg-status--active",
+        "Submitted" or "InTransit" => "tlg-status--pending",
+        "Cancelled" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+
+    private class LineRow
+    {
+        public Guid PurchaseOrderLineId { get; set; }
+        public int PoPositionNo { get; set; }
+        public string ItemCode { get; set; } = string.Empty;
+        public decimal OrderQty { get; set; }
+        public decimal ShippedQty { get; set; }
+        public string? BatchNumber { get; set; }
+        public DateTime? ExpiryDate { get; set; }
+    }
+}

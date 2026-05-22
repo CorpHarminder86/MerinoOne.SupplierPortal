@@ -1,0 +1,423 @@
+@page "/admin/settings"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject NavigationManager Nav
+
+<PageTitle>System settings</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">System settings</h1>
+            </div>
+            <p class="tl-sub">Global configuration. Changes apply across the portal immediately.</p>
+        </div>
+    </header>
+
+    @if (!Token.IsAdmin)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+            <div>Administrator access required.</div>
+        </div>
+    }
+    else
+    {
+        <div class="settings-shell">
+            <aside class="settings-rail">
+                <button type="button" class="settings-rail__item @(category == "EmailConfig" ? "active" : null)" @onclick="@(() => SelectCategory("EmailConfig"))">
+                    <span class="material-symbols-outlined">mail</span> Email
+                </button>
+                <button type="button" class="settings-rail__item @(category == "SupplierInvite" ? "active" : null)" @onclick="@(() => SelectCategory("SupplierInvite"))">
+                    <span class="material-symbols-outlined">schedule_send</span> Supplier Invite
+                </button>
+            </aside>
+
+            <main class="rz-card settings-panel">
+                @if (loading)
+                {
+                    <div class="tl-empty">Loading…</div>
+                }
+                else
+                {
+                    @if (!string.IsNullOrEmpty(banner))
+                    {
+                        <div class="settings-banner @(bannerOk ? "settings-banner--ok" : "settings-banner--err")">
+                            <span class="material-symbols-outlined">@(bannerOk ? "check_circle" : "error")</span>
+                            <span style="flex:1;">@banner</span>
+                            <button type="button" class="settings-banner__close" @onclick="() => banner = null">×</button>
+                        </div>
+                    }
+
+                    @if (category == "EmailConfig")
+                    {
+                        <h2 class="settings-section__title">Email (SMTP)</h2>
+                        <p class="settings-section__sub">Outbound SMTP settings used for all system notifications.</p>
+
+                        @RenderTextRow("Email", "From-address", email.Email, v => email.Email = v, "user@company.com", "Email")
+                        @RenderTextRow("Host", "SMTP hostname", email.Host, v => email.Host = v, "smtp.office365.com", "Host")
+                        @RenderNumericRow("Port", "SMTP port (1–65535)", email.Port, v => email.Port = v, 1, 65535, "Port")
+                        @RenderToggleRow("EnableSsl", "Use TLS/SSL when connecting", email.EnableSsl, v => email.EnableSsl = v, "EnableSsl")
+                        @RenderToggleRow("DefaultCredentials", "Use process default credentials (disables UserName/Password)", email.DefaultCredentials, v => email.DefaultCredentials = v, "DefaultCredentials")
+                        @RenderTextRow("UserName", email.DefaultCredentials ? "Disabled — using default credentials" : "SMTP username", email.UserName, v => email.UserName = v, "smtp@company.com", "UserName", disabled: email.DefaultCredentials)
+                        @RenderPasswordRow("Password", "SMTP password. Stored encrypted. Leave masked to keep current.", email.PasswordInput, v => email.PasswordInput = v, "Password", disabled: email.DefaultCredentials, masked: email.PasswordIsMasked, onClear: () => { email.PasswordInput = ""; email.PasswordIsMasked = false; })
+
+                        <div class="settings-actions">
+                            <button type="button" class="rz-button rz-primary settings-btn--primary" disabled="@busy" @onclick="SaveEmail">
+                                <span class="material-symbols-outlined">save</span> @(busy ? "Saving…" : "Save changes")
+                            </button>
+                            <button type="button" class="rz-button settings-btn--ghost" disabled="@busy" @onclick="SendTestEmail">
+                                <span class="material-symbols-outlined">send</span> Send test email
+                            </button>
+                        </div>
+                    }
+                    else if (category == "SupplierInvite")
+                    {
+                        <h2 class="settings-section__title">Supplier invite</h2>
+                        <p class="settings-section__sub">Lifetime of a supplier-invite token. Applies to invites created after change.</p>
+
+                        @RenderNumericRow("ExpiryDays", "Days before token expires (1–365)", invite.ExpiryDays, v => invite.ExpiryDays = v, 1, 365, "ExpiryDays")
+
+                        <div class="settings-actions">
+                            <button type="button" class="rz-button rz-primary settings-btn--primary" disabled="@busy" @onclick="SaveInvite">
+                                <span class="material-symbols-outlined">save</span> @(busy ? "Saving…" : "Save changes")
+                            </button>
+                        </div>
+                    }
+                }
+            </main>
+        </div>
+    }
+</div>
+
+<style>
+    .settings-shell { display:grid; grid-template-columns:220px 1fr; gap:20px; align-items:start; }
+    .settings-rail { display:flex; flex-direction:column; gap:4px; padding:8px; background:var(--mer-surface); border:1px solid var(--mer-line); border-radius:var(--mer-radius-lg); position:sticky; top:12px; }
+    .settings-rail__item { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:var(--mer-radius); border:0; background:transparent; color:var(--mer-ink-700); cursor:pointer; text-align:left; font:500 13px/1 'Plus Jakarta Sans', sans-serif; transition: background var(--mer-transition), color var(--mer-transition); }
+    .settings-rail__item:hover { background:var(--mer-ink-50); color:var(--mer-ink-900); }
+    .settings-rail__item.active { background:rgba(46,91,183,.10); color:var(--mer-blue-darker); font-weight:600; }
+    .settings-rail__item .material-symbols-outlined { font-size:18px; }
+
+    .settings-panel { padding:20px 24px; background:var(--mer-surface); border:1px solid var(--mer-line); border-radius:var(--mer-radius-lg); }
+    .settings-section__title { margin:0 0 4px; color:var(--mer-blue-darker); font-size:16px; font-weight:600; letter-spacing:-.01em; }
+    .settings-section__sub { margin:0 0 16px; color:var(--mer-ink-500); font-size:12px; }
+
+    .settings-row { display:grid; grid-template-columns:220px 1fr 100px; gap:14px; align-items:start; padding:14px 0; border-bottom:1px solid var(--mer-line-soft); }
+    .settings-row__label { font-size:13px; color:var(--mer-ink-700); font-weight:500; padding-top:8px; }
+    .settings-row__hint { display:block; font-size:11px; color:var(--mer-ink-500); margin-top:2px; font-weight:400; }
+    .settings-row__control { display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .settings-row__input { width:100%; padding:8px 10px; border:1px solid var(--mer-ink-300); border-radius:var(--mer-radius); background:var(--mer-surface); font:13px/1.4 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-900); }
+    .settings-row__input:disabled { background:var(--mer-ink-50); color:var(--mer-ink-500); cursor:not-allowed; }
+    .settings-row__input:focus-visible { outline:0; border-color:var(--mer-blue); box-shadow:var(--mer-focus-ring); }
+    .settings-row__num { font-family:Inter, monospace; font-variant-numeric: tabular-nums; }
+    .settings-row__toggle { display:inline-flex; align-items:center; gap:10px; padding:6px 0; font-size:13px; color:var(--mer-ink-700); cursor:pointer; user-select:none; }
+    .settings-row__toggle input { width:18px; height:18px; accent-color:var(--mer-blue); cursor:pointer; }
+    .settings-row__reset { background:transparent; border:0; color:var(--mer-blue); font:500 12px/1 'Plus Jakarta Sans', sans-serif; cursor:pointer; padding:8px 4px 0; text-align:right; white-space:nowrap; }
+    .settings-row__reset:hover { color:var(--mer-blue-bright); text-decoration:underline; }
+    .settings-row__reset:disabled { color:var(--mer-ink-400); cursor:not-allowed; text-decoration:none; }
+
+    .settings-actions { display:flex; gap:10px; padding-top:18px; flex-wrap:wrap; }
+    .settings-btn--primary, .settings-btn--ghost { display:inline-flex; align-items:center; gap:6px; padding:9px 16px; border-radius:var(--mer-radius); cursor:pointer; font:600 13px/1 'Plus Jakarta Sans', sans-serif; border:1px solid transparent; transition: background var(--mer-transition), border-color var(--mer-transition); }
+    .settings-btn--primary { background:var(--mer-blue); color:#fff; border-color:var(--mer-blue); }
+    .settings-btn--primary:hover:not(:disabled) { background:var(--mer-blue-bright); border-color:var(--mer-blue-bright); }
+    .settings-btn--primary:disabled { opacity:.55; cursor:not-allowed; }
+    .settings-btn--ghost { background:var(--mer-surface); color:var(--mer-ink-700); border-color:var(--mer-ink-300); }
+    .settings-btn--ghost:hover:not(:disabled) { background:var(--mer-ink-50); }
+    .settings-btn--ghost:disabled { opacity:.55; cursor:not-allowed; }
+    .settings-btn--primary .material-symbols-outlined, .settings-btn--ghost .material-symbols-outlined { font-size:16px; }
+
+    .settings-banner { display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:var(--mer-radius); margin-bottom:14px; font-size:13px; }
+    .settings-banner--ok { background:var(--mer-green-soft); color:var(--mer-green-dark); border:1px solid var(--mer-green); }
+    .settings-banner--err { background:rgba(220,38,38,.08); color:var(--mer-danger); border:1px solid var(--mer-danger); }
+    .settings-banner__close { background:transparent; border:0; color:inherit; opacity:.7; cursor:pointer; font-size:18px; line-height:1; padding:0 4px; }
+    .settings-banner .material-symbols-outlined { font-size:18px; }
+</style>
+
+@code {
+    private const string EmailCategory = "EmailConfig";
+    private const string InviteCategory = "SupplierInvite";
+    private const string PasswordMask = "********";
+
+    private string category = EmailCategory;
+    private bool loading = true;
+    private bool busy = false;
+    private string? banner;
+    private bool bannerOk;
+
+    private readonly EmailForm email = new();
+    private readonly InviteForm invite = new();
+
+    // Track original values per key so Save only sends changed rows.
+    private Dictionary<string, string> originalEmail = new();
+    private Dictionary<string, string> originalInvite = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Token.IsAdmin) { loading = false; return; }
+        await LoadCategory(category);
+    }
+
+    private async Task SelectCategory(string newCategory)
+    {
+        if (category == newCategory) return;
+        category = newCategory;
+        banner = null;
+        await LoadCategory(category);
+    }
+
+    private async Task LoadCategory(string cat)
+    {
+        loading = true;
+        StateHasChanged();
+        var resp = await Api.GetAsync<List<SettingRowDto>>($"api/system-settings?category={Uri.EscapeDataString(cat)}");
+        var rows = resp?.Data ?? new();
+        if (cat == EmailCategory)
+        {
+            email.Email = Pick(rows, "Email", "");
+            email.Host = Pick(rows, "Host", "");
+            email.Port = ParseInt(Pick(rows, "Port", "587"), 587);
+            email.EnableSsl = ParseBool(Pick(rows, "EnableSsl", "true"), true);
+            email.DefaultCredentials = ParseBool(Pick(rows, "DefaultCredentials", "true"), true);
+            email.UserName = Pick(rows, "UserName", "");
+            var pwd = Pick(rows, "Password", "");
+            email.PasswordIsMasked = pwd == PasswordMask;
+            email.PasswordInput = email.PasswordIsMasked ? "" : pwd;
+            originalEmail = SnapshotEmail();
+        }
+        else if (cat == InviteCategory)
+        {
+            invite.ExpiryDays = ParseInt(Pick(rows, "ExpiryDays", "7"), 7);
+            originalInvite = SnapshotInvite();
+        }
+        loading = false;
+        StateHasChanged();
+    }
+
+    private static string Pick(List<SettingRowDto> rows, string key, string fallback) =>
+        rows.FirstOrDefault(r => string.Equals(r.SettingKey, key, StringComparison.OrdinalIgnoreCase))?.SettingValue ?? fallback;
+
+    private static int ParseInt(string raw, int fallback) => int.TryParse(raw, out var v) ? v : fallback;
+    private static bool ParseBool(string raw, bool fallback) => bool.TryParse(raw, out var v) ? v : fallback;
+
+    private Dictionary<string, string> SnapshotEmail() => new()
+    {
+        ["Email"] = email.Email ?? "",
+        ["Host"] = email.Host ?? "",
+        ["Port"] = email.Port.ToString(),
+        ["EnableSsl"] = email.EnableSsl.ToString().ToLowerInvariant(),
+        ["DefaultCredentials"] = email.DefaultCredentials.ToString().ToLowerInvariant(),
+        ["UserName"] = email.UserName ?? "",
+    };
+
+    private Dictionary<string, string> SnapshotInvite() => new()
+    {
+        ["ExpiryDays"] = invite.ExpiryDays.ToString(),
+    };
+
+    private async Task SaveEmail()
+    {
+        busy = true; banner = null;
+        try
+        {
+            // Cross-field validation: UserName required when DefaultCredentials=false.
+            if (!email.DefaultCredentials && string.IsNullOrWhiteSpace(email.UserName))
+            {
+                Show("UserName is required when DefaultCredentials is off.", ok: false);
+                return;
+            }
+
+            var current = SnapshotEmail();
+            var failures = new List<string>();
+            foreach (var (key, value) in current)
+            {
+                if (originalEmail.TryGetValue(key, out var prev) && prev == value) continue;
+                if (!await SaveOne(EmailCategory, key, value, failures)) break;
+            }
+
+            // Password: only post if user typed (PasswordInput non-empty AND no longer masked).
+            if (!email.PasswordIsMasked && !string.IsNullOrEmpty(email.PasswordInput))
+            {
+                await SaveOne(EmailCategory, "Password", email.PasswordInput, failures);
+            }
+
+            if (failures.Count == 0)
+            {
+                Show("Settings saved.", ok: true);
+                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+                await LoadCategory(EmailCategory);
+            }
+            else
+            {
+                Show(string.Join(" ", failures), ok: false);
+            }
+        }
+        finally { busy = false; }
+    }
+
+    private async Task SaveInvite()
+    {
+        busy = true; banner = null;
+        try
+        {
+            var current = SnapshotInvite();
+            var failures = new List<string>();
+            foreach (var (key, value) in current)
+            {
+                if (originalInvite.TryGetValue(key, out var prev) && prev == value) continue;
+                if (!await SaveOne(InviteCategory, key, value, failures)) break;
+            }
+
+            if (failures.Count == 0)
+            {
+                Show("Settings saved.", ok: true);
+                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+                await LoadCategory(InviteCategory);
+            }
+            else
+            {
+                Show(string.Join(" ", failures), ok: false);
+            }
+        }
+        finally { busy = false; }
+    }
+
+    private async Task<bool> SaveOne(string cat, string key, string value, List<string> failures)
+    {
+        var resp = await Api.PostAsync<object, SaveSystemSettingRequest>("api/system-settings", new SaveSystemSettingRequest(cat, key, value));
+        if (resp?.Success != true)
+        {
+            failures.Add(resp?.Errors?.FirstOrDefault() ?? $"Failed to save {key}.");
+            return false;
+        }
+        return true;
+    }
+
+    private async Task ResetKey(string key)
+    {
+        busy = true; banner = null;
+        try
+        {
+            var resp = await Api.PostAsync<object, ResetSystemSettingRequest>("api/system-settings/reset", new ResetSystemSettingRequest(category, key));
+            if (resp?.Success == true)
+            {
+                Show($"{key} reset to default.", ok: true);
+                await LoadCategory(category);
+            }
+            else
+            {
+                Show(resp?.Errors?.FirstOrDefault() ?? $"Failed to reset {key}.", ok: false);
+            }
+        }
+        finally { busy = false; }
+    }
+
+    private async Task SendTestEmail()
+    {
+        busy = true; banner = null;
+        try
+        {
+            var resp = await Api.PostAsync<TestEmailResult, SendTestEmailRequest>("api/system-settings/email/test", new SendTestEmailRequest(null));
+            if (resp?.Success == true)
+            {
+                var to = resp.Data?.SentTo;
+                Show(string.IsNullOrEmpty(to) ? "Test email sent." : $"Test email sent to {to}.", ok: true);
+            }
+            else
+            {
+                Show(resp?.Errors?.FirstOrDefault() ?? "Test email failed.", ok: false);
+            }
+        }
+        finally { busy = false; }
+    }
+
+    private void Show(string message, bool ok)
+    {
+        banner = message;
+        bannerOk = ok;
+    }
+
+    // ============ Row renderers ============
+
+    private RenderFragment RenderTextRow(string label, string hint, string value, Action<string> setter, string placeholder, string key, bool disabled = false) => __builder =>
+    {
+        <div class="settings-row">
+            <div class="settings-row__label">@label<span class="settings-row__hint">@hint</span></div>
+            <div class="settings-row__control">
+                <input type="text" class="settings-row__input" value="@value" placeholder="@placeholder" disabled="@disabled"
+                       @oninput="e => setter(e.Value?.ToString() ?? string.Empty)" />
+            </div>
+            <button type="button" class="settings-row__reset" disabled="@busy" @onclick="() => ResetKey(key)" title="Reset to default">Reset</button>
+        </div>
+    };
+
+    private RenderFragment RenderNumericRow(string label, string hint, int value, Action<int> setter, int min, int max, string key) => __builder =>
+    {
+        <div class="settings-row">
+            <div class="settings-row__label">@label<span class="settings-row__hint">@hint</span></div>
+            <div class="settings-row__control">
+                <input type="number" class="settings-row__input settings-row__num" min="@min" max="@max" value="@value"
+                       @oninput="e => { if (int.TryParse(e.Value?.ToString(), out var v)) setter(v); }" />
+            </div>
+            <button type="button" class="settings-row__reset" disabled="@busy" @onclick="() => ResetKey(key)" title="Reset to default">Reset</button>
+        </div>
+    };
+
+    private RenderFragment RenderToggleRow(string label, string hint, bool value, Action<bool> setter, string key) => __builder =>
+    {
+        <div class="settings-row">
+            <div class="settings-row__label">@label<span class="settings-row__hint">@hint</span></div>
+            <div class="settings-row__control">
+                <label class="settings-row__toggle">
+                    <input type="checkbox" checked="@value" @onchange="e => setter(e.Value is bool b ? b : false)" />
+                    <span>@(value ? "Enabled" : "Disabled")</span>
+                </label>
+            </div>
+            <button type="button" class="settings-row__reset" disabled="@busy" @onclick="() => ResetKey(key)" title="Reset to default">Reset</button>
+        </div>
+    };
+
+    private RenderFragment RenderPasswordRow(string label, string hint, string value, Action<string> setter, string key, bool disabled, bool masked, Action onClear) => __builder =>
+    {
+        <div class="settings-row">
+            <div class="settings-row__label">@label<span class="settings-row__hint">@hint</span></div>
+            <div class="settings-row__control" style="flex-direction:row;gap:8px;align-items:center;">
+                <input type="password" class="settings-row__input" value="@value" placeholder="@(masked ? PasswordMask : "Enter password")"
+                       disabled="@disabled" autocomplete="new-password"
+                       @oninput="e => { setter(e.Value?.ToString() ?? string.Empty); email.PasswordIsMasked = false; }" />
+                @if (masked && !disabled)
+                {
+                    <button type="button" class="settings-row__reset" style="white-space:nowrap;padding:0 4px;" @onclick="@(() => onClear())">Change</button>
+                }
+            </div>
+            <button type="button" class="settings-row__reset" disabled="@busy" @onclick="() => ResetKey(key)" title="Reset to default">Reset</button>
+        </div>
+    };
+
+    // ============ Local view models (mirror anticipated contracts shape) ============
+
+    private class EmailForm
+    {
+        public string Email { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int Port { get; set; } = 587;
+        public bool EnableSsl { get; set; } = true;
+        public bool DefaultCredentials { get; set; } = true;
+        public string UserName { get; set; } = "";
+        public string PasswordInput { get; set; } = "";
+        public bool PasswordIsMasked { get; set; } = false;
+    }
+
+    private class InviteForm
+    {
+        public int ExpiryDays { get; set; } = 7;
+    }
+
+    /// <summary>Wire shape returned by GET /api/system-settings — matches anticipated SystemSettingDto.</summary>
+    private record SettingRowDto(string Category, string SettingKey, string SettingValue, string? Description);
+    private record SaveSystemSettingRequest(string Category, string Key, string Value);
+    private record ResetSystemSettingRequest(string Category, string Key);
+    private record SendTestEmailRequest(string? To);
+    private record TestEmailResult(string? SentTo, string? Message);
+}

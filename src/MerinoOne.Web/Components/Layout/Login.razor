@@ -1,12 +1,12 @@
 @inject ApiClient Api
 @inject TokenAccessor Token
+@inject NavigationManager Nav
+<PageTitle>Sign in — Supplier Portal</PageTitle>
 
 <div class="mer-auth-shell">
     <aside class="mer-auth-aside">
         <div class="mer-auth-brand">
-            <div style="width:44px;height:44px;border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:center;">
-                <span class="material-symbols-outlined" style="color:var(--mer-blue-darker);font-size:28px">factory</span>
-            </div>
+            <img src="img/merino-logo.png" alt="Merino" style="width:44px;height:44px;border-radius:10px;background:#fff;padding:4px;object-fit:contain;" />
             <div>
                 <div class="mer-auth-brand__name">MERIN<span class="infinity-symbol">∞</span>NE</div>
                 <div class="mer-auth-brand__tag">SUPPLIER PORTAL</div>
@@ -16,15 +16,16 @@
             <h1>Supplier collaboration, simplified.</h1>
             <p>POs, ASNs, invoices and payments — one secure portal between MCSL and its suppliers.</p>
         </div>
-        <div class="mer-auth-foot">© 2026 Merino Composites Ltd</div>
+        <div class="mer-auth-foot">© 2026 Merino Consulting Services Ltd.</div>
     </aside>
     <main class="mer-auth-main">
         <div class="mer-auth-card">
             <h2>Welcome back</h2>
+            <p class="mer-auth-sub" style="margin-bottom:6px;">Use your email to sign in. Existing internal users can still use their user code.</p>
             <p class="mer-auth-sub">Sign in with your portal credentials.</p>
             <div style="margin-bottom:12px;">
-                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">User code</label>
-                <input class="rz-textbox" style="width:100%;height:38px;padding:6px 10px;" @bind="userCode" />
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Email</label>
+                <input class="rz-textbox" style="width:100%;height:38px;padding:6px 10px;" placeholder="your.name@company.com" @bind="email" />
             </div>
             <div style="margin-bottom:12px;">
                 <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Password</label>
@@ -37,7 +38,7 @@
             <button class="rz-button rz-primary" style="width:100%;height:42px;font-size:14px;font-weight:600;border:0;border-radius:6px;" disabled="@busy" @onclick="DoLogin">
                 @(busy ? "Signing in…" : "Sign in")
             </button>
-            <p class="mer-auth-foot-text">Try: admin1 / Merino@@123 · sup1 / Merino@@123</p>
+            <p class="mer-auth-foot-text">Protected by enterprise-grade encryption · <a href="#" class="mer-auth-link">Privacy</a> · <a href="#" class="mer-auth-link">Terms</a></p>
         </div>
     </main>
 </div>
@@ -63,7 +64,7 @@
 
 @code {
     [Parameter] public EventCallback OnLoggedIn { get; set; }
-    private string userCode = string.Empty;
+    private string email = string.Empty;
     private string password = string.Empty;
     private string error = string.Empty;
     private bool busy = false;
@@ -78,11 +79,23 @@
         error = string.Empty; busy = true;
         try
         {
-            var resp = await Api.LoginAsync(new LoginRequest(userCode.Trim(), password));
+            // Backend resolves either email-with-@ or bare user code from the same LoginRequest field.
+            var resp = await Api.LoginAsync(new LoginRequest(email.Trim(), password));
             if (resp?.Success == true)
-                await OnLoggedIn.InvokeAsync();
+            {
+                if (Token.MustChangePassword)
+                {
+                    Nav.NavigateTo("/change-password", forceLoad: false);
+                }
+                else
+                {
+                    await OnLoggedIn.InvokeAsync();
+                }
+            }
             else
+            {
                 error = resp?.Errors?.FirstOrDefault() ?? "Login failed.";
+            }
         }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }

@@ -1,0 +1,136 @@
+@page "/credit-debit-notes/{Id:guid}"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+<PageTitle>@detail?.NoteNumber</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else if (detail == null)
+{
+    <div class="tl-empty">Note not found.</div>
+}
+else
+{
+    <div class="tl-page">
+        <a href="/credit-debit-notes" class="mer-back-link">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+            Back to list
+        </a>
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">@detail.NoteNumber</h1>
+                    <span class="tlg-status @TypeClass(detail.NoteType)">@(detail.NoteType == "CN" ? "Credit Note" : "Debit Note")</span>
+                    <span class="tlg-status @StatusClass(detail.NoteStatus)">@detail.NoteStatus</span>
+                </div>
+                <p class="tl-sub">@detail.SupplierName · Invoice <a href="/invoices/@detail.InvoiceId" style="color:var(--mer-blue);">@detail.InvoiceNumber</a> · @detail.CreatedOn.ToString("yyyy-MM-dd")</p>
+            </div>
+            <div class="tl-header__actions">
+                @if (Token.HasPermission("CreditDebitNote.Approve") && detail.NoteStatus == "Submitted")
+                {
+                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                    </button>
+                }
+            </div>
+        </header>
+
+        <div class="rz-card" style="padding:20px;max-width:680px;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Note details</h3>
+            <dl style="display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:13px;">
+                <dt style="color:var(--mer-ink-500);">Note number</dt><dd style="font-family:Inter,monospace;">@detail.NoteNumber</dd>
+                <dt style="color:var(--mer-ink-500);">Type</dt><dd>@(detail.NoteType == "CN" ? "Credit Note" : "Debit Note")</dd>
+                <dt style="color:var(--mer-ink-500);">Against invoice</dt><dd><a href="/invoices/@detail.InvoiceId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.InvoiceNumber</a></dd>
+                <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName</dd>
+                <dt style="color:var(--mer-ink-500);">Amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@detail.Amount.ToString("N2")</dd>
+                <dt style="color:var(--mer-ink-500);">Status</dt><dd><span class="tlg-status @StatusClass(detail.NoteStatus)">@detail.NoteStatus</span></dd>
+                <dt style="color:var(--mer-ink-500);">Created</dt><dd style="font-family:Inter,monospace;">@detail.CreatedOn.ToString("yyyy-MM-dd HH:mm")</dd>
+            </dl>
+            @if (!string.IsNullOrEmpty(detail.Reason))
+            {
+                <h4 style="font-size:12px;font-weight:700;margin:16px 0 6px;color:var(--mer-ink-700);">Reason</h4>
+                <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@detail.Reason</p>
+            }
+        </div>
+    </div>
+
+    @if (showApprove)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="success" data-size="md" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">task_alt</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Adjustment</div>
+                        <h2 class="merino-dialog__title">Approve @detail.NoteNumber</h2>
+                        <p class="merino-dialog__subtitle">Approve and post this adjustment.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showApprove = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Notes (optional)</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="dialogNotes"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApprove = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApprove" disabled="@busy">@(busy ? "Working…" : "Approve")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private CreditDebitNoteDetailDto? detail;
+    private bool loading = true;
+    private bool busy = false;
+    private bool showApprove = false;
+    private string dialogNotes = string.Empty;
+    private string dialogError = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<CreditDebitNoteDetailDto>($"api/credit-debit-notes/{Id}");
+        detail = resp?.Data;
+        loading = false;
+    }
+
+    private void OpenApprove() { dialogNotes = string.Empty; dialogError = string.Empty; showApprove = true; }
+
+    private async Task DoApprove()
+    {
+        busy = true; dialogError = string.Empty;
+        var resp = await Api.PostAsync<CreditDebitNoteDetailDto, ApproveCreditDebitNoteRequest>($"api/credit-debit-notes/{Id}/approve", new ApproveCreditDebitNoteRequest());
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Approved" }); showApprove = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private string TypeClass(string type) => type switch
+    {
+        "CN" => "tlg-status--info",
+        "DN" => "tlg-status--pending",
+        _ => "tlg-status--info"
+    };
+
+    private string StatusClass(string status) => status switch
+    {
+        "Approved" => "tlg-status--active",
+        "Draft" or "Submitted" => "tlg-status--pending",
+        "Rejected" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

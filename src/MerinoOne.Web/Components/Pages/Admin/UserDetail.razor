@@ -1,0 +1,487 @@
+@page "/admin/users/{Id:guid}"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+<PageTitle>@detail?.FullName</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else if (detail == null)
+{
+    <div class="tl-empty">User not found.</div>
+}
+else
+{
+    <div class="tl-page">
+        <a href="/admin/users" class="mer-back-link">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+            Back to list
+        </a>
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">@detail.FullName</h1>
+                    <span class="tl-count-chip">@detail.UserCode</span>
+                    <span class="tlg-status @(detail.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(detail.IsActive ? "Active" : "Inactive")</span>
+                    @if (detail.IsInternal)
+                    {
+                        <span class="tlg-status tlg-status--info">Internal</span>
+                    }
+                    @if (detail.IsMfaEnabled)
+                    {
+                        <span class="tlg-status tlg-status--info">MFA</span>
+                    }
+                </div>
+                <p class="tl-sub">@detail.Email · Seq #@detail.Seq · Created @detail.CreatedOn.ToString("yyyy-MM-dd")</p>
+            </div>
+            <div class="tl-header__actions">
+                @if (Token.HasPermission("User.Write"))
+                {
+                    if (detail.IsActive)
+                    {
+                        <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenDeactivate">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span> Deactivate
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Reactivate" disabled="@busy">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">check_circle</span> Reactivate
+                        </button>
+                    }
+                }
+            </div>
+        </header>
+
+        <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;">
+            @foreach (var t in tabs)
+            {
+                <button class="@(tab==t.Key?"mer-tab mer-tab--active":"mer-tab")" @onclick="@(() => tab = t.Key)" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab==t.Key?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab==t.Key?"var(--mer-blue)":"var(--mer-ink-700)");">@t.Value</button>
+            }
+        </div>
+
+        @if (tab == "overview")
+        {
+            <div class="rz-card" style="padding:20px;max-width:760px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:var(--mer-blue-darker);">Profile</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Full name</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="editFullName" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Email</label>
+                        <input class="rz-textbox" type="email" style="width:100%;padding:8px 10px;" @bind="editEmail" />
+                    </div>
+                    <div style="display:flex;align-items:center;gap:24px;padding-top:24px;">
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" @bind="editIsInternal" />
+                            Internal user
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" @bind="editMfaEnabled" />
+                            MFA enabled
+                        </label>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(overviewError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;">@overviewError</div>
+                }
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid var(--mer-line);">
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="OpenSetPassword">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">key</span> Set password
+                    </button>
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="SaveOverview" disabled="@busy">
+                        @(busy ? "Saving…" : "Save")
+                    </button>
+                </div>
+            </div>
+        }
+        else if (tab == "roles")
+        {
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:var(--mer-blue-darker);">Assigned roles</h3>
+                @if (detail.Roles.Length == 0)
+                {
+                    <p style="color:var(--mer-ink-500);font-size:13px;">No roles assigned.</p>
+                }
+                else
+                {
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;">
+                        @foreach (var rn in detail.Roles)
+                        {
+                            var role = availableRoles?.FirstOrDefault(r => r.Name == rn);
+                            <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:var(--mer-blue-50);color:var(--mer-blue-700);font-size:12px;">
+                                @rn
+                                @if (role != null)
+                                {
+                                    <button @onclick="() => UnassignRole(role.Id)" style="background:transparent;border:0;color:var(--mer-blue-700);cursor:pointer;line-height:1;padding:0;" title="Remove">
+                                        <span class="material-symbols-outlined" style="font-size:14px;">close</span>
+                                    </button>
+                                }
+                            </span>
+                        }
+                    </div>
+                }
+
+                @if (availableRoles != null)
+                {
+                    var unassigned = availableRoles.Where(ar => !detail.Roles.Contains(ar.Name)).ToList();
+                    @if (unassigned.Count > 0)
+                    {
+                        <div style="display:flex;gap:8px;align-items:center;padding-top:16px;border-top:1px solid var(--mer-line);">
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Assign role:</label>
+                            <select class="rz-dropdown" style="padding:6px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:200px;" @bind="roleToAssign">
+                                <option value="">— Select role —</option>
+                                @foreach (var r in unassigned)
+                                {
+                                    <option value="@r.Id">@r.Name</option>
+                                }
+                            </select>
+                            <button class="rz-button rz-primary" style="padding:6px 12px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="AssignRole" disabled="@(roleToAssign == Guid.Empty || busy)">Add</button>
+                        </div>
+                    }
+                }
+            </div>
+        }
+        else if (tab == "suppliers")
+        {
+            if (detail.IsInternal)
+            {
+                <div class="tl-empty">
+                    <span class="material-symbols-outlined" style="font-size:32px;">info</span>
+                    <div>Supplier mappings only apply to non-internal users.</div>
+                </div>
+            }
+            else
+            {
+                <div class="rz-card" style="padding:20px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                        <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);">Mapped suppliers (@detail.SupplierIds.Length)</h3>
+                        @if (Token.HasPermission("Supplier.Provision"))
+                        {
+                            <button class="rz-button rz-primary" style="padding:6px 12px;border-radius:6px;border:0;color:#fff;cursor:pointer;font-size:12px;" @onclick="OpenMapSupplier">
+                                <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">add</span> Map supplier
+                            </button>
+                        }
+                    </div>
+                    @if (detail.SupplierIds.Length == 0)
+                    {
+                        <p style="color:var(--mer-ink-500);font-size:13px;">No suppliers mapped yet.</p>
+                    }
+                    else
+                    {
+                        <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                            <thead>
+                                <tr style="border-bottom:1px solid var(--mer-line);">
+                                    <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Code</th>
+                                    <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Legal name</th>
+                                    <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            @foreach (var sid in detail.SupplierIds)
+                            {
+                                var s = availableSuppliers?.FirstOrDefault(x => x.Id == sid);
+                                <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                                    <td style="padding:8px 4px;font-family:Inter,monospace;">@(s?.SupplierCode ?? "—")</td>
+                                    <td style="padding:8px 4px;">@(s?.LegalName ?? sid.ToString())</td>
+                                    <td style="padding:8px 4px;text-align:right;">
+                                        @if (Token.HasPermission("Supplier.Provision"))
+                                        {
+                                            <button @onclick="() => UnmapSupplier(sid)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Remove">
+                                                <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            }
+        }
+        else if (tab == "history")
+        {
+            <AuditHistoryTab EntityName="AppUser" EntityId="@Id" />
+        }
+    </div>
+
+    @if (showSetPassword)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">key</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">User</div>
+                        <h2 class="merino-dialog__title">Set new password</h2>
+                        <p class="merino-dialog__subtitle">For @detail.UserCode</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showSetPassword = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">New password (min 8 chars)</label>
+                    <input type="password" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="newPassword" />
+                    @if (!string.IsNullOrEmpty(passwordError))
+                    {
+                        <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@passwordError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showSetPassword = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoSetPassword" disabled="@busy">@(busy ? "Saving…" : "Set password")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showMapSupplier)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">link</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">User mapping</div>
+                        <h2 class="merino-dialog__title">Map supplier</h2>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showMapSupplier = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Supplier</label>
+                    <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="supplierToMap">
+                        <option value="">— Select supplier —</option>
+                        @if (availableSuppliers != null)
+                        {
+                            @foreach (var s in availableSuppliers.Where(x => !detail.SupplierIds.Contains(x.Id)))
+                            {
+                                <option value="@s.Id">@s.SupplierCode — @s.LegalName</option>
+                            }
+                        }
+                    </select>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-top:12px;">
+                        <input type="checkbox" @bind="mapCanWrite" />
+                        Can write (else read-only)
+                    </label>
+                    @if (!string.IsNullOrEmpty(mapError))
+                    {
+                        <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@mapError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showMapSupplier = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoMapSupplier" disabled="@busy">@(busy ? "Saving…" : "Map")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showDeactivate)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="danger" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">block</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">User</div>
+                        <h2 class="merino-dialog__title">Deactivate @detail.UserCode?</h2>
+                        <p class="merino-dialog__subtitle">They will lose access immediately.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showDeactivate = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showDeactivate = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="danger" @onclick="DoDeactivate" disabled="@busy">@(busy ? "Deactivating…" : "Deactivate")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private UserDetailDto? detail;
+    private bool loading = true;
+    private bool busy = false;
+    private string tab = "overview";
+    private readonly Dictionary<string, string> tabs = new()
+    {
+        ["overview"] = "Overview",
+        ["roles"] = "Roles",
+        ["suppliers"] = "Supplier Mappings",
+        ["history"] = "History"
+    };
+
+    private string editFullName = string.Empty;
+    private string editEmail = string.Empty;
+    private bool editIsInternal;
+    private bool editMfaEnabled;
+    private string overviewError = string.Empty;
+
+    private bool showSetPassword;
+    private string newPassword = string.Empty;
+    private string passwordError = string.Empty;
+
+    private bool showMapSupplier;
+    private Guid supplierToMap = Guid.Empty;
+    private bool mapCanWrite = false;
+    private string mapError = string.Empty;
+    private List<SupplierListItemDto>? availableSuppliers;
+
+    private bool showDeactivate;
+
+    private List<RoleListItemDto>? availableRoles;
+    private Guid roleToAssign = Guid.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        var rolesResp = await Api.GetAsync<List<RoleListItemDto>>("api/roles");
+        availableRoles = rolesResp?.Data ?? new();
+        var suppResp = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+        availableSuppliers = suppResp?.Data ?? new();
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<UserDetailDto>($"api/users/{Id}");
+        detail = resp?.Data;
+        if (detail != null)
+        {
+            editFullName = detail.FullName;
+            editEmail = detail.Email;
+            editIsInternal = detail.IsInternal;
+            editMfaEnabled = detail.IsMfaEnabled;
+        }
+        loading = false;
+    }
+
+    private async Task SaveOverview()
+    {
+        if (detail == null) return;
+        overviewError = string.Empty;
+        if (string.IsNullOrWhiteSpace(editFullName)) { overviewError = "Full name required."; return; }
+        if (string.IsNullOrWhiteSpace(editEmail) || !editEmail.Contains('@')) { overviewError = "Valid email required."; return; }
+        busy = true;
+        var req = new UpdateUserRequest(editFullName.Trim(), editEmail.Trim(), editIsInternal, editMfaEnabled);
+        var resp = await Api.PutAsync<UpdateUserRequest>($"api/users/{Id}", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "User updated" });
+            await Load();
+        }
+        else { overviewError = resp?.Errors?.FirstOrDefault() ?? "Update failed."; }
+        busy = false;
+    }
+
+    private void OpenSetPassword() { newPassword = string.Empty; passwordError = string.Empty; showSetPassword = true; }
+
+    private async Task DoSetPassword()
+    {
+        if (string.IsNullOrEmpty(newPassword) || newPassword.Length < 8) { passwordError = "Min 8 characters."; return; }
+        busy = true;
+        var resp = await Api.PostAsync<SetPasswordRequest>($"api/users/{Id}/password", new SetPasswordRequest(newPassword));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Password updated" });
+            showSetPassword = false;
+        }
+        else { passwordError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task AssignRole()
+    {
+        if (roleToAssign == Guid.Empty) return;
+        busy = true;
+        var resp = await Api.PostAsync<AssignRoleRequest>($"api/users/{Id}/roles", new AssignRoleRequest(roleToAssign));
+        if (resp?.Success == true)
+        {
+            roleToAssign = Guid.Empty;
+            await Load();
+        }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+    private async Task UnassignRole(Guid roleId)
+    {
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/users/{Id}/roles/{roleId}");
+        if (resp?.Success == true) await Load();
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    private void OpenMapSupplier() { supplierToMap = Guid.Empty; mapCanWrite = false; mapError = string.Empty; showMapSupplier = true; }
+
+    private async Task DoMapSupplier()
+    {
+        if (supplierToMap == Guid.Empty) { mapError = "Select a supplier."; return; }
+        busy = true;
+        var resp = await Api.PostAsync<MapSupplierRequest>($"api/users/{Id}/supplier-maps", new MapSupplierRequest(supplierToMap, mapCanWrite));
+        if (resp?.Success == true)
+        {
+            showMapSupplier = false;
+            await Load();
+        }
+        else { mapError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task UnmapSupplier(Guid supplierId)
+    {
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/users/{Id}/supplier-maps/{supplierId}");
+        if (resp?.Success == true) await Load();
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    private void OpenDeactivate() => showDeactivate = true;
+
+    private async Task DoDeactivate()
+    {
+        busy = true;
+        var resp = await Api.PostAsync<object>($"api/users/{Id}/deactivate", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "User deactivated" });
+            showDeactivate = false;
+            await Load();
+        }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+    private async Task Reactivate()
+    {
+        busy = true;
+        var resp = await Api.PostAsync<object>($"api/users/{Id}/reactivate", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "User reactivated" });
+            await Load();
+        }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+}

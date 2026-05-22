@@ -1,0 +1,116 @@
+@page "/purchase-orders"
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Purchase Orders</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Purchase Orders</h1>
+                <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+            </div>
+            <p class="tl-sub">Released and in-progress purchase orders</p>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input class="rz-textbox" placeholder="Search PO # / supplier…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="OnSearchKeyup" />
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="Reload">
+            <option value="">All statuses</option>
+            <option value="Released">Released</option>
+            <option value="Acknowledged">Acknowledged</option>
+            <option value="Accepted">Accepted</option>
+            <option value="DateProposed">Date Proposed</option>
+            <option value="PartiallyDelivered">Partially Delivered</option>
+            <option value="Delivered">Delivered</option>
+            <option value="Rejected">Rejected</option>
+            <option value="Closed">Closed</option>
+        </select>
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="typeFilter" @bind:after="Reload">
+            <option value="">All types</option>
+            <option value="Material">Material</option>
+            <option value="Service">Service</option>
+        </select>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (paged == null || paged.Items.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">description</span>
+            <div>No purchase orders match.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 150px 1.5fr 120px 130px 140px 80px; --tl-min-width: 1000px;">
+            <div class="tlg-header">
+                <div class="tlg-col">PO #</div>
+                <div class="tlg-col">Supplier</div>
+                <div class="tlg-col">Type</div>
+                <div class="tlg-col">PO Date</div>
+                <div class="tlg-col">Status</div>
+                <div class="tlg-col tlg-col--num">Version</div>
+            </div>
+            @foreach (var po in paged.Items)
+            {
+                <div class="tlg-row" @onclick="() => OpenDetail(po.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">@po.PoNumber</div>
+                    <div class="tlg-col tlg-name">@po.SupplierName</div>
+                    <div class="tlg-col">@po.PoType</div>
+                    <div class="tlg-col tlg-code">@po.PoDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(po.PoStatus)">@po.PoStatus</span></div>
+                    <div class="tlg-col tlg-col--num">@po.Version</div>
+                </div>
+            }
+        </div>
+
+        <Pager Page="page" PageSize="PageSize" TotalCount="paged.TotalCount" PageChanged="OnPageChanged" />
+    }
+</div>
+
+@code {
+    private PagedResult<PurchaseOrderListItemDto>? paged;
+    private bool loading = true;
+    private string search = string.Empty;
+    private string statusFilter = string.Empty;
+    private string typeFilter = string.Empty;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        loading = true;
+        var url = $"api/purchase-orders?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
+        if (!string.IsNullOrWhiteSpace(typeFilter)) url += $"&type={Uri.EscapeDataString(typeFilter)}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search.Trim())}";
+        var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>(url);
+        paged = resp?.Data;
+        loading = false;
+    }
+
+    private async Task OnSearchKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { page = 1; await Reload(); }
+    }
+
+    private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+
+    private void OpenDetail(Guid id) => Nav.NavigateTo($"/purchase-orders/{id}");
+
+    private string StatusClass(string status) => status switch
+    {
+        "Accepted" or "Delivered" or "Closed" => "tlg-status--active",
+        "Released" or "Acknowledged" or "DateProposed" or "PartiallyDelivered" => "tlg-status--pending",
+        "Rejected" or "Cancelled" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

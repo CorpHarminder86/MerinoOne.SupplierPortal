@@ -1,17 +1,29 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @inject TokenAccessor Token
 @inject NavigationManager Nav
+@inject ShellState Shell
 
 @if (!Token.IsAuthenticated)
 {
     <Login OnLoggedIn="@(() => InvokeAsync(StateHasChanged))" />
 }
+else if (Token.MustChangePassword && !IsOnChangePasswordRoute())
+{
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--mer-canvas);">
+        <div class="rz-card" style="padding:24px;max-width:420px;text-align:center;">
+            <span class="material-symbols-outlined" style="font-size:36px;color:var(--mer-warning);">lock_reset</span>
+            <h2 style="margin:8px 0 6px;color:var(--mer-blue-darker);font-size:18px;">Password change required</h2>
+            <p style="color:var(--mer-ink-500);font-size:13px;margin-bottom:14px;">Redirecting you to the password update page…</p>
+        </div>
+    </div>
+}
 else
 {
     <div class="mer-shell">
-        <aside class="mer-sidenav">
+        <aside class="mer-sidenav @(Shell.IsSidenavCollapsed ? "mer-sidenav--collapsed" : null)">
             <div class="mer-brand">
-                <div class="mer-brand__logo"><span class="material-symbols-outlined" style="color:var(--mer-blue-darker)">factory</span></div>
+                <div class="mer-brand__logo"><img src="img/merino-logo.png" alt="Merino" /></div>
                 <div class="mer-brand__text">
                     <div class="mer-brand__name">MERIN<span class="infinity-symbol">∞</span>NE</div>
                     <div class="mer-brand__tag">SUPPLIER PORTAL</div>
@@ -37,20 +49,96 @@ else
                     </NavLink>
                 }
 
+                <div class="mer-nav__label">Procurement</div>
+                <NavLink class="mer-nav-item" href="/purchase-orders" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">description</span>
+                    <span class="mer-nav-item__label">Purchase Orders</span>
+                </NavLink>
+                <NavLink class="mer-nav-item" href="/delivery-schedules" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">event</span>
+                    <span class="mer-nav-item__label">Delivery Schedules</span>
+                </NavLink>
+                <NavLink class="mer-nav-item" href="/asns" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">local_shipping</span>
+                    <span class="mer-nav-item__label">ASNs</span>
+                </NavLink>
+                <NavLink class="mer-nav-item" href="/goods-receipts" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
+                    <span class="mer-nav-item__label">Goods Receipts</span>
+                </NavLink>
+
+                <div class="mer-nav__label">Finance</div>
+                <NavLink class="mer-nav-item" href="/invoices" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">receipt_long</span>
+                    <span class="mer-nav-item__label">Invoices</span>
+                </NavLink>
+                <NavLink class="mer-nav-item" href="/credit-debit-notes" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">request_quote</span>
+                    <span class="mer-nav-item__label">Credit/Debit Notes</span>
+                </NavLink>
+                <NavLink class="mer-nav-item" href="/payments" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">payments</span>
+                    <span class="mer-nav-item__label">Payments</span>
+                </NavLink>
+
                 <div class="mer-nav__label">Communication</div>
                 <NavLink class="mer-nav-item" href="/messages" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">mail</span>
                     <span class="mer-nav-item__label">Messages</span>
                 </NavLink>
+
+                @if (Token.IsAdmin)
+                {
+                    <div class="mer-nav__label">Integrations</div>
+                    <NavLink class="mer-nav-item" href="/integrations/sync-log" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">sync</span>
+                        <span class="mer-nav-item__label">Sync Log</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="/integrations/errors" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">error</span>
+                        <span class="mer-nav-item__label">Integration Errors</span>
+                    </NavLink>
+
+                    <div class="mer-nav__label">Administration</div>
+                    <NavLink class="mer-nav-item" href="/admin/users" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">group</span>
+                        <span class="mer-nav-item__label">Users</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="/admin/roles" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">admin_panel_settings</span>
+                        <span class="mer-nav-item__label">Roles</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="/admin/supplier-invites" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">mail_outline</span>
+                        <span class="mer-nav-item__label">Supplier Invites</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="/admin/delivery-terms" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">local_shipping</span>
+                        <span class="mer-nav-item__label">Delivery Terms</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="/admin/payment-terms" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">savings</span>
+                        <span class="mer-nav-item__label">Payment Terms</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="/admin/items" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
+                        <span class="mer-nav-item__label">Items</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="/admin/settings" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">tune</span>
+                        <span class="mer-nav-item__label">System Settings</span>
+                    </NavLink>
+                }
             </nav>
         </aside>
 
         <div class="mer-main">
             <header class="mer-topbar">
-                <button class="mer-topbar__btn"><span class="material-symbols-outlined">menu</span></button>
+                <button class="mer-topbar__btn" @onclick="Shell.ToggleSidenav" title="@(Shell.IsSidenavCollapsed ? "Expand menu" : "Collapse menu")" aria-label="Toggle navigation"><span class="material-symbols-outlined">menu</span></button>
                 <nav class="mer-globalbc">
                     <a class="mer-globalbc__item" href="/">Home</a>
                 </nav>
+                <GlobalSearch />
                 <div class="mer-topbar__spacer"></div>
                 <button class="mer-topbar__btn"><span class="material-symbols-outlined">notifications</span></button>
                 <button class="mer-userpill" @onclick="Logout">
@@ -77,6 +165,39 @@ else
 </div>
 
 @code {
+    protected override void OnInitialized()
+    {
+        Shell.OnChange += OnShellChange;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnShellChange() => InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Token.IsAuthenticated && Token.MustChangePassword && !IsOnChangePasswordRoute())
+        {
+            await Task.Yield();
+            Nav.NavigateTo("/change-password", forceLoad: false);
+        }
+    }
+
+    private bool IsOnChangePasswordRoute()
+    {
+        var path = new Uri(Nav.Uri).AbsolutePath;
+        return path.Equals("/change-password", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/change-password/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Dispose()
+    {
+        Shell.OnChange -= OnShellChange;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+
     private string Initials
     {
         get

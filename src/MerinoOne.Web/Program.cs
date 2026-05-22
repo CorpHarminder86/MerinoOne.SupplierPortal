@@ -10,6 +10,7 @@ builder.Services.AddRazorComponents()
 builder.Services.AddRadzenComponents();
 
 builder.Services.AddScoped<TokenAccessor>();
+builder.Services.AddScoped<ShellState>();
 builder.Services.AddScoped(sp =>
 {
     var token = sp.GetRequiredService<TokenAccessor>();

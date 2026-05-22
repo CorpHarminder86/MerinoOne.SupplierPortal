@@ -1,0 +1,128 @@
+@page "/admin/roles"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+<PageTitle>Roles</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Roles</h1>
+                <span class="tl-count-chip">@(roles?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Role definitions and their permission grants</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (Token.HasPermission("Role.Write"))
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span>
+                    New role
+                </button>
+            }
+        </div>
+    </header>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (roles == null || roles.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">admin_panel_settings</span>
+            <div>No roles defined yet.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 1.5fr 140px 140px; --tl-min-width: 600px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Name</div>
+                <div class="tlg-col tlg-col--num">Permissions</div>
+                <div class="tlg-col tlg-col--num">Users</div>
+            </div>
+            @foreach (var r in roles)
+            {
+                <div class="tlg-row" @onclick="() => OpenDetail(r.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-name">@r.Name</div>
+                    <div class="tlg-col tlg-col--num">@r.PermissionCount</div>
+                    <div class="tlg-col tlg-col--num">@r.UserCount</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showNew)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" style="width:420px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">add</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Role</div>
+                    <h2 class="merino-dialog__title">New role</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showNew = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Name</label>
+                <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="newName" />
+                @if (!string.IsNullOrEmpty(newError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@newError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showNew = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="DoCreate" disabled="@busy">@(busy ? "Creating…" : "Create")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private List<RoleListItemDto>? roles;
+    private bool loading = true;
+    private bool showNew;
+    private string newName = string.Empty;
+    private string newError = string.Empty;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<RoleListItemDto>>("api/roles");
+        roles = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenNew() { newName = string.Empty; newError = string.Empty; showNew = true; }
+    private void OpenDetail(Guid id) => Nav.NavigateTo($"/admin/roles/{id}");
+
+    private async Task DoCreate()
+    {
+        if (string.IsNullOrWhiteSpace(newName)) { newError = "Name required."; return; }
+        busy = true;
+        var req = new CreateRoleRequest(newName.Trim(), Array.Empty<string>());
+        var resp = await Api.PostAsync<Guid, CreateRoleRequest>("api/roles", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Role created" });
+            showNew = false;
+            if (resp.Data != Guid.Empty) Nav.NavigateTo($"/admin/roles/{resp.Data}");
+            else await Load();
+        }
+        else { newError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+}

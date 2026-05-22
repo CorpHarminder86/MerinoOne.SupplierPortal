@@ -1,0 +1,390 @@
+@page "/invoices/{Id:guid}"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+<PageTitle>@detail?.InvoiceNumber</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else if (detail == null)
+{
+    <div class="tl-empty">Invoice not found.</div>
+}
+else
+{
+    <div class="tl-page">
+        <a href="/invoices" class="mer-back-link">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+            Back to list
+        </a>
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">@detail.InvoiceNumber</h1>
+                    <span class="tlg-status @StatusClass(detail.InvoiceStatus)">@detail.InvoiceStatus</span>
+                </div>
+                <p class="tl-sub">@detail.SupplierName · PO <a href="/purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);">@detail.PoNumber</a> · @detail.InvoiceDate.ToString("yyyy-MM-dd")</p>
+            </div>
+            <div class="tl-header__actions">
+                @if (Token.HasPermission("Invoice.Review") && detail.InvoiceStatus == "Submitted")
+                {
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenReview" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">fact_check</span> Mark Under Review
+                    </button>
+                }
+                @if (Token.HasPermission("Invoice.Approve") && (detail.InvoiceStatus == "UnderReview" || detail.InvoiceStatus == "Matched"))
+                {
+                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                    </button>
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenReject" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject
+                    </button>
+                }
+                @if (Token.HasPermission("CreditDebitNote.Write"))
+                {
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenCreateNote" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">request_quote</span> Create Credit/Debit Note
+                    </button>
+                }
+            </div>
+        </header>
+
+        <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;">
+            <button class="mer-tab @(tab=="overview"?"mer-tab--active":"")" @onclick="TabOverview" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="overview"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="overview"?"var(--mer-blue)":"var(--mer-ink-700)");">Overview</button>
+            <button class="mer-tab @(tab=="history"?"mer-tab--active":"")" @onclick="TabHistory" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="history"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="history"?"var(--mer-blue)":"var(--mer-ink-700)");">History</button>
+        </div>
+
+        @if (tab == "history")
+        {
+            <AuditHistoryTab EntityName="Invoice" EntityId="@Id" />
+        }
+        else
+        {
+        <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;">
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Invoice details</h3>
+                <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
+                    <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
+                    <dt style="color:var(--mer-ink-500);">PO</dt><dd><a href="/purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.PoNumber</a></dd>
+                    @if (!string.IsNullOrEmpty(detail.AsnNumber))
+                    {
+                        <dt style="color:var(--mer-ink-500);">ASN</dt><dd style="font-family:Inter,monospace;">@detail.AsnNumber</dd>
+                    }
+                    <dt style="color:var(--mer-ink-500);">Invoice date</dt><dd style="font-family:Inter,monospace;">@detail.InvoiceDate.ToString("yyyy-MM-dd")</dd>
+                    <dt style="color:var(--mer-ink-500);">Matching</dt><dd>@detail.MatchingType</dd>
+                    @if (!string.IsNullOrEmpty(detail.GrnReference))
+                    {
+                        <dt style="color:var(--mer-ink-500);">GRN reference</dt><dd style="font-family:Inter,monospace;">@detail.GrnReference</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(detail.EInvoiceIrn))
+                    {
+                        <dt style="color:var(--mer-ink-500);">e-Invoice IRN</dt><dd style="font-family:Inter,monospace;font-size:11px;">@detail.EInvoiceIrn</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(detail.EInvoiceAckNo))
+                    {
+                        <dt style="color:var(--mer-ink-500);">Ack #</dt><dd style="font-family:Inter,monospace;">@detail.EInvoiceAckNo</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(detail.EWayBillNumber))
+                    {
+                        <dt style="color:var(--mer-ink-500);">e-Way Bill</dt><dd style="font-family:Inter,monospace;">@detail.EWayBillNumber</dd>
+                    }
+                    @if (detail.ApprovedAt.HasValue)
+                    {
+                        <dt style="color:var(--mer-ink-500);">Approved</dt><dd style="font-family:Inter,monospace;">@detail.ApprovedAt.Value.ToString("yyyy-MM-dd HH:mm") by @detail.ApprovedBy</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(detail.RejectionReason))
+                    {
+                        <dt style="color:var(--mer-ink-500);">Rejection reason</dt><dd style="background:var(--mer-red-50);color:var(--mer-red);padding:6px 10px;border-radius:4px;">@detail.RejectionReason</dd>
+                    }
+                </dl>
+            </div>
+
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Totals</h3>
+                <dl style="display:grid;grid-template-columns:140px 1fr;gap:6px 16px;font-size:13px;">
+                    <dt style="color:var(--mer-ink-500);">Currency</dt><dd>@detail.CurrencyCode</dd>
+                    <dt style="color:var(--mer-ink-500);">Invoice amount</dt><dd style="font-family:Inter,monospace;text-align:right;">@detail.InvoiceAmount.ToString("N2")</dd>
+                    <dt style="color:var(--mer-ink-500);">Tax</dt><dd style="font-family:Inter,monospace;text-align:right;">@detail.TaxAmount.ToString("N2")</dd>
+                    <dt style="color:var(--mer-ink-500);font-weight:700;">Net</dt><dd style="font-family:Inter,monospace;text-align:right;font-weight:700;color:var(--mer-blue-darker);">@detail.NetAmount.ToString("N2")</dd>
+                </dl>
+                @if (!string.IsNullOrEmpty(detail.Notes))
+                {
+                    <h4 style="font-size:12px;font-weight:700;margin:16px 0 6px;color:var(--mer-ink-700);">Notes</h4>
+                    <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@detail.Notes</p>
+                }
+            </div>
+        </div>
+
+        <div class="rz-card" style="padding:20px;margin-top:16px;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)</h3>
+            @if (detail.Lines.Count == 0)
+            {
+                <p style="font-size:13px;color:var(--mer-ink-500);">No lines on this invoice.</p>
+            }
+            else
+            {
+                <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                    <thead>
+                        <tr style="border-bottom:1px solid var(--mer-line);">
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Description</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Billed Qty</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Unit Price</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Tax</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Tax Amt</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Line Amt</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var ln in detail.Lines.OrderBy(l => l.ItemCode))
+                    {
+                        <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
+                            <td style="padding:6px 4px;">@ln.ItemDescription</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.BilledQty.ToString("0.###")</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.UnitPrice.ToString("0.00")</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@(ln.TaxCode ?? "—")</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.TaxAmount.ToString("0.00")</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;">@ln.LineAmount.ToString("0.00")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </div>
+        }
+    </div>
+
+    @if (showReview)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="md" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">fact_check</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Invoice</div>
+                        <h2 class="merino-dialog__title">Mark @detail.InvoiceNumber under review?</h2>
+                        <p class="merino-dialog__subtitle">Move invoice into the matching workflow.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showReview = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Notes (optional)</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="dialogNotes"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showReview = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoReview" disabled="@busy">@(busy ? "Working…" : "Mark Under Review")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showApprove)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="success" data-size="md" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">task_alt</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Invoice</div>
+                        <h2 class="merino-dialog__title">Approve @detail.InvoiceNumber</h2>
+                        <p class="merino-dialog__subtitle">Approves invoice for payment.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showApprove = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Notes (optional)</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="dialogNotes"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApprove = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApprove" disabled="@busy">@(busy ? "Working…" : "Approve")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showReject)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="danger" data-size="md" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">cancel</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Invoice</div>
+                        <h2 class="merino-dialog__title">Reject @detail.InvoiceNumber</h2>
+                        <p class="merino-dialog__subtitle">Provide a reason for rejection.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showReject = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Reason (required)</label>
+                    <textarea class="rz-textbox" rows="4" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="rejectionReason"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showReject = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="danger" @onclick="DoReject" disabled="@busy">@(busy ? "Working…" : "Reject")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showCreateNote)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="md" style="width:580px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">request_quote</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Adjustment</div>
+                        <h2 class="merino-dialog__title">New Credit/Debit Note</h2>
+                        <p class="merino-dialog__subtitle">Issue a credit or debit note against @detail.InvoiceNumber.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showCreateNote = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="margin-bottom:10px;display:flex;gap:16px;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">
+                            <input type="radio" name="ntype" checked="@(noteType == "CN")" @onchange="SetNoteTypeCN" /> Credit Note
+                        </label>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">
+                            <input type="radio" name="ntype" checked="@(noteType == "DN")" @onchange="SetNoteTypeDN" /> Debit Note
+                        </label>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Note number</label>
+                            <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="noteNumber" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Amount</label>
+                            <input type="number" step="0.01" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;text-align:right;" @bind="noteAmount" />
+                        </div>
+                    </div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:10px;display:block;">Reason</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="noteReason"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showCreateNote = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoCreateNote" disabled="@busy">@(busy ? "Working…" : "Create")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private InvoiceDetailDto? detail;
+    private bool loading = true;
+    private bool busy = false;
+    private string tab = "overview";
+
+    private void TabOverview() => tab = "overview";
+    private void TabHistory() => tab = "history";
+
+    private bool showReview = false;
+    private bool showApprove = false;
+    private bool showReject = false;
+    private bool showCreateNote = false;
+    private string dialogNotes = string.Empty;
+    private string rejectionReason = string.Empty;
+    private string dialogError = string.Empty;
+    private string noteType = "CN";
+    private string noteNumber = string.Empty;
+    private decimal noteAmount = 0;
+    private string noteReason = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<InvoiceDetailDto>($"api/invoices/{Id}");
+        detail = resp?.Data;
+        loading = false;
+    }
+
+    private void OpenReview() { dialogNotes = string.Empty; dialogError = string.Empty; showReview = true; }
+    private void OpenApprove() { dialogNotes = string.Empty; dialogError = string.Empty; showApprove = true; }
+    private void OpenReject() { rejectionReason = string.Empty; dialogError = string.Empty; showReject = true; }
+    private void OpenCreateNote() { noteType = "CN"; noteNumber = string.Empty; noteAmount = 0; noteReason = string.Empty; dialogError = string.Empty; showCreateNote = true; }
+
+    private void SetNoteTypeCN() => noteType = "CN";
+    private void SetNoteTypeDN() => noteType = "DN";
+
+    private async Task DoReview()
+    {
+        busy = true; dialogError = string.Empty;
+        var resp = await Api.PostAsync<InvoiceDetailDto, ReviewInvoiceRequest>($"api/invoices/{Id}/review", new ReviewInvoiceRequest());
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Marked under review" }); showReview = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task DoApprove()
+    {
+        busy = true; dialogError = string.Empty;
+        var resp = await Api.PostAsync<InvoiceDetailDto, ApproveInvoiceRequest>($"api/invoices/{Id}/approve", new ApproveInvoiceRequest(string.IsNullOrWhiteSpace(dialogNotes) ? null : dialogNotes));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Approved" }); showApprove = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task DoReject()
+    {
+        if (string.IsNullOrWhiteSpace(rejectionReason)) { dialogError = "Reason is required."; return; }
+        busy = true; dialogError = string.Empty;
+        var resp = await Api.PostAsync<InvoiceDetailDto, RejectInvoiceRequest>($"api/invoices/{Id}/reject", new RejectInvoiceRequest(rejectionReason));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Rejected" }); showReject = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task DoCreateNote()
+    {
+        if (string.IsNullOrWhiteSpace(noteNumber)) { dialogError = "Note number is required."; return; }
+        if (noteAmount <= 0) { dialogError = "Amount must be greater than 0."; return; }
+        busy = true; dialogError = string.Empty;
+        var req = new CreateCreditDebitNoteRequest(detail!.Id, noteType, noteNumber, noteAmount, string.IsNullOrWhiteSpace(noteReason) ? null : noteReason);
+        var resp = await Api.PostAsync<CreditDebitNoteDetailDto, CreateCreditDebitNoteRequest>("api/credit-debit-notes", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = $"{noteType} created" });
+            showCreateNote = false;
+            if (resp.Data != null) Nav.NavigateTo($"/credit-debit-notes/{resp.Data.Id}");
+        }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private string StatusClass(string status) => status switch
+    {
+        "Approved" or "Paid" => "tlg-status--active",
+        "Submitted" or "UnderReview" or "Matched" or "PartiallyPaid" => "tlg-status--pending",
+        "Rejected" or "Cancelled" or "MatchExceptions" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

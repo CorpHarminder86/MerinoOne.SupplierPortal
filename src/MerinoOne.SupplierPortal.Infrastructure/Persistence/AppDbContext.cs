@@ -2,10 +2,13 @@ using System.Linq.Expressions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Domain.Common;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
+using MerinoOne.SupplierPortal.Domain.Entities.Audit;
 using MerinoOne.SupplierPortal.Domain.Entities.Comm;
 using MerinoOne.SupplierPortal.Domain.Entities.Doc;
 using MerinoOne.SupplierPortal.Domain.Entities.Integration;
+using MerinoOne.SupplierPortal.Domain.Entities.Inv;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
+using MerinoOne.SupplierPortal.Domain.Entities.Settings;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence.Interceptors;
 using Microsoft.EntityFrameworkCore;
 using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplier;
@@ -35,7 +38,12 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<Seccode> Seccodes => Set<Seccode>();
     public DbSet<SecRight> SecRights => Set<SecRight>();
     public DbSet<SupplierUserMap> SupplierUserMaps => Set<SupplierUserMap>();
+    public DbSet<SupplierInvite> SupplierInvites => Set<SupplierInvite>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
+
+    public DbSet<Item> Items => Set<Item>();
+    public DbSet<DeliveryTerm> DeliveryTerms => Set<DeliveryTerm>();
+    public DbSet<PaymentTerm> PaymentTerms => Set<PaymentTerm>();
 
     public DbSet<SupplierEntity> Suppliers => Set<SupplierEntity>();
     public DbSet<SupplierVerificationEntity> SupplierVerifications => Set<SupplierVerificationEntity>();
@@ -59,6 +67,10 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<InforEndpointMap> InforEndpointMaps => Set<InforEndpointMap>();
     public DbSet<InforSyncLog> InforSyncLogs => Set<InforSyncLog>();
     public DbSet<IntegrationError> IntegrationErrors => Set<IntegrationError>();
+
+    public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
+
+    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {

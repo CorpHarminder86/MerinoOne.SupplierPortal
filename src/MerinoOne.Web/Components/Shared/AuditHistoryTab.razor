@@ -1,0 +1,77 @@
+@inject ApiClient Api
+
+@if (loading)
+{
+    <div class="tl-empty">Loading history…</div>
+}
+else if (rows == null || rows.Count == 0)
+{
+    <div class="tl-empty">
+        <span class="material-symbols-outlined" style="font-size:32px;">history</span>
+        <div>No history yet.</div>
+    </div>
+}
+else
+{
+    <div class="dash__panel">
+        <header class="dash__panel-header">
+            <h2 class="dash__panel-title">Change history (@rows.Count)</h2>
+        </header>
+        <table class="dash__table" style="width:100%;font-size:12.5px;border-collapse:collapse;">
+            <thead>
+                <tr style="border-bottom:1px solid var(--mer-line);">
+                    <th style="text-align:left;padding:8px 10px;color:var(--mer-ink-700);">When</th>
+                    <th style="text-align:left;padding:8px 10px;color:var(--mer-ink-700);">Who</th>
+                    <th style="text-align:left;padding:8px 10px;color:var(--mer-ink-700);">Op</th>
+                    <th style="text-align:left;padding:8px 10px;color:var(--mer-ink-700);">Field</th>
+                    <th style="text-align:left;padding:8px 10px;color:var(--mer-ink-700);">Old</th>
+                    <th style="text-align:left;padding:8px 10px;color:var(--mer-ink-700);">New</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in rows)
+                {
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                        <td style="padding:8px 10px;font-family:Inter,monospace;font-variant-numeric:tabular-nums;">@r.ChangedOn.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td style="padding:8px 10px;">@r.ChangedBy</td>
+                        <td style="padding:8px 10px;"><span class="tlg-status @OpClass(r.Operation)">@r.Operation</span></td>
+                        <td style="padding:8px 10px;font-family:Inter,monospace;">@r.FieldName</td>
+                        <td style="padding:8px 10px;color:var(--mer-ink-500);">@(string.IsNullOrEmpty(r.OldValue) ? "—" : r.OldValue)</td>
+                        <td style="padding:8px 10px;">@(string.IsNullOrEmpty(r.NewValue) ? "—" : r.NewValue)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter] public string EntityName { get; set; } = string.Empty;
+    [Parameter] public Guid EntityId { get; set; }
+
+    private List<AuditEntryDto>? rows;
+    private bool loading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loading = true;
+        try
+        {
+            var resp = await Api.GetAsync<List<AuditEntryDto>>($"api/audit/{EntityName}/{EntityId}");
+            rows = resp?.Data;
+        }
+        catch
+        {
+            rows = null;
+        }
+        loading = false;
+    }
+
+    private string OpClass(string op) => op switch
+    {
+        "Insert" or "Create" => "tlg-status--active",
+        "Update" or "Modify" => "tlg-status--pending",
+        "Delete" or "Remove" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

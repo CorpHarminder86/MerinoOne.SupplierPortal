@@ -1,0 +1,52 @@
+@* Reusable list pager with chevron icons. Wire via Page / PageSize / TotalCount / PageChanged. *@
+
+<div class="mer-pager">
+    <button type="button" class="mer-pager__btn"
+            disabled="@(Page <= 1)"
+            @onclick="PrevClick">
+        <span class="material-symbols-outlined mer-pager__icon">chevron_left</span>
+        <span class="mer-pager__label">Back</span>
+    </button>
+    <span class="mer-pager__status">
+        Page @Page of @Math.Max(1, TotalPages) · @TotalCount rows
+    </span>
+    <button type="button" class="mer-pager__btn"
+            disabled="@(Page >= TotalPages)"
+            @onclick="NextClick">
+        <span class="mer-pager__label">Next</span>
+        <span class="material-symbols-outlined mer-pager__icon">chevron_right</span>
+    </button>
+</div>
+
+<style>
+    .mer-pager { display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding: 12px 4px; }
+    .mer-pager__btn {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 6px 12px; height: 32px;
+        border-radius: 6px; border: 1px solid var(--mer-ink-300);
+        background: var(--mer-surface); color: var(--mer-ink-900);
+        font: 500 13px/1 'Plus Jakarta Sans', sans-serif;
+        cursor: pointer;
+        transition: background 0.12s ease, border-color 0.12s ease;
+    }
+    .mer-pager__btn:hover:not(:disabled) { background: var(--mer-ink-50); border-color: var(--mer-ink-400); }
+    .mer-pager__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .mer-pager__btn:focus-visible { outline: 0; box-shadow: var(--mer-focus-ring); }
+    .mer-pager__icon { font-size: 16px !important; line-height: 1; }
+    .mer-pager__label { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .mer-pager__status { font-size: 12px; color: var(--mer-ink-600); font-family: 'Plus Jakarta Sans', sans-serif; }
+</style>
+
+@code {
+    [Parameter] public int Page { get; set; } = 1;
+    [Parameter] public int PageSize { get; set; } = 50;
+    [Parameter] public int TotalCount { get; set; }
+    [Parameter] public EventCallback<int> PageChanged { get; set; }
+
+    private int TotalPages => PageSize <= 0
+        ? 1
+        : Math.Max(1, (int)Math.Ceiling((double)TotalCount / PageSize));
+
+    private Task PrevClick() => Page > 1 ? PageChanged.InvokeAsync(Page - 1) : Task.CompletedTask;
+    private Task NextClick() => Page < TotalPages ? PageChanged.InvokeAsync(Page + 1) : Task.CompletedTask;
+}

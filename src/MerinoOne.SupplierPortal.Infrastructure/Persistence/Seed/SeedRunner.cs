@@ -22,6 +22,9 @@ public static class SeedRunner
         logger?.LogInformation("Seed: SupplierSeeder");
         await SupplierSeeder.SeedAsync(ctx, ct);
 
+        logger?.LogInformation("Seed: MasterSeeder");
+        await MasterSeeder.SeedAsync(ctx, ct);
+
         if (includeBackfill)
         {
             logger?.LogInformation("Seed: BackfillSeeder (large volume)");

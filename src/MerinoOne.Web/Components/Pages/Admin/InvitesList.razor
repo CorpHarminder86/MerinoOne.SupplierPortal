@@ -1,0 +1,217 @@
+@page "/admin/supplier-invites"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+@inject IJSRuntime JS
+
+<PageTitle>Supplier invites</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Supplier invites</h1>
+                <span class="tl-count-chip">@(invites?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Track invitations sent to prospective suppliers</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (Token.HasPermission("Supplier.Invite"))
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">mail</span>
+                    New invite
+                </button>
+            }
+        </div>
+    </header>
+
+    @if (!string.IsNullOrEmpty(latestRegistrationUrl))
+    {
+        <div style="background:var(--mer-green-50);border:1px solid var(--mer-green);padding:12px 16px;border-radius:8px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">
+            <span class="material-symbols-outlined" style="color:var(--mer-green-dark);">check_circle</span>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:600;color:var(--mer-green-dark);">Invite created — share this link:</div>
+                <div style="font-family:Inter,monospace;font-size:12px;color:var(--mer-ink-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@latestRegistrationUrl</div>
+            </div>
+            <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="() => CopyText(latestRegistrationUrl!)">
+                <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">content_copy</span> Copy
+            </button>
+            <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:0;background:transparent;cursor:pointer;color:var(--mer-ink-500);" @onclick="() => latestRegistrationUrl = null">×</button>
+        </div>
+    }
+
+    <div class="tl-filter-bar">
+        <input class="rz-textbox" placeholder="Search legal name / email…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="ApplyFilters" />
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="ApplyFilters">
+            <option value="">All statuses</option>
+            <option value="Pending">Pending</option>
+            <option value="Consumed">Consumed</option>
+            <option value="Expired">Expired</option>
+        </select>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (invites == null || invites.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">mail_outline</span>
+            <div>No invites yet.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.2fr 130px 130px 130px 110px; --tl-min-width: 1000px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Legal name</div>
+                <div class="tlg-col">Email</div>
+                <div class="tlg-col">Invited by</div>
+                <div class="tlg-col">Invited at</div>
+                <div class="tlg-col">Expires at</div>
+                <div class="tlg-col">Status</div>
+            </div>
+            @foreach (var i in invites)
+            {
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-name">@i.LegalName</div>
+                    <div class="tlg-col tlg-desc">@i.Email</div>
+                    <div class="tlg-col">@i.InvitedBy</div>
+                    <div class="tlg-col tlg-code">@i.InvitedAt.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@i.ExpiresAt.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(i.Status)">@i.Status</span></div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showNew)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" style="width:480px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">mail</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Onboarding</div>
+                    <h2 class="merino-dialog__title">Invite a supplier</h2>
+                    <p class="merino-dialog__subtitle">A registration link is created and emailed.</p>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showNew = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Legal name *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="newLegalName" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Email *</label>
+                        <input class="rz-textbox" type="email" style="width:100%;padding:8px 10px;" @bind="newEmail" />
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(newError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@newError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showNew = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="DoCreate" disabled="@busy">@(busy ? "Sending…" : "Send invite")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private List<SupplierInviteListDto>? all;
+    private List<SupplierInviteListDto>? invites;
+    private bool loading = true;
+    private bool busy;
+    private bool showNew;
+    private string newLegalName = string.Empty;
+    private string newEmail = string.Empty;
+    private string newError = string.Empty;
+    private string? latestRegistrationUrl;
+    private string search = string.Empty;
+    private string statusFilter = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<SupplierInviteListDto>>("api/supplier-registration/invites");
+        all = resp?.Data ?? new();
+        ApplyFilters();
+        loading = false;
+    }
+
+    private void ApplyFilters()
+    {
+        if (all == null) { invites = new(); return; }
+        IEnumerable<SupplierInviteListDto> q = all;
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x => x.LegalName.Contains(s, StringComparison.OrdinalIgnoreCase)
+                          || x.Email.Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+        if (!string.IsNullOrEmpty(statusFilter))
+            q = q.Where(x => x.Status == statusFilter);
+        invites = q.ToList();
+    }
+
+    private void OpenNew()
+    {
+        newLegalName = string.Empty;
+        newEmail = string.Empty;
+        newError = string.Empty;
+        showNew = true;
+    }
+
+    private async Task DoCreate()
+    {
+        if (string.IsNullOrWhiteSpace(newLegalName)) { newError = "Legal name required."; return; }
+        if (string.IsNullOrWhiteSpace(newEmail) || !newEmail.Contains('@')) { newError = "Valid email required."; return; }
+        busy = true;
+        var req = new CreateSupplierInviteRequest(newLegalName.Trim(), newEmail.Trim());
+        var resp = await Api.PostAsync<CreateSupplierInviteResponse, CreateSupplierInviteRequest>("api/supplier-registration/invites", req);
+        if (resp?.Success == true && resp.Data != null)
+        {
+            latestRegistrationUrl = resp.Data.RegistrationUrl;
+            showNew = false;
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invite created" });
+            await Load();
+        }
+        else { newError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task CopyText(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Info, Summary = "Copied to clipboard" });
+        }
+        catch
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Copy failed", Detail = "Use right-click to copy the link manually." });
+        }
+    }
+
+    private string StatusClass(string status) => status switch
+    {
+        "Consumed" or "Registered" => "tlg-status--active",
+        "Pending" or "Invited" => "tlg-status--pending",
+        "Expired" or "Revoked" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

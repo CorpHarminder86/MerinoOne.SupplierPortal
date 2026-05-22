@@ -1,0 +1,322 @@
+@page "/invoices/new"
+@inject ApiClient Api
+@inject NavigationManager NavMgr
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+<PageTitle>New invoice</PageTitle>
+
+<div class="tl-page">
+    <a href="/invoices" class="mer-back-link">
+        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+        Back to list
+    </a>
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Create invoice</h1>
+                <span class="tl-count-chip">Step @currentStep of 4</span>
+            </div>
+            <p class="tl-sub">Submit a supplier invoice against a purchase order</p>
+        </div>
+        <div class="tl-header__actions">
+            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Cancel">Cancel</button>
+        </div>
+    </header>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else
+    {
+        <div class="rz-card" style="padding:20px;">
+            <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--mer-line);">
+                @for (int i = 1; i <= 4; i++)
+                {
+                    var step = i;
+                    var active = currentStep == step;
+                    var done = currentStep > step;
+                    <div style="padding:10px 16px;font-size:13px;font-weight:600;border-bottom:3px solid @(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "transparent");color:@(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "var(--mer-ink-500)");cursor:pointer;" @onclick="@(() => GoStep(step))">
+                        @step. @StepLabel(step)
+                    </div>
+                }
+            </div>
+
+            @if (currentStep == 1)
+            {
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Select purchase order</h3>
+                @if (availablePos == null)
+                {
+                    <p style="color:var(--mer-ink-500);font-size:13px;">Loading POs…</p>
+                }
+                else if (availablePos.Count == 0)
+                {
+                    <p style="color:var(--mer-ink-500);font-size:13px;">No eligible POs.</p>
+                }
+                else
+                {
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Purchase order</label>
+                    <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="selectedPoId" @bind:after="LoadPoLines">
+                        <option value="">— Select PO —</option>
+                        @foreach (var p in availablePos)
+                        {
+                            <option value="@p.Id">@p.PoNumber — @p.SupplierName (@p.PoStatus)</option>
+                        }
+                    </select>
+                }
+            }
+            else if (currentStep == 2)
+            {
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Header</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Invoice number</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="invoiceNumber" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Invoice date</label>
+                        <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="invoiceDate" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Currency</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="currencyCode">
+                            <option value="INR">INR</option>
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="GBP">GBP</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Matching type</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="matchingType">
+                            <option value="TwoWay">Two-way (PO + Invoice)</option>
+                            <option value="ThreeWay">Three-way (PO + Invoice + GRN)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">e-Invoice IRN</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:11px;" @bind="eInvoiceIrn" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">e-Invoice Ack #</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="eInvoiceAckNo" />
+                    </div>
+                    <div style="grid-column:1 / span 2;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">e-Way Bill #</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="eWayBillNumber" />
+                    </div>
+                </div>
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:12px;display:block;">Notes</label>
+                <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="notes"></textarea>
+            }
+            else if (currentStep == 3)
+            {
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@lines.Count(l => l.BilledQty > 0) of @lines.Count selected)</h3>
+                @if (lines.Count == 0)
+                {
+                    <p style="color:var(--mer-ink-500);font-size:13px;">Select a PO to load lines.</p>
+                }
+                else
+                {
+                    <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                        <thead>
+                            <tr style="border-bottom:1px solid var(--mer-line);">
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Order Qty</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Billed Qty</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Unit Price</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Tax</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Tax Amt</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Line Amt</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var ln in lines)
+                        {
+                            <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                                <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PoPositionNo</td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
+                                <td style="padding:6px 4px;text-align:right;"><input type="number" step="0.001" class="rz-textbox" style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;" @bind="ln.BilledQty" /></td>
+                                <td style="padding:6px 4px;text-align:right;"><input type="number" step="0.01" class="rz-textbox" style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;" @bind="ln.UnitPrice" /></td>
+                                <td style="padding:6px 4px;"><input type="text" class="rz-textbox" style="width:80px;padding:4px 6px;font-family:Inter,monospace;" @bind="ln.TaxCode" placeholder="GST18" /></td>
+                                <td style="padding:6px 4px;text-align:right;"><input type="number" step="0.01" class="rz-textbox" style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;" @bind="ln.TaxAmount" /></td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;">@((ln.BilledQty * ln.UnitPrice).ToString("0.00"))</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                    <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:24px;font-size:13px;">
+                        <div><span style="color:var(--mer-ink-500);">Subtotal:</span> <b style="font-family:Inter,monospace;">@Subtotal.ToString("N2")</b></div>
+                        <div><span style="color:var(--mer-ink-500);">Tax:</span> <b style="font-family:Inter,monospace;">@TaxTotal.ToString("N2")</b></div>
+                        <div><span style="color:var(--mer-blue-darker);font-weight:700;">Net:</span> <b style="font-family:Inter,monospace;color:var(--mer-blue-darker);">@NetTotal.ToString("N2")</b></div>
+                    </div>
+                }
+            }
+            else if (currentStep == 4)
+            {
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Review & submit</h3>
+                <dl style="display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:13px;">
+                    <dt style="color:var(--mer-ink-500);">PO</dt><dd>@(availablePos?.FirstOrDefault(p => p.Id == selectedPoId)?.PoNumber)</dd>
+                    <dt style="color:var(--mer-ink-500);">Invoice number</dt><dd style="font-family:Inter,monospace;">@invoiceNumber</dd>
+                    <dt style="color:var(--mer-ink-500);">Invoice date</dt><dd style="font-family:Inter,monospace;">@invoiceDate?.ToString("yyyy-MM-dd")</dd>
+                    <dt style="color:var(--mer-ink-500);">Currency / Matching</dt><dd>@currencyCode · @matchingType</dd>
+                    @if (!string.IsNullOrEmpty(eInvoiceIrn))
+                    {
+                        <dt style="color:var(--mer-ink-500);">e-Invoice IRN</dt><dd style="font-family:Inter,monospace;font-size:11px;">@eInvoiceIrn</dd>
+                    }
+                    <dt style="color:var(--mer-ink-500);">Lines being billed</dt><dd>@lines.Count(l => l.BilledQty > 0) of @lines.Count</dd>
+                    <dt style="color:var(--mer-ink-500);">Subtotal</dt><dd style="font-family:Inter,monospace;">@Subtotal.ToString("N2")</dd>
+                    <dt style="color:var(--mer-ink-500);">Tax</dt><dd style="font-family:Inter,monospace;">@TaxTotal.ToString("N2")</dd>
+                    <dt style="color:var(--mer-ink-500);font-weight:700;">Net amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@NetTotal.ToString("N2") @currencyCode</dd>
+                </dl>
+                @if (!string.IsNullOrEmpty(submitError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;">@submitError</div>
+                }
+            }
+
+            <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--mer-line);">
+                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="PrevStep" disabled="@(currentStep == 1)">Back</button>
+                @if (currentStep < 4)
+                {
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NextStep" disabled="@(!CanProceed)">Next</button>
+                }
+                else
+                {
+                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Submit" disabled="@busy">@(busy ? "Submitting…" : "Submit invoice")</button>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool loading = true;
+    private bool busy = false;
+    private int currentStep = 1;
+    private string submitError = string.Empty;
+
+    private List<PurchaseOrderListItemDto>? availablePos;
+    private Guid? selectedPoId;
+    private List<LineRow> lines = new();
+    private string invoiceNumber = string.Empty;
+    private DateTime? invoiceDate = DateTime.Today;
+    private string currencyCode = "INR";
+    private string matchingType = "ThreeWay";
+    private string eInvoiceIrn = string.Empty;
+    private string eInvoiceAckNo = string.Empty;
+    private string eWayBillNumber = string.Empty;
+    private string notes = string.Empty;
+
+    private decimal Subtotal => lines.Where(l => l.BilledQty > 0).Sum(l => l.BilledQty * l.UnitPrice);
+    private decimal TaxTotal => lines.Where(l => l.BilledQty > 0).Sum(l => l.TaxAmount);
+    private decimal NetTotal => Subtotal + TaxTotal;
+
+    private bool CanProceed => currentStep switch
+    {
+        1 => selectedPoId.HasValue,
+        2 => !string.IsNullOrWhiteSpace(invoiceNumber) && invoiceDate.HasValue,
+        3 => lines.Any(l => l.BilledQty > 0),
+        _ => true
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>("api/purchase-orders?page=1&pageSize=200&status=Delivered");
+        availablePos = resp?.Data?.Items ?? new();
+        if (availablePos.Count == 0)
+        {
+            // fall back to accepted POs if none delivered yet
+            var alt = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>("api/purchase-orders?page=1&pageSize=200&status=Accepted");
+            availablePos = alt?.Data?.Items ?? new();
+        }
+        loading = false;
+    }
+
+    private async Task LoadPoLines()
+    {
+        if (!selectedPoId.HasValue) { lines.Clear(); return; }
+        var resp = await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{selectedPoId}");
+        if (resp?.Data != null)
+        {
+            lines = resp.Data.Lines.Select(l => new LineRow
+            {
+                PurchaseOrderLineId = l.Id,
+                PoPositionNo = l.PositionNo,
+                ItemCode = l.ItemCode,
+                ItemDescription = l.ItemDescription,
+                OrderQty = l.OrderQty,
+                BilledQty = 0,
+                UnitPrice = l.Price,
+                TaxCode = l.TaxCode,
+                TaxAmount = 0
+            }).ToList();
+        }
+    }
+
+    private void GoStep(int s) { if (s <= currentStep) currentStep = s; }
+    private void PrevStep() { if (currentStep > 1) currentStep--; }
+    private void NextStep() { if (currentStep < 4 && CanProceed) currentStep++; }
+
+    private string StepLabel(int s) => s switch { 1 => "PO", 2 => "Header", 3 => "Lines", 4 => "Review", _ => "" };
+
+    private async Task Submit()
+    {
+        if (!selectedPoId.HasValue || !invoiceDate.HasValue) { submitError = "Missing required fields."; return; }
+        busy = true; submitError = string.Empty;
+        var billedLines = lines.Where(l => l.BilledQty > 0).ToList();
+        var lineReqs = billedLines
+            .Select(l => new CreateInvoiceLineRequest(
+                l.PurchaseOrderLineId,
+                l.ItemCode,
+                string.IsNullOrWhiteSpace(l.ItemDescription) ? null : l.ItemDescription,
+                l.BilledQty,
+                l.UnitPrice,
+                l.BilledQty * l.UnitPrice,
+                string.IsNullOrWhiteSpace(l.TaxCode) ? null : l.TaxCode,
+                l.TaxAmount))
+            .ToList();
+        var req = new CreateInvoiceRequest(
+            selectedPoId.Value,
+            null,
+            invoiceNumber,
+            invoiceDate.Value,
+            Subtotal,
+            TaxTotal,
+            NetTotal,
+            currencyCode,
+            matchingType,
+            string.IsNullOrWhiteSpace(eInvoiceIrn) ? null : eInvoiceIrn,
+            string.IsNullOrWhiteSpace(eInvoiceAckNo) ? null : eInvoiceAckNo,
+            string.IsNullOrWhiteSpace(eWayBillNumber) ? null : eWayBillNumber,
+            string.IsNullOrWhiteSpace(notes) ? null : notes,
+            lineReqs);
+        var resp = await Api.PostAsync<InvoiceDetailDto, CreateInvoiceRequest>("api/invoices", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invoice submitted" });
+            if (resp.Data != null) NavMgr.NavigateTo($"/invoices/{resp.Data.Id}");
+            else NavMgr.NavigateTo("/invoices");
+        }
+        else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private void Cancel() => NavMgr.NavigateTo("/invoices");
+
+    private class LineRow
+    {
+        public Guid PurchaseOrderLineId { get; set; }
+        public int PoPositionNo { get; set; }
+        public string ItemCode { get; set; } = string.Empty;
+        public string? ItemDescription { get; set; }
+        public decimal OrderQty { get; set; }
+        public decimal BilledQty { get; set; }
+        public decimal UnitPrice { get; set; }
+        public string? TaxCode { get; set; }
+        public decimal TaxAmount { get; set; }
+    }
+}

@@ -28,18 +28,43 @@ MerinoOne Supplier Portal is a .NET-based supplier portal with a Clean Architect
 - Blazor UI for user-facing pages.
 - Aspire app host for orchestration.
 
-## Flow Diagram
+## Functional Flow (Entire App)
 
 ```mermaid
 flowchart LR
-    User[User] --> UI[Blazor UI]
+    U[User] --> UI[Blazor UI]
+    UI --> Auth[Auth API]
+    Auth --> Token[JWT Issued]
+    Token --> UI
     UI --> API[API Controllers]
     API --> App[Application Layer]
+    App --> Val[Validation Pipeline]
+    Val --> App
     App --> Domain[Domain Model]
     App --> Infra[Infrastructure]
     Infra --> DB[(Database)]
     Infra --> Ext[External Services]
     Ext --> Infra
+    Infra --> App
+    App --> API
+    API --> UI
+```
+
+## Functional Flow (Supplier Onboarding)
+
+```mermaid
+flowchart LR
+    S[Supplier] --> SUi[Supplier UI]
+    SUi --> SAuth[Authenticate/Register]
+    SAuth --> SProfile[Profile Setup]
+    SProfile --> Docs[Upload Documents]
+    Docs --> Validation[Validation Services]
+    Validation --> Review[Internal Review]
+    Review --> Decision{Approve?}
+    Decision -- Yes --> Activation[Activate Supplier]
+    Decision -- No --> Rework[Request Changes]
+    Rework --> SProfile
+    Activation --> Access[Supplier Access Granted]
 ```
 
 ## Notes
