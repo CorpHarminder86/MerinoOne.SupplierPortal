@@ -15,13 +15,14 @@ public class GetRoleListQueryHandler : IRequestHandler<GetRoleListQuery, List<Ro
     public async Task<List<RoleListItemDto>> Handle(GetRoleListQuery request, CancellationToken ct)
     {
         return await _db.Roles.IgnoreQueryFilters()
+            .Where(r => !r.IsDeleted)
             .OrderBy(r => r.Name)
             .Select(r => new RoleListItemDto(
                 r.Id,
                 r.Seq,
                 r.Name,
-                _db.RolePermissions.IgnoreQueryFilters().Count(rp => rp.RoleId == r.Id),
-                _db.UserRoles.IgnoreQueryFilters().Count(ur => ur.RoleId == r.Id)))
+                _db.RolePermissions.IgnoreQueryFilters().Count(rp => rp.RoleId == r.Id && !rp.IsDeleted),
+                _db.UserRoles.IgnoreQueryFilters().Count(ur => ur.RoleId == r.Id && !ur.IsDeleted)))
             .ToListAsync(ct);
     }
 }

@@ -1,0 +1,56 @@
+using MediatR;
+using MerinoOne.SupplierPortal.Application.Admin.EmailTemplates;
+using MerinoOne.SupplierPortal.Application.Common.Models;
+using MerinoOne.SupplierPortal.Contracts.Admin;
+using MerinoOne.SupplierPortal.Contracts.SystemSettings;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace MerinoOne.SupplierPortal.Controllers;
+
+/// <summary>
+/// Admin CRUD for the admin-editable <c>EmailTemplate</c> table. Reads require
+/// <c>Settings.Read</c>; mutations (edit, test-send) require <c>Settings.Write</c>.
+/// </summary>
+[ApiController]
+[Authorize]
+[Route("api/admin/email-templates")]
+public class EmailTemplatesController : ControllerBase
+{
+    private readonly IMediator _mediator;
+    public EmailTemplatesController(IMediator mediator) => _mediator = mediator;
+
+    [HttpGet]
+    [Authorize(Policy = "Settings.Read")]
+    public async Task<Result<List<EmailTemplateDto>>> List(CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetEmailTemplateListQuery(), ct);
+        return Result<List<EmailTemplateDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpGet("{key}")]
+    [Authorize(Policy = "Settings.Read")]
+    public async Task<Result<EmailTemplateDto>> GetByKey(string key, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetEmailTemplateByKeyQuery(key), ct);
+        return Result<EmailTemplateDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("{key}")]
+    [Authorize(Policy = "Settings.Write")]
+    public async Task<Result<bool>> Update(
+        string key, [FromBody] UpdateEmailTemplateRequest body, CancellationToken ct)
+    {
+        await _mediator.Send(new UpdateEmailTemplateCommand(key, body), ct);
+        return Result<bool>.Ok(true, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("test-send")]
+    [Authorize(Policy = "Settings.Write")]
+    public async Task<Result<TestEmailResult>> TestSend(
+        [FromBody] SendTestEmailTemplateRequest body, CancellationToken ct)
+    {
+        var result = await _mediator.Send(new SendTestEmailTemplateCommand(body), ct);
+        return Result<TestEmailResult>.Ok(result, HttpContext.TraceIdentifier);
+    }
+}

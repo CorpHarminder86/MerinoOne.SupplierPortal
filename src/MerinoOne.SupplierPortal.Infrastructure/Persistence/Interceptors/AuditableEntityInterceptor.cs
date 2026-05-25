@@ -65,10 +65,16 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
                 case EntityState.Deleted:
                     if (entry.Entity is ISoftDelete sd)
                     {
-                        entry.State = EntityState.Modified;
+                        // Reset to Unchanged then surgically mark only the soft-delete fields as Modified.
+                        // Flipping to Modified directly would mark EVERY column as modified, including the
+                        // IDENTITY Seq column → SQL Server rejects "Cannot update identity column".
+                        entry.State = EntityState.Unchanged;
                         sd.IsDeleted = true;
                         sd.DeletedBy = actor;
                         sd.DeletedOn = now;
+                        entry.Property(nameof(ISoftDelete.IsDeleted)).IsModified = true;
+                        entry.Property(nameof(ISoftDelete.DeletedBy)).IsModified = true;
+                        entry.Property(nameof(ISoftDelete.DeletedOn)).IsModified = true;
                     }
                     break;
             }

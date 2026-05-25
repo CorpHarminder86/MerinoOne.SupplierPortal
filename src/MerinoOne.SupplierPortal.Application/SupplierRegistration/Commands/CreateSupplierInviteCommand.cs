@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
@@ -7,6 +8,8 @@ using MerinoOne.SupplierPortal.Application.SystemSettings.SupplierInvite;
 using MerinoOne.SupplierPortal.Contracts.SupplierRegistration;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace MerinoOne.SupplierPortal.Application.SupplierRegistration.Commands;
 
@@ -14,23 +17,50 @@ public record CreateSupplierInviteCommand(CreateSupplierInviteRequest Body) : IR
 
 public class CreateSupplierInviteCommandValidator : AbstractValidator<CreateSupplierInviteCommand>
 {
+    // Loose E.164: optional leading '+' then 8–15 digits. Empty/null is allowed.
+    private static readonly Regex MobileRegex = new("^\\+?\\d{8,15}$", RegexOptions.Compiled);
+
     public CreateSupplierInviteCommandValidator()
     {
         RuleFor(x => x.Body.LegalName).NotEmpty().MaximumLength(300);
         RuleFor(x => x.Body.Email).NotEmpty().EmailAddress().MaximumLength(256);
+        RuleFor(x => x.Body.MobileNo)
+            .Must(m => string.IsNullOrWhiteSpace(m) || MobileRegex.IsMatch(m!))
+            .WithMessage("Mobile number must be 8–15 digits with an optional leading '+'.");
     }
 }
 
 public class CreateSupplierInviteCommandHandler : IRequestHandler<CreateSupplierInviteCommand, SupplierInviteDetailDto>
 {
+    private const int InviteOtpValidMinutes = 10;
+
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly ISupplierInviteSettings _settings;
-    public CreateSupplierInviteCommandHandler(IAppDbContext db, ICurrentUser user, ISupplierInviteSettings settings)
+    private readonly IEmailService _email;
+    private readonly IConfiguration _config;
+    private readonly IOtpCodeGenerator _otp;
+    private readonly IPasswordHasher _hasher;
+    private readonly ILogger<CreateSupplierInviteCommandHandler> _logger;
+
+    public CreateSupplierInviteCommandHandler(
+        IAppDbContext db,
+        ICurrentUser user,
+        ISupplierInviteSettings settings,
+        IEmailService email,
+        IConfiguration config,
+        IOtpCodeGenerator otp,
+        IPasswordHasher hasher,
+        ILogger<CreateSupplierInviteCommandHandler> logger)
     {
         _db = db;
         _user = user;
         _settings = settings;
+        _email = email;
+        _config = config;
+        _otp = otp;
+        _hasher = hasher;
+        _logger = logger;
     }
 
     public async Task<SupplierInviteDetailDto> Handle(CreateSupplierInviteCommand request, CancellationToken ct)
@@ -48,11 +78,16 @@ public class CreateSupplierInviteCommandHandler : IRequestHandler<CreateSupplier
         // Pull invite-token lifetime from the SystemSettings module (SupplierInvite.ExpiryDays).
         var expiryDays = _settings.ExpiryDays;
 
+        var mobile = string.IsNullOrWhiteSpace(request.Body.MobileNo)
+            ? null
+            : request.Body.MobileNo!.Trim();
+
         var invite = new SupplierInvite
         {
             Id = Guid.NewGuid(),
             LegalName = request.Body.LegalName.Trim(),
             Email = email,
+            MobileNo = mobile,
             InvitedBy = string.IsNullOrEmpty(_user.UserCode) ? "system" : _user.UserCode,
             InvitedAt = now,
             Token = token,
@@ -63,10 +98,68 @@ public class CreateSupplierInviteCommandHandler : IRequestHandler<CreateSupplier
         _db.SupplierInvites.Add(invite);
         await _db.SaveChangesAsync(ct);
 
+        // Fire-and-log invite email. Persistence already committed — never roll back on send failure.
+        try
+        {
+            var registrationUrl = BuildRegistrationUrl(invite.Token);
+            await _email.SendInviteEmailAsync(
+                invite.Email,
+                invite.LegalName,
+                invite.MobileNo,
+                registrationUrl,
+                invite.ExpiresAt,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Invite email send failed for {Email} (invite {InviteId}). Invite was persisted successfully.",
+                invite.Email, invite.Id);
+        }
+
+        // Issue + persist the invite OTP, then email it as a separate message so the
+        // supplier has the 6-digit code in hand without needing to click the link first.
+        var code = _otp.Generate();
+        var otpRow = new InviteOtp
+        {
+            Id = Guid.NewGuid(),
+            SupplierInviteId = invite.Id,
+            CodeHash = _hasher.DeterministicHash(code),
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(InviteOtpValidMinutes),
+            Attempts = 0,
+            ConsumedAt = null,
+            CreatedBy = string.IsNullOrEmpty(_user.UserCode) ? "system" : _user.UserCode,
+            CreatedOn = now,
+        };
+        _db.InviteOtps.Add(otpRow);
+        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _email.SendInviteOtpAsync(invite.Email, invite.LegalName, code, InviteOtpValidMinutes, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Invite OTP email send failed for {Email} (invite {InviteId}, otp {OtpId}). OTP row was persisted; supplier can request a resend.",
+                invite.Email, invite.Id, otpRow.Id);
+        }
+
         return new SupplierInviteDetailDto(
             invite.Id, invite.Seq, invite.LegalName, invite.Email, invite.InvitedBy,
             invite.InvitedAt, invite.ExpiresAt, invite.ConsumedAt, invite.SupplierId,
             invite.Token, "Pending");
+    }
+
+    private string BuildRegistrationUrl(string token)
+    {
+        // Mirror SupplierRegistrationController.BuildRegistrationUrl — same Web:BaseUrl convention.
+        var configured = _config["Web:BaseUrl"];
+        var baseUrl = !string.IsNullOrWhiteSpace(configured)
+            ? configured.TrimEnd('/')
+            : "http://localhost:5114";
+        return $"{baseUrl}/register/{token}";
     }
 
     private static string GenerateUrlSafeToken()

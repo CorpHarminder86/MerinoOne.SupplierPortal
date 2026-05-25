@@ -1,0 +1,232 @@
+@page "/admin/email-templates"
+@using MerinoOne.SupplierPortal.Contracts.Admin
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+<PageTitle>Email templates</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Email Templates</h1>
+                <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Edit subject/body for outbound system emails.</p>
+        </div>
+    </header>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (rows == null || rows.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">mail</span>
+            <div>No email templates defined.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.6fr 90px 160px 110px; --tl-min-width: 880px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Key</div>
+                <div class="tlg-col">Subject</div>
+                <div class="tlg-col">Active</div>
+                <div class="tlg-col">Last updated</div>
+                <div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var r in rows)
+            {
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code">@r.TemplateKey</div>
+                    <div class="tlg-col tlg-desc">@r.Subject</div>
+                    <div class="tlg-col"><span class="tlg-status @(r.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(r.IsActive ? "Yes" : "No")</span></div>
+                    <div class="tlg-col" style="font-family:Inter,monospace;font-size:12px;color:var(--mer-ink-600);">@FormatLastUpdated(r)</div>
+                    <div class="tlg-col tlg-col--actions">
+                        @if (Token.HasPermission("Settings.Write"))
+                        {
+                            <button @onclick="() => OpenEdit(r)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit">
+                                <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" style="width:560px;max-height:90vh;display:flex;flex-direction:column;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">mail</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Email template</div>
+                    <h2 class="merino-dialog__title">@editingKey</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="CloseDialog"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body" style="overflow-y:auto;">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Subject *</label>
+                        <RadzenTextBox @bind-Value="formSubject" MaxLength="300" Style="width:100%;" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Body (HTML)</label>
+                        <RadzenHtmlEditor @bind-Value="formHtmlBody" Style="height:380px;width:100%;">
+                            <RadzenHtmlEditorUndo />
+                            <RadzenHtmlEditorRedo />
+                            <RadzenHtmlEditorSeparator />
+                            <RadzenHtmlEditorBold />
+                            <RadzenHtmlEditorItalic />
+                            <RadzenHtmlEditorUnderline />
+                            <RadzenHtmlEditorSeparator />
+                            <RadzenHtmlEditorUnorderedList />
+                            <RadzenHtmlEditorOrderedList />
+                            <RadzenHtmlEditorSeparator />
+                            <RadzenHtmlEditorLink />
+                            <RadzenHtmlEditorImage />
+                            <RadzenHtmlEditorSeparator />
+                            <RadzenHtmlEditorSource />
+                        </RadzenHtmlEditor>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(formNotes))
+                    {
+                        <div class="tl-sub" style="font-size:11px;color:var(--mer-ink-500);background:var(--mer-ink-50);border:1px solid var(--mer-line);border-radius:var(--mer-radius);padding:8px 10px;">@formNotes</div>
+                    }
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                        <RadzenCheckBox @bind-Value="formIsActive" Name="formIsActive" />
+                        <span>Active (uncheck to fall back to built-in hardcoded body)</span>
+                    </label>
+
+                    @if (_sendTestPrompt)
+                    {
+                        <div style="border:1px dashed var(--mer-ink-300);border-radius:var(--mer-radius);padding:10px 12px;background:var(--mer-ink-50);">
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:6px;">Send test to email</label>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <RadzenTextBox @bind-Value="_testToEmail" Placeholder="user@example.com" Style="flex:1;" />
+                                <button class="merino-dialog__btn" data-intent="primary" data-size="sm" @onclick="SendTest" disabled="@busy">@(busy ? "Sending…" : "Send")</button>
+                                <button class="merino-dialog__btn" data-intent="ghost" data-size="sm" @onclick="() => _sendTestPrompt = false" disabled="@busy">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@formError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="CloseDialog">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="outlined" @onclick="OpenSendTestPrompt" disabled="@busy">Send test</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private List<EmailTemplateDto>? rows;
+    private bool loading = true;
+    private bool busy;
+    private bool showDialog;
+    private bool _sendTestPrompt;
+    private string _testToEmail = string.Empty;
+    private string editingKey = string.Empty;
+    private string formSubject = string.Empty;
+    private string formHtmlBody = string.Empty;
+    private bool formIsActive = true;
+    private string formNotes = string.Empty;
+    private string formError = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<EmailTemplateDto>>("api/admin/email-templates");
+        rows = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private static string FormatLastUpdated(EmailTemplateDto r)
+    {
+        var ts = r.UpdatedOn ?? r.CreatedOn;
+        return ts.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    }
+
+    private void OpenEdit(EmailTemplateDto r)
+    {
+        editingKey = r.TemplateKey;
+        formSubject = r.Subject;
+        formHtmlBody = r.HtmlBody;
+        formIsActive = r.IsActive;
+        formNotes = r.Notes ?? string.Empty;
+        formError = string.Empty;
+        _sendTestPrompt = false;
+        _testToEmail = Token.Email ?? string.Empty;
+        showDialog = true;
+    }
+
+    private void CloseDialog()
+    {
+        showDialog = false;
+        _sendTestPrompt = false;
+        formError = string.Empty;
+    }
+
+    private void OpenSendTestPrompt()
+    {
+        formError = string.Empty;
+        if (string.IsNullOrWhiteSpace(_testToEmail))
+            _testToEmail = Token.Email ?? string.Empty;
+        _sendTestPrompt = true;
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(formSubject)) { formError = "Subject required."; return; }
+        if (string.IsNullOrWhiteSpace(formHtmlBody)) { formError = "Body required."; return; }
+        busy = true;
+        var req = new UpdateEmailTemplateRequest(formSubject.Trim(), formHtmlBody, formIsActive);
+        var resp = await Api.PutAsync($"api/admin/email-templates/{Uri.EscapeDataString(editingKey)}", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+            CloseDialog();
+            await Load();
+        }
+        else { formError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task SendTest()
+    {
+        if (string.IsNullOrWhiteSpace(_testToEmail)) { formError = "Test email address required."; return; }
+        busy = true;
+        var req = new SendTestEmailTemplateRequest(_testToEmail.Trim(), formSubject ?? string.Empty, formHtmlBody ?? string.Empty);
+        var resp = await Api.PostAsync("api/admin/email-templates/test-send", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Test email sent", Detail = _testToEmail });
+            _sendTestPrompt = false;
+        }
+        else
+        {
+            var err = resp?.Errors?.FirstOrDefault() ?? "Failed to send test email.";
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Test failed", Detail = err });
+            formError = err;
+        }
+        busy = false;
+    }
+}

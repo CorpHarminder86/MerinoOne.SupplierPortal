@@ -3,6 +3,7 @@
 @inject TokenAccessor Token
 @inject NavigationManager Nav
 @inject NotificationService Notif
+@inject DialogService Dialog
 
 <PageTitle>@detail?.FullName</PageTitle>
 
@@ -120,7 +121,7 @@ else
                                 @rn
                                 @if (role != null)
                                 {
-                                    <button @onclick="() => UnassignRole(role.Id)" style="background:transparent;border:0;color:var(--mer-blue-700);cursor:pointer;line-height:1;padding:0;" title="Remove">
+                                    <button @onclick="() => UnassignRole(role.Id, rn)" style="background:transparent;border:0;color:var(--mer-blue-700);cursor:pointer;line-height:1;padding:0;" title="Remove">
                                         <span class="material-symbols-outlined" style="font-size:14px;">close</span>
                                     </button>
                                 }
@@ -194,7 +195,7 @@ else
                                     <td style="padding:8px 4px;text-align:right;">
                                         @if (Token.HasPermission("Supplier.Provision"))
                                         {
-                                            <button @onclick="() => UnmapSupplier(sid)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Remove">
+                                            <button @onclick="() => UnmapSupplier(sid, s?.SupplierCode ?? s?.LegalName ?? sid.ToString())" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Remove">
                                                 <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
                                             </button>
                                         }
@@ -421,8 +422,10 @@ else
         busy = false;
     }
 
-    private async Task UnassignRole(Guid roleId)
+    private async Task UnassignRole(Guid roleId, string roleName)
     {
+        if (!await Dialog.ConfirmDeleteAsync(roleName, category: "ROLE", actionLabel: "Remove",
+                subtitle: $"Remove role {roleName} from this user?")) return;
         busy = true;
         var resp = await Api.DeleteAsync($"api/users/{Id}/roles/{roleId}");
         if (resp?.Success == true) await Load();
@@ -446,8 +449,9 @@ else
         busy = false;
     }
 
-    private async Task UnmapSupplier(Guid supplierId)
+    private async Task UnmapSupplier(Guid supplierId, string label)
     {
+        if (!await Dialog.ConfirmUnmapAsync(label, "SUPPLIER MAP")) return;
         busy = true;
         var resp = await Api.DeleteAsync($"api/users/{Id}/supplier-maps/{supplierId}");
         if (resp?.Success == true) await Load();

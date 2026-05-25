@@ -1,0 +1,19 @@
+@inherits ErrorBoundary
+@inject ApiErrorNotifier Notifier
+@inject ILogger<GlobalErrorBoundary> Logger
+
+@ChildContent
+
+@code {
+    protected override async Task OnErrorAsync(Exception exception)
+    {
+        if (exception is ApiException api)
+            Logger.LogWarning("API error surfaced to UI: {Status} {Title} (Trace: {TraceId})", api.StatusCode, api.Title, api.TraceId);
+        else
+            Logger.LogError(exception, "Unhandled UI exception");
+
+        try { Notifier.Show(exception); } catch { }
+        Recover();
+        await Task.CompletedTask;
+    }
+}

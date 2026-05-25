@@ -1,0 +1,26 @@
+@inherits LayoutComponentBase
+
+<div class="mer-auth-shell">
+    <aside class="mer-auth-aside">
+        <div class="mer-auth-brand">
+            <img src="img/merino-logo.png" alt="Merino" />
+            <div>
+                <div class="mer-auth-brand__name">MERIN<span class="infinity-symbol">∞</span>NE</div>
+                <div class="mer-auth-brand__tag">SUPPLIER PORTAL</div>
+            </div>
+        </div>
+
+        <div class="mer-auth-blurb">
+            <h1>Supplier collaboration, simplified.</h1>
+            <p>POs, ASNs, invoices and payments — one secure portal between MCSL and its suppliers.</p>
+        </div>
+
+        <div class="mer-auth-foot">© @DateTime.Now.Year Merino Consulting Services Ltd. · Internal use only</div>
+    </aside>
+
+    <main class="mer-auth-main">
+        <div class="mer-auth-card">
+            @Body
+        </div>
+    </main>
+</div>

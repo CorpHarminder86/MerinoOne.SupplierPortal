@@ -1,12 +1,20 @@
 @inherits LayoutComponentBase
 @implements IDisposable
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
 @inject TokenAccessor Token
+@inject ApiClient Api
 @inject NavigationManager Nav
 @inject ShellState Shell
+@inject PageRefreshService PageRefresh
+@inject NotificationService Notification
+@inject ProtectedLocalStorage Storage
+@inject IJSRuntime JS
 
 @if (!Token.IsAuthenticated)
 {
-    <Login OnLoggedIn="@(() => InvokeAsync(StateHasChanged))" />
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--mer-canvas);">
+        <div style="color:var(--mer-ink-500);font-size:13px;">Redirecting to sign in…</div>
+    </div>
 }
 else if (Token.MustChangePassword && !IsOnChangePasswordRoute())
 {
@@ -128,6 +136,10 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">tune</span>
                         <span class="mer-nav-item__label">System Settings</span>
                     </NavLink>
+                    <NavLink class="mer-nav-item" href="/admin/email-templates" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">mail</span>
+                        <span class="mer-nav-item__label">Email Templates</span>
+                    </NavLink>
                 }
             </nav>
         </aside>
@@ -140,19 +152,51 @@ else
                 </nav>
                 <GlobalSearch />
                 <div class="mer-topbar__spacer"></div>
-                <button class="mer-topbar__btn"><span class="material-symbols-outlined">notifications</span></button>
-                <button class="mer-userpill" @onclick="Logout">
-                    <div class="mer-userpill__avatar">@Initials</div>
-                    <div class="mer-userpill__meta">
-                        <span class="mer-userpill__name">@Token.FullName</span>
-                        <span class="mer-userpill__role">@(string.Join(", ", Token.Roles))</span>
-                    </div>
-                    <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-ink-500)">logout</span>
+                <button type="button" class="mer-topbar__btn" title="Refresh page data"
+                        @onclick="RefreshPageAsync" disabled="@_refreshing">
+                    <span class="material-symbols-outlined @(_refreshing ? "mer-spin" : "")">refresh</span>
                 </button>
+                <button class="mer-topbar__btn" title="Notifications"><span class="material-symbols-outlined">notifications</span></button>
+
+                <div class="mer-userpill-wrap" @onclick:stopPropagation="true">
+                    <button type="button" class="mer-userpill" @onclick="ToggleUserMenu">
+                        <div class="mer-userpill__avatar">@Initials</div>
+                        <div class="mer-userpill__meta">
+                            <span class="mer-userpill__name">@DisplayName</span>
+                            <span class="mer-userpill__role">@RoleLabel</span>
+                        </div>
+                        <span class="material-symbols-outlined mer-userpill__caret">expand_more</span>
+                    </button>
+
+                    @if (_userMenuOpen)
+                    {
+                        <div class="mer-usermenu">
+                            <div class="mer-usermenu__header">
+                                <div class="mer-usermenu__name">@DisplayName</div>
+                                <div class="mer-usermenu__email">@(Token.Email ?? Token.UserCode ?? "")</div>
+                            </div>
+                            <button type="button" class="mer-usermenu__item" @onclick='() => UserMenuClick("profile")'>
+                                <span class="material-symbols-outlined">person</span> My profile
+                            </button>
+                            <button type="button" class="mer-usermenu__item" @onclick='() => UserMenuClick("preferences")'>
+                                <span class="material-symbols-outlined">settings</span> Preferences
+                            </button>
+                            <button type="button" class="mer-usermenu__item" @onclick='() => UserMenuClick("refresh")'>
+                                <span class="material-symbols-outlined">refresh</span> Refresh permissions
+                            </button>
+                            <div class="mer-usermenu__sep"></div>
+                            <button type="button" class="mer-usermenu__item mer-usermenu__item--danger" @onclick='() => UserMenuClick("logout")'>
+                                <span class="material-symbols-outlined">logout</span> Sign out
+                            </button>
+                        </div>
+                    }
+                </div>
             </header>
 
             <main class="mer-page">
-                @Body
+                <GlobalErrorBoundary>
+                    @Body
+                </GlobalErrorBoundary>
             </main>
         </div>
     </div>
@@ -165,24 +209,117 @@ else
 </div>
 
 @code {
+    private bool _refreshing;
+    private bool _userMenuOpen;
+    private bool _signingOut;
+    private bool _hydrated;
+
     protected override void OnInitialized()
     {
         Shell.OnChange += OnShellChange;
         Nav.LocationChanged += OnLocationChanged;
+        Token.Changed += OnTokenChanged;
+        Token.SessionExpired += HandleSessionExpired;
     }
 
     private void OnShellChange() => InvokeAsync(StateHasChanged);
+    private void OnTokenChanged() => InvokeAsync(StateHasChanged);
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
-        => InvokeAsync(StateHasChanged);
+    {
+        EnforceRouteGuard();
+        InvokeAsync(StateHasChanged);
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            await HydrateTokenAsync();
+            EnforceRouteGuard();
+        }
+
         if (Token.IsAuthenticated && Token.MustChangePassword && !IsOnChangePasswordRoute())
         {
             await Task.Yield();
             Nav.NavigateTo("/change-password", forceLoad: false);
         }
+    }
+
+    private async Task HydrateTokenAsync()
+    {
+        if (_hydrated) return;
+        if (Token.IsAuthenticated) { _hydrated = true; return; }
+
+        string? stored = null;
+        try
+        {
+            var read = await Storage.GetAsync<string>("merinoone.token");
+            if (read.Success) stored = read.Value;
+        }
+        catch { /* protected storage may not be ready during pre-render */ }
+
+        if (string.IsNullOrEmpty(stored))
+        {
+            // No token persisted — route guard pushes to /login on the next location change.
+            _hydrated = true;
+            return;
+        }
+
+        // Provisionally seed the accessor so ApiClient attaches the bearer on the /me call.
+        Token.SetSession(stored!, null, null, null, Array.Empty<string>(), Array.Empty<string>(), null, false);
+
+        try
+        {
+            var resp = await Api.GetAsync<MerinoOne.SupplierPortal.Contracts.Auth.LoginResponse>("api/auth/me");
+            if (resp?.Success == true && resp.Data is not null)
+            {
+                Token.SetSession(
+                    resp.Data.Token,
+                    resp.Data.UserCode,
+                    Token.Email,
+                    resp.Data.FullName,
+                    resp.Data.Roles,
+                    resp.Data.Permissions,
+                    resp.Data.ExpiresAt,
+                    resp.Data.MustChangePassword);
+                try { await Storage.SetAsync("merinoone.token", resp.Data.Token); } catch { }
+                _hydrated = true;
+                StateHasChanged();
+                return;
+            }
+
+            // Endpoint replied but the session is no longer valid — clear and bounce.
+            Token.Clear();
+            try { await Storage.DeleteAsync("merinoone.token"); } catch { }
+            _hydrated = true;
+            Nav.NavigateTo("/login", forceLoad: false);
+        }
+        catch (ApiException)
+        {
+            // 401 or any API failure → clear stored token, redirect to /login.
+            Token.Clear();
+            try { await Storage.DeleteAsync("merinoone.token"); } catch { }
+            _hydrated = true;
+            Nav.NavigateTo("/login", forceLoad: false);
+        }
+        catch
+        {
+            // Network / unexpected failures: clear silently and bounce, same as 401.
+            Token.Clear();
+            try { await Storage.DeleteAsync("merinoone.token"); } catch { }
+            _hydrated = true;
+            Nav.NavigateTo("/login", forceLoad: false);
+        }
+    }
+
+    private void EnforceRouteGuard()
+    {
+        var rel = Nav.ToBaseRelativePath(Nav.Uri).TrimEnd('/').ToLowerInvariant();
+        var path = rel.Split('?')[0];
+        if (path is "login" or "register" or "not-found" or "error") return;
+        if (!Token.IsAuthenticated && _hydrated)
+            Nav.NavigateTo("/login", forceLoad: false);
     }
 
     private bool IsOnChangePasswordRoute()
@@ -196,22 +333,129 @@ else
     {
         Shell.OnChange -= OnShellChange;
         Nav.LocationChanged -= OnLocationChanged;
+        Token.Changed -= OnTokenChanged;
+        Token.SessionExpired -= HandleSessionExpired;
     }
+
+    private async Task RefreshPageAsync()
+    {
+        if (_refreshing) return;
+        _refreshing = true;
+        StateHasChanged();
+        try
+        {
+            // Pages inheriting AuthenticatedPageBase auto-subscribe to this event.
+            await PageRefresh.RequestRefreshAsync();
+
+            // Fallback for pages that load in OnInitializedAsync without inheriting the base.
+            // Use forceReload:true — interactive Server mode treats same-URL Refresh(false) as
+            // a no-op when the route component instance is reused, so OnInitializedAsync never
+            // re-runs. forceLoad does a real HTTP GET → MainLayout.HydrateTokenAsync re-fetches
+            // /api/auth/me to restore the session. Skip on /login.
+            var rel = Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].TrimEnd('/').ToLowerInvariant();
+            if (rel != "login")
+            {
+                Nav.NavigateTo(Nav.Uri, forceLoad: true);
+            }
+        }
+        finally { _refreshing = false; StateHasChanged(); }
+    }
+
+    private void ToggleUserMenu() => _userMenuOpen = !_userMenuOpen;
+
+    private string DisplayName =>
+        !string.IsNullOrWhiteSpace(Token.FullName) ? Token.FullName! :
+        !string.IsNullOrWhiteSpace(Token.Email)    ? Token.Email!    :
+        !string.IsNullOrWhiteSpace(Token.UserCode) ? Token.UserCode! : "Guest";
 
     private string Initials
     {
         get
         {
-            if (string.IsNullOrEmpty(Token.FullName)) return "?";
-            var parts = Token.FullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var initials = string.Concat(parts.Select(p => p[0])).ToUpper();
-            return initials.Length > 2 ? initials[..2] : initials;
+            var name = DisplayName;
+            if (string.IsNullOrWhiteSpace(name) || name == "Guest") return "??";
+            var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 1) return parts[0][..Math.Min(2, parts[0].Length)].ToUpperInvariant();
+            return $"{parts[0][0]}{parts[^1][0]}".ToUpperInvariant();
         }
     }
 
-    private void Logout()
+    private string RoleLabel => Token.Roles.FirstOrDefault() ?? "User";
+
+    private async Task UserMenuClick(string value)
     {
+        _userMenuOpen = false;
+        switch (value)
+        {
+            case "profile":     Stub("My profile");        break;
+            case "preferences": Stub("Preferences");       break;
+            case "refresh":     await RefreshUserAsync();  break;
+            case "logout":      await LogoutAsync();       break;
+        }
+    }
+
+    private async Task RefreshUserAsync()
+    {
+        try
+        {
+            var resp = await Api.GetAsync<MerinoOne.SupplierPortal.Contracts.Auth.LoginResponse>("api/auth/me");
+            if (resp?.Success == true && resp.Data is not null)
+            {
+                Token.SetSession(
+                    resp.Data.Token,
+                    resp.Data.UserCode,
+                    Token.Email,
+                    resp.Data.FullName,
+                    resp.Data.Roles,
+                    resp.Data.Permissions,
+                    resp.Data.ExpiresAt,
+                    resp.Data.MustChangePassword);
+                try { await Storage.SetAsync("merinoone.token", resp.Data.Token); } catch { }
+                Notification.Notify(NotificationSeverity.Success, "Permissions refreshed.");
+                return;
+            }
+
+            Notification.Notify(NotificationSeverity.Warning, "Session expired. Please sign in again.");
+            await LogoutAsync();
+        }
+        catch (ApiException ex) when (ex.StatusCode == 401)
+        {
+            await LogoutAsync();
+        }
+        catch (Exception)
+        {
+            Notification.Notify(NotificationSeverity.Error, "Failed to refresh permissions.");
+        }
+    }
+
+    private void Stub(string label) => Notification.Notify(NotificationSeverity.Info, $"{label} — coming soon");
+
+    private void HandleSessionExpired() => _ = InvokeAsync(SignOutDueToExpiryAsync);
+
+    private async Task SignOutDueToExpiryAsync()
+    {
+        if (_signingOut || !Token.IsAuthenticated) return;
+        _signingOut = true;
+        try
+        {
+            Notification.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Info,
+                Summary  = "Session expired",
+                Detail   = "Please sign in again.",
+                Duration = 5000
+            });
+            await LogoutAsync();
+        }
+        finally { _signingOut = false; }
+    }
+
+    private async Task LogoutAsync()
+    {
+        try { await Api.LogoutAsync(); } catch { }
         Token.Clear();
-        Nav.NavigateTo("/", forceLoad: true);
+        try { await Storage.DeleteAsync("merinoone.token"); } catch { }
+        try { await JS.InvokeVoidAsync("sessionStorage.removeItem", "merinoone.tabs"); } catch { }
+        Nav.NavigateTo("/login", forceLoad: false);
     }
 }

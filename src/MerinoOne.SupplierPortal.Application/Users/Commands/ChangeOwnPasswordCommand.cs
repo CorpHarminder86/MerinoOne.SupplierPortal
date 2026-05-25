@@ -3,6 +3,7 @@ using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Auth;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
 using ValidationException = MerinoOne.SupplierPortal.Application.Common.Exceptions.ValidationException;
 
@@ -36,12 +37,21 @@ public class ChangeOwnPasswordCommandHandler : IRequestHandler<ChangeOwnPassword
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _current;
     private readonly IPasswordHasher _hasher;
+    private readonly IEmailService _email;
+    private readonly ILogger<ChangeOwnPasswordCommandHandler> _logger;
 
-    public ChangeOwnPasswordCommandHandler(IAppDbContext db, ICurrentUser current, IPasswordHasher hasher)
+    public ChangeOwnPasswordCommandHandler(
+        IAppDbContext db,
+        ICurrentUser current,
+        IPasswordHasher hasher,
+        IEmailService email,
+        ILogger<ChangeOwnPasswordCommandHandler> logger)
     {
         _db = db;
         _current = current;
         _hasher = hasher;
+        _email = email;
+        _logger = logger;
     }
 
     public async Task<Unit> Handle(ChangeOwnPasswordCommand request, CancellationToken ct)
@@ -68,6 +78,23 @@ public class ChangeOwnPasswordCommandHandler : IRequestHandler<ChangeOwnPassword
         user.UpdatedOn = now;
 
         await _db.SaveChangesAsync(ct);
+
+        // Security-event notification. Persistence already committed — log and continue on failure.
+        try
+        {
+            await _email.SendPasswordChangedAsync(
+                user.Email,
+                user.FullName,
+                now.ToString("u"),
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Password-changed email send failed for {UserCode} ({Email}). Password change is already committed.",
+                user.UserCode, user.Email);
+        }
+
         return Unit.Value;
     }
 }

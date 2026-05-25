@@ -25,6 +25,9 @@ public static class SeedRunner
         logger?.LogInformation("Seed: MasterSeeder");
         await MasterSeeder.SeedAsync(ctx, ct);
 
+        logger?.LogInformation("Seed: EmailTemplateSeeder");
+        await EmailTemplateSeeder.SeedAsync(ctx, ct);
+
         if (includeBackfill)
         {
             logger?.LogInformation("Seed: BackfillSeeder (large volume)");

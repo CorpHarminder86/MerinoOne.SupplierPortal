@@ -4,8 +4,14 @@
     {
       "name": "web",
       "runtimeExecutable": "dotnet",
-      "runtimeArgs": ["run", "--project", "src/MerinoOne.Web", "--no-build"],
+      "runtimeArgs": ["run", "--project", "src/MerinoOne.Web", "--launch-profile", "https", "--no-build"],
       "port": 5114
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/MerinoOne.SupplierPortal", "--launch-profile", "https", "--no-build"],
+      "port": 5186
     }
   ]
 }

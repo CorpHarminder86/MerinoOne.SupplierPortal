@@ -1,7 +1,9 @@
 @page "/register/{Token}"
 @layout EmptyLayout
+@implements IDisposable
 @using System.Net.Http
 @using System.Net.Http.Json
+@using System.Text.RegularExpressions
 @using Microsoft.AspNetCore.Components.Forms
 @using MerinoOne.SupplierPortal.Contracts.Common
 @inject ApiClient Api
@@ -32,6 +34,45 @@ else if (registered)
             Thank you. Our team will review your details and contact you on <b>@invite.Email</b>. You will receive
             a portal login once your supplier registration is approved.
         </p>
+    </div>
+}
+else if (!_otpVerified)
+{
+    <div class="rz-card" style="padding:32px;max-width:480px;margin:0 auto;">
+        <header style="margin-bottom:20px;text-align:center;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;color:var(--mer-ink-500);text-transform:uppercase;">Verify</div>
+            <h1 style="margin:6px 0 6px;font-size:20px;color:var(--mer-blue-darker);">Enter the code we sent to @invite.Email</h1>
+            <p style="color:var(--mer-ink-500);font-size:12.5px;">Check your inbox for a 6-digit verification code. It expires in 10 minutes.</p>
+        </header>
+
+        <div style="margin-bottom:14px;">
+            <input class="rz-textbox"
+                   style="width:100%;padding:14px 12px;font-family:Inter,monospace;font-size:22px;letter-spacing:0.4em;text-align:center;"
+                   maxlength="6"
+                   placeholder="000000"
+                   @bind="_otpCode"
+                   @bind:event="oninput"
+                   disabled="@_otpBusy" />
+        </div>
+
+        @if (!string.IsNullOrEmpty(_otpError))
+        {
+            <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12.5px;margin-bottom:12px;">@_otpError</div>
+        }
+
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+            <button class="rz-button rz-primary"
+                    style="padding:10px 18px;border-radius:6px;border:0;color:#fff;cursor:pointer;font-weight:600;flex:1;"
+                    @onclick="VerifyOtp"
+                    disabled="@(_otpBusy || string.IsNullOrWhiteSpace(_otpCode) || _otpCode.Trim().Length != 6)">
+                @(_otpBusy ? "Verifying…" : "Verify")
+            </button>
+            <button style="background:transparent;border:0;color:var(--mer-blue);cursor:@(_resendInSeconds > 0 || _otpBusy ? "default" : "pointer");font-size:12.5px;font-weight:600;@(_resendInSeconds > 0 || _otpBusy ? "opacity:0.5;" : "")"
+                    @onclick="ResendOtp"
+                    disabled="@(_resendInSeconds > 0 || _otpBusy)">
+                @(_resendInSeconds > 0 ? $"Resend in {_resendInSeconds}s" : "Resend code")
+            </button>
+        </div>
     </div>
 }
 else
@@ -274,6 +315,14 @@ else
     private int currentStep = 1;
     private string submitError = string.Empty;
 
+    // Invite-OTP gate (in-memory only; page reload forces a fresh code entry by design).
+    private bool _otpVerified;
+    private bool _otpBusy;
+    private string _otpCode = string.Empty;
+    private string _otpError = string.Empty;
+    private int _resendInSeconds;
+    private System.Threading.Timer? _resendTimer;
+
     private string legalName = string.Empty;
     private string tradeName = string.Empty;
     private string supplierType = "Material";
@@ -316,6 +365,114 @@ else
             // invite stays null -> empty state
         }
         loading = false;
+    }
+
+    private async Task VerifyOtp()
+    {
+        _otpError = string.Empty;
+        if (string.IsNullOrWhiteSpace(_otpCode) || _otpCode.Trim().Length != 6)
+        {
+            _otpError = "Enter the 6-digit code from your email.";
+            return;
+        }
+        _otpBusy = true;
+        try
+        {
+            var resp = await Api.PostAsync<VerifyInviteOtpResponse, VerifyInviteOtpRequest>(
+                $"api/supplier-registration/invites/{Token}/verify-otp",
+                new VerifyInviteOtpRequest(_otpCode.Trim()));
+
+            if (resp?.Success == true && resp.Data?.Verified == true)
+            {
+                _otpVerified = true;
+                _otpError = string.Empty;
+            }
+            else
+            {
+                var msg = resp?.Data?.Message ?? resp?.Errors?.FirstOrDefault();
+                if (resp?.Data is { } d && string.IsNullOrEmpty(msg))
+                {
+                    msg = d.RemainingAttempts > 0
+                        ? $"Invalid OTP — {d.RemainingAttempts} attempts left."
+                        : "OTP not found, please resend.";
+                }
+                _otpError = msg ?? "Verification failed. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _otpError = $"Verification failed: {ex.Message}";
+        }
+        finally
+        {
+            _otpBusy = false;
+        }
+    }
+
+    private async Task ResendOtp()
+    {
+        if (_resendInSeconds > 0 || _otpBusy) return;
+        _otpBusy = true;
+        _otpError = string.Empty;
+        try
+        {
+            var resp = await Api.PostAsync<ResendInviteOtpResponse, object>(
+                $"api/supplier-registration/invites/{Token}/resend-otp",
+                new { });
+
+            if (resp?.Success == true && resp.Data?.Sent == true)
+            {
+                StartResendCountdown(resp.Data.RetryAfterSeconds > 0 ? resp.Data.RetryAfterSeconds : 60);
+            }
+            else
+            {
+                // Throttled or transient failure — parse cooldown from response/message and arm the timer anyway.
+                var seconds = resp?.Data?.RetryAfterSeconds ?? 0;
+                if (seconds <= 0)
+                {
+                    var msg = resp?.Data?.Message ?? resp?.Errors?.FirstOrDefault();
+                    if (!string.IsNullOrEmpty(msg))
+                    {
+                        var m = Regex.Match(msg, "(\\d+)\\s*s");
+                        if (m.Success && int.TryParse(m.Groups[1].Value, out var parsed)) seconds = parsed;
+                    }
+                }
+                StartResendCountdown(seconds > 0 ? seconds : 60);
+                _otpError = resp?.Data?.Message ?? resp?.Errors?.FirstOrDefault() ?? "Could not resend code. Please wait and try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _otpError = $"Could not resend code: {ex.Message}";
+            StartResendCountdown(60);
+        }
+        finally
+        {
+            _otpBusy = false;
+        }
+    }
+
+    private void StartResendCountdown(int seconds)
+    {
+        _resendTimer?.Dispose();
+        _resendInSeconds = seconds;
+        _resendTimer = new System.Threading.Timer(async _ =>
+        {
+            _resendInSeconds--;
+            if (_resendInSeconds <= 0)
+            {
+                _resendInSeconds = 0;
+                _resendTimer?.Dispose();
+                _resendTimer = null;
+            }
+            await InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+    }
+
+    public void Dispose()
+    {
+        _resendTimer?.Dispose();
+        _resendTimer = null;
     }
 
     private void GoStep(int s) { if (s <= currentStep) currentStep = s; }

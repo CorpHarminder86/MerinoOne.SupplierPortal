@@ -6,4 +6,5 @@ public class PasswordHasherService : IPasswordHasher
 {
     public string Hash(string password) => PasswordHasher.Hash(password);
     public bool Verify(string password, string stored) => PasswordHasher.Verify(password, stored);
+    public string DeterministicHash(string input) => PasswordHasher.DeterministicHash(input);
 }

@@ -32,10 +32,13 @@ public class MapSupplierCommandHandler : IRequestHandler<MapSupplierCommand, Uni
             .FirstOrDefaultAsync(s => s.Id == request.Body.SupplierId, ct)
             ?? throw new NotFoundException("Supplier", request.Body.SupplierId);
 
-        // Existing mapping is a conflict (TSD §5.2: removed together, in one transaction — likewise added together).
-        var alreadyMapped = await _db.SupplierUserMaps.IgnoreQueryFilters()
-            .AnyAsync(m => m.AppUserId == user.Id && m.SupplierId == supplier.Id, ct);
-        if (alreadyMapped)
+        // Load any existing mapping INCLUDING soft-deleted. An active row is a true conflict.
+        // A soft-deleted row means the admin previously removed the mapping — restore it + the
+        // paired SecRight (one in, one out per TSD §5.2) instead of inserting a duplicate.
+        var existingMap = await _db.SupplierUserMaps.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(m => m.AppUserId == user.Id && m.SupplierId == supplier.Id, ct);
+
+        if (existingMap is not null && !existingMap.IsDeleted)
             throw new ConflictException($"User '{user.UserCode}' is already mapped to supplier '{supplier.SupplierCode}'.");
 
         var seccode = await _db.Seccodes.IgnoreQueryFilters()
@@ -45,27 +48,69 @@ public class MapSupplierCommandHandler : IRequestHandler<MapSupplierCommand, Uni
         var actor = string.IsNullOrEmpty(_user.UserCode) ? "api" : _user.UserCode;
         var now = DateTime.UtcNow;
 
-        var secRight = new SecRight
+        if (existingMap is not null)
         {
-            Id = Guid.NewGuid(),
-            SeccodeId = seccode.Id,
-            UserCode = user.UserCode,
-            CanRead = true,
-            CanWrite = request.Body.CanWrite,
-            CreatedBy = actor,
-            CreatedOn = now
-        };
-        _db.SecRights.Add(secRight);
+            // Restore the soft-deleted map + its paired SecRight (or create a fresh SecRight if
+            // the original is gone — keeps the map row stable while still rebuilding access).
+            var existingSecRight = await _db.SecRights.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(r => r.Id == existingMap.SecRightId, ct);
 
-        _db.SupplierUserMaps.Add(new SupplierUserMap
+            if (existingSecRight is not null)
+            {
+                existingSecRight.IsDeleted = false;
+                existingSecRight.DeletedBy = null;
+                existingSecRight.DeletedOn = null;
+                existingSecRight.CanRead = true;
+                existingSecRight.CanWrite = request.Body.CanWrite;
+                existingSecRight.UpdatedBy = actor;
+                existingSecRight.UpdatedOn = now;
+            }
+            else
+            {
+                var freshSecRight = new SecRight
+                {
+                    Id = Guid.NewGuid(),
+                    SeccodeId = seccode.Id,
+                    UserCode = user.UserCode,
+                    CanRead = true,
+                    CanWrite = request.Body.CanWrite,
+                    CreatedBy = actor,
+                    CreatedOn = now
+                };
+                _db.SecRights.Add(freshSecRight);
+                existingMap.SecRightId = freshSecRight.Id;
+            }
+
+            existingMap.IsDeleted = false;
+            existingMap.DeletedBy = null;
+            existingMap.DeletedOn = null;
+            existingMap.UpdatedBy = actor;
+            existingMap.UpdatedOn = now;
+        }
+        else
         {
-            Id = Guid.NewGuid(),
-            SupplierId = supplier.Id,
-            AppUserId = user.Id,
-            SecRightId = secRight.Id,
-            CreatedBy = actor,
-            CreatedOn = now
-        });
+            var secRight = new SecRight
+            {
+                Id = Guid.NewGuid(),
+                SeccodeId = seccode.Id,
+                UserCode = user.UserCode,
+                CanRead = true,
+                CanWrite = request.Body.CanWrite,
+                CreatedBy = actor,
+                CreatedOn = now
+            };
+            _db.SecRights.Add(secRight);
+
+            _db.SupplierUserMaps.Add(new SupplierUserMap
+            {
+                Id = Guid.NewGuid(),
+                SupplierId = supplier.Id,
+                AppUserId = user.Id,
+                SecRightId = secRight.Id,
+                CreatedBy = actor,
+                CreatedOn = now
+            });
+        }
 
         // Single SaveChangesAsync — EF wraps in an implicit transaction.
         await _db.SaveChangesAsync(ct);

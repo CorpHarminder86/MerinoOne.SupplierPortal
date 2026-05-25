@@ -58,6 +58,24 @@ public class SupplierRegistrationController : ControllerBase
         return Result<SupplierRegistrationResponse>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    [HttpPost("invites/{token}/verify-otp")]
+    [AllowAnonymous]
+    public async Task<Result<VerifyInviteOtpResponse>> VerifyInviteOtp(
+        string token, [FromBody] VerifyInviteOtpRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new VerifyInviteOtpCommand(token, body.Code), ct);
+        return Result<VerifyInviteOtpResponse>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("invites/{token}/resend-otp")]
+    [AllowAnonymous]
+    public async Task<Result<ResendInviteOtpResponse>> ResendInviteOtp(
+        string token, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new ResendInviteOtpCommand(token), ct);
+        return Result<ResendInviteOtpResponse>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
     private string BuildRegistrationUrl(string token)
     {
         // Web URL is configured under Web:BaseUrl. Falls back to the request origin.

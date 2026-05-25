@@ -14,6 +14,14 @@ public record LoginResponse(
     string FullName,
     string[] Roles,
     string[] Permissions,
-    bool MustChangePassword);
+    bool MustChangePassword,
+    bool RequiresMfa = false,
+    string? MfaToken = null);
 
 public record ChangeOwnPasswordRequest(string CurrentPassword, string NewPassword);
+
+/// <summary>
+/// Body posted to <c>/api/auth/mfa/verify</c> to complete login for an MFA-enabled
+/// user. <c>MfaToken</c> is the opaque handle returned by the password leg.
+/// </summary>
+public record MfaVerifyRequest(string MfaToken, string Code);

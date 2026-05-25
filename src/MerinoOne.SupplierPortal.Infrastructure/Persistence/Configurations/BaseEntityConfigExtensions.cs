@@ -1,5 +1,6 @@
 using MerinoOne.SupplierPortal.Domain.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Configurations;
@@ -33,9 +34,13 @@ public static class BaseEntityConfigExtensions
             .HasColumnType("uniqueidentifier")
             .HasDefaultValueSql("NEWID()");
 
-        b.Property(x => x.Seq)
+        var seqProp = b.Property(x => x.Seq)
             .HasColumnName(seqCol)
             .ValueGeneratedOnAdd();
+        // SQL Server IDENTITY column — must not appear in UPDATE statements.
+        // The audit interceptor flips Deleted→Modified for soft-delete which otherwise
+        // marks every column as modified including this identity column.
+        seqProp.Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
 
         b.HasIndex(x => x.Seq)
             .HasDatabaseName(uxSeqName)

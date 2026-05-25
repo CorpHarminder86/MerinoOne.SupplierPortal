@@ -56,6 +56,7 @@ public class SupplierInviteConfiguration : IEntityTypeConfiguration<SupplierInvi
         b.Property(x => x.LegalName).HasColumnName("legalName").HasMaxLength(300).IsRequired();
         b.Property(x => x.Email).HasColumnName("email").HasMaxLength(256).IsRequired();
         b.Property(x => x.InvitedBy).HasColumnName("invitedBy").HasMaxLength(100).IsRequired();
+        b.Property(x => x.MobileNo).HasColumnName("mobileNo").HasMaxLength(20);
         b.Property(x => x.InvitedAt).HasColumnName("invitedAt").HasColumnType("datetime2")
             .HasDefaultValueSql("SYSUTCDATETIME()");
         b.Property(x => x.Token).HasColumnName("token").HasMaxLength(64).IsRequired();
@@ -65,5 +66,78 @@ public class SupplierInviteConfiguration : IEntityTypeConfiguration<SupplierInvi
 
         b.HasIndex(x => x.Token).HasDatabaseName("UQ_SupplierInvite_token").IsUnique();
         b.HasIndex(x => x.Email).HasDatabaseName("IX_SupplierInvite_email");
+    }
+}
+
+public class InviteOtpConfiguration : IEntityTypeConfiguration<InviteOtp>
+{
+    public void Configure(EntityTypeBuilder<InviteOtp> b)
+    {
+        b.ApplyBaseEntityConvention("InviteOtp", "admin", "inviteOtp");
+        b.Property(x => x.SupplierInviteId).HasColumnName("supplierInviteId")
+            .HasColumnType("uniqueidentifier").IsRequired();
+        b.Property(x => x.CodeHash).HasColumnName("codeHash").HasMaxLength(200).IsRequired();
+        b.Property(x => x.IssuedAt).HasColumnName("issuedAt").HasColumnType("datetime2")
+            .HasDefaultValueSql("SYSUTCDATETIME()");
+        b.Property(x => x.ExpiresAt).HasColumnName("expiresAt").HasColumnType("datetime2");
+        b.Property(x => x.Attempts).HasColumnName("attempts").HasDefaultValue(0);
+        b.Property(x => x.ConsumedAt).HasColumnName("consumedAt").HasColumnType("datetime2");
+
+        b.HasOne(x => x.Invite)
+            .WithMany()
+            .HasForeignKey(x => x.SupplierInviteId)
+            .HasConstraintName("FK_InviteOtp_SupplierInvite_SupplierInviteId")
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.HasIndex(x => new { x.SupplierInviteId, x.IssuedAt })
+            .HasDatabaseName("IX_InviteOtp_supplierInviteId_issuedAt")
+            .IsDescending(false, true);
+    }
+}
+
+public class LoginOtpConfiguration : IEntityTypeConfiguration<LoginOtp>
+{
+    public void Configure(EntityTypeBuilder<LoginOtp> b)
+    {
+        b.ApplyBaseEntityConvention("LoginOtp", "admin", "loginOtp");
+        b.Property(x => x.AppUserId).HasColumnName("appUserId")
+            .HasColumnType("uniqueidentifier").IsRequired();
+        b.Property(x => x.CodeHash).HasColumnName("codeHash").HasMaxLength(200).IsRequired();
+        b.Property(x => x.IssuedAt).HasColumnName("issuedAt").HasColumnType("datetime2")
+            .HasDefaultValueSql("SYSUTCDATETIME()");
+        b.Property(x => x.ExpiresAt).HasColumnName("expiresAt").HasColumnType("datetime2");
+        b.Property(x => x.Attempts).HasColumnName("attempts").HasDefaultValue(0);
+        b.Property(x => x.ConsumedAt).HasColumnName("consumedAt").HasColumnType("datetime2");
+        b.Property(x => x.MfaToken).HasColumnName("mfaToken").HasMaxLength(64).IsRequired();
+
+        b.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.AppUserId)
+            .HasConstraintName("FK_LoginOtp_AppUser_AppUserId")
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.HasIndex(x => x.MfaToken)
+            .HasDatabaseName("UX_LoginOtp_mfaToken")
+            .IsUnique();
+        b.HasIndex(x => new { x.AppUserId, x.IssuedAt })
+            .HasDatabaseName("IX_LoginOtp_appUserId_issuedAt")
+            .IsDescending(false, true);
+    }
+}
+
+public class EmailTemplateConfiguration : IEntityTypeConfiguration<EmailTemplate>
+{
+    public void Configure(EntityTypeBuilder<EmailTemplate> b)
+    {
+        b.ApplyBaseEntityConvention("EmailTemplate", "admin", "emailTemplate");
+        b.Property(x => x.TemplateKey).HasColumnName("templateKey").HasMaxLength(50).IsRequired();
+        b.Property(x => x.Subject).HasColumnName("subject").HasMaxLength(300).IsRequired();
+        b.Property(x => x.HtmlBody).HasColumnName("htmlBody").HasColumnType("nvarchar(max)").IsRequired();
+        b.Property(x => x.IsActive).HasColumnName("isActive").HasColumnType("bit").HasDefaultValue(true);
+        b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(1000);
+
+        b.HasIndex(x => x.TemplateKey)
+            .HasDatabaseName("UX_EmailTemplate_templateKey")
+            .IsUnique();
     }
 }

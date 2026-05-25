@@ -113,6 +113,11 @@
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Email *</label>
                         <input class="rz-textbox" type="email" style="width:100%;padding:8px 10px;" @bind="newEmail" />
                     </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Mobile number</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="+919876543210" @bind="formMobileNo" />
+                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Optional. Will be used for OTP verification at sign-up (Phase 2).</div>
+                    </div>
                 </div>
                 @if (!string.IsNullOrEmpty(newError))
                 {
@@ -137,6 +142,7 @@
     private bool showNew;
     private string newLegalName = string.Empty;
     private string newEmail = string.Empty;
+    private string formMobileNo = string.Empty;
     private string newError = string.Empty;
     private string? latestRegistrationUrl;
     private string search = string.Empty;
@@ -172,6 +178,7 @@
     {
         newLegalName = string.Empty;
         newEmail = string.Empty;
+        formMobileNo = string.Empty;
         newError = string.Empty;
         showNew = true;
     }
@@ -181,7 +188,7 @@
         if (string.IsNullOrWhiteSpace(newLegalName)) { newError = "Legal name required."; return; }
         if (string.IsNullOrWhiteSpace(newEmail) || !newEmail.Contains('@')) { newError = "Valid email required."; return; }
         busy = true;
-        var req = new CreateSupplierInviteRequest(newLegalName.Trim(), newEmail.Trim());
+        var req = new CreateSupplierInviteRequest(newLegalName.Trim(), newEmail.Trim(), string.IsNullOrWhiteSpace(formMobileNo) ? null : formMobileNo.Trim());
         var resp = await Api.PostAsync<CreateSupplierInviteResponse, CreateSupplierInviteRequest>("api/supplier-registration/invites", req);
         if (resp?.Success == true && resp.Data != null)
         {

@@ -2,6 +2,7 @@
 @inject ApiClient Api
 @inject TokenAccessor Token
 @inject NotificationService Notif
+@inject DialogService Dialog
 
 <PageTitle>Items</PageTitle>
 
@@ -66,7 +67,7 @@
                             </button>
                             @if (r.IsActive)
                             {
-                                <button @onclick="() => Deactivate(r.Id)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
+                                <button @onclick="() => Deactivate(r.Id, r.Code)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
                                     <span class="material-symbols-outlined" style="font-size:18px;">block</span>
                                 </button>
                             }
@@ -220,8 +221,9 @@
         busy = false;
     }
 
-    private async Task Deactivate(Guid id)
+    private async Task Deactivate(Guid id, string label)
     {
+        if (!await Dialog.ConfirmDeactivateAsync(label, "ITEM")) return;
         busy = true;
         var resp = await Api.PostAsync<object>($"api/masters/items/{id}/deactivate", new { });
         if (resp?.Success == true)

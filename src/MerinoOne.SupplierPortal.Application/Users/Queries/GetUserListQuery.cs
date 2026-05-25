@@ -15,7 +15,8 @@ public class GetUserListQueryHandler : IRequestHandler<GetUserListQuery, List<Us
 
     public async Task<List<UserListItemDto>> Handle(GetUserListQuery request, CancellationToken ct)
     {
-        var q = _db.AppUsers.IgnoreQueryFilters().AsQueryable();
+        // IgnoreQueryFilters bypasses BOTH seccode AND soft-delete; re-apply !IsDeleted manually.
+        var q = _db.AppUsers.IgnoreQueryFilters().Where(u => !u.IsDeleted);
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
@@ -41,11 +42,12 @@ public class GetUserListQueryHandler : IRequestHandler<GetUserListQuery, List<Us
                 u.IsActive,
                 u.CreatedOn,
                 Roles = _db.UserRoles.IgnoreQueryFilters()
-                    .Where(ur => ur.AppUserId == u.Id)
-                    .Join(_db.Roles.IgnoreQueryFilters(), ur => ur.RoleId, r => r.Id, (ur, r) => r.Name)
+                    .Where(ur => ur.AppUserId == u.Id && !ur.IsDeleted)
+                    .Join(_db.Roles.IgnoreQueryFilters().Where(r => !r.IsDeleted),
+                          ur => ur.RoleId, r => r.Id, (ur, r) => r.Name)
                     .ToArray(),
                 SupplierMapCount = _db.SupplierUserMaps.IgnoreQueryFilters()
-                    .Count(m => m.AppUserId == u.Id)
+                    .Count(m => m.AppUserId == u.Id && !m.IsDeleted)
             })
             .ToListAsync(ct);
 

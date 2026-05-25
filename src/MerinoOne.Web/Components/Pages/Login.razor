@@ -1,0 +1,263 @@
+@page "/login"
+@layout MerinoOne.Web.Components.Layout.LoginLayout
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject ApiClient Api
+@inject TokenAccessor AuthState
+@inject NavigationManager Navigation
+@inject NotificationService Notification
+@inject ProtectedLocalStorage Storage
+
+<PageTitle>Sign in — Supplier Portal</PageTitle>
+
+@if (!_requiresMfa)
+{
+    <h2>Welcome back</h2>
+    <p class="mer-auth-sub">Use your email to sign in. Existing internal users can still use their user code.</p>
+
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter"
+                     AllowClose="false" Class="rz-mb-4">
+            @_errorMessage
+        </RadzenAlert>
+    }
+
+    <RadzenStack Gap="1rem">
+        <RadzenFormField Text="Work email or user code" Variant="Variant.Outlined" Style="width:100%;">
+            <ChildContent>
+                <RadzenTextBox @bind-Value="Input.Email"
+                               Change="@(_ => ClearError())"
+                               Placeholder="you@company.com"
+                               Disabled="_busy"
+                               Style="width:100%;"
+                               @onkeydown="HandleKeyDown" />
+            </ChildContent>
+            <Start><RadzenIcon Icon="mail" /></Start>
+        </RadzenFormField>
+
+        <RadzenFormField Text="Password" Variant="Variant.Outlined" Style="width:100%;">
+            <ChildContent>
+                <RadzenPassword @bind-Value="Input.Password"
+                                Change="@(_ => ClearError())"
+                                Placeholder="Enter your password"
+                                Disabled="_busy"
+                                Style="width:100%;"
+                                @onkeydown="HandleKeyDown" />
+            </ChildContent>
+            <Start><RadzenIcon Icon="lock" /></Start>
+        </RadzenFormField>
+
+        <div class="mer-auth-row">
+            <RadzenCheckBox @bind-Value="_remember" Name="remember" />
+            <label for="remember" style="margin-left:6px;">Remember me</label>
+            <span style="flex:1;"></span>
+            <a class="mer-auth-link">Forgot password?</a>
+        </div>
+
+        <RadzenButton ButtonStyle="ButtonStyle.Primary"
+                      Size="ButtonSize.Large"
+                      IsBusy="_busy"
+                      BusyText="Signing in…"
+                      Text="Sign in"
+                      Click="OnSubmitAsync"
+                      Style="width:100%;height:44px;font-weight:600;" />
+    </RadzenStack>
+
+    <p class="mer-auth-foot-text">
+        Protected by enterprise-grade encryption · <a href="#" class="mer-auth-link">Privacy</a> · <a href="#" class="mer-auth-link">Terms</a>
+    </p>
+}
+else
+{
+    <h2>Two-step verification</h2>
+    <p class="mer-auth-sub">We emailed a 6-digit code to <b>@_mfaEmail</b>. Enter it below to finish signing in.</p>
+
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter"
+                     AllowClose="false" Class="rz-mb-4">
+            @_errorMessage
+        </RadzenAlert>
+    }
+
+    <RadzenStack Gap="1rem">
+        <RadzenFormField Text="6-digit code" Variant="Variant.Outlined" Style="width:100%;">
+            <ChildContent>
+                <RadzenTextBox @bind-Value="_mfaCode"
+                               Change="@(_ => ClearError())"
+                               Placeholder="000000"
+                               MaxLength="6"
+                               Disabled="_busy"
+                               Style="width:100%;font-family:Inter,monospace;font-size:20px;letter-spacing:0.4em;text-align:center;"
+                               @onkeydown="HandleMfaKeyDown" />
+            </ChildContent>
+            <Start><RadzenIcon Icon="pin" /></Start>
+        </RadzenFormField>
+
+        <RadzenButton ButtonStyle="ButtonStyle.Primary"
+                      Size="ButtonSize.Large"
+                      IsBusy="_busy"
+                      BusyText="Verifying…"
+                      Text="Verify and sign in"
+                      Click="OnMfaVerifyAsync"
+                      Style="width:100%;height:44px;font-weight:600;" />
+
+        <div class="mer-auth-row" style="justify-content:center;">
+            <a class="mer-auth-link" style="cursor:pointer;" @onclick="BackToSignIn">Back to sign-in</a>
+        </div>
+    </RadzenStack>
+
+    <p class="mer-auth-foot-text">
+        Protected by enterprise-grade encryption · <a href="#" class="mer-auth-link">Privacy</a> · <a href="#" class="mer-auth-link">Terms</a>
+    </p>
+}
+
+@code {
+    private LoginModel Input { get; set; } = new();
+    private bool _busy;
+    private bool _remember = true;
+    private string? _errorMessage;
+
+    private bool _requiresMfa;
+    private string _mfaToken = string.Empty;
+    private string _mfaEmail = string.Empty;
+    private string _mfaName = string.Empty;
+    private string _mfaCode = string.Empty;
+
+    private void ClearError() => _errorMessage = null;
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_busy) await OnSubmitAsync();
+    }
+
+    private async Task HandleMfaKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_busy) await OnMfaVerifyAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && AuthState.IsAuthenticated)
+            Navigation.NavigateTo("/", forceLoad: false);
+        await Task.CompletedTask;
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        _errorMessage = null;
+        if (string.IsNullOrWhiteSpace(Input.Email) || string.IsNullOrWhiteSpace(Input.Password))
+        {
+            _errorMessage = "Please enter your email and password.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Api.LoginAsync(new LoginRequest(Input.Email.Trim(), Input.Password));
+            if (result?.Success != true)
+            {
+                _errorMessage = result?.Errors?.FirstOrDefault() ?? "Invalid email or password.";
+                Notification.Notify(NotificationSeverity.Error, _errorMessage);
+                return;
+            }
+
+            // MFA gate — server returned RequiresMfa with an opaque token; no session seeded.
+            if (result.Data is { RequiresMfa: true, MfaToken: not null } mfaData)
+            {
+                _mfaToken = mfaData.MfaToken!;
+                _mfaEmail = mfaData.UserCode;
+                _mfaName = mfaData.FullName;
+                _mfaCode = string.Empty;
+                _requiresMfa = true;
+                return;
+            }
+
+            await PersistAndNavigateAsync();
+        }
+        catch (ApiException apiEx)
+        {
+            _errorMessage = apiEx.Errors.Length > 0 ? string.Join("\n", apiEx.Errors) : apiEx.Title;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Sign-in failed: {ex.Message}";
+            Notification.Notify(NotificationSeverity.Error, _errorMessage);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task OnMfaVerifyAsync()
+    {
+        _errorMessage = null;
+        if (string.IsNullOrWhiteSpace(_mfaCode) || _mfaCode.Trim().Length != 6)
+        {
+            _errorMessage = "Enter the 6-digit code from your email.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var resp = await Api.PostAsync<LoginResponse, MfaVerifyRequest>(
+                "api/auth/mfa/verify",
+                new MfaVerifyRequest(_mfaToken, _mfaCode.Trim()));
+
+            if (resp?.Success != true || resp.Data == null || string.IsNullOrEmpty(resp.Data.Token))
+            {
+                _errorMessage = resp?.Errors?.FirstOrDefault() ?? "Verification failed. Please try again.";
+                Notification.Notify(NotificationSeverity.Error, _errorMessage);
+                return;
+            }
+
+            // Mirror the persistence path ApiClient.LoginAsync uses for the password leg.
+            AuthState.SetSession(
+                token: resp.Data.Token,
+                userCode: resp.Data.UserCode,
+                email: _mfaEmail.Contains('@') ? _mfaEmail : null,
+                fullName: resp.Data.FullName,
+                roles: resp.Data.Roles,
+                permissions: resp.Data.Permissions,
+                expiresAt: resp.Data.ExpiresAt,
+                mustChangePassword: resp.Data.MustChangePassword);
+
+            await PersistAndNavigateAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Verification failed: {ex.Message}";
+            Notification.Notify(NotificationSeverity.Error, _errorMessage);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task PersistAndNavigateAsync()
+    {
+        try { await Storage.SetAsync("merinoone.token", AuthState.Token ?? string.Empty); } catch { }
+
+        Notification.Notify(NotificationSeverity.Success, $"Welcome, {AuthState.FullName ?? AuthState.UserCode}");
+
+        if (AuthState.MustChangePassword)
+            Navigation.NavigateTo("/change-password", forceLoad: false);
+        else
+            Navigation.NavigateTo("/", forceLoad: false);
+    }
+
+    private void BackToSignIn()
+    {
+        _requiresMfa = false;
+        _mfaToken = string.Empty;
+        _mfaEmail = string.Empty;
+        _mfaName = string.Empty;
+        _mfaCode = string.Empty;
+        _errorMessage = null;
+    }
+
+    public class LoginModel
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}

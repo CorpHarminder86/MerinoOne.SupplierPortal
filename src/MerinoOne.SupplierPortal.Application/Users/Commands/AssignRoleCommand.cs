@@ -30,18 +30,35 @@ public class AssignRoleCommandHandler : IRequestHandler<AssignRoleCommand, Unit>
             .FirstOrDefaultAsync(r => r.Id == request.Body.RoleId, ct)
             ?? throw new NotFoundException("Role", request.Body.RoleId);
 
+        // Load existing link INCLUDING soft-deleted. If active → idempotent. If soft-deleted →
+        // restore by clearing the delete-block (resurrects the original Seq + audit chain).
         var existing = await _db.UserRoles.IgnoreQueryFilters()
-            .AnyAsync(ur => ur.AppUserId == user.Id && ur.RoleId == role.Id, ct);
-        if (existing) return Unit.Value; // idempotent
+            .FirstOrDefaultAsync(ur => ur.AppUserId == user.Id && ur.RoleId == role.Id, ct);
 
-        _db.UserRoles.Add(new UserRole
+        var actor = string.IsNullOrEmpty(_user.UserCode) ? "api" : _user.UserCode;
+        var now = DateTime.UtcNow;
+
+        if (existing is not null)
         {
-            Id = Guid.NewGuid(),
-            AppUserId = user.Id,
-            RoleId = role.Id,
-            CreatedOn = DateTime.UtcNow,
-            CreatedBy = string.IsNullOrEmpty(_user.UserCode) ? "api" : _user.UserCode
-        });
+            if (!existing.IsDeleted) return Unit.Value; // already active — idempotent
+            existing.IsDeleted = false;
+            existing.DeletedBy = null;
+            existing.DeletedOn = null;
+            existing.UpdatedBy = actor;
+            existing.UpdatedOn = now;
+        }
+        else
+        {
+            _db.UserRoles.Add(new UserRole
+            {
+                Id = Guid.NewGuid(),
+                AppUserId = user.Id,
+                RoleId = role.Id,
+                CreatedOn = now,
+                CreatedBy = actor
+            });
+        }
+
         await _db.SaveChangesAsync(ct);
         return Unit.Value;
     }

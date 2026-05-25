@@ -20,13 +20,17 @@ public class GetUserByIdQueryHandler : IRequestHandler<GetUserByIdQuery, UserDet
             .FirstOrDefaultAsync(u => u.Id == request.Id, ct)
             ?? throw new NotFoundException("User", request.Id);
 
+        // IgnoreQueryFilters() drops the SECCODE filter (admin needs cross-tenant view) but
+        // also drops the SOFT-DELETE filter — must re-apply !IsDeleted explicitly or unmapped
+        // / removed rows resurface in the UI.
         var roles = await _db.UserRoles.IgnoreQueryFilters()
-            .Where(ur => ur.AppUserId == user.Id)
-            .Join(_db.Roles.IgnoreQueryFilters(), ur => ur.RoleId, r => r.Id, (ur, r) => r.Name)
+            .Where(ur => ur.AppUserId == user.Id && !ur.IsDeleted)
+            .Join(_db.Roles.IgnoreQueryFilters().Where(r => !r.IsDeleted),
+                  ur => ur.RoleId, r => r.Id, (ur, r) => r.Name)
             .ToArrayAsync(ct);
 
         var supplierIds = await _db.SupplierUserMaps.IgnoreQueryFilters()
-            .Where(m => m.AppUserId == user.Id)
+            .Where(m => m.AppUserId == user.Id && !m.IsDeleted)
             .Select(m => m.SupplierId)
             .ToArrayAsync(ct);
 

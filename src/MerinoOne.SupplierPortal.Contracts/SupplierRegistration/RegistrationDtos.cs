@@ -26,7 +26,7 @@ public record SupplierInviteDetailDto(
     string Token,
     string Status);
 
-public record CreateSupplierInviteRequest(string LegalName, string Email);
+public record CreateSupplierInviteRequest(string LegalName, string Email, string? MobileNo = null);
 
 public record CreateSupplierInviteResponse(
     SupplierInviteDetailDto Invite,
@@ -80,3 +80,22 @@ public record SupplierRegistrationResponse(
     string SupplierCode,
     string Status,
     string Message);
+
+/// <summary>
+/// Body posted by the invite landing page to verify the 6-digit OTP that was
+/// emailed alongside the invite link.
+/// </summary>
+public record VerifyInviteOtpRequest(string Code);
+
+/// <summary>
+/// Result of an invite-OTP verification attempt. <c>RemainingAttempts</c> is
+/// clamped to 0 when the OTP is invalidated (5 wrong attempts) so the UI can
+/// switch to "request a new code" without doing the math itself.
+/// </summary>
+public record VerifyInviteOtpResponse(bool Verified, string? Message, int RemainingAttempts);
+
+/// <summary>
+/// Result of an invite-OTP resend. <c>RetryAfterSeconds</c> is &gt; 0 when the
+/// request was throttled — clients should display the remaining cooldown.
+/// </summary>
+public record ResendInviteOtpResponse(bool Sent, string? Message, int RetryAfterSeconds);

@@ -25,6 +25,9 @@ public interface IAppDbContext
     DbSet<SecRight> SecRights { get; }
     DbSet<SupplierUserMap> SupplierUserMaps { get; }
     DbSet<SupplierInvite> SupplierInvites { get; }
+    DbSet<InviteOtp> InviteOtps { get; }
+    DbSet<LoginOtp> LoginOtps { get; }
+    DbSet<EmailTemplate> EmailTemplates { get; }
     DbSet<Tenant> Tenants { get; }
 
     DbSet<Item> Items { get; }

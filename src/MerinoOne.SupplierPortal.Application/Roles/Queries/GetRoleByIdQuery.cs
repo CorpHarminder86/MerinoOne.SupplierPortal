@@ -16,12 +16,14 @@ public class GetRoleByIdQueryHandler : IRequestHandler<GetRoleByIdQuery, RoleDet
     public async Task<RoleDetailDto> Handle(GetRoleByIdQuery request, CancellationToken ct)
     {
         var role = await _db.Roles.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.Id == request.Id, ct)
+            .FirstOrDefaultAsync(r => r.Id == request.Id && !r.IsDeleted, ct)
             ?? throw new NotFoundException("Role", request.Id);
 
+        // IgnoreQueryFilters drops soft-delete too; re-apply !IsDeleted on every join.
         var permissions = await _db.RolePermissions.IgnoreQueryFilters()
-            .Where(rp => rp.RoleId == role.Id)
-            .Join(_db.Permissions.IgnoreQueryFilters(), rp => rp.PermissionId, p => p.Id, (rp, p) => p.Code)
+            .Where(rp => rp.RoleId == role.Id && !rp.IsDeleted)
+            .Join(_db.Permissions.IgnoreQueryFilters().Where(p => !p.IsDeleted),
+                  rp => rp.PermissionId, p => p.Id, (rp, p) => p.Code)
             .OrderBy(c => c)
             .ToArrayAsync(ct);
 

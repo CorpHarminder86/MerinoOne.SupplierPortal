@@ -39,6 +39,9 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<SecRight> SecRights => Set<SecRight>();
     public DbSet<SupplierUserMap> SupplierUserMaps => Set<SupplierUserMap>();
     public DbSet<SupplierInvite> SupplierInvites => Set<SupplierInvite>();
+    public DbSet<InviteOtp> InviteOtps => Set<InviteOtp>();
+    public DbSet<LoginOtp> LoginOtps => Set<LoginOtp>();
+    public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
 
     public DbSet<Item> Items => Set<Item>();
@@ -120,13 +123,21 @@ public class AppDbContext : DbContext, IAppDbContext
         }
     }
 
+    // Instance accessors used by the seccode global filter. EF Core evaluates property access
+    // on a DbContext-typed Expression.Constant at query time (not at model-build time), so the
+    // values below are read PER REQUEST instead of being baked into the cached compiled model.
+    public string SecCurrentUserCode => _currentUser?.UserCode ?? string.Empty;
+    public bool SecCurrentUserIsPrivileged => _currentUser?.IsAdmin == true || _currentUser?.IsManager == true;
+    public bool SecCurrentUserIsAuthenticated => _currentUser?.IsAuthenticated == true;
+
     private Expression? BuildSeccodePredicate(ParameterExpression parameter)
     {
-        var userCode = _currentUser?.UserCode ?? string.Empty;
-        var isPrivileged = _currentUser?.IsAdmin == true || _currentUser?.IsManager == true;
-
-        if (isPrivileged) return Expression.Constant(true);
-        if (string.IsNullOrEmpty(userCode)) return Expression.Constant(true);
+        // CRITICAL: do not bake _currentUser values into Expression.Constant — the model is built
+        // ONCE and cached. Reference DbContext instance properties so EF parameterizes per query.
+        var ctx = Expression.Constant(this);
+        var privilegedAccess = Expression.Property(ctx, nameof(SecCurrentUserIsPrivileged));
+        var authenticatedAccess = Expression.Property(ctx, nameof(SecCurrentUserIsAuthenticated));
+        var userCodeAccess = Expression.Property(ctx, nameof(SecCurrentUserCode));
 
         var ownerProp = Expression.Property(parameter, nameof(ISeccode.Owner));
         var ownerNotNull = Expression.NotEqual(ownerProp, Expression.Constant(null));
@@ -135,7 +146,7 @@ public class AppDbContext : DbContext, IAppDbContext
         var srParam = Expression.Parameter(typeof(SecRight), "r");
         var srUserCode = Expression.Property(srParam, nameof(SecRight.UserCode));
         var srCanRead = Expression.Property(srParam, nameof(SecRight.CanRead));
-        var equalsUser = Expression.Equal(srUserCode, Expression.Constant(userCode));
+        var equalsUser = Expression.Equal(srUserCode, userCodeAccess);
         var canRead = Expression.Equal(srCanRead, Expression.Constant(true));
         var srPredicate = Expression.AndAlso(equalsUser, canRead);
         var srLambda = Expression.Lambda<Func<SecRight, bool>>(srPredicate, srParam);
@@ -143,9 +154,15 @@ public class AppDbContext : DbContext, IAppDbContext
         var anyMethod = typeof(Enumerable).GetMethods()
             .First(m => m.Name == "Any" && m.GetParameters().Length == 2)
             .MakeGenericMethod(typeof(SecRight));
-
         var anyCall = Expression.Call(anyMethod, secRightsProp, srLambda);
-        return Expression.AndAlso(ownerNotNull, anyCall);
+
+        // Per-row check: row owner is set AND a SecRight exists for current user.
+        var rowMatchesUser = Expression.AndAlso(ownerNotNull, anyCall);
+
+        // Combined: privileged sees all rows; otherwise authenticated user filtered by SecRights.
+        // Anonymous (not authenticated, not privileged) gets nothing.
+        var nonPrivilegedAllowed = Expression.AndAlso(authenticatedAccess, rowMatchesUser);
+        return Expression.OrElse(privilegedAccess, nonPrivilegedAllowed);
     }
 
     public override int SaveChanges() => base.SaveChanges();

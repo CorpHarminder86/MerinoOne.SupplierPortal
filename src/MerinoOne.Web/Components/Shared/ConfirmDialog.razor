@@ -1,0 +1,33 @@
+@using Radzen
+@inject DialogService Dialog
+
+<div class="mer-confirm">
+    <div class="mer-confirm__head">
+        <div class="mer-confirm__iconchip mer-confirm__iconchip--@Intent">
+            <span class="material-symbols-outlined">@Icon</span>
+        </div>
+        <div class="mer-confirm__head-text">
+            <div class="mer-confirm__cat">@Category</div>
+            <div class="mer-confirm__title">@Title</div>
+        </div>
+    </div>
+    <div class="mer-confirm__sep"></div>
+    <div class="mer-confirm__body">@Subtitle</div>
+    <div class="mer-confirm__footer">
+        <button type="button" class="mer-confirm__cancel" @onclick="OnCancel">@CancelText</button>
+        <button type="button" class="mer-confirm__ok mer-confirm__ok--@Intent" @onclick="OnConfirm">@ConfirmText</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Category { get; set; } = string.Empty;
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Subtitle { get; set; } = string.Empty;
+    [Parameter] public string ConfirmText { get; set; } = "Delete";
+    [Parameter] public string CancelText { get; set; } = "Cancel";
+    [Parameter] public string Intent { get; set; } = "danger";
+    [Parameter] public string Icon { get; set; } = "delete";
+
+    private void OnConfirm() => Dialog.Close(true);
+    private void OnCancel() => Dialog.Close(false);
+}
