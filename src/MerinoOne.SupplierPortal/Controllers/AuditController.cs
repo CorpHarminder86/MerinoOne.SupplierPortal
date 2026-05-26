@@ -20,6 +20,12 @@ public class AuditController : ControllerBase
     /// </summary>
     [HttpGet("{entityName}/{id:guid}")]
     [Authorize(Policy = "Settings.Read")]
+    [EndpointSummary("Audit trail")]
+    [EndpointDescription(@"Returns field-level change history (Before/After values) captured by the audit interceptor.
+Filters / params:
+- **entityName**: Required — entity table name (e.g. ""Supplier"", ""PurchaseOrder"").
+- **id**: Required — entity primary key.
+Returns: List<AuditEntryDto> ordered by timestamp; 404 if no rows. Requires permission **Settings.Read** (admins only).")]
     public async Task<Result<List<AuditEntryDto>>> Trail(string entityName, Guid id, CancellationToken ct)
     {
         var data = await _mediator.Send(new GetAuditTrailQuery(entityName, id), ct);

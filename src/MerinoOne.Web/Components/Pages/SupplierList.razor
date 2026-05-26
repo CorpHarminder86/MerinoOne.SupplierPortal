@@ -90,7 +90,7 @@
         suppliers = q.ToList();
     }
 
-    private void OpenDetail(Guid id) => Nav.NavigateTo($"/suppliers/{id}");
+    private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/suppliers/{id}");
 
     private string StatusClass(string status) => status switch
     {

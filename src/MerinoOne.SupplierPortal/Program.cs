@@ -9,6 +9,7 @@ using MerinoOne.SupplierPortal.Middlewares;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
 
@@ -37,7 +38,31 @@ builder.Host.UseSerilog((ctx, lc) => lc
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    // Inject a Bearer security scheme into the OpenAPI doc so Scalar surfaces a JWT
+    // "Authorize" input. Without this transformer the doc has no security definitions
+    // and the Scalar auth panel renders empty.
+    options.AddDocumentTransformer((document, context, ct) =>
+    {
+        document.Components ??= new Microsoft.OpenApi.OpenApiComponents();
+        document.Components.SecuritySchemes ??= new Dictionary<string, Microsoft.OpenApi.IOpenApiSecurityScheme>();
+        document.Components.SecuritySchemes["Bearer"] = new Microsoft.OpenApi.OpenApiSecurityScheme
+        {
+            Type = Microsoft.OpenApi.SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            In = Microsoft.OpenApi.ParameterLocation.Header,
+            Description = "JWT obtained from POST /api/auth/login. Paste the raw token (no 'Bearer ' prefix)."
+        };
+        document.Security ??= new List<Microsoft.OpenApi.OpenApiSecurityRequirement>();
+        document.Security.Add(new Microsoft.OpenApi.OpenApiSecurityRequirement
+        {
+            [new Microsoft.OpenApi.OpenApiSecuritySchemeReference("Bearer", document)] = new List<string>()
+        });
+        return Task.CompletedTask;
+    });
+});
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
@@ -94,7 +119,22 @@ if (app.Environment.IsDevelopment())
         var ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await ctx.Database.MigrateAsync();
     }
+}
+
+// OpenAPI + Scalar exposed in every environment — protected endpoints still require a
+// valid JWT, so the docs UI is safe to publish. Disable by setting Scalar:Enabled = false
+// in appsettings.Production.json if you need to hide the API surface.
+if (app.Configuration.GetValue("Scalar:Enabled", true))
+{
     app.MapOpenApi();
+    app.MapScalarApiReference(options =>
+    {
+        options.Title = "MerinoOne Supplier Portal API";
+        options.AddPreferredSecuritySchemes("Bearer");
+        options.PersistentAuthentication = true;
+        options.DefaultHttpClient = new(ScalarTarget.Shell, ScalarClient.Curl);
+        options.HideClientButton = false;
+    });
 }
 
 app.UseMiddleware<GlobalExceptionHandler>();

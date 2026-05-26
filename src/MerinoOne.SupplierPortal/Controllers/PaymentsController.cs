@@ -18,6 +18,17 @@ public class PaymentsController : ControllerBase
 
     [HttpGet]
     [Authorize(Policy = "Payment.Read")]
+    [EndpointSummary("Payment list")]
+    [EndpointDescription(@"Paged list of payments dispatched (or scheduled) to suppliers.
+Filters / params:
+- **page**: Optional — 1-based page index (default 1).
+- **pageSize**: Optional — rows per page (default 50).
+- **supplierId**: Optional — restrict to one supplier.
+- **invoiceId**: Optional — restrict to payments against one invoice.
+- **search**: Optional — free-text on payment / reference number.
+Side effects:
+- Seccode-scoped: supplier users see only their own payments.
+Returns: PagedResult<PaymentListItemDto>. Requires permission **Payment.Read**.")]
     public async Task<Result<ContractsPagedResult>> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
@@ -32,6 +43,11 @@ public class PaymentsController : ControllerBase
 
     [HttpGet("{id:guid}")]
     [Authorize(Policy = "Payment.Read")]
+    [EndpointSummary("Payment detail")]
+    [EndpointDescription(@"Full payment record including allocations and bank details.
+Filters / params:
+- **id**: Required — payment GUID.
+Returns: PaymentDetailDto on success; 404 if not found; 403 if seccode mismatch. Requires permission **Payment.Read**.")]
     public async Task<Result<PaymentDetailDto>> GetById(Guid id, CancellationToken ct)
     {
         var data = await _mediator.Send(new GetPaymentByIdQuery(id), ct);
@@ -40,6 +56,11 @@ public class PaymentsController : ControllerBase
 
     [HttpGet("{id:guid}/remittance")]
     [Authorize(Policy = "Payment.Read")]
+    [EndpointSummary("Payment remittance")]
+    [EndpointDescription(@"Remittance advice for a single payment — printable summary of invoice allocations.
+Filters / params:
+- **id**: Required — payment GUID.
+Returns: RemittanceDto on success; 404 if not found; 403 if seccode mismatch. Requires permission **Payment.Read**.")]
     public async Task<Result<RemittanceDto>> Remittance(Guid id, CancellationToken ct)
     {
         var data = await _mediator.Send(new GetRemittanceQuery(id), ct);

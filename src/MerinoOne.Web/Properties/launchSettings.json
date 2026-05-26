@@ -7,7 +7,8 @@
         "launchBrowser": true,
         "applicationUrl": "http://localhost:5114",
         "environmentVariables": {
-          "ASPNETCORE_ENVIRONMENT": "Development"
+          "ASPNETCORE_ENVIRONMENT": "Development",
+          "SUPPLIERPORTAL_API_BASE_URL": "https://localhost:7270/"
         }
       },
       "https": {
@@ -16,7 +17,8 @@
         "launchBrowser": true,
         "applicationUrl": "https://localhost:7287;http://localhost:5114",
         "environmentVariables": {
-          "ASPNETCORE_ENVIRONMENT": "Development"
+          "ASPNETCORE_ENVIRONMENT": "Development",
+          "SUPPLIERPORTAL_API_BASE_URL": "https://localhost:7270/"
         }
       }
     }

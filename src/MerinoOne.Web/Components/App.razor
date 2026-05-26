@@ -1,10 +1,20 @@
+@inject IConfiguration Configuration
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <base href="/" />
+    @{
+        // Sub-path support. Local dev: "/". Production behind reverse proxy: "/supplier-portal-dev/".
+        // Override via env var AppBasePath or appsettings.json -> AppBasePath.
+        // MUST start AND end with "/".
+        var basePath = Configuration["AppBasePath"];
+        if (string.IsNullOrWhiteSpace(basePath)) basePath = "/";
+        if (!basePath.StartsWith('/')) basePath = "/" + basePath;
+        if (!basePath.EndsWith('/')) basePath += "/";
+    }
+    <base href="@basePath" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

@@ -7,7 +7,7 @@
 <PageTitle>New invoice</PageTitle>
 
 <div class="tl-page">
-    <a href="/invoices" class="mer-back-link">
+    <a href="invoices" class="mer-back-link">
         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
         Back to list
     </a>
@@ -298,14 +298,14 @@
         if (resp?.Success == true)
         {
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invoice submitted" });
-            if (resp.Data != null) NavMgr.NavigateTo($"/invoices/{resp.Data.Id}");
-            else NavMgr.NavigateTo("/invoices");
+            if (resp.Data != null) NavMgr.NavigateToRoute($"/invoices/{resp.Data.Id}");
+            else NavMgr.NavigateToRoute("/invoices");
         }
         else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
         busy = false;
     }
 
-    private void Cancel() => NavMgr.NavigateTo("/invoices");
+    private void Cancel() => NavMgr.NavigateToRoute("/invoices");
 
     private class LineRow
     {

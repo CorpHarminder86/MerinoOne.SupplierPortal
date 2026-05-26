@@ -38,6 +38,9 @@ internal sealed class SmtpEmailService : IEmailService
             {
                 EnableSsl = _config.EnableSsl,
                 UseDefaultCredentials = _config.DefaultCredentials,
+                // Cap socket+handshake wait so API responds before the Web client's 30s cancel.
+                // Default would be 100,000 ms (100s) — too long for an interactive "Send test" call.
+                Timeout = 15_000,
             };
 
             if (!_config.DefaultCredentials)

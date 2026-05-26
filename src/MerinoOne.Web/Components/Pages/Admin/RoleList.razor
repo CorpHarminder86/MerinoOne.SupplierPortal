@@ -107,7 +107,7 @@
     }
 
     private void OpenNew() { newName = string.Empty; newError = string.Empty; showNew = true; }
-    private void OpenDetail(Guid id) => Nav.NavigateTo($"/admin/roles/{id}");
+    private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/admin/roles/{id}");
 
     private async Task DoCreate()
     {
@@ -119,7 +119,7 @@
         {
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Role created" });
             showNew = false;
-            if (resp.Data != Guid.Empty) Nav.NavigateTo($"/admin/roles/{resp.Data}");
+            if (resp.Data != Guid.Empty) Nav.NavigateToRoute($"/admin/roles/{resp.Data}");
             else await Load();
         }
         else { newError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }

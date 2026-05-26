@@ -93,7 +93,7 @@
 
     private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
 
-    private void OpenDetail(Guid id) => Nav.NavigateTo($"/credit-debit-notes/{id}");
+    private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/credit-debit-notes/{id}");
 
     private string TypeClass(string type) => type switch
     {

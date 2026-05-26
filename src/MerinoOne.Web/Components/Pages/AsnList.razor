@@ -95,8 +95,8 @@
 
     private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
 
-    private void OpenDetail(Guid id) => Nav.NavigateTo($"/asns/{id}");
-    private void NewAsn() => Nav.NavigateTo("/asns/new");
+    private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/asns/{id}");
+    private void NewAsn() => Nav.NavigateToRoute("/asns/new");
 
     private string StatusClass(string status) => status switch
     {

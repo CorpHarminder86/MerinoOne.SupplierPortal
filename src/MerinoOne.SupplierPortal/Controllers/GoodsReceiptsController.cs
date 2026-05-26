@@ -19,6 +19,17 @@ public class GoodsReceiptsController : ControllerBase
 
     [HttpGet]
     [Authorize(Policy = "GoodsReceipt.Read")]
+    [EndpointSummary("Goods receipt list")]
+    [EndpointDescription(@"Paged list of buyer-side goods receipts (read-only for suppliers).
+Filters / params:
+- **page**: Optional — 1-based page index (default 1).
+- **pageSize**: Optional — rows per page (default 50).
+- **purchaseOrderId**: Optional — restrict to one PO.
+- **asnId**: Optional — restrict to one ASN.
+- **search**: Optional — free-text on receipt number / reference.
+Side effects:
+- Seccode-scoped: supplier users see only receipts against their own POs.
+Returns: PagedResult<GoodsReceiptDto>. Requires permission **GoodsReceipt.Read**.")]
     public async Task<Result<ContractsPagedResult>> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,

@@ -20,6 +20,14 @@ public class DeliverySchedulesController : ControllerBase
 
     [HttpGet]
     [Authorize(Policy = "DeliverySchedule.Read")]
+    [EndpointSummary("Delivery schedule list")]
+    [EndpointDescription(@"Paged list of supplier-proposed delivery schedules against POs.
+Filters / params:
+- **page**: Optional — 1-based page index (default 1).
+- **pageSize**: Optional — rows per page (default 50).
+- **status**: Optional — schedule lifecycle status.
+- **purchaseOrderId**: Optional — restrict to one PO.
+Returns: PagedResult<DeliveryScheduleDto>. Requires permission **DeliverySchedule.Read**.")]
     public async Task<Result<ContractsPagedResult>> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
@@ -33,6 +41,13 @@ public class DeliverySchedulesController : ControllerBase
 
     [HttpPost]
     [Authorize(Policy = "DeliverySchedule.Propose")]
+    [EndpointSummary("Propose delivery schedule")]
+    [EndpointDescription(@"Supplier proposes a delivery schedule (date + qty splits) against a PO.
+Body:
+- **body**: ProposeDeliveryScheduleRequest with PO reference + scheduled dates / quantities.
+Side effects:
+- Creates the schedule in Proposed status awaiting buyer approval.
+Returns: DeliveryScheduleDto on success; 400 on validation; 403 if seccode mismatch. Requires permission **DeliverySchedule.Propose**.")]
     public async Task<Result<DeliveryScheduleDto>> Propose([FromBody] ProposeDeliveryScheduleRequest body, CancellationToken ct)
     {
         var data = await _mediator.Send(new ProposeDeliveryScheduleCommand(body), ct);
@@ -41,6 +56,14 @@ public class DeliverySchedulesController : ControllerBase
 
     [HttpPost("{id:guid}/approve")]
     [Authorize(Policy = "DeliverySchedule.Approve")]
+    [EndpointSummary("Approve delivery schedule")]
+    [EndpointDescription(@"Buyer approves a proposed delivery schedule.
+Filters / params:
+- **id**: Required — schedule GUID.
+- **body**: ApproveDeliveryScheduleRequest with reviewer notes.
+Side effects:
+- Flips status to Approved + records approver/timestamp.
+Returns: empty success; 404 if not found; 409 if not in approvable state. Requires permission **DeliverySchedule.Approve**.")]
     public async Task<Result> Approve(Guid id, [FromBody] ApproveDeliveryScheduleRequest body, CancellationToken ct)
     {
         await _mediator.Send(new ApproveDeliveryScheduleCommand(id, body), ct);

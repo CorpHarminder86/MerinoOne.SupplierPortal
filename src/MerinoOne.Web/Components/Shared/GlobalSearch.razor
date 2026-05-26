@@ -154,7 +154,7 @@
     {
         if (string.IsNullOrWhiteSpace(query)) return;
         showDropdown = false;
-        Nav.NavigateTo($"/search?q={Uri.EscapeDataString(query)}");
+        Nav.NavigateToRoute($"/search?q={Uri.EscapeDataString(query)}");
     }
 
     private string IconFor(string module) => module switch

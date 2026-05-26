@@ -17,6 +17,12 @@ public class DashboardController : ControllerBase
 
     /// <summary>Dashboard KPI tiles + recent activity. Any authenticated user; counts are seccode-scoped.</summary>
     [HttpGet("summary")]
+    [EndpointSummary("Dashboard summary")]
+    [EndpointDescription(@"KPI tiles + recent activity for the current user's home dashboard.
+Side effects:
+- Seccode-scoped: counts reflect only entities the caller can see.
+- Role-aware: privileged roles (SuperAdmin/Admin/Buyer/Finance) see organisation-wide tiles; supplier users see their own.
+Returns: DashboardSummaryDto. Requires authentication only — no permission gate.")]
     public async Task<Result<DashboardSummaryDto>> Summary(CancellationToken ct)
     {
         var data = await _mediator.Send(new GetDashboardSummaryQuery(), ct);

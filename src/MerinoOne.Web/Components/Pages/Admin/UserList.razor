@@ -112,6 +112,6 @@
         users = q.ToList();
     }
 
-    private void OpenDetail(Guid id) => Nav.NavigateTo($"/admin/users/{id}");
-    private void GoNew() => Nav.NavigateTo("/admin/users/new");
+    private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/admin/users/{id}");
+    private void GoNew() => Nav.NavigateToRoute("/admin/users/new");
 }

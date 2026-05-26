@@ -6,7 +6,7 @@
 <PageTitle>New user</PageTitle>
 
 <div class="tl-page">
-    <a href="/admin/users" class="mer-back-link">
+    <a href="admin/users" class="mer-back-link">
         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
         Back to list
     </a>
@@ -135,7 +135,7 @@
         if (resp?.Success == true && resp.Data != Guid.Empty)
         {
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "User created" });
-            Nav.NavigateTo($"/admin/users/{resp.Data}");
+            Nav.NavigateToRoute($"/admin/users/{resp.Data}");
         }
         else
         {
@@ -144,5 +144,5 @@
         busy = false;
     }
 
-    private void Cancel() => Nav.NavigateTo("/admin/users");
+    private void Cancel() => Nav.NavigateToRoute("/admin/users");
 }

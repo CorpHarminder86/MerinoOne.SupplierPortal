@@ -45,6 +45,15 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("login")]
+    [EndpointSummary("Login")]
+    [EndpointDescription(@"Authenticates a user with email/userCode + password.
+Body:
+- **req.Email**: Required — accepts an email address OR a bare userCode.
+- **req.Password**: Required — verified against the stored hash.
+Side effects:
+- If MFA is disabled, issues a 60-min JWT immediately and stamps LastLoginAt.
+- If MFA is enabled, persists a LoginOtp, emails a 6-digit code, and returns an MfaToken; JWT issuance is deferred to /mfa/verify.
+Returns: LoginResponse (token + roles + permissions, or MfaToken stub); 401 on bad credentials.")]
     public async Task<ActionResult<Result<LoginResponse>>> Login([FromBody] LoginRequest req, CancellationToken ct)
     {
         var identifier = (req.Email ?? string.Empty).Trim();
@@ -132,6 +141,16 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("mfa/verify")]
+    [EndpointSummary("Verify MFA code")]
+    [EndpointDescription(@"Completes the MFA second factor and mints the real JWT.
+Body:
+- **req.MfaToken**: Required — opaque token returned by /login when MFA is enabled.
+- **req.Code**: Required — 6-digit OTP delivered via email.
+Side effects:
+- Consumes the OTP on success (single-use).
+- Increments Attempts on failure; locks out after 5 attempts.
+- Issues a 60-min JWT and stamps LastLoginAt on success.
+Returns: LoginResponse with token + roles + permissions; 401 on expired/invalid/locked code.")]
     public async Task<ActionResult<Result<LoginResponse>>> MfaVerify([FromBody] MfaVerifyRequest req, CancellationToken ct)
     {
         var token = (req?.MfaToken ?? string.Empty).Trim();
@@ -259,6 +278,11 @@ public class AuthController : ControllerBase
     /// </summary>
     [Microsoft.AspNetCore.Authorization.Authorize]
     [HttpGet("whoami")]
+    [EndpointSummary("Identity diagnostic")]
+    [EndpointDescription(@"Diagnostic view of the principal as the seccode filter sees it.
+Returns the current userCode, claim-derived roles + permissions, every SecRight row (with canRead/canWrite + Seccode metadata), mapped suppliers, and a willSeeAllData flag explaining why the user is or is not filtered.
+Use to verify whether sup-* users have over-broad SecRights or wrong roles.
+Returns: anonymous diagnostic payload; 401 if not authenticated. Requires authentication only — no permission gate.")]
     public async Task<ActionResult<object>> WhoAmI(CancellationToken ct)
     {
         var userCode = User.FindFirst("userCode")?.Value
@@ -315,6 +339,11 @@ public class AuthController : ControllerBase
     /// </summary>
     [Microsoft.AspNetCore.Authorization.Authorize]
     [HttpGet("me")]
+    [EndpointSummary("Rehydrate session")]
+    [EndpointDescription(@"Re-emits the LoginResponse shape from the current JWT without minting a new token.
+Used by the Blazor client after page reload; ProtectedLocalStorage only persists the raw token, so this endpoint rebuilds roles, permissions, full name, expiry, and mustChangePassword from the principal + database.
+Echoes the incoming bearer token back so the client can re-store it.
+Returns: LoginResponse on success; 401 if the user is inactive or session is invalid. Requires authentication only — no permission gate.")]
     public async Task<ActionResult<Result<LoginResponse>>> Me(CancellationToken ct)
     {
         var userCode = User.FindFirst("userCode")?.Value

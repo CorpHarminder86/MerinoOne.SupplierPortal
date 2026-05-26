@@ -66,6 +66,6 @@
         loading = false;
     }
 
-    private void OpenThread(Guid id) => Nav.NavigateTo($"/threads/{id}");
-    private void NewMessage() => Nav.NavigateTo("/messages/new");
+    private void OpenThread(Guid id) => Nav.NavigateToRoute($"/threads/{id}");
+    private void NewMessage() => Nav.NavigateToRoute("/messages/new");
 }

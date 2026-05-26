@@ -20,6 +20,17 @@ public class SearchController : ControllerBase
     /// non-privileged users via <see cref="GlobalSearchQuery"/>.
     /// </summary>
     [HttpGet]
+    [EndpointSummary("Global search")]
+    [EndpointDescription(@"Cross-module global search across POs, ASNs, GRs, invoices, payments, and suppliers.
+Filters / params:
+- **q**: Required — free-text query string.
+- **module**: Optional — restrict to one module (e.g. ""invoices"", ""purchase-orders"").
+- **from**: Optional — earliest CreatedOn to include.
+- **to**: Optional — latest CreatedOn to include.
+- **limit**: Optional — max rows to return (default 50).
+Side effects:
+- Seccode-scoped: non-privileged users see only results within their data domain.
+Returns: List<SearchResultDto> with module + entity-id + display text. Any authenticated user.")]
     public async Task<Result<List<SearchResultDto>>> Search(
         [FromQuery] string q,
         [FromQuery] string? module = null,

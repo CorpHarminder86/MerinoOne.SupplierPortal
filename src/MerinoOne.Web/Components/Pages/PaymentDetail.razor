@@ -15,7 +15,7 @@ else if (detail == null)
 else
 {
     <div class="tl-page">
-        <a href="/payments" class="mer-back-link">
+        <a href="payments" class="mer-back-link">
             <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
             Back to list
         </a>
@@ -25,7 +25,7 @@ else
                     <h1 class="tl-title">@detail.PaymentReference</h1>
                     <span class="tlg-status tlg-status--active">Paid</span>
                 </div>
-                <p class="tl-sub">@detail.SupplierName · Invoice <a href="/invoices/@detail.InvoiceId" style="color:var(--mer-blue);">@detail.InvoiceNumber</a> · @detail.PaymentDate.ToString("yyyy-MM-dd")</p>
+                <p class="tl-sub">@detail.SupplierName · Invoice <a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);">@detail.InvoiceNumber</a> · @detail.PaymentDate.ToString("yyyy-MM-dd")</p>
             </div>
         </header>
 
@@ -34,7 +34,7 @@ else
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Payment details</h3>
                 <dl style="display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:13px;">
                     <dt style="color:var(--mer-ink-500);">Payment reference</dt><dd style="font-family:Inter,monospace;">@detail.PaymentReference</dd>
-                    <dt style="color:var(--mer-ink-500);">Invoice</dt><dd><a href="/invoices/@detail.InvoiceId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.InvoiceNumber</a></dd>
+                    <dt style="color:var(--mer-ink-500);">Invoice</dt><dd><a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.InvoiceNumber</a></dd>
                     <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName</dd>
                     <dt style="color:var(--mer-ink-500);">Payment date</dt><dd style="font-family:Inter,monospace;">@detail.PaymentDate.ToString("yyyy-MM-dd")</dd>
                     <dt style="color:var(--mer-ink-500);">Mode</dt><dd>@(detail.PaymentMode ?? "—")</dd>

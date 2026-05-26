@@ -17,7 +17,7 @@ else if (detail == null)
 else
 {
     <div class="tl-page">
-        <a href="/credit-debit-notes" class="mer-back-link">
+        <a href="credit-debit-notes" class="mer-back-link">
             <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
             Back to list
         </a>
@@ -28,7 +28,7 @@ else
                     <span class="tlg-status @TypeClass(detail.NoteType)">@(detail.NoteType == "CN" ? "Credit Note" : "Debit Note")</span>
                     <span class="tlg-status @StatusClass(detail.NoteStatus)">@detail.NoteStatus</span>
                 </div>
-                <p class="tl-sub">@detail.SupplierName · Invoice <a href="/invoices/@detail.InvoiceId" style="color:var(--mer-blue);">@detail.InvoiceNumber</a> · @detail.CreatedOn.ToString("yyyy-MM-dd")</p>
+                <p class="tl-sub">@detail.SupplierName · Invoice <a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);">@detail.InvoiceNumber</a> · @detail.CreatedOn.ToString("yyyy-MM-dd")</p>
             </div>
             <div class="tl-header__actions">
                 @if (Token.HasPermission("CreditDebitNote.Approve") && detail.NoteStatus == "Submitted")
@@ -45,7 +45,7 @@ else
             <dl style="display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:13px;">
                 <dt style="color:var(--mer-ink-500);">Note number</dt><dd style="font-family:Inter,monospace;">@detail.NoteNumber</dd>
                 <dt style="color:var(--mer-ink-500);">Type</dt><dd>@(detail.NoteType == "CN" ? "Credit Note" : "Debit Note")</dd>
-                <dt style="color:var(--mer-ink-500);">Against invoice</dt><dd><a href="/invoices/@detail.InvoiceId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.InvoiceNumber</a></dd>
+                <dt style="color:var(--mer-ink-500);">Against invoice</dt><dd><a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.InvoiceNumber</a></dd>
                 <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName</dd>
                 <dt style="color:var(--mer-ink-500);">Amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@detail.Amount.ToString("N2")</dd>
                 <dt style="color:var(--mer-ink-500);">Status</dt><dd><span class="tlg-status @StatusClass(detail.NoteStatus)">@detail.NoteStatus</span></dd>

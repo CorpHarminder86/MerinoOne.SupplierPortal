@@ -17,7 +17,7 @@ else if (detail == null)
 else
 {
     <div class="tl-page">
-        <a href="/invoices" class="mer-back-link">
+        <a href="invoices" class="mer-back-link">
             <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
             Back to list
         </a>
@@ -27,7 +27,7 @@ else
                     <h1 class="tl-title">@detail.InvoiceNumber</h1>
                     <span class="tlg-status @StatusClass(detail.InvoiceStatus)">@detail.InvoiceStatus</span>
                 </div>
-                <p class="tl-sub">@detail.SupplierName · PO <a href="/purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);">@detail.PoNumber</a> · @detail.InvoiceDate.ToString("yyyy-MM-dd")</p>
+                <p class="tl-sub">@detail.SupplierName · PO <a href="purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);">@detail.PoNumber</a> · @detail.InvoiceDate.ToString("yyyy-MM-dd")</p>
             </div>
             <div class="tl-header__actions">
                 @if (Token.HasPermission("Invoice.Review") && detail.InvoiceStatus == "Submitted")
@@ -70,7 +70,7 @@ else
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Invoice details</h3>
                 <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
                     <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
-                    <dt style="color:var(--mer-ink-500);">PO</dt><dd><a href="/purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.PoNumber</a></dd>
+                    <dt style="color:var(--mer-ink-500);">PO</dt><dd><a href="purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.PoNumber</a></dd>
                     @if (!string.IsNullOrEmpty(detail.AsnNumber))
                     {
                         <dt style="color:var(--mer-ink-500);">ASN</dt><dd style="font-family:Inter,monospace;">@detail.AsnNumber</dd>
@@ -374,7 +374,7 @@ else
         {
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = $"{noteType} created" });
             showCreateNote = false;
-            if (resp.Data != null) Nav.NavigateTo($"/credit-debit-notes/{resp.Data.Id}");
+            if (resp.Data != null) Nav.NavigateToRoute($"/credit-debit-notes/{resp.Data.Id}");
         }
         else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
         busy = false;

@@ -8,7 +8,7 @@
 <PageTitle>@(IsNew ? "New ASN" : detail?.AsnNumber)</PageTitle>
 
 <div class="tl-page">
-    <a href="/asns" class="mer-back-link">
+    <a href="asns" class="mer-back-link">
         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
         Back to list
     </a>
@@ -302,20 +302,20 @@
         {
             var req = new CreateAsnRequest(selectedPoId.Value, expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
             var resp = await Api.PostAsync<AsnDetailDto, CreateAsnRequest>("api/asns", req);
-            if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN created" }); NavMgr.NavigateTo("/asns"); }
+            if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN created" }); NavMgr.NavigateToRoute("/asns"); }
             else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
         }
         else
         {
             var req = new UpdateAsnRequest(expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
             var resp = await Api.PostAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", req);
-            if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN updated" }); NavMgr.NavigateTo("/asns"); }
+            if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN updated" }); NavMgr.NavigateToRoute("/asns"); }
             else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
         }
         busy = false;
     }
 
-    private void Cancel() => NavMgr.NavigateTo("/asns");
+    private void Cancel() => NavMgr.NavigateToRoute("/asns");
 
     private string StatusClass(string status) => status switch
     {

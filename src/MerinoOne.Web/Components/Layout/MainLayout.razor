@@ -39,58 +39,58 @@ else
             </div>
             <nav class="mer-nav">
                 <div class="mer-nav__label">Overview</div>
-                <NavLink class="mer-nav-item" href="/" Match="NavLinkMatch.All" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="" Match="NavLinkMatch.All" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">dashboard</span>
                     <span class="mer-nav-item__label">Dashboard</span>
                 </NavLink>
 
                 <div class="mer-nav__label">Suppliers</div>
-                <NavLink class="mer-nav-item" href="/suppliers" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="suppliers" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">groups</span>
                     <span class="mer-nav-item__label">Suppliers</span>
                 </NavLink>
                 @if (Token.IsAdmin)
                 {
-                    <NavLink class="mer-nav-item" href="/suppliers/onboarding" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="suppliers/onboarding" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">how_to_reg</span>
                         <span class="mer-nav-item__label">Onboarding Queue</span>
                     </NavLink>
                 }
 
                 <div class="mer-nav__label">Procurement</div>
-                <NavLink class="mer-nav-item" href="/purchase-orders" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="purchase-orders" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">description</span>
                     <span class="mer-nav-item__label">Purchase Orders</span>
                 </NavLink>
-                <NavLink class="mer-nav-item" href="/delivery-schedules" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="delivery-schedules" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">event</span>
                     <span class="mer-nav-item__label">Delivery Schedules</span>
                 </NavLink>
-                <NavLink class="mer-nav-item" href="/asns" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="asns" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">local_shipping</span>
                     <span class="mer-nav-item__label">ASNs</span>
                 </NavLink>
-                <NavLink class="mer-nav-item" href="/goods-receipts" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="goods-receipts" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
                     <span class="mer-nav-item__label">Goods Receipts</span>
                 </NavLink>
 
                 <div class="mer-nav__label">Finance</div>
-                <NavLink class="mer-nav-item" href="/invoices" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="invoices" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">receipt_long</span>
                     <span class="mer-nav-item__label">Invoices</span>
                 </NavLink>
-                <NavLink class="mer-nav-item" href="/credit-debit-notes" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="credit-debit-notes" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">request_quote</span>
                     <span class="mer-nav-item__label">Credit/Debit Notes</span>
                 </NavLink>
-                <NavLink class="mer-nav-item" href="/payments" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="payments" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">payments</span>
                     <span class="mer-nav-item__label">Payments</span>
                 </NavLink>
 
                 <div class="mer-nav__label">Communication</div>
-                <NavLink class="mer-nav-item" href="/messages" ActiveClass="active">
+                <NavLink class="mer-nav-item" href="messages" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">mail</span>
                     <span class="mer-nav-item__label">Messages</span>
                 </NavLink>
@@ -98,45 +98,45 @@ else
                 @if (Token.IsAdmin)
                 {
                     <div class="mer-nav__label">Integrations</div>
-                    <NavLink class="mer-nav-item" href="/integrations/sync-log" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="integrations/sync-log" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">sync</span>
                         <span class="mer-nav-item__label">Sync Log</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="/integrations/errors" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="integrations/errors" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">error</span>
                         <span class="mer-nav-item__label">Integration Errors</span>
                     </NavLink>
 
                     <div class="mer-nav__label">Administration</div>
-                    <NavLink class="mer-nav-item" href="/admin/users" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="admin/users" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">group</span>
                         <span class="mer-nav-item__label">Users</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="/admin/roles" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="admin/roles" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">admin_panel_settings</span>
                         <span class="mer-nav-item__label">Roles</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="/admin/supplier-invites" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="admin/supplier-invites" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">mail_outline</span>
                         <span class="mer-nav-item__label">Supplier Invites</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="/admin/delivery-terms" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="admin/delivery-terms" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">local_shipping</span>
                         <span class="mer-nav-item__label">Delivery Terms</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="/admin/payment-terms" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="admin/payment-terms" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">savings</span>
                         <span class="mer-nav-item__label">Payment Terms</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="/admin/items" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="admin/items" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
                         <span class="mer-nav-item__label">Items</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="/admin/settings" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="admin/settings" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">tune</span>
                         <span class="mer-nav-item__label">System Settings</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="/admin/email-templates" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="admin/email-templates" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">mail</span>
                         <span class="mer-nav-item__label">Email Templates</span>
                     </NavLink>
@@ -148,7 +148,7 @@ else
             <header class="mer-topbar">
                 <button class="mer-topbar__btn" @onclick="Shell.ToggleSidenav" title="@(Shell.IsSidenavCollapsed ? "Expand menu" : "Collapse menu")" aria-label="Toggle navigation"><span class="material-symbols-outlined">menu</span></button>
                 <nav class="mer-globalbc">
-                    <a class="mer-globalbc__item" href="/">Home</a>
+                    <a class="mer-globalbc__item" href="">Home</a>
                 </nav>
                 <GlobalSearch />
                 <div class="mer-topbar__spacer"></div>
@@ -242,7 +242,7 @@ else
         if (Token.IsAuthenticated && Token.MustChangePassword && !IsOnChangePasswordRoute())
         {
             await Task.Yield();
-            Nav.NavigateTo("/change-password", forceLoad: false);
+            Nav.NavigateToRoute("/change-password", forceLoad: false);
         }
     }
 
@@ -293,7 +293,7 @@ else
             Token.Clear();
             try { await Storage.DeleteAsync("merinoone.token"); } catch { }
             _hydrated = true;
-            Nav.NavigateTo("/login", forceLoad: false);
+            Nav.NavigateToRoute("/login", forceLoad: false);
         }
         catch (ApiException)
         {
@@ -301,7 +301,7 @@ else
             Token.Clear();
             try { await Storage.DeleteAsync("merinoone.token"); } catch { }
             _hydrated = true;
-            Nav.NavigateTo("/login", forceLoad: false);
+            Nav.NavigateToRoute("/login", forceLoad: false);
         }
         catch
         {
@@ -309,7 +309,7 @@ else
             Token.Clear();
             try { await Storage.DeleteAsync("merinoone.token"); } catch { }
             _hydrated = true;
-            Nav.NavigateTo("/login", forceLoad: false);
+            Nav.NavigateToRoute("/login", forceLoad: false);
         }
     }
 
@@ -319,7 +319,7 @@ else
         var path = rel.Split('?')[0];
         if (path is "login" or "register" or "not-found" or "error") return;
         if (!Token.IsAuthenticated && _hydrated)
-            Nav.NavigateTo("/login", forceLoad: false);
+            Nav.NavigateToRoute("/login", forceLoad: false);
     }
 
     private bool IsOnChangePasswordRoute()
@@ -456,6 +456,6 @@ else
         Token.Clear();
         try { await Storage.DeleteAsync("merinoone.token"); } catch { }
         try { await JS.InvokeVoidAsync("sessionStorage.removeItem", "merinoone.tabs"); } catch { }
-        Nav.NavigateTo("/login", forceLoad: false);
+        Nav.NavigateToRoute("/login", forceLoad: false);
     }
 }

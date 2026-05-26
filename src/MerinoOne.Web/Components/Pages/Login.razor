@@ -140,7 +140,7 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && AuthState.IsAuthenticated)
-            Navigation.NavigateTo("/", forceLoad: false);
+            Navigation.NavigateToRoute("/", forceLoad: false);
         await Task.CompletedTask;
     }
 
@@ -240,9 +240,9 @@ else
         Notification.Notify(NotificationSeverity.Success, $"Welcome, {AuthState.FullName ?? AuthState.UserCode}");
 
         if (AuthState.MustChangePassword)
-            Navigation.NavigateTo("/change-password", forceLoad: false);
+            Navigation.NavigateToRoute("/change-password", forceLoad: false);
         else
-            Navigation.NavigateTo("/", forceLoad: false);
+            Navigation.NavigateToRoute("/", forceLoad: false);
     }
 
     private void BackToSignIn()

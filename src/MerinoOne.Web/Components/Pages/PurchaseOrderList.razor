@@ -104,7 +104,7 @@
 
     private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
 
-    private void OpenDetail(Guid id) => Nav.NavigateTo($"/purchase-orders/{id}");
+    private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/purchase-orders/{id}");
 
     private string StatusClass(string status) => status switch
     {

@@ -118,8 +118,8 @@
         loading = false;
     }
 
-    private void GoSuppliers() => Nav.NavigateTo("/suppliers");
-    private void GoMessages() => Nav.NavigateTo("/messages");
+    private void GoSuppliers() => Nav.NavigateToRoute("/suppliers");
+    private void GoMessages() => Nav.NavigateToRoute("/messages");
 
     private static string DeltaClass(string? sign) => sign switch
     {
