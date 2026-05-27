@@ -1,0 +1,110 @@
+@*
+    Reusable document preview overlay. Caller renders the component once on its page and
+    flips IsOpen via Doc parameter; the component renders a merino-dialog skinned overlay
+    when Doc is non-null and clears on OnClose.
+
+    Usage:
+        <DocumentPreviewer Doc="_previewDoc" OnClose="() => _previewDoc = null" />
+
+    Renders by MimeType:
+      - image/*          -> inline <img>
+      - application/pdf  -> <embed type="application/pdf">
+      - other            -> file icon + Download CTA
+
+    Always shows a Download button in the header so callers don't need a separate affordance.
+    FileUrl must be a same-origin path (e.g. /files/proxy/{id}) — the Web project's proxy route
+    forwards bearer auth (via merino-jwt cookie) to the API.
+*@
+
+@if (Doc is not null)
+{
+    var d = Doc;
+    var isImage = d.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+    var isPdf = string.Equals(d.MimeType, "application/pdf", StringComparison.OrdinalIgnoreCase);
+    var icon = isImage ? "image" : (isPdf ? "picture_as_pdf" : "description");
+    var variant = isPdf ? "danger" : "info"; // PDF chip = red, image = blue
+    <div class="doc-prev-backdrop" @onclick="HandleBackdropClick">
+        <div class="merino-dialog doc-prev-dialog" data-variant="@variant" @onclick:stopPropagation="true">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--@variant"><span class="material-symbols-outlined">@icon</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Document preview</div>
+                    <h2 class="merino-dialog__title" title="@d.FileName">@d.FileName</h2>
+                    <p class="merino-dialog__subtitle">@d.MimeType · @d.FileSizeKb KB</p>
+                </div>
+                <a class="doc-prev-iconbtn" href="@d.FileUrl" download="@d.FileName" title="Download">
+                    <span class="material-symbols-outlined">download</span>
+                </a>
+                <a class="doc-prev-iconbtn" href="@d.FileUrl" target="_blank" rel="noopener" title="Open in new tab">
+                    <span class="material-symbols-outlined">open_in_new</span>
+                </a>
+                <button class="merino-dialog__close" @onclick="Close" title="Close"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="doc-prev-body">
+                @if (isImage)
+                {
+                    <img src="@d.FileUrl" alt="@d.FileName" class="doc-prev-img" />
+                }
+                else if (isPdf)
+                {
+                    <embed src="@d.FileUrl" type="application/pdf" class="doc-prev-pdf" />
+                }
+                else
+                {
+                    <div class="doc-prev-fallback">
+                        <span class="material-symbols-outlined" style="font-size:64px;color:var(--mer-ink-400);">description</span>
+                        <div style="margin-top:12px;color:var(--mer-ink-700);font-size:14px;">@d.FileName</div>
+                        <div style="color:var(--mer-ink-500);font-size:12px;">@d.MimeType</div>
+                    </div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <a class="merino-dialog__btn" data-intent="ghost" href="@d.FileUrl" download="@d.FileName">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">download</span>
+                        Download
+                    </a>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Close">Close</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+<style>
+    .doc-prev-backdrop { position:fixed; inset:0; background:var(--mer-modal-backdrop); display:flex; align-items:center; justify-content:center; z-index:1000; padding:24px; }
+    .doc-prev-dialog { width:min(960px, 100%); max-height:90vh; display:flex; flex-direction:column; }
+    .doc-prev-iconbtn { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:6px; color:var(--mer-ink-500); text-decoration:none; transition: background var(--mer-transition), color var(--mer-transition); }
+    .doc-prev-iconbtn:hover { background:var(--mer-ink-50); color:var(--mer-blue); }
+    .doc-prev-iconbtn .material-symbols-outlined { font-size:20px; }
+    .doc-prev-body { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:16px; background:var(--mer-ink-50); overflow:auto; }
+    .doc-prev-img { max-width:100%; max-height:70vh; object-fit:contain; box-shadow:0 4px 12px rgba(0,0,0,.08); border-radius:4px; background:#fff; }
+    .doc-prev-pdf { width:100%; height:70vh; border:0; background:#fff; }
+    .doc-prev-fallback { display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center; padding:32px; }
+</style>
+
+@code {
+    /// <summary>When non-null the overlay renders; flip to null (via OnClose) to dismiss.</summary>
+    [Parameter] public DocumentDescriptor? Doc { get; set; }
+
+    /// <summary>Caller clears its state field here. Fires on close button, Esc, and backdrop click.</summary>
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    /// <summary>When true (default) a backdrop click closes the preview. Set false to require explicit Close.</summary>
+    [Parameter] public bool CloseOnBackdrop { get; set; } = true;
+
+    private async Task Close()
+    {
+        if (OnClose.HasDelegate) await OnClose.InvokeAsync();
+    }
+
+    private async Task HandleBackdropClick()
+    {
+        if (CloseOnBackdrop) await Close();
+    }
+
+    /// <summary>Minimal projection callers pass in — keeps the component decoupled from
+    /// any specific DTO shape (SupplierDocumentDto, UploadedDocumentDto, etc.).</summary>
+    public record DocumentDescriptor(Guid Id, string FileName, string MimeType, long FileSizeKb, string FileUrl);
+}

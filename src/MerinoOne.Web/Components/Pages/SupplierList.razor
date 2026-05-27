@@ -1,5 +1,6 @@
 @page "/suppliers"
 @page "/suppliers/onboarding"
+@implements IDisposable
 @inject ApiClient Api
 @inject NavigationManager Nav
 
@@ -69,6 +70,31 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // /suppliers and /suppliers/onboarding both map to this component. Blazor reuses
+        // the existing instance when navigating between them — OnInitializedAsync never
+        // re-fires, so the IsOnboardingQueue-driven filter would stay stale and the page
+        // appears "stuck" on the prior route's list. Subscribe to LocationChanged to
+        // recompute filters on each switch.
+        Nav.LocationChanged += OnLocationChanged;
+        await Load();
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        // Only react to in-component route flips. ApplyFilters() reads IsOnboardingQueue
+        // (which derives from Nav.Uri) so the new filter set lands immediately.
+        ApplyFilters();
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+
+    private async Task Load()
+    {
+        loading = true;
         var resp = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
         all = resp?.Data ?? new();
         ApplyFilters();

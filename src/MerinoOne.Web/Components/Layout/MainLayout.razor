@@ -45,13 +45,15 @@ else
                 </NavLink>
 
                 <div class="mer-nav__label">Suppliers</div>
-                <NavLink class="mer-nav-item" href="suppliers" ActiveClass="active">
+                @* Match.All on "Suppliers" so it doesn't stay active when the user navigates
+                   to the sub-route /suppliers/onboarding (default Prefix match lights both). *@
+                <NavLink class="mer-nav-item" href="suppliers" Match="NavLinkMatch.All" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">groups</span>
                     <span class="mer-nav-item__label">Suppliers</span>
                 </NavLink>
                 @if (Token.IsAdmin)
                 {
-                    <NavLink class="mer-nav-item" href="suppliers/onboarding" ActiveClass="active">
+                    <NavLink class="mer-nav-item" href="suppliers/onboarding" Match="NavLinkMatch.All" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">how_to_reg</span>
                         <span class="mer-nav-item__label">Onboarding Queue</span>
                     </NavLink>
@@ -284,6 +286,18 @@ else
                     resp.Data.ExpiresAt,
                     resp.Data.MustChangePassword);
                 try { await Storage.SetAsync("merinoone.token", resp.Data.Token); } catch { }
+                // Refresh the same-origin "merino-jwt" cookie that /files/proxy/{id} reads on
+                // every request. ProtectedLocalStorage rehydrates the in-memory TokenAccessor
+                // on reload/new tab, but the cookie may have expired (8h Max-Age) or been
+                // dropped — without this refresh, the image proxy returns 401 and the user
+                // sees broken thumbnails on supplier-detail until they explicitly re-login.
+                try
+                {
+                    await JS.InvokeVoidAsync(
+                        "eval",
+                        $"document.cookie = 'merino-jwt={resp.Data.Token};Path=/;Max-Age=28800;SameSite=Strict' + (location.protocol === 'https:' ? ';Secure' : '');");
+                }
+                catch { /* best-effort — proxy will return 401 if cookie missing */ }
                 _hydrated = true;
                 StateHasChanged();
                 return;
@@ -324,9 +338,12 @@ else
 
     private bool IsOnChangePasswordRoute()
     {
-        var path = new Uri(Nav.Uri).AbsolutePath;
-        return path.Equals("/change-password", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/change-password/", StringComparison.OrdinalIgnoreCase);
+        // Sub-path-safe: Uri.AbsolutePath includes the PathBase prefix (e.g. "/supplier-portal-dev/change-password")
+        // when deployed behind a reverse proxy, so a literal "/change-password" comparison never matches and the
+        // post-NavigateToRoute guard at the top of this file re-renders the "Redirecting..." card forever.
+        // Mirror the EnforceRouteGuard() pattern above — ToBaseRelativePath strips the base + leading slash.
+        var rel = Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].TrimEnd('/').ToLowerInvariant();
+        return rel.Equals("change-password") || rel.StartsWith("change-password/");
     }
 
     public void Dispose()
@@ -456,6 +473,8 @@ else
         Token.Clear();
         try { await Storage.DeleteAsync("merinoone.token"); } catch { }
         try { await JS.InvokeVoidAsync("sessionStorage.removeItem", "merinoone.tabs"); } catch { }
+        // Drop the proxy-auth cookie too so a stolen cookie can't outlive the session.
+        try { await JS.InvokeVoidAsync("eval", "document.cookie = 'merino-jwt=;Path=/;Max-Age=0';"); } catch { }
         Nav.NavigateToRoute("/login", forceLoad: false);
     }
 }

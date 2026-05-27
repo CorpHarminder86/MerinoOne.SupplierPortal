@@ -41,6 +41,10 @@ public static class DependencyInjection
         services.AddScoped<IDocumentValidationService, MockDocumentValidationService>();
         services.AddScoped<IInforIntegrationService, MockInforIntegrationService>();
 
+        // File storage (Mock-then-Live). Stage 1 = local disk under {ContentRoot}/uploads.
+        // Stage 2 will swap to Azure Blob behind the same IFileStorageService interface.
+        services.AddSingleton<IFileStorageService, LocalDiskFileStorageService>();
+
         // In-process memory cache — backs the IEmailTemplateRenderer 60s lookup. Safe to call
         // twice; Microsoft.Extensions registers a single MemoryCache + IMemoryCache pair.
         services.AddMemoryCache();
@@ -49,27 +53,30 @@ public static class DependencyInjection
         // decorator below, and by the test-send command in the EmailTemplates admin endpoints).
         services.AddScoped<IEmailTemplateRenderer, EmailTemplateRenderer>();
 
-        // Email transport. Defaults to Live SMTP — opt into Mock by setting
-        // Email:Mode = "Mock" in appsettings.Development.json or env var. The chosen sender is
-        // wrapped by TemplateAwareEmailService so admin-edited templates win over hardcoded
-        // bodies; when no active template exists, the decorator forwards to the inner service.
+        // Email transport — split into two contracts:
+        //   IEmailService  → public, used by handlers; goes to TemplateAwareEmailService which
+        //                    renders the template and ENQUEUES a row in admin.emailOutbox. Fast,
+        //                    never touches SMTP, never blocks the API response.
+        //   IEmailSender   → low-level raw SMTP/Mock; resolved by EmailOutboxWorker only.
+        // Email:Mode = "Mock" (dev) | "Live" (default). The Mock impl writes to logs/emails-*.log
+        // so QA can fish OTPs out without an SMTP server.
         var emailMode = cfg["Email:Mode"] ?? "Live";
         if (emailMode.Equals("Mock", StringComparison.OrdinalIgnoreCase))
         {
             services.AddScoped<MockEmailService>();
-            services.AddScoped<IEmailService>(sp => new TemplateAwareEmailService(
-                sp.GetRequiredService<MockEmailService>(),
-                sp.GetRequiredService<IEmailTemplateRenderer>(),
-                sp.GetRequiredService<ILogger<TemplateAwareEmailService>>()));
+            services.AddScoped<IEmailSender>(sp => sp.GetRequiredService<MockEmailService>());
         }
         else
         {
             services.AddScoped<SmtpEmailService>();
-            services.AddScoped<IEmailService>(sp => new TemplateAwareEmailService(
-                sp.GetRequiredService<SmtpEmailService>(),
-                sp.GetRequiredService<IEmailTemplateRenderer>(),
-                sp.GetRequiredService<ILogger<TemplateAwareEmailService>>()));
+            services.AddScoped<IEmailSender>(sp => sp.GetRequiredService<SmtpEmailService>());
         }
+        // Single public IEmailService — always the enqueueing decorator. Worker uses IEmailSender
+        // directly so it never routes through the enqueue path (no infinite loop).
+        services.AddScoped<IEmailService, TemplateAwareEmailService>();
+
+        // Async drain. Hosted service so it starts with the host and stops cleanly on shutdown.
+        services.AddHostedService<EmailOutboxWorker>();
 
         // Cryptographically-strong numeric OTP generator (invite + MFA flows).
         services.AddSingleton<IOtpCodeGenerator, OtpCodeGenerator>();

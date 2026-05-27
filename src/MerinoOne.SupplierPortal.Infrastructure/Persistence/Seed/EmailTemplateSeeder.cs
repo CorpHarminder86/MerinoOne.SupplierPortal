@@ -58,6 +58,15 @@ public static class EmailTemplateSeeder
             "<p>Your one-time code is <b style=\"font-size:20px;letter-spacing:4px;\">{{otp}}</b>. " +
             "It expires in {{validMinutes}} minutes. Do not share this code.</p>",
             "Placeholders: {{fullName}}, {{otp}}, {{validMinutes}}"),
+
+        new TemplateSpec(
+            "RegistrationAcknowledgement",
+            "We received your supplier registration — {{supplierCode}}",
+            "<h2>Thank you, {{legalName}}</h2>" +
+            "<p>We have received your supplier registration. Our team is reviewing the details and documents you submitted, and will reach out at <b>{{contactEmail}}</b> once your application is approved.</p>" +
+            "<p><b>Reference:</b> {{supplierCode}}<br/><b>Status:</b> {{status}}</p>" +
+            "<p>You do not need to take any further action right now.</p>",
+            "Placeholders: {{legalName}}, {{supplierCode}}, {{contactEmail}}, {{status}}"),
     };
 
     public static async Task SeedAsync(AppDbContext ctx, CancellationToken ct = default)

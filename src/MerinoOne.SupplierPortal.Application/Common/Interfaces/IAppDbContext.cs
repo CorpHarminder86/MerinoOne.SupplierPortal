@@ -28,6 +28,7 @@ public interface IAppDbContext
     DbSet<InviteOtp> InviteOtps { get; }
     DbSet<LoginOtp> LoginOtps { get; }
     DbSet<EmailTemplate> EmailTemplates { get; }
+    DbSet<EmailOutbox> EmailOutbox { get; }
     DbSet<Tenant> Tenants { get; }
 
     DbSet<Item> Items { get; }

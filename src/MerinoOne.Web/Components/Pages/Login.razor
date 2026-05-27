@@ -7,6 +7,7 @@
 @inject NavigationManager Navigation
 @inject NotificationService Notification
 @inject ProtectedLocalStorage Storage
+@inject IJSRuntime JS
 
 <PageTitle>Sign in — Supplier Portal</PageTitle>
 
@@ -236,6 +237,19 @@ else
     private async Task PersistAndNavigateAsync()
     {
         try { await Storage.SetAsync("merinoone.token", AuthState.Token ?? string.Empty); } catch { }
+
+        // Also drop a same-origin cookie so the /files/proxy/{id} minimal-API endpoint can
+        // attach the bearer when the browser <img>/<embed> fetches a document. The proxy
+        // runs in a fresh HTTP scope where TokenAccessor (scoped to the Blazor circuit) is
+        // empty, so cookie is the only way to carry auth across the request boundary.
+        // 8h expiry mirrors the JWT exp window; Strict SameSite prevents CSRF on the route.
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "eval",
+                $"document.cookie = 'merino-jwt={AuthState.Token};Path=/;Max-Age=28800;SameSite=Strict' + (location.protocol === 'https:' ? ';Secure' : '');");
+        }
+        catch { /* best-effort — proxy will return 401 if cookie missing */ }
 
         Notification.Notify(NotificationSeverity.Success, $"Welcome, {AuthState.FullName ?? AuthState.UserCode}");
 

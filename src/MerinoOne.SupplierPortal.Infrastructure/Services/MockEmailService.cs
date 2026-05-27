@@ -10,7 +10,7 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Services;
 /// AND appended to a daily file (<c>logs/emails-YYYYMMDD.log</c>) so the
 /// onboarding OTP is recoverable during local/dev smoke tests.
 /// </summary>
-public class MockEmailService : IEmailService
+public class MockEmailService : IEmailService, IEmailSender
 {
     private readonly ILogger<MockEmailService> _logger;
     private static readonly SemaphoreSlim _fileLock = new(1, 1);
@@ -81,6 +81,19 @@ public class MockEmailService : IEmailService
     {
         var subject = "Your sign-in verification code";
         var body = BuildLoginOtpBody(fullName, otp, validMinutes);
+        return SendAsync(toEmail, subject, body, ct);
+    }
+
+    public Task SendRegistrationAcknowledgementAsync(
+        string toEmail,
+        string legalName,
+        string supplierCode,
+        string contactEmail,
+        string status,
+        CancellationToken ct = default)
+    {
+        var subject = $"We received your supplier registration — {supplierCode}";
+        var body = BuildRegistrationAcknowledgementBody(legalName, supplierCode, contactEmail, status);
         return SendAsync(toEmail, subject, body, ct);
     }
 
@@ -221,6 +234,29 @@ public class MockEmailService : IEmailService
   <p>This code is valid for <b>{validMinutes} minutes</b>.</p>
   <p style="color:#b91c1c;"><b>Do not share this code</b> with anyone. MerinoOne staff will never ask you for this code.</p>
   <p>If you did not attempt to sign in, please reset your password immediately and contact support.</p>
+  <hr/>
+  <p style="font-size:12px;color:#6b7280;">&copy; Merino Consulting Services Ltd.</p>
+</body></html>
+""";
+    }
+
+    private static string BuildRegistrationAcknowledgementBody(string legalName, string supplierCode, string contactEmail, string status)
+    {
+        // All fields user-influenced (legalName from invite, contactEmail from registration form) — encode.
+        var safeLegalName = WebUtility.HtmlEncode(legalName ?? string.Empty);
+        var safeSupplierCode = WebUtility.HtmlEncode(supplierCode ?? string.Empty);
+        var safeContactEmail = WebUtility.HtmlEncode(contactEmail ?? string.Empty);
+        var safeStatus = WebUtility.HtmlEncode(status ?? string.Empty);
+        return $"""
+<!DOCTYPE html>
+<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
+  <h2 style="color:#0f3b5e;">Thank you, {safeLegalName}</h2>
+  <p>We have received your supplier registration. Our team is reviewing the details and documents you submitted, and will reach out at <b>{safeContactEmail}</b> once your application is approved.</p>
+  <table cellpadding="6" style="border-collapse:collapse;border:1px solid #e5e7eb;">
+    <tr><td><b>Reference</b></td><td><code>{safeSupplierCode}</code></td></tr>
+    <tr><td><b>Status</b></td><td>{safeStatus}</td></tr>
+  </table>
+  <p>You do not need to take any further action right now.</p>
   <hr/>
   <p style="font-size:12px;color:#6b7280;">&copy; Merino Consulting Services Ltd.</p>
 </body></html>

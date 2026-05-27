@@ -154,7 +154,6 @@ public class CreateSupplierInviteCommandHandler : IRequestHandler<CreateSupplier
 
     private string BuildRegistrationUrl(string token)
     {
-        // Mirror SupplierRegistrationController.BuildRegistrationUrl — same Web:BaseUrl convention.
         var configured = _config["Web:BaseUrl"];
         var baseUrl = !string.IsNullOrWhiteSpace(configured)
             ? configured.TrimEnd('/')

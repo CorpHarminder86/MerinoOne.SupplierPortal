@@ -72,6 +72,56 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 app.UseHttpsRedirection();
 app.UseAntiforgery();
 app.MapStaticAssets();
+
+// File proxy — the Blazor app is served on a different host/port than the API, so a relative
+// <img src="/api/document-uploads/{id}"> would 404 against the Web origin. These proxy routes
+// hit the Web host (same origin as the page), grab the API response and stream the body straight
+// back to the browser. Authentication: reads the JWT from a same-origin "merino-jwt" cookie
+// that Login.razor sets after successful sign-in; the proxy attaches it as a bearer when calling
+// the API. This bypasses the TokenAccessor scoping problem (Blazor circuit state isn't available
+// from a fresh minimal-API HTTP scope).
+//
+// Anonymous /by-token variant exists for Register.razor previews before login — no cookie needed.
+async Task<IResult> ProxyApiAsync(HttpContext http, IHttpClientFactory factory, string apiPath, bool requireAuth, CancellationToken ct)
+{
+    var apiBase = http.RequestServices.GetRequiredService<IConfiguration>()["SUPPLIERPORTAL_API_BASE_URL"]
+                  ?? http.RequestServices.GetRequiredService<IConfiguration>()["SupplierPortal:ApiBaseUrl"]
+                  ?? http.RequestServices.GetRequiredService<IConfiguration>()["Api:BaseUrl"]
+                  ?? "https+http://supplierPortal-api";
+    var client = factory.CreateClient(nameof(ApiClient));
+    if (client.BaseAddress is null) client.BaseAddress = new Uri(apiBase, UriKind.Absolute);
+
+    using var req = new HttpRequestMessage(HttpMethod.Get, apiPath);
+    if (requireAuth)
+    {
+        var jwt = http.Request.Cookies["merino-jwt"];
+        if (string.IsNullOrEmpty(jwt)) return Results.Unauthorized();
+        req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", jwt);
+    }
+
+    using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+    if (!resp.IsSuccessStatusCode)
+    {
+        return Results.StatusCode((int)resp.StatusCode);
+    }
+    var contentType = resp.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+    var contentDisposition = resp.Content.Headers.ContentDisposition?.ToString();
+    var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+
+    // Forward Content-Disposition so download=foo.pdf works AND inline image rendering stays intact.
+    if (!string.IsNullOrEmpty(contentDisposition))
+    {
+        http.Response.Headers["Content-Disposition"] = contentDisposition;
+    }
+    return Results.File(bytes, contentType);
+}
+
+app.MapGet("/files/proxy/{id:guid}", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
+    => ProxyApiAsync(http, factory, $"api/document-uploads/{id}", requireAuth: true, ct));
+
+app.MapGet("/files/proxy/{id:guid}/by-token/{token}", (Guid id, string token, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
+    => ProxyApiAsync(http, factory, $"api/document-uploads/{id}/by-token/{token}", requireAuth: false, ct));
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

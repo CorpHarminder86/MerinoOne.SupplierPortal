@@ -86,6 +86,29 @@ public class ApiClient
                  resp => ReadEnvelopeAsync<ApiResult>(resp),
                  errors => new ApiResult { Success = false, Errors = errors });
 
+    /// <summary>
+    /// Multipart POST for file uploads. Caller builds the <see cref="MultipartFormDataContent"/>
+    /// — including any non-file form fields — and we surface it through the same RunAsync
+    /// failure-folding so anonymous upload endpoints behave like every other ApiClient call.
+    /// </summary>
+    public Task<ApiResult<T>?> PostMultipartAsync<T>(string url, MultipartFormDataContent content) =>
+        RunAsync(() => _http.PostAsync(url, content),
+                 resp => ReadEnvelopeAsync<ApiResult<T>>(resp),
+                 errors => new ApiResult<T> { Success = false, Errors = errors });
+
+    /// <summary>
+    /// Streaming GET — returns the raw <see cref="HttpResponseMessage"/> so the caller (e.g.
+    /// the <c>/files/proxy/{id}</c> minimal-API endpoint in MerinoOne.Web) can pipe the response
+    /// body straight back to the browser without buffering the whole file. Caller is responsible
+    /// for disposing the response. Does NOT fold failures into an envelope — this is a transport
+    /// helper for proxying, not an API result wrapper.
+    /// </summary>
+    public Task<HttpResponseMessage> GetRawAsync(string url, CancellationToken ct = default)
+    {
+        EnsureAuth();
+        return _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+    }
+
     public Task LogoutAsync()
     {
         EnsureAuth();

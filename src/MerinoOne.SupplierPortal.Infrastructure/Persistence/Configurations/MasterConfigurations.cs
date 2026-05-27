@@ -141,3 +141,24 @@ public class EmailTemplateConfiguration : IEntityTypeConfiguration<EmailTemplate
             .IsUnique();
     }
 }
+
+public class EmailOutboxConfiguration : IEntityTypeConfiguration<EmailOutbox>
+{
+    public void Configure(EntityTypeBuilder<EmailOutbox> b)
+    {
+        b.ApplyBaseEntityConvention("EmailOutbox", "admin", "emailOutbox");
+        b.Property(x => x.TemplateKey).HasColumnName("templateKey").HasMaxLength(50).IsRequired();
+        b.Property(x => x.ToEmail).HasColumnName("toEmail").HasMaxLength(256).IsRequired();
+        b.Property(x => x.Subject).HasColumnName("subject").HasMaxLength(300).IsRequired();
+        b.Property(x => x.HtmlBody).HasColumnName("htmlBody").HasColumnType("nvarchar(max)").IsRequired();
+        b.Property(x => x.Status).HasColumnName("status").HasConversion<int>().IsRequired();
+        b.Property(x => x.AttemptCount).HasColumnName("attemptCount").HasDefaultValue(0);
+        b.Property(x => x.NextAttemptAt).HasColumnName("nextAttemptAt").HasColumnType("datetime2").IsRequired();
+        b.Property(x => x.SentAt).HasColumnName("sentAt").HasColumnType("datetime2");
+        b.Property(x => x.LastError).HasColumnName("lastError").HasMaxLength(2000);
+
+        // Worker poll filter: pick Pending rows whose retry window has elapsed.
+        b.HasIndex(x => new { x.Status, x.NextAttemptAt })
+            .HasDatabaseName("IX_EmailOutbox_status_nextAttemptAt");
+    }
+}

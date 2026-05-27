@@ -1,0 +1,48 @@
+@*
+    Reusable busy-state overlay. Render conditionally over any block that performs
+    an async operation the user is waiting on (file upload, save, etc.).
+
+    Usage — inline (overlays its nearest position:relative parent):
+        <div style="position:relative;">
+            <LoaderOverlay IsBusy="_uploading" Message="Uploading…" />
+            ... slot body ...
+        </div>
+
+    Usage — fullscreen veil:
+        <LoaderOverlay IsBusy="_saving" Message="Saving…" Inline="false" />
+
+    Theming: relies on Merino CSS variables (--mer-modal-backdrop, --mer-surface,
+    --mer-line, --mer-radius-lg, --mer-ink-700). RadzenProgressBarCircular renders
+    via the Radzen Material bundle already loaded by the host page.
+*@
+
+@if (IsBusy)
+{
+    <div class="@(Inline ? "mer-loader-overlay mer-loader-overlay--inline" : "mer-loader-overlay mer-loader-overlay--fullscreen")"
+         role="status" aria-live="polite" aria-busy="true">
+        <div class="mer-loader-overlay__card">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate"
+                                       ShowValue="false"
+                                       Size="ProgressBarCircularSize.Medium"
+                                       ProgressBarStyle="ProgressBarStyle.Primary" />
+            @if (!string.IsNullOrEmpty(Message))
+            {
+                <div class="mer-loader-overlay__msg">@Message</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>When true the overlay renders. Bind to a host-page busy flag.</summary>
+    [Parameter] public bool IsBusy { get; set; }
+
+    /// <summary>Optional caption beneath the spinner. Keep short — "Uploading…", "Saving…".</summary>
+    [Parameter] public string? Message { get; set; }
+
+    /// <summary>
+    /// True (default) → absolute-positioned inside the nearest position:relative parent.
+    /// False → fixed fullscreen veil at z-index 2000.
+    /// </summary>
+    [Parameter] public bool Inline { get; set; } = true;
+}

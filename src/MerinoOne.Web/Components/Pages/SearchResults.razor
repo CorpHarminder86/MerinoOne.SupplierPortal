@@ -125,7 +125,7 @@
         module = m;
         var url = $"/search?q={Uri.EscapeDataString(Q ?? string.Empty)}";
         if (!string.IsNullOrEmpty(m)) url += $"&module={Uri.EscapeDataString(m)}";
-        Nav.NavigateTo(url);
+        Nav.NavigateToRoute(url);
     }
 
     private void OpenResult(SearchResultDto r)
@@ -141,7 +141,7 @@
             "CommunicationMessage" => $"/threads/{r.Id}",
             _ => "/"
         };
-        Nav.NavigateTo(url);
+        Nav.NavigateToRoute(url);
     }
 
     private string IconFor(string module) => module switch

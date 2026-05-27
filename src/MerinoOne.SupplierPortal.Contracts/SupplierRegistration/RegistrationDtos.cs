@@ -11,7 +11,10 @@ public record SupplierInviteListDto(
     DateTime? ConsumedAt,
     Guid? SupplierId,
     string Token,
-    string Status); // Pending | Consumed | Expired
+    string Status, // Pending | Consumed | Expired | Cancelled
+    DateTime? CancelledAt = null,
+    DateTime? LastResentAt = null,
+    int ResendCount = 0);
 
 public record SupplierInviteDetailDto(
     Guid Id,
@@ -24,7 +27,10 @@ public record SupplierInviteDetailDto(
     DateTime? ConsumedAt,
     Guid? SupplierId,
     string Token,
-    string Status);
+    string Status,
+    DateTime? CancelledAt = null,
+    DateTime? LastResentAt = null,
+    int ResendCount = 0);
 
 public record CreateSupplierInviteRequest(string LegalName, string Email, string? MobileNo = null);
 
@@ -50,17 +56,27 @@ public record SupplierContactInput(
     bool IsPrimary);
 
 /// <summary>
-/// One uploaded document captured during self-registration. DocumentType is the
-/// string name of <see cref="MerinoOne.SupplierPortal.Domain.Enums.DocumentType"/>
-/// (e.g. "OnboardingPan", "OnboardingGst", "OnboardingCheque", "OnboardingMsme").
-/// FileUrl is the storage path/URL produced by the upload endpoint (mocked in Stage 1).
+/// One uploaded document referenced from a registration submission. The document row is
+/// created by <c>POST api/document-uploads</c> ahead of time; only its <c>Id</c> is sent
+/// here so the registration handler can rewrite ownership to the new supplier. DocumentType
+/// is the string name of <see cref="MerinoOne.SupplierPortal.Domain.Enums.DocumentType"/>.
 /// </summary>
 public record UploadedDocumentInput(
+    Guid Id,
     string DocumentType,
     string FileName,
     string FileUrl,
     long FileSizeKb,
     string MimeType);
+
+/// <summary>Wire shape returned by the anonymous upload endpoint.</summary>
+public record UploadedDocumentDto(
+    Guid Id,
+    string DocumentType,
+    string FileName,
+    int FileSizeKb,
+    string MimeType,
+    string FileUrl);
 
 public record SupplierRegistrationRequest(
     string Token,

@@ -8,6 +8,7 @@ using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Doc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplier;
 using SupplierAddressEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierAddress;
 using SupplierContactEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact;
@@ -88,12 +89,11 @@ public class RegisterSupplierCommandValidator : AbstractValidator<RegisterSuppli
 
         RuleForEach(x => x.Body.Documents).ChildRules(d =>
         {
+            d.RuleFor(x => x.Id).NotEmpty()
+                .WithMessage("Documents must reference an id returned by POST api/document-uploads.");
             d.RuleFor(x => x.DocumentType).NotEmpty()
                 .Must(v => Enum.TryParse<DocumentType>(v, true, out _))
                 .WithMessage("DocumentType must be one of the DocumentType enum values.");
-            d.RuleFor(x => x.FileName).NotEmpty().MaximumLength(300);
-            d.RuleFor(x => x.FileUrl).NotEmpty().MaximumLength(1000);
-            d.RuleFor(x => x.MimeType).NotEmpty().MaximumLength(100);
         });
     }
 
@@ -106,11 +106,19 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
 {
     private readonly IAppDbContext _db;
     private readonly IDocumentValidationService _docValidator;
+    private readonly IEmailService _email;
+    private readonly ILogger<RegisterSupplierCommandHandler> _logger;
 
-    public RegisterSupplierCommandHandler(IAppDbContext db, IDocumentValidationService docValidator)
+    public RegisterSupplierCommandHandler(
+        IAppDbContext db,
+        IDocumentValidationService docValidator,
+        IEmailService email,
+        ILogger<RegisterSupplierCommandHandler> logger)
     {
         _db = db;
         _docValidator = docValidator;
+        _email = email;
+        _logger = logger;
     }
 
     public async Task<SupplierRegistrationResponse> Handle(RegisterSupplierCommand request, CancellationToken ct)
@@ -220,31 +228,46 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
 
         _db.Suppliers.Add(supplier);
 
-        // Persist uploaded onboarding documents alongside the supplier so we can validate
-        // them after save. Stored on the supplier's seccode so seccode filtering picks them up.
-        var docIds = new List<Guid>();
-        foreach (var d in request.Body.Documents ?? new List<UploadedDocumentInput>())
+        // Rewrite ownership of the already-uploaded onboarding documents from the
+        // anonymous "PendingInvite" phase onto the new supplier + its seccode.
+        // POST api/document-uploads created these rows with OwnerEntityType="PendingInvite"
+        // and OwnerEntityId=invite.Id; we flip them here in the same EF transaction so
+        // seccode filtering picks them up post-registration.
+        var requestedIds = (request.Body.Documents ?? new List<UploadedDocumentInput>())
+            .Select(d => d.Id).Distinct().ToList();
+        // IgnoreQueryFilters — the upload endpoint runs anonymously and assigns each PendingInvite
+        // doc an orphan invite-scope seccode; the registering user (also anonymous) can't see it
+        // through the normal seccode filter. Token-bound ownership check below provides the gate.
+        var pendingDocs = await _db.DocumentUploads
+            .IgnoreQueryFilters()
+            .Where(d => requestedIds.Contains(d.Id))
+            .ToListAsync(ct);
+
+        // Hard-fail if any requested id is missing or bound to a different invite — prevents
+        // a malicious client from poisoning the new supplier with docs uploaded for someone else.
+        foreach (var docId in requestedIds)
         {
-            if (!Enum.TryParse<DocumentType>(d.DocumentType, true, out var docType))
-                continue; // validator already enforces parseability — defensive skip
-            var docId = Guid.NewGuid();
-            docIds.Add(docId);
-            _db.DocumentUploads.Add(new DocumentUpload
-            {
-                Id = docId,
-                OwnerEntityType = "Supplier",
-                OwnerEntityId = supplierId,
-                DocumentType = docType,
-                FileName = d.FileName.Trim(),
-                FileUrl = d.FileUrl.Trim(),
-                FileSizeKb = d.FileSizeKb,
-                MimeType = d.MimeType.Trim(),
-                UploadedBy = "self-registration",
-                SeccodeId = seccodeId,
-                AiValidationStatus = AiValidationStatus.Pending,
-                CreatedBy = "self-register",
-                CreatedOn = now,
-            });
+            var doc = pendingDocs.FirstOrDefault(p => p.Id == docId);
+            if (doc is null)
+                throw new Common.Exceptions.ValidationException(new Dictionary<string, string[]>
+                {
+                    ["documents"] = new[] { $"Uploaded document {docId} was not found." }
+                });
+            if (doc.OwnerEntityType != "PendingInvite" || doc.OwnerEntityId != invite.Id)
+                throw new Common.Exceptions.ValidationException(new Dictionary<string, string[]>
+                {
+                    ["documents"] = new[] { $"Uploaded document {docId} does not belong to this invite." }
+                });
+        }
+
+        var docIds = pendingDocs.Select(d => d.Id).ToList();
+        foreach (var doc in pendingDocs)
+        {
+            doc.OwnerEntityType = "Supplier";
+            doc.OwnerEntityId = supplierId;
+            doc.SeccodeId = seccodeId;
+            doc.UpdatedBy = "self-register";
+            doc.UpdatedOn = now;
         }
 
         // Consume the invite atomically (single SaveChanges = single EF transaction)
@@ -280,6 +303,29 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
             }
         }
         await _db.SaveChangesAsync(ct);
+
+        // Fire-and-log acknowledgement email. Persistence already committed — log and continue
+        // on send failure (must never roll the registration back). Recipient is the invite's
+        // original address (the supplier already verified it via OTP); contactEmail in the body
+        // is the primary contact's email from the registration form (may differ from invite.Email).
+        try
+        {
+            var primaryContactEmail = supplier.Contacts.FirstOrDefault(c => c.IsPrimary)?.Email
+                                      ?? invite.Email;
+            await _email.SendRegistrationAcknowledgementAsync(
+                invite.Email,
+                supplier.LegalName,
+                supplier.SupplierCode,
+                primaryContactEmail,
+                supplier.RegistrationStatus.ToString(),
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Registration acknowledgement email send failed for {Email} (supplier {SupplierCode}). Registration was persisted successfully.",
+                invite.Email, supplier.SupplierCode);
+        }
 
         return new SupplierRegistrationResponse(
             supplierId,

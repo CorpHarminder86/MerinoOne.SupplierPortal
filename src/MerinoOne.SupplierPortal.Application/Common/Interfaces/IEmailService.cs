@@ -62,4 +62,19 @@ public interface IEmailService
         string otp,
         int validMinutes,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Acknowledgement sent to a supplier immediately after they submit the invite
+    /// registration form. Fires post-persist — log and continue on send failure (must
+    /// never roll the registration back). <paramref name="toEmail"/> is the invite's
+    /// original recipient address; <paramref name="contactEmail"/> is the primary
+    /// contact email the supplier supplied during registration (may differ).
+    /// </summary>
+    Task SendRegistrationAcknowledgementAsync(
+        string toEmail,
+        string legalName,
+        string supplierCode,
+        string contactEmail,
+        string status,
+        CancellationToken ct = default);
 }

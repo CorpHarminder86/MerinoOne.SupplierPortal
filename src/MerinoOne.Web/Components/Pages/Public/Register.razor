@@ -1,5 +1,6 @@
 @page "/register/{Token}"
 @layout EmptyLayout
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @implements IDisposable
 @using System.Net.Http
 @using System.Net.Http.Json
@@ -102,7 +103,8 @@ else
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div>
                     <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Legal name *</label>
-                    <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="legalName" />
+                    <input class="rz-textbox @(Err("legalName") != null ? "reg-invalid" : "")" style="width:100%;padding:8px 10px;" @bind="legalName" @bind:after='@(() => Clear("legalName"))' />
+                    @ErrChip("legalName")
                 </div>
                 <div>
                     <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Trade name</label>
@@ -114,15 +116,17 @@ else
                         @foreach (var t in new[] { "Material", "Service", "Both" })
                         {
                             <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
-                                <input type="radio" name="supplierType" value="@t" checked="@(supplierType == t)" @onchange="@(() => supplierType = t)" />
+                                <input type="radio" name="supplierType" value="@t" checked="@(supplierType == t)" @onchange='@(() => { supplierType = t; Clear("supplierType"); })' />
                                 @t
                             </label>
                         }
                     </div>
+                    @ErrChip("supplierType")
                 </div>
                 <div style="grid-column:1 / span 2;">
                     <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Website</label>
-                    <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="website" placeholder="https://example.com" />
+                    <input class="rz-textbox @(Err("website") != null ? "reg-invalid" : "")" style="width:100%;padding:8px 10px;" @bind="website" @bind:after='@(() => Clear("website"))' placeholder="https://example.com" />
+                    @ErrChip("website")
                 </div>
             </div>
         }
@@ -132,15 +136,18 @@ else
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div>
                     <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">GST number</label>
-                    <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="gstNumber" />
+                    <input class="rz-textbox @(Err("gstNumber") != null ? "reg-invalid" : "")" style="width:100%;padding:8px 10px;font-family:Inter,monospace;text-transform:uppercase;" @bind="gstNumber" @bind:after='@(() => Clear("gstNumber"))' placeholder="15 chars, e.g. 27ABCDE1234F1Z5" />
+                    @ErrChip("gstNumber")
                 </div>
                 <div>
                     <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">PAN number</label>
-                    <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="panNumber" />
+                    <input class="rz-textbox @(Err("panNumber") != null ? "reg-invalid" : "")" style="width:100%;padding:8px 10px;font-family:Inter,monospace;text-transform:uppercase;" @bind="panNumber" @bind:after='@(() => Clear("panNumber"))' placeholder="e.g. ABCDE1234F" />
+                    @ErrChip("panNumber")
                 </div>
                 <div style="grid-column:1 / span 2;">
                     <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">MSME registration number</label>
-                    <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="msmeNumber" />
+                    <input class="rz-textbox @(Err("msmeNumber") != null ? "reg-invalid" : "")" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="msmeNumber" @bind:after='@(() => Clear("msmeNumber"))' />
+                    @ErrChip("msmeNumber")
                 </div>
             </div>
         }
@@ -156,6 +163,12 @@ else
             {
                 var idx = i;
                 var a = addresses[idx];
+                // Pre-compute keys as locals so attribute values don't need nested $"..." inside double quotes.
+                var kPostal  = AddrKey(idx, "postal");
+                var kLine1   = AddrKey(idx, "line1");
+                var kCity    = AddrKey(idx, "city");
+                var kState   = AddrKey(idx, "state");
+                var kCountry = AddrKey(idx, "country");
                 <div style="border:1px solid var(--mer-line);border-radius:8px;padding:16px;margin-bottom:12px;background:var(--mer-ink-50);">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                         <span style="font-size:12px;font-weight:700;color:var(--mer-blue-darker);">Address #@(idx + 1)</span>
@@ -173,12 +186,27 @@ else
                             <option value="Shipping">Shipping</option>
                             <option value="Other">Other</option>
                         </select>
-                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Postal code" @bind="a.PostalCode" />
-                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;grid-column:1 / span 2;" placeholder="Line 1 *" @bind="a.Line1" />
+                        <div>
+                            <input class="rz-textbox @(InvalidClass(kPostal))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Postal code *" @bind="a.PostalCode" @bind:after="() => Clear(kPostal)" />
+                            @ErrChip(kPostal)
+                        </div>
+                        <div style="grid-column:1 / span 2;">
+                            <input class="rz-textbox @(InvalidClass(kLine1))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Line 1 *" @bind="a.Line1" @bind:after="() => Clear(kLine1)" />
+                            @ErrChip(kLine1)
+                        </div>
                         <input class="rz-textbox" style="padding:6px 10px;font-size:12px;grid-column:1 / span 2;" placeholder="Line 2" @bind="a.Line2" />
-                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="City *" @bind="a.City" />
-                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="State *" @bind="a.State" />
-                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;grid-column:1 / span 2;" placeholder="Country *" @bind="a.Country" />
+                        <div>
+                            <input class="rz-textbox @(InvalidClass(kCity))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="City *" @bind="a.City" @bind:after="() => Clear(kCity)" />
+                            @ErrChip(kCity)
+                        </div>
+                        <div>
+                            <input class="rz-textbox @(InvalidClass(kState))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="State *" @bind="a.State" @bind:after="() => Clear(kState)" />
+                            @ErrChip(kState)
+                        </div>
+                        <div style="grid-column:1 / span 2;">
+                            <input class="rz-textbox @(InvalidClass(kCountry))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Country *" @bind="a.Country" @bind:after="() => Clear(kCountry)" />
+                            @ErrChip(kCountry)
+                        </div>
                     </div>
                 </div>
             }
@@ -195,6 +223,9 @@ else
             {
                 var idx = i;
                 var c = contacts[idx];
+                var kName  = ConKey(idx, "name");
+                var kEmail = ConKey(idx, "email");
+                var kPhone = ConKey(idx, "phone");
                 <div style="border:1px solid var(--mer-line);border-radius:8px;padding:16px;margin-bottom:12px;background:var(--mer-ink-50);">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                         <span style="font-size:12px;font-weight:700;color:var(--mer-blue-darker);">Contact #@(idx + 1)</span>
@@ -206,65 +237,34 @@ else
                         }
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Name *" @bind="c.Name" />
+                        <div>
+                            <input class="rz-textbox @(InvalidClass(kName))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Name *" @bind="c.Name" @bind:after="() => Clear(kName)" />
+                            @ErrChip(kName)
+                        </div>
                         <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Designation" @bind="c.Designation" />
-                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Email *" @bind="c.Email" />
-                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;" placeholder="Phone" @bind="c.Phone" />
+                        <div>
+                            <input class="rz-textbox @(InvalidClass(kEmail))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Email *" @bind="c.Email" @bind:after="() => Clear(kEmail)" />
+                            @ErrChip(kEmail)
+                        </div>
+                        <div>
+                            <input class="rz-textbox @(InvalidClass(kPhone))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Phone" @bind="c.Phone" @bind:after="() => Clear(kPhone)" />
+                            @ErrChip(kPhone)
+                        </div>
                         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
-                            <input type="checkbox" checked="@c.IsPrimary" @onchange="@((ChangeEventArgs e) => SetPrimary(idx, (bool)(e.Value ?? false)))" />
+                            <input type="checkbox" checked="@c.IsPrimary" @onchange='@((ChangeEventArgs e) => { SetPrimary(idx, (bool)(e.Value ?? false)); Clear("con.primary"); })' />
                             Primary contact
                         </label>
                     </div>
                 </div>
             }
+            @ErrChip("con.primary")
         }
         else if (currentStep == 5)
         {
             <h3 style="font-size:14px;font-weight:700;margin-bottom:6px;color:var(--mer-blue-darker);">Onboarding documents</h3>
             <p style="color:var(--mer-ink-500);font-size:12.5px;margin-bottom:14px;">Upload the documents required to complete your onboarding. PAN card and cancelled cheque are always required. GST and MSME certificates are required when you have provided those numbers.</p>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                @foreach (var slot in DocSlots)
-                {
-                    var slotRef = slot;
-                    <div style="border:1px solid @(slot.File != null ? "var(--mer-green-dark)" : "var(--mer-line)");border-radius:8px;padding:14px;background:var(--mer-surface);display:flex;flex-direction:column;gap:8px;">
-                        <div style="display:flex;align-items:center;gap:10px;">
-                            <span class="material-symbols-outlined" style="font-size:22px;color:@(slot.File != null ? "var(--mer-green-dark)" : "var(--mer-blue)");">@slot.Icon</span>
-                            <div style="flex:1;min-width:0;">
-                                <div style="font-size:13px;font-weight:600;color:var(--mer-ink-900);">@slot.Label @if (slot.Required) { <span style="color:var(--mer-danger);">*</span> }</div>
-                                <div style="font-size:11px;color:var(--mer-ink-500);">@slot.Hint</div>
-                            </div>
-                        </div>
-                        @if (slot.File == null)
-                        {
-                            <label class="rz-button" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;width:max-content;">
-                                <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
-                                Choose file
-                                <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelected(slotRef, e))" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" />
-                            </label>
-                        }
-                        else
-                        {
-                            <div style="font-size:12px;color:var(--mer-ink-700);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                                <span class="material-symbols-outlined" style="font-size:14px;color:var(--mer-green-dark);">check_circle</span>
-                                <span style="font-family:Inter,monospace;">@slot.File.FileName</span>
-                                <span style="color:var(--mer-ink-500);">(@slot.File.FileSizeKb KB)</span>
-                            </div>
-                            <label style="font-size:12px;color:var(--mer-blue);cursor:pointer;text-decoration:underline;width:max-content;">
-                                Replace file
-                                <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelected(slotRef, e))" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" />
-                            </label>
-                        }
-                        @if (!string.IsNullOrEmpty(slot.Error))
-                        {
-                            <div style="color:var(--mer-red);font-size:11px;">@slot.Error</div>
-                        }
-                    </div>
-                }
-            </div>
-            @if (DocSlots.Count == 0)
-            {
-                <div style="color:var(--mer-ink-500);font-size:12px;">No documents required.</div>
-            }
+            <DocumentUploader Token="@Token" Slots="@DocSlots" OnUploaded="OnDocUploaded" />
+            @ErrChip("docs")
         }
         else if (currentStep == 6)
         {
@@ -296,7 +296,7 @@ else
             <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Prev" disabled="@(currentStep == 1)">Back</button>
             @if (currentStep < 6)
             {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Next" disabled="@(!CanProceed)">Next</button>
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Next">Next</button>
             }
             else
             {
@@ -305,6 +305,11 @@ else
         </div>
     </div>
 }
+
+<style>
+    .reg-invalid { border:1px solid var(--mer-red) !important; outline:0; }
+    .reg-err { color:var(--mer-red); font-size:11px; margin-top:4px; line-height:1.3; }
+</style>
 
 @code {
     [Parameter] public string Token { get; set; } = string.Empty;
@@ -333,19 +338,116 @@ else
 
     private List<AddressRow> addresses = new();
     private List<ContactRow> contacts = new();
-    private List<DocSlot> DocSlots = new();
+    // DocSlot type lives in the shared DocumentUploader component; we reuse it via the type alias below.
+    private List<DocumentUploader.DocSlot> DocSlots = new();
 
     private const long MaxFileBytes = 5 * 1024 * 1024; // 5 MB
 
-    private bool CanProceed => currentStep switch
+    // ─── Per-step validation ────────────────────────────────────────────────
+    //
+    // Mirrors backend FluentValidation rules (CreateSupplierInviteCommandValidator +
+    // RegisterSupplierCommandValidator) so the user sees errors at the offending step
+    // instead of one big "submission failed" at the end. Map key conventions:
+    //   legalName / supplierType / website / gstNumber / panNumber / msmeNumber
+    //   addr.{idx}.{line1|city|state|country|postal}
+    //   con.{idx}.{name|email|phone}
+    //   con.primary  ← cross-row check
+    //   docs         ← cross-slot check on step 5
+
+    private readonly Dictionary<string, string> _err = new();
+
+    // GST: 15 alphanumeric. Backend uses ^[0-9A-Z]{15}$.
+    private static readonly Regex GstRegex = new("^[0-9A-Z]{15}$", RegexOptions.Compiled);
+    // PAN: 5 letters + 4 digits + 1 letter.
+    private static readonly Regex PanRegex = new("^[A-Z]{5}[0-9]{4}[A-Z]{1}$", RegexOptions.Compiled);
+    // E.164-ish loose: optional + then 8-15 digits.
+    private static readonly Regex PhoneRegex = new("^\\+?\\d{8,15}$", RegexOptions.Compiled);
+    // Minimal sanity check for email; backend re-validates with proper EmailAddress rule.
+    private static readonly Regex EmailRegex = new("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", RegexOptions.Compiled);
+    // Postal code: digits, optional dash/space, 3-12 chars (loose — supports IN/UK/CA).
+    private static readonly Regex PostalRegex = new("^[A-Za-z0-9][A-Za-z0-9 \\-]{2,11}$", RegexOptions.Compiled);
+
+    private string? Err(string key) => _err.TryGetValue(key, out var v) ? v : null;
+    private void Clear(string key) { _err.Remove(key); }
+    private string InvalidClass(string key) => _err.ContainsKey(key) ? "reg-invalid" : string.Empty;
+    private static string AddrKey(int idx, string field) => "addr." + idx + "." + field;
+    private static string ConKey(int idx, string field) => "con." + idx + "." + field;
+    private RenderFragment ErrChip(string key) => __builder =>
     {
-        1 => !string.IsNullOrWhiteSpace(legalName) && !string.IsNullOrWhiteSpace(supplierType),
-        2 => true,
-        3 => addresses.Count > 0 && addresses.All(a => !string.IsNullOrWhiteSpace(a.Line1) && !string.IsNullOrWhiteSpace(a.City) && !string.IsNullOrWhiteSpace(a.State) && !string.IsNullOrWhiteSpace(a.Country)),
-        4 => contacts.Count > 0 && contacts.All(c => !string.IsNullOrWhiteSpace(c.Name) && !string.IsNullOrWhiteSpace(c.Email) && c.Email.Contains('@')) && contacts.Any(c => c.IsPrimary),
-        5 => DocSlots.Where(s => s.Required).All(s => s.File != null),
-        _ => true
+        if (_err.TryGetValue(key, out var msg))
+        {
+            __builder.OpenElement(0, "div");
+            __builder.AddAttribute(1, "class", "reg-err");
+            __builder.AddContent(2, msg);
+            __builder.CloseElement();
+        }
     };
+
+    private bool ValidateStep(int step)
+    {
+        switch (step)
+        {
+            case 1:
+                if (string.IsNullOrWhiteSpace(legalName)) _err["legalName"] = "Legal name is required.";
+                if (string.IsNullOrWhiteSpace(supplierType)) _err["supplierType"] = "Pick a supplier type.";
+                if (!string.IsNullOrWhiteSpace(website) && !(website.StartsWith("http://") || website.StartsWith("https://")))
+                    _err["website"] = "Website must start with http:// or https://.";
+                break;
+
+            case 2:
+                if (!string.IsNullOrWhiteSpace(gstNumber) && !GstRegex.IsMatch(gstNumber.Trim().ToUpperInvariant()))
+                    _err["gstNumber"] = "GST must be 15 alphanumeric characters (e.g. 27ABCDE1234F1Z5).";
+                if (!string.IsNullOrWhiteSpace(panNumber) && !PanRegex.IsMatch(panNumber.Trim().ToUpperInvariant()))
+                    _err["panNumber"] = "PAN must be 5 letters + 4 digits + 1 letter (e.g. ABCDE1234F).";
+                if (!string.IsNullOrWhiteSpace(msmeNumber) && msmeNumber.Trim().Length > 50)
+                    _err["msmeNumber"] = "MSME number too long (max 50 chars).";
+                break;
+
+            case 3:
+                if (addresses.Count == 0)
+                {
+                    _err["addr.0.line1"] = "Add at least one address.";
+                    break;
+                }
+                for (int i = 0; i < addresses.Count; i++)
+                {
+                    var a = addresses[i];
+                    if (string.IsNullOrWhiteSpace(a.Line1)) _err[$"addr.{i}.line1"] = "Address line 1 required.";
+                    if (string.IsNullOrWhiteSpace(a.City)) _err[$"addr.{i}.city"] = "City required.";
+                    if (string.IsNullOrWhiteSpace(a.State)) _err[$"addr.{i}.state"] = "State required.";
+                    if (string.IsNullOrWhiteSpace(a.Country)) _err[$"addr.{i}.country"] = "Country required.";
+                    if (string.IsNullOrWhiteSpace(a.PostalCode)) _err[$"addr.{i}.postal"] = "Postal code required.";
+                    else if (!PostalRegex.IsMatch(a.PostalCode.Trim())) _err[$"addr.{i}.postal"] = "Postal code looks invalid.";
+                }
+                break;
+
+            case 4:
+                if (contacts.Count == 0)
+                {
+                    _err["con.0.name"] = "Add at least one contact.";
+                    break;
+                }
+                for (int i = 0; i < contacts.Count; i++)
+                {
+                    var c = contacts[i];
+                    if (string.IsNullOrWhiteSpace(c.Name)) _err[$"con.{i}.name"] = "Contact name required.";
+                    if (string.IsNullOrWhiteSpace(c.Email)) _err[$"con.{i}.email"] = "Email required.";
+                    else if (!EmailRegex.IsMatch(c.Email.Trim())) _err[$"con.{i}.email"] = "Email format looks invalid.";
+                    if (!string.IsNullOrWhiteSpace(c.Phone) && !PhoneRegex.IsMatch(c.Phone.Trim()))
+                        _err[$"con.{i}.phone"] = "Phone must be 8–15 digits (optional leading +).";
+                }
+                if (!contacts.Any(c => c.IsPrimary)) _err["con.primary"] = "Mark exactly one contact as primary.";
+                break;
+
+            case 5:
+                var missing = DocSlots.Where(s => s.Required && s.File == null).Select(s => s.Label).ToList();
+                if (missing.Count > 0) _err["docs"] = "Upload required documents: " + string.Join(", ", missing) + ".";
+                break;
+        }
+        return _err.Count == 0;
+    }
+
+    private void OnDocUploaded(MerinoOne.SupplierPortal.Contracts.SupplierRegistration.UploadedDocumentDto _) => Clear("docs");
 
     protected override async Task OnInitializedAsync()
     {
@@ -480,22 +582,22 @@ else
 
     private void Next()
     {
-        if (currentStep < 6 && CanProceed)
+        if (currentStep >= 6) return;
+        _err.Clear();
+        if (!ValidateStep(currentStep)) return; // errors now in _err — render will show chips
+        // Build the document slot list when entering step 5.
+        if (currentStep == 4)
         {
-            // Build the document slot list when entering step 5.
-            if (currentStep == 4)
-            {
-                RebuildDocSlots();
-            }
-            currentStep++;
+            RebuildDocSlots();
         }
+        currentStep++;
     }
 
     private void RebuildDocSlots()
     {
-        // Preserve existing files for slots that survive.
+        // Preserve already-uploaded files for slots that survive a step transition.
         var existing = DocSlots.ToDictionary(s => s.DocumentType, s => s);
-        DocSlots = new List<DocSlot>
+        DocSlots = new List<DocumentUploader.DocSlot>
         {
             BuildSlot(existing, "OnboardingPan",    "PAN card",          "id_card",     true,                                "PDF / JPG / PNG — up to 5 MB"),
             BuildSlot(existing, "OnboardingCheque", "Cancelled cheque",  "account_balance", true,                            "PDF / JPG / PNG — up to 5 MB"),
@@ -510,42 +612,10 @@ else
         }
     }
 
-    private static DocSlot BuildSlot(Dictionary<string, DocSlot> existing, string type, string label, string icon, bool required, string hint)
+    private static DocumentUploader.DocSlot BuildSlot(Dictionary<string, DocumentUploader.DocSlot> existing, string type, string label, string icon, bool required, string hint)
     {
         if (existing.TryGetValue(type, out var prior)) return prior;
-        return new DocSlot { DocumentType = type, Label = label, Icon = icon, Required = required, Hint = hint };
-    }
-
-    private async Task OnFileSelected(DocSlot slot, InputFileChangeEventArgs e)
-    {
-        slot.Error = string.Empty;
-        var file = e.File;
-        if (file == null) return;
-        if (file.Size > MaxFileBytes)
-        {
-            slot.Error = $"File exceeds 5 MB ({(file.Size / 1024d / 1024d):0.0} MB).";
-            return;
-        }
-        try
-        {
-            // Read into memory to capture size + a synthetic file URL.
-            // Stage 1 mock: do not actually upload — backend IDocumentValidationService is mocked.
-            using var stream = file.OpenReadStream(MaxFileBytes);
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            var sizeKb = (int)Math.Ceiling(ms.Length / 1024d);
-            slot.File = new UploadedFileInfo
-            {
-                FileName = file.Name,
-                FileSizeKb = sizeKb,
-                MimeType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType,
-                FileUrl = $"data:placeholder/{Guid.NewGuid()}"
-            };
-        }
-        catch (Exception ex)
-        {
-            slot.Error = $"Could not read file: {ex.Message}";
-        }
+        return new DocumentUploader.DocSlot { DocumentType = type, Label = label, Icon = icon, Required = required, Hint = hint };
     }
 
     private string StepLabel(int s) => s switch
@@ -611,8 +681,9 @@ else
             }).ToList(),
             documents = DocSlots.Where(s => s.File != null).Select(s => new
             {
+                id = s.File!.Id,
                 documentType = s.DocumentType,
-                fileName = s.File!.FileName,
+                fileName = s.File.FileName,
                 fileUrl = s.File.FileUrl,
                 fileSizeKb = s.File.FileSizeKb,
                 mimeType = s.File.MimeType
@@ -658,22 +729,4 @@ else
         public bool IsPrimary { get; set; }
     }
 
-    private class DocSlot
-    {
-        public string DocumentType { get; set; } = string.Empty;
-        public string Label { get; set; } = string.Empty;
-        public string Icon { get; set; } = "description";
-        public bool Required { get; set; }
-        public string Hint { get; set; } = string.Empty;
-        public UploadedFileInfo? File { get; set; }
-        public string Error { get; set; } = string.Empty;
-    }
-
-    private class UploadedFileInfo
-    {
-        public string FileName { get; set; } = string.Empty;
-        public string FileUrl { get; set; } = string.Empty;
-        public int FileSizeKb { get; set; }
-        public string MimeType { get; set; } = string.Empty;
-    }
 }

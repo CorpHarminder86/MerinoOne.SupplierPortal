@@ -104,6 +104,38 @@ Returns: VerifyInviteOtpResponse; 400 on invalid code; 410 if OTP expired. Anony
         return Result<VerifyInviteOtpResponse>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    [HttpPost("invites/{id:guid}/cancel")]
+    [Authorize(Policy = "Supplier.Invite")]
+    [EndpointSummary("Cancel supplier invite")]
+    [EndpointDescription(@"Cancels a pending supplier invite.
+Filters / params:
+- **id**: Required — invite id.
+Side effects:
+- Sets CancelledAt + CancelledBy on the invite. Status switches to **Cancelled**.
+Returns: SupplierInviteDetailDto reflecting the cancelled state; 404 if not found; 409 if already consumed or cancelled. Requires permission **Supplier.Invite**.")]
+    public async Task<Result<SupplierInviteDetailDto>> CancelInvite(Guid id, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new CancelSupplierInviteCommand(id), ct);
+        return Result<SupplierInviteDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("invites/{id:guid}/resend")]
+    [Authorize(Policy = "Supplier.Invite")]
+    [EndpointSummary("Resend supplier invite")]
+    [EndpointDescription(@"Reissues a pending supplier invite. Generates a fresh token + expiry, persists a new InviteOtp row, and re-sends both the Invite email and the InviteOtp email.
+Filters / params:
+- **id**: Required — invite id.
+Side effects:
+- Updates Token / ExpiresAt / LastResentAt / ResendCount on the invite.
+- Dispatches a fresh Invite + InviteOtp email.
+- Throttled to 1 resend per 60s per invite.
+Returns: CreateSupplierInviteResponse (updated invite + fresh registrationUrl); 404 if not found; 409 if consumed/cancelled or throttled. Requires permission **Supplier.Invite**.")]
+    public async Task<Result<CreateSupplierInviteResponse>> ResendInvite(Guid id, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new ResendSupplierInviteCommand(id), ct);
+        return Result<CreateSupplierInviteResponse>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
     [HttpPost("invites/{token}/resend-otp")]
     [AllowAnonymous]
     [EndpointSummary("Resend invite OTP")]
@@ -123,7 +155,7 @@ Returns: ResendInviteOtpResponse; 404 if invite not found; 429 if requested too 
 
     private string BuildRegistrationUrl(string token)
     {
-        // Web URL is configured under Web:BaseUrl. Falls back to the request origin.
+        // Resolution: Web:BaseUrl appsetting → fall back to the request origin.
         var configured = _config["Web:BaseUrl"];
         var baseUrl = !string.IsNullOrWhiteSpace(configured)
             ? configured.TrimEnd('/')

@@ -1,4 +1,5 @@
 @page "/admin/supplier-invites"
+@implements IDisposable
 @inject ApiClient Api
 @inject TokenAccessor Token
 @inject NavigationManager Nav
@@ -49,6 +50,7 @@
             <option value="Pending">Pending</option>
             <option value="Consumed">Consumed</option>
             <option value="Expired">Expired</option>
+            <option value="Cancelled">Cancelled</option>
         </select>
     </div>
 
@@ -65,7 +67,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.2fr 130px 130px 130px 110px; --tl-min-width: 1000px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.2fr 130px 130px 130px 110px 130px; --tl-min-width: 1130px;">
             <div class="tlg-header">
                 <div class="tlg-col">Legal name</div>
                 <div class="tlg-col">Email</div>
@@ -73,16 +75,34 @@
                 <div class="tlg-col">Invited at</div>
                 <div class="tlg-col">Expires at</div>
                 <div class="tlg-col">Status</div>
+                <div class="tlg-col">Actions</div>
             </div>
             @foreach (var i in invites)
             {
+                var inv = i;
                 <div class="tlg-row">
-                    <div class="tlg-col tlg-name">@i.LegalName</div>
-                    <div class="tlg-col tlg-desc">@i.Email</div>
-                    <div class="tlg-col">@i.InvitedBy</div>
-                    <div class="tlg-col tlg-code">@i.InvitedAt.ToString("yyyy-MM-dd")</div>
-                    <div class="tlg-col tlg-code">@i.ExpiresAt.ToString("yyyy-MM-dd")</div>
-                    <div class="tlg-col"><span class="tlg-status @StatusClass(i.Status)">@i.Status</span></div>
+                    <div class="tlg-col tlg-name">@inv.LegalName</div>
+                    <div class="tlg-col tlg-desc">@inv.Email</div>
+                    <div class="tlg-col">@inv.InvitedBy</div>
+                    <div class="tlg-col tlg-code">@inv.InvitedAt.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@inv.ExpiresAt.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(inv.Status)">@inv.Status</span></div>
+                    <div class="tlg-col" style="display:flex;gap:6px;align-items:center;">
+                        @if (Token.HasPermission("Supplier.Invite") && (inv.Status == "Pending" || inv.Status == "Expired"))
+                        {
+                            <button title="Resend invite" @onclick="() => DoResend(inv)" disabled="@busy"
+                                    style="background:transparent;border:1px solid var(--mer-ink-300);border-radius:4px;padding:2px 6px;cursor:pointer;color:var(--mer-blue);">
+                                <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">refresh</span>
+                            </button>
+                        }
+                        @if (Token.HasPermission("Supplier.Invite") && inv.Status == "Pending")
+                        {
+                            <button title="Cancel invite" @onclick="() => DoCancel(inv)" disabled="@busy"
+                                    style="background:transparent;border:1px solid var(--mer-ink-300);border-radius:4px;padding:2px 6px;cursor:pointer;color:var(--mer-red);">
+                                <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span>
+                            </button>
+                        }
+                    </div>
                 </div>
             }
         </div>
@@ -134,6 +154,36 @@
     </div>
 }
 
+@* Confirm dialog (merino-dialog skin) — used for both Cancel and Resend actions. *@
+@if (_confirm is not null)
+{
+    var c = _confirm;
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="@c.Variant" style="width:440px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--@c.Variant"><span class="material-symbols-outlined">@c.Icon</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">@c.Eyebrow</div>
+                    <h2 class="merino-dialog__title">@c.Title</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="CloseConfirm"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="margin:0;color:var(--mer-ink-700);font-size:13px;line-height:1.4;">@c.Body</p>
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="CloseConfirm" disabled="@busy">@c.CancelLabel</button>
+                    <button class="merino-dialog__btn" data-intent="@(c.Variant == "danger" ? "danger" : "primary")" @onclick="ConfirmAction" disabled="@busy">
+                        @(busy ? "Working…" : c.ConfirmLabel)
+                    </button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
 @code {
     private List<SupplierInviteListDto>? all;
     private List<SupplierInviteListDto>? invites;
@@ -148,7 +198,22 @@
     private string search = string.Empty;
     private string statusFilter = string.Empty;
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        // TokenAccessor.Permissions hydrates async after MainLayout.HydrateTokenAsync runs.
+        // Without this subscription the page renders once with empty permissions (Action
+        // column buttons hidden), then never re-evaluates when /api/auth/me finishes —
+        // causing the "Action buttons disappear on page load" defect.
+        Token.Changed += OnTokenChanged;
+        await Load();
+    }
+
+    private void OnTokenChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Token.Changed -= OnTokenChanged;
+    }
 
     private async Task Load()
     {
@@ -201,6 +266,96 @@
         busy = false;
     }
 
+    // Confirm-dialog state (single instance, drives both Cancel and Resend flows).
+    private ConfirmRequest? _confirm;
+
+    private void DoCancel(SupplierInviteListDto inv)
+    {
+        _confirm = new ConfirmRequest
+        {
+            Eyebrow = "Supplier invite",
+            Title = $"Cancel invite for {inv.LegalName}?",
+            Body = $"The link sent to {inv.Email} will stop working. This cannot be undone.",
+            Icon = "cancel",
+            Variant = "danger",
+            ConfirmLabel = "Cancel invite",
+            CancelLabel = "Keep invite",
+            Action = (ct) => CancelInviteAsync(inv, ct),
+        };
+    }
+
+    private void DoResend(SupplierInviteListDto inv)
+    {
+        _confirm = new ConfirmRequest
+        {
+            Eyebrow = "Supplier invite",
+            Title = $"Resend invite to {inv.LegalName}?",
+            Body = $"A fresh registration link and OTP will be emailed to {inv.Email}. The previous link will stop working.",
+            Icon = "refresh",
+            Variant = "info",
+            ConfirmLabel = "Send again",
+            CancelLabel = "Cancel",
+            Action = (ct) => ResendInviteAsync(inv, ct),
+        };
+    }
+
+    private void CloseConfirm() => _confirm = null;
+
+    private async Task ConfirmAction()
+    {
+        if (_confirm is null) return;
+        var action = _confirm.Action;
+        busy = true;
+        try { await action(default); }
+        finally { busy = false; }
+        _confirm = null;
+    }
+
+    private async Task CancelInviteAsync(SupplierInviteListDto inv, CancellationToken ct)
+    {
+        var resp = await Api.PostAsync<SupplierInviteDetailDto, object>(
+            $"api/supplier-registration/invites/{inv.Id}/cancel", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invite cancelled" });
+            await Load();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Cancel failed",
+                Detail = resp?.Errors?.FirstOrDefault() });
+        }
+    }
+
+    private async Task ResendInviteAsync(SupplierInviteListDto inv, CancellationToken ct)
+    {
+        var resp = await Api.PostAsync<CreateSupplierInviteResponse, object>(
+            $"api/supplier-registration/invites/{inv.Id}/resend", new { });
+        if (resp?.Success == true && resp.Data != null)
+        {
+            latestRegistrationUrl = resp.Data.RegistrationUrl;
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invite resent" });
+            await Load();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Resend failed",
+                Detail = resp?.Errors?.FirstOrDefault() });
+        }
+    }
+
+    private class ConfirmRequest
+    {
+        public string Eyebrow { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string Body { get; set; } = "";
+        public string Icon { get; set; } = "help";
+        public string Variant { get; set; } = "info"; // info | danger | success | warning
+        public string ConfirmLabel { get; set; } = "Confirm";
+        public string CancelLabel { get; set; } = "Cancel";
+        public Func<CancellationToken, Task> Action { get; set; } = _ => Task.CompletedTask;
+    }
+
     private async Task CopyText(string text)
     {
         try
@@ -218,7 +373,7 @@
     {
         "Consumed" or "Registered" => "tlg-status--active",
         "Pending" or "Invited" => "tlg-status--pending",
-        "Expired" or "Revoked" => "tlg-status--danger",
+        "Expired" or "Revoked" or "Cancelled" => "tlg-status--danger",
         _ => "tlg-status--info"
     };
 }

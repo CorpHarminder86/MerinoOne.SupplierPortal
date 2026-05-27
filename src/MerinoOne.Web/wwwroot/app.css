@@ -15,3 +15,10 @@ body { margin: 0; }
 
 .blazor-error-boundary { background: var(--mer-danger); color: #FFFFFF; padding: 1rem 1.5rem; }
 .blazor-error-boundary::after { content: "An error has occurred."; }
+
+/* LoaderOverlay — reusable busy veil. Inline = absolute over parent (parent must be position:relative). Fullscreen = fixed viewport veil. */
+.mer-loader-overlay { display: flex; align-items: center; justify-content: center; background: var(--mer-modal-backdrop, rgba(255, 255, 255, 0.72)); backdrop-filter: blur(2px); z-index: 50; }
+.mer-loader-overlay--inline { position: absolute; inset: 0; border-radius: inherit; }
+.mer-loader-overlay--fullscreen { position: fixed; inset: 0; z-index: 2000; }
+.mer-loader-overlay__card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 18px; background: var(--mer-surface); border: 1px solid var(--mer-line); border-radius: var(--mer-radius-lg); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06); }
+.mer-loader-overlay__msg { font: 500 12px/1.3 'Plus Jakarta Sans', sans-serif; color: var(--mer-ink-700); }

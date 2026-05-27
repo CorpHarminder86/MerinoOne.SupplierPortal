@@ -27,12 +27,18 @@ public class GetInvitesListQueryHandler : IRequestHandler<GetInvitesListQuery, L
 
         return rows.Select(i =>
         {
+            // Status precedence: Consumed > Cancelled > Expired > Pending.
+            // Cancelled wins over Expired so an explicit admin action stays visible even after
+            // the token would have aged out naturally.
             string status = i.ConsumedAt.HasValue
                 ? "Consumed"
-                : (i.ExpiresAt < now ? "Expired" : "Pending");
+                : (i.CancelledAt.HasValue
+                    ? "Cancelled"
+                    : (i.ExpiresAt < now ? "Expired" : "Pending"));
             return new SupplierInviteListDto(
                 i.Id, i.Seq, i.LegalName, i.Email, i.InvitedBy,
-                i.InvitedAt, i.ExpiresAt, i.ConsumedAt, i.SupplierId, i.Token, status);
+                i.InvitedAt, i.ExpiresAt, i.ConsumedAt, i.SupplierId, i.Token, status,
+                i.CancelledAt, i.LastResentAt, i.ResendCount);
         })
         .Where(d => string.IsNullOrWhiteSpace(request.Status) ||
                     string.Equals(d.Status, request.Status, StringComparison.OrdinalIgnoreCase))

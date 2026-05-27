@@ -1,0 +1,197 @@
+@*
+    Reusable document-upload grid. Renders one card per slot, streams the picked file
+    to POST api/document-uploads (anonymous endpoint, token-scoped) and surfaces a green
+    check + "Replace file" affordance on success.
+
+    Usage:
+        <DocumentUploader Token="@Token"
+                          Slots="DocSlots"
+                          OnUploaded="OnSlotUploaded"
+                          MaxFileBytes="5242880" />
+
+    Caller owns the slot list (DocumentUploader.DocSlot record). Slots are rendered in the
+    order supplied. Component mutates slot.File/slot.Error in-place so the caller can read
+    them back after upload.
+
+    The component is presentation + transport only — it does NOT submit the registration
+    payload. The hosting page collects slot IDs and POSTs them to its own endpoint.
+*@
+
+@inject ApiClient Api
+
+@if (Slots is null || Slots.Count == 0)
+{
+    <div style="color:var(--mer-ink-500);font-size:12px;">No documents required.</div>
+}
+else
+{
+    <div class="@($"doc-uploader doc-uploader--cols-{Columns}")">
+        @foreach (var slot in Slots)
+        {
+            var slotRef = slot;
+            <div class="doc-uploader__slot" data-uploaded="@(slot.File != null)">
+                <LoaderOverlay IsBusy="_uploadingSlots.Contains(slot.DocumentType)" Message="Uploading…" Inline="true" />
+                <div class="doc-uploader__head">
+                    <span class="material-symbols-outlined doc-uploader__icon" data-uploaded="@(slot.File != null)">@slot.Icon</span>
+                    <div class="doc-uploader__head-text">
+                        <div class="doc-uploader__label">
+                            @slot.Label
+                            @if (slot.Required)
+                            {
+                                <span style="color:var(--mer-danger);">*</span>
+                            }
+                        </div>
+                        <div class="doc-uploader__hint">@slot.Hint</div>
+                    </div>
+                </div>
+                @if (slot.File == null)
+                {
+                    <label class="rz-button doc-uploader__choose">
+                        <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
+                        Choose file
+                        <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelectedAsync(slotRef, e))" style="display:none;" accept="@Accept" />
+                    </label>
+                }
+                else
+                {
+                    <div class="doc-uploader__file">
+                        <span class="material-symbols-outlined" style="font-size:14px;color:var(--mer-green-dark);">check_circle</span>
+                        <span class="doc-uploader__file-name">@slot.File.FileName</span>
+                        <span class="doc-uploader__file-size">(@slot.File.FileSizeKb KB)</span>
+                    </div>
+                    <label class="doc-uploader__replace">
+                        Replace file
+                        <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelectedAsync(slotRef, e))" style="display:none;" accept="@Accept" />
+                    </label>
+                }
+                @if (!string.IsNullOrEmpty(slot.Error))
+                {
+                    <div class="doc-uploader__error">@slot.Error</div>
+                }
+            </div>
+        }
+    </div>
+}
+
+<style>
+    .doc-uploader { display:grid; gap:12px; }
+    .doc-uploader--cols-1 { grid-template-columns:1fr; }
+    .doc-uploader--cols-2 { grid-template-columns:1fr 1fr; }
+    .doc-uploader--cols-3 { grid-template-columns:1fr 1fr 1fr; }
+    .doc-uploader__slot { position:relative; border:1px solid var(--mer-line); border-radius:8px; padding:14px; background:var(--mer-surface); display:flex; flex-direction:column; gap:8px; }
+    .doc-uploader__slot[data-uploaded="True"] { border-color:var(--mer-green-dark); }
+    .doc-uploader__head { display:flex; align-items:center; gap:10px; }
+    .doc-uploader__icon { font-size:22px; color:var(--mer-blue); }
+    .doc-uploader__icon[data-uploaded="True"] { color:var(--mer-green-dark); }
+    .doc-uploader__head-text { flex:1; min-width:0; }
+    .doc-uploader__label { font-size:13px; font-weight:600; color:var(--mer-ink-900); }
+    .doc-uploader__hint { font-size:11px; color:var(--mer-ink-500); }
+    .doc-uploader__choose { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:6px; border:1px solid var(--mer-ink-300); background:var(--mer-surface); cursor:pointer; font-size:12px; width:max-content; }
+    .doc-uploader__file { font-size:12px; color:var(--mer-ink-700); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .doc-uploader__file-name { font-family:Inter, monospace; }
+    .doc-uploader__file-size { color:var(--mer-ink-500); }
+    .doc-uploader__replace { font-size:12px; color:var(--mer-blue); cursor:pointer; text-decoration:underline; width:max-content; }
+    .doc-uploader__error { color:var(--mer-red); font-size:11px; }
+</style>
+
+@code {
+    /// <summary>Anonymous invite token. Required — the upload endpoint validates this matches a pending invite.</summary>
+    [Parameter, EditorRequired] public string Token { get; set; } = string.Empty;
+
+    /// <summary>Caller-owned slot list. Component mutates slot.File / slot.Error in-place.</summary>
+    [Parameter, EditorRequired] public List<DocSlot> Slots { get; set; } = new();
+
+    /// <summary>Fires after every successful slot upload. Caller can persist DTOs / refresh totals.</summary>
+    [Parameter] public EventCallback<UploadedDocumentDto> OnUploaded { get; set; }
+
+    /// <summary>Server-side cap mirrors backend RequestSizeLimit; defaults to 5 MB.</summary>
+    [Parameter] public long MaxFileBytes { get; set; } = 5L * 1024 * 1024;
+
+    /// <summary>HTML accept attribute on the picker. Defaults to the onboarding-doc set.</summary>
+    [Parameter] public string Accept { get; set; } = ".pdf,.jpg,.jpeg,.png";
+
+    /// <summary>1, 2, or 3 columns. Defaults to 2 to match the registration page layout.</summary>
+    [Parameter] public int Columns { get; set; } = 2;
+
+    // Set of DocumentType keys currently mid-upload. Drives per-slot LoaderOverlay visibility.
+    private readonly HashSet<string> _uploadingSlots = new(StringComparer.Ordinal);
+
+    private async Task OnFileSelectedAsync(DocSlot slot, InputFileChangeEventArgs e)
+    {
+        slot.Error = string.Empty;
+        var file = e.File;
+        if (file == null) return;
+        if (file.Size > MaxFileBytes)
+        {
+            slot.Error = $"File exceeds {MaxFileBytes / 1024 / 1024} MB ({(file.Size / 1024d / 1024d):0.0} MB).";
+            return;
+        }
+
+        _uploadingSlots.Add(slot.DocumentType);
+        StateHasChanged();
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            var streamContent = new StreamContent(file.OpenReadStream(MaxFileBytes));
+            streamContent.Headers.ContentType =
+                new System.Net.Http.Headers.MediaTypeHeaderValue(
+                    string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
+            content.Add(streamContent, "file", file.Name);
+            content.Add(new StringContent(slot.DocumentType), "documentType");
+            content.Add(new StringContent(Token), "token");
+
+            var resp = await Api.PostMultipartAsync<UploadedDocumentDto>("api/document-uploads", content);
+            if (resp?.Success == true && resp.Data != null)
+            {
+                var d = resp.Data;
+                slot.File = new UploadedFileInfo
+                {
+                    Id = d.Id,
+                    FileName = d.FileName,
+                    FileSizeKb = d.FileSizeKb,
+                    MimeType = d.MimeType,
+                    FileUrl = d.FileUrl,
+                };
+                if (OnUploaded.HasDelegate)
+                {
+                    await OnUploaded.InvokeAsync(d);
+                }
+            }
+            else
+            {
+                slot.Error = resp?.Errors?.FirstOrDefault() ?? "Upload failed.";
+            }
+        }
+        catch (Exception ex)
+        {
+            slot.Error = $"Upload failed: {ex.Message}";
+        }
+        finally
+        {
+            _uploadingSlots.Remove(slot.DocumentType);
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>One upload slot in the grid. Caller constructs, component mutates File/Error.</summary>
+    public class DocSlot
+    {
+        public string DocumentType { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string Icon { get; set; } = "description";
+        public bool Required { get; set; }
+        public string Hint { get; set; } = string.Empty;
+        public UploadedFileInfo? File { get; set; }
+        public string Error { get; set; } = string.Empty;
+    }
+
+    /// <summary>Result captured per slot after a successful upload.</summary>
+    public class UploadedFileInfo
+    {
+        public Guid Id { get; set; }
+        public string FileName { get; set; } = string.Empty;
+        public string FileUrl { get; set; } = string.Empty;
+        public int FileSizeKb { get; set; }
+        public string MimeType { get; set; } = string.Empty;
+    }
+}

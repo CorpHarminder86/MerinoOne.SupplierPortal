@@ -42,6 +42,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<InviteOtp> InviteOtps => Set<InviteOtp>();
     public DbSet<LoginOtp> LoginOtps => Set<LoginOtp>();
     public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
+    public DbSet<EmailOutbox> EmailOutbox => Set<EmailOutbox>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
 
     public DbSet<Item> Items => Set<Item>();
