@@ -32,7 +32,12 @@ public record SupplierInviteDetailDto(
     DateTime? LastResentAt = null,
     int ResendCount = 0);
 
-public record CreateSupplierInviteRequest(string LegalName, string Email, string? MobileNo = null);
+/// <summary>
+/// Create a supplier invite. <see cref="TenantEntityId"/> is the company the invited supplier will be
+/// registered under — required (must exist in the inviting admin's tenant). RegisterSupplierCommand copies
+/// it onto the created Supplier so the supplier inherits its company.
+/// </summary>
+public record CreateSupplierInviteRequest(string LegalName, string Email, Guid TenantEntityId, string? MobileNo = null);
 
 public record CreateSupplierInviteResponse(
     SupplierInviteDetailDto Invite,

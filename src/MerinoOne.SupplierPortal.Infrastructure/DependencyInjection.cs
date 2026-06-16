@@ -3,6 +3,7 @@ using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Application.SystemSettings;
 using MerinoOne.SupplierPortal.Application.SystemSettings.EmailConfig;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Registry;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Scope;
 using MerinoOne.SupplierPortal.Application.SystemSettings.SupplierInvite;
 using MerinoOne.SupplierPortal.Infrastructure.Identity;
 using MerinoOne.SupplierPortal.Infrastructure.Integration.Infor;
@@ -25,6 +26,9 @@ public static class DependencyInjection
                   ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
 
         services.AddScoped<AuditableEntityInterceptor>();
+        // Stamps tenant + active-company onto inserted rows (skips the system principal). Scoped so it
+        // ctor-injects the per-request ICurrentUser / ICurrentCompany.
+        services.AddScoped<ScopeStampInterceptor>();
 
         services.AddDbContext<AppDbContext>((sp, opts) =>
         {
@@ -84,6 +88,9 @@ public static class DependencyInjection
         // Password hashing — adapter over the static PasswordHasher (Application has no Infra ref).
         services.AddSingleton<IPasswordHasher, PasswordHasherService>();
 
+        // API-key hashing — adapter over the static ApiKeyHasher (SHA-256 + FixedTimeEquals).
+        services.AddSingleton<IApiKeyHasher, ApiKeyHasherService>();
+
         // System settings — generic shell, per-category seeds, password protection, cached readers.
         services.AddDataProtection();
         // Singleton — DataProtectorSettingProtector wraps the singleton IDataProtectionProvider
@@ -108,8 +115,15 @@ public static class DependencyInjection
         services.AddSingleton<ISupplierInviteSettings>(sp => sp.GetRequiredService<SupplierInviteSettingsService>());
         services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<SupplierInviteSettingsService>());
 
-        // ef tooling / migrations / seed contexts get the anonymous user
+        // Scope-filter rollout gate — singleton so the request DbContext reads the flag with zero DB I/O
+        // (no re-entrancy during query-filter evaluation). Invalidated like the other cached readers.
+        services.AddSingleton<ScopeFilterGate>();
+        services.AddSingleton<IScopeFilterGate>(sp => sp.GetRequiredService<ScopeFilterGate>());
+        services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<ScopeFilterGate>());
+
+        // ef tooling / migrations / seed contexts get the anonymous (system) user + company.
         services.TryAddCurrentUserFallback();
+        services.TryAddCurrentCompanyFallback();
 
         return services;
     }
@@ -121,6 +135,17 @@ public static class DependencyInjection
         if (!services.Any(d => d.ServiceType == typeof(ICurrentUser)))
         {
             services.AddScoped<ICurrentUser, AnonymousCurrentUser>();
+        }
+        return services;
+    }
+
+    private static IServiceCollection TryAddCurrentCompanyFallback(this IServiceCollection services)
+    {
+        // Same pattern as ICurrentUser: the API host registers HttpContextCurrentCompany; design-time
+        // tooling, seeders and workers fall back to the system company (bypasses the company filter).
+        if (!services.Any(d => d.ServiceType == typeof(ICurrentCompany)))
+        {
+            services.AddScoped<ICurrentCompany, AnonymousCurrentCompany>();
         }
         return services;
     }

@@ -253,6 +253,33 @@ Returns: LoginResponse with token + roles + permissions; 401 on expired/invalid/
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
         claims.AddRange(perms.Select(p => new Claim("permission", p)));
 
+        // Tenant claim — the single fixed tenant this user belongs to. Omitted for a Platform Admin
+        // (TenantId is null); HttpContextCurrentUser.IsPlatformAdmin is driven by the role claim and
+        // a null/absent tenant claim fails the tenant filter closed for any non-platform principal.
+        if (user.TenantId.HasValue)
+            claims.Add(new Claim("tenant", user.TenantId.Value.ToString()));
+
+        // Company claims — basis for HttpContextCurrentCompany.AccessibleCompanyIds.
+        //  - Tenant Admin (SuperAdmin/Admin): a single "company=ALL" marker → resolver expands to every
+        //    active company in the tenant (no per-company claim needed; access is implicit-all).
+        //  - Regular user: one "company=<tenantEntityId>" claim per ACTIVE UserCompanyMap.
+        // A Platform Admin gets none (no business-data access).
+        var isTenantAdmin = roles.Contains("SuperAdmin") || roles.Contains("Admin");
+        if (user.TenantId.HasValue)
+        {
+            if (isTenantAdmin)
+            {
+                claims.Add(new Claim("company", "ALL"));
+            }
+            else
+            {
+                var companyIds = await (from m in _db.UserCompanyMaps.IgnoreQueryFilters()
+                                        where m.AppUserId == user.Id && !m.IsDeleted
+                                        select m.TenantEntityId).Distinct().ToListAsync(ct);
+                claims.AddRange(companyIds.Select(c => new Claim("company", c.ToString())));
+            }
+        }
+
         var expiry = DateTime.UtcNow.AddMinutes(int.Parse(jwt["ExpiryMinutes"] ?? "60"));
         var token = new JwtSecurityToken(
             issuer: jwt["Issuer"],

@@ -39,6 +39,8 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         b.HasIndex(x => x.PoNumber).HasDatabaseName("UQ_PurchaseOrder_poNumber").IsUnique();
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_PurchaseOrder_supplierId");
         b.HasIndex(x => x.PoStatus).HasDatabaseName("IX_PurchaseOrder_poStatus");
+        // Composite scope index — the always-on tenant + company business-data filter scans this path.
+        b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_PurchaseOrder_tenant_company");
     }
 }
 
@@ -115,6 +117,8 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
 
         b.HasIndex(x => x.AsnNumber).HasDatabaseName("UQ_Asn_asnNumber").IsUnique();
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_Asn_supplierId");
+        // Composite scope index — the always-on tenant + company business-data filter scans this path.
+        b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Asn_tenant_company");
     }
 }
 
@@ -200,6 +204,8 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         b.HasIndex(x => new { x.SupplierId, x.InvoiceNumber })
             .HasDatabaseName("UQ_Invoice_supplier_invoiceNumber").IsUnique();
         b.HasIndex(x => x.InvoiceStatus).HasDatabaseName("IX_Invoice_invoiceStatus");
+        // Composite scope index — the always-on tenant + company business-data filter scans this path.
+        b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Invoice_tenant_company");
     }
 }
 
@@ -275,5 +281,7 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
             .HasConstraintName("FK_Payment_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_Payment_supplierId");
+        // Composite scope index — the always-on tenant + company business-data filter scans this path.
+        b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Payment_tenant_company");
     }
 }

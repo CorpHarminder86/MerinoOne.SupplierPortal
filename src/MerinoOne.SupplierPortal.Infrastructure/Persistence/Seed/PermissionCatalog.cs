@@ -41,9 +41,14 @@ public static class PermissionCatalog
         new PermissionSeed("Settings.Write",               "Manage settings",           "Administration", "Manage settings"),
         new PermissionSeed("Integration.Read",             "View integration",          "Integration",    "View Infor endpoints, sync log and errors"),
         new PermissionSeed("Integration.Manage",           "Manage integration",        "Integration",    "Retry integration errors, manage endpoint mapping"),
+        new PermissionSeed("Integration.ApiKeys",          "Manage API keys",           "Integration",    "Generate, rotate and revoke inbound X-APIKey credentials"),
+        // Platform-tier permissions — held ONLY by the cross-tenant PlatformAdmin (separation of duties:
+        // a Platform Admin onboards tenants/companies/first-admins but reads NO business data).
+        new PermissionSeed("Platform.Tenants",             "Manage tenants",            "Platform",       "View and manage tenants and their companies (cross-tenant)"),
+        new PermissionSeed("Platform.Onboard",             "Onboard tenant",            "Platform",       "Onboard a tenant: create tenant, companies and the first Tenant Admin"),
     };
 
-    public static readonly string[] Roles = { "SuperAdmin", "Admin", "Buyer", "Finance", "Supplier", "ReadOnly" };
+    public static readonly string[] Roles = { "PlatformAdmin", "SuperAdmin", "Admin", "Buyer", "Finance", "Supplier", "ReadOnly" };
 
     // permission code -> roles that hold it (matches TSD §7.2 matrix)
     public static readonly IReadOnlyDictionary<string, string[]> Matrix = new Dictionary<string, string[]>
@@ -83,5 +88,10 @@ public static class PermissionCatalog
         ["Settings.Write"]                = new[] { "SuperAdmin","Admin" },
         ["Integration.Read"]              = new[] { "SuperAdmin","Admin" },
         ["Integration.Manage"]            = new[] { "SuperAdmin","Admin" },
+        ["Integration.ApiKeys"]           = new[] { "SuperAdmin","Admin" },
+        // Platform-tier perms granted ONLY to PlatformAdmin. PlatformAdmin appears in NO other row —
+        // it holds zero business-data permissions (separation of duties).
+        ["Platform.Tenants"]              = new[] { "PlatformAdmin" },
+        ["Platform.Onboard"]              = new[] { "PlatformAdmin" },
     };
 }

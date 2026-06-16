@@ -30,7 +30,15 @@ public class DeliveryTermConfiguration : IEntityTypeConfiguration<DeliveryTerm>
         b.Property(x => x.Description).HasColumnName("description").HasMaxLength(200).IsRequired();
         b.Property(x => x.IsActive).HasColumnName("isActive").HasDefaultValue(true);
 
-        b.HasIndex(x => x.Code).HasDatabaseName("UQ_DeliveryTerm_code").IsUnique();
+        // Per-company (source) uniqueness, soft-delete-aware. Replaces the old global UQ_DeliveryTerm_code.
+        // Sharing means a member company writes under its source, so the key is (sourceTenantEntityId, code).
+        b.HasIndex(x => new { x.TenantEntityId, x.Code })
+            .HasDatabaseName("UQ_DeliveryTerm_company_code")
+            .IsUnique()
+            .HasFilter("[tenantEntityId] IS NOT NULL AND [isDeleted] = 0");
+        // Composite scope index for the always-on tenant + (sharing-aware) company read filter.
+        b.HasIndex(x => new { x.TenantId, x.TenantEntityId })
+            .HasDatabaseName("IX_DeliveryTerm_tenant_company");
     }
 }
 
@@ -44,7 +52,14 @@ public class PaymentTermConfiguration : IEntityTypeConfiguration<PaymentTerm>
         b.Property(x => x.NetDays).HasColumnName("netDays").ValueGeneratedNever();
         b.Property(x => x.IsActive).HasColumnName("isActive").HasDefaultValue(true);
 
-        b.HasIndex(x => x.Code).HasDatabaseName("UQ_PaymentTerm_code").IsUnique();
+        // Per-company (source) uniqueness, soft-delete-aware. Replaces the old global UQ_PaymentTerm_code.
+        b.HasIndex(x => new { x.TenantEntityId, x.Code })
+            .HasDatabaseName("UQ_PaymentTerm_company_code")
+            .IsUnique()
+            .HasFilter("[tenantEntityId] IS NOT NULL AND [isDeleted] = 0");
+        // Composite scope index for the always-on tenant + (sharing-aware) company read filter.
+        b.HasIndex(x => new { x.TenantId, x.TenantEntityId })
+            .HasDatabaseName("IX_PaymentTerm_tenant_company");
     }
 }
 
@@ -63,9 +78,18 @@ public class SupplierInviteConfiguration : IEntityTypeConfiguration<SupplierInvi
         b.Property(x => x.ExpiresAt).HasColumnName("expiresAt").HasColumnType("datetime2");
         b.Property(x => x.ConsumedAt).HasColumnName("consumedAt").HasColumnType("datetime2");
         b.Property(x => x.SupplierId).HasColumnName("supplierId").HasColumnType("uniqueidentifier");
+        // tenantId mapped by ITenantOwned block in ApplyBaseEntityConvention. Map the company column
+        // explicitly (nullable; required in the validator) and FK it to TenantEntity.
+        b.Property(x => x.TenantEntityId).HasColumnName("tenantEntityId").HasColumnType("uniqueidentifier");
+
+        b.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId)
+            .HasConstraintName("FK_SupplierInvite_Tenant_TenantId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantEntityId)
+            .HasConstraintName("FK_SupplierInvite_TenantEntity_TenantEntityId").OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => x.Token).HasDatabaseName("UQ_SupplierInvite_token").IsUnique();
         b.HasIndex(x => x.Email).HasDatabaseName("IX_SupplierInvite_email");
+        b.HasIndex(x => x.TenantEntityId).HasDatabaseName("IX_SupplierInvite_tenantEntityId");
     }
 }
 
@@ -136,9 +160,12 @@ public class EmailTemplateConfiguration : IEntityTypeConfiguration<EmailTemplate
         b.Property(x => x.IsActive).HasColumnName("isActive").HasColumnType("bit").HasDefaultValue(true);
         b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(1000);
 
-        b.HasIndex(x => x.TemplateKey)
-            .HasDatabaseName("UX_EmailTemplate_templateKey")
-            .IsUnique();
+        // Per-tenant template set. Replaces the old global UX_EmailTemplate_templateKey.
+        // Filtered so soft-deleted rows don't collide on re-clone.
+        b.HasIndex(x => new { x.TenantId, x.TemplateKey })
+            .HasDatabaseName("UX_EmailTemplate_tenant_templateKey")
+            .IsUnique()
+            .HasFilter("[isDeleted] = 0");
     }
 }
 

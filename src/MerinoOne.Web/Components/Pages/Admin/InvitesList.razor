@@ -134,6 +134,20 @@
                         <input class="rz-textbox" type="email" style="width:100%;padding:8px 10px;" @bind="newEmail" />
                     </div>
                     <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Company *</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="newCompanyId">
+                            <option value="@Guid.Empty">— Select company —</option>
+                            @if (companies != null)
+                            {
+                                @foreach (var c in companies)
+                                {
+                                    <option value="@c.Id">@c.Code — @c.Name</option>
+                                }
+                            }
+                        </select>
+                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">The registered supplier inherits this company.</div>
+                    </div>
+                    <div>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Mobile number</label>
                         <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="+919876543210" @bind="formMobileNo" />
                         <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Optional. Will be used for OTP verification at sign-up (Phase 2).</div>
@@ -193,6 +207,9 @@
     private string newLegalName = string.Empty;
     private string newEmail = string.Empty;
     private string formMobileNo = string.Empty;
+    // Company the invited supplier inherits — bound to the Company dropdown sourced from GET api/companies.
+    private Guid newCompanyId = Guid.Empty;
+    private List<CompanyDto>? companies;
     private string newError = string.Empty;
     private string? latestRegistrationUrl;
     private string search = string.Empty;
@@ -206,6 +223,8 @@
         // causing the "Action buttons disappear on page load" defect.
         Token.Changed += OnTokenChanged;
         await Load();
+        var compResp = await Api.GetAsync<List<CompanyDto>>("api/companies");
+        companies = compResp?.Data ?? new();
     }
 
     private void OnTokenChanged() => InvokeAsync(StateHasChanged);
@@ -244,6 +263,7 @@
         newLegalName = string.Empty;
         newEmail = string.Empty;
         formMobileNo = string.Empty;
+        newCompanyId = Guid.Empty;
         newError = string.Empty;
         showNew = true;
     }
@@ -252,8 +272,9 @@
     {
         if (string.IsNullOrWhiteSpace(newLegalName)) { newError = "Legal name required."; return; }
         if (string.IsNullOrWhiteSpace(newEmail) || !newEmail.Contains('@')) { newError = "Valid email required."; return; }
+        if (newCompanyId == Guid.Empty) { newError = "Select a company."; return; }
         busy = true;
-        var req = new CreateSupplierInviteRequest(newLegalName.Trim(), newEmail.Trim(), string.IsNullOrWhiteSpace(formMobileNo) ? null : formMobileNo.Trim());
+        var req = new CreateSupplierInviteRequest(newLegalName.Trim(), newEmail.Trim(), newCompanyId, string.IsNullOrWhiteSpace(formMobileNo) ? null : formMobileNo.Trim());
         var resp = await Api.PostAsync<CreateSupplierInviteResponse, CreateSupplierInviteRequest>("api/supplier-registration/invites", req);
         if (resp?.Success == true && resp.Data != null)
         {

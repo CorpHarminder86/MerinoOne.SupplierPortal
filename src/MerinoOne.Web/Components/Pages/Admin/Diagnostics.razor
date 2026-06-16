@@ -1,0 +1,151 @@
+@page "/admin/diagnostics"
+@implements IDisposable
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject CompanyState Company
+
+<PageTitle>Scope diagnostics</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Scope diagnostics</h1>
+            </div>
+            <p class="tl-sub">Tenant / company / sources / bypass flags as the always-on filters see this session — for debugging row visibility</p>
+        </div>
+        <div class="tl-header__actions">
+            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Load" disabled="@loading">
+                <span class="material-symbols-outlined @(loading ? "mer-spin" : "")" style="font-size:16px;vertical-align:middle;">refresh</span> Refresh
+            </button>
+        </div>
+    </header>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+
+        @* Identity + bypass *@
+        <div class="rz-card" style="padding:20px;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:14px;color:var(--mer-blue-darker);">Identity &amp; bypass flags</h3>
+            <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                <tbody>
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);">User code</td><td style="padding:6px 4px;font-family:Inter,monospace;">@(Token.UserCode ?? "—")</td></tr>
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);">Roles</td><td style="padding:6px 4px;">@(Token.Roles.Length == 0 ? "—" : string.Join(", ", Token.Roles))</td></tr>
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);">Platform Admin</td><td style="padding:6px 4px;"><span class="tlg-status @(Token.IsPlatformAdmin ? "tlg-status--info" : "tlg-status--active")">@Token.IsPlatformAdmin</span></td></tr>
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);">Tenant Admin</td><td style="padding:6px 4px;"><span class="tlg-status @(Token.IsAdmin ? "tlg-status--info" : "tlg-status--active")">@Token.IsAdmin</span></td></tr>
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);">Tenant filter bypassed</td><td style="padding:6px 4px;"><span class="tlg-status @(Token.IsPlatformAdmin ? "tlg-status--danger" : "tlg-status--active")">@Token.IsPlatformAdmin</span></td></tr>
+                    <tr><td style="padding:6px 4px;color:var(--mer-ink-500);">Company filter bypassed</td><td style="padding:6px 4px;"><span class="tlg-status tlg-status--active">false (no role bypass)</span></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        @* Tenant + active company *@
+        <div class="rz-card" style="padding:20px;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:14px;color:var(--mer-blue-darker);">Tenant &amp; active company</h3>
+            <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                <tbody>
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);">Tenant id (JWT claim)</td><td style="padding:6px 4px;font-family:Inter,monospace;">@(Token.TenantId?.ToString() ?? "— (none / platform)")</td></tr>
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);">Company claims</td><td style="padding:6px 4px;font-family:Inter,monospace;">@(Token.CompanyClaims.Length == 0 ? "—" : string.Join(", ", Token.CompanyClaims))</td></tr>
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);">Active company (X-Active-Company)</td><td style="padding:6px 4px;font-family:Inter,monospace;">@(Company.Active is { } a ? $"{a.Code} — {a.Name}" : (Company.ActiveCompanyId?.ToString() ?? "—"))</td></tr>
+                    <tr><td style="padding:6px 4px;color:var(--mer-ink-500);">Accessible companies</td><td style="padding:6px 4px;">@(Company.AccessibleCompanies.Count == 0 ? "—" : string.Join(", ", Company.AccessibleCompanies.Select(c => c.Code)))</td></tr>
+                </tbody>
+            </table>
+            <p style="font-size:11px;color:var(--mer-ink-500);margin-top:10px;">
+                Resolved master sources (PT/DT) are computed server-side via share-group normalization
+                (e.g. active 3000 reads source 2000). The portal sends the active company; the server resolves the source.
+            </p>
+        </div>
+
+        @* Seccode whoami (existing diagnostic) *@
+        <div class="rz-card" style="padding:20px;grid-column:1 / -1;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:14px;color:var(--mer-blue-darker);">Seccode diagnostic (/api/auth/whoami)</h3>
+            @if (loading)
+            {
+                <div class="tl-empty">Loading…</div>
+            }
+            else if (whoamiError != null)
+            {
+                <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;">@whoamiError</div>
+            }
+            else if (whoami is not null)
+            {
+                <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                    <tbody>
+                        <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);width:240px;">Will see all data</td><td style="padding:6px 4px;"><span class="tlg-status @(whoami.WillSeeAllData ? "tlg-status--info" : "tlg-status--active")">@whoami.WillSeeAllData</span> <span style="color:var(--mer-ink-500);margin-left:8px;">@whoami.WillSeeAllReason</span></td></tr>
+                        <tr style="border-bottom:1px solid var(--mer-line-soft);"><td style="padding:6px 4px;color:var(--mer-ink-500);">SecRights</td><td style="padding:6px 4px;">@whoami.SecRights.Count row(s)</td></tr>
+                        <tr><td style="padding:6px 4px;color:var(--mer-ink-500);">Mapped suppliers</td><td style="padding:6px 4px;">@(whoami.MappedSuppliers.Count == 0 ? "—" : string.Join(", ", whoami.MappedSuppliers.Select(m => m.SupplierCode)))</td></tr>
+                    </tbody>
+                </table>
+                @if (whoami.SecRights.Count > 0)
+                {
+                    <table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:12px;">
+                        <thead>
+                            <tr style="border-bottom:1px solid var(--mer-line);">
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Seccode</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Type</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Read</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Write</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var sr in whoami.SecRights)
+                            {
+                                <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                                    <td style="padding:6px 4px;">@sr.SecCodeName</td>
+                                    <td style="padding:6px 4px;font-family:Inter,monospace;">@sr.SecCodeType</td>
+                                    <td style="padding:6px 4px;">@sr.CanRead</td>
+                                    <td style="padding:6px 4px;">@sr.CanWrite</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool loading = true;
+    private string? whoamiError;
+    private WhoAmIPayload? whoami;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Token.Changed += OnChanged;
+        Company.Changed += OnChanged;
+        await Load();
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Token.Changed -= OnChanged;
+        Company.Changed -= OnChanged;
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        whoamiError = null;
+        // whoami returns a raw anonymous object (not wrapped in Result<>); deserialize the shape directly.
+        whoami = await Api.GetRawJsonAsync<WhoAmIPayload>("api/auth/whoami");
+        if (whoami is null) whoamiError = "Diagnostic unavailable (or your session lacks access).";
+        loading = false;
+    }
+
+    // Mirrors the anonymous payload returned by AuthController.WhoAmI.
+    private record WhoAmIPayload(
+        string UserCode,
+        string[] Roles,
+        string[] Permissions,
+        bool IsAdmin,
+        bool IsManager,
+        bool WillSeeAllData,
+        string WillSeeAllReason,
+        List<SecRightRow> SecRights,
+        List<MappedSupplierRow> MappedSuppliers);
+
+    private record SecRightRow(Guid SecCodeId, string SecCodeType, string SecCodeName, Guid? SupplierId, bool CanRead, bool CanWrite);
+    private record MappedSupplierRow(string SupplierCode, string LegalName);
+}

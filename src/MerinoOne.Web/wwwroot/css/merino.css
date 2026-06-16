@@ -256,6 +256,50 @@ a:hover { color: var(--mer-blue-bright); }
 .mer-usermenu__item--danger:hover { background: rgba(220,38,38,.08); color: var(--mer-danger); }
 .mer-usermenu__sep { height: 1px; background: var(--mer-line-soft); margin: 4px 0; }
 
+/* Active-company selector (topbar) + Platform tenant-context indicator */
+.mer-company-wrap { position: relative; margin-right: 4px; }
+.mer-company-pill {
+    display: flex; align-items: center; gap: 8px;
+    height: 36px; padding: 4px 8px 4px 10px;
+    border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--mer-line); background: var(--mer-surface);
+    color: var(--mer-ink-900); font-family: inherit; max-width: 240px;
+}
+.mer-company-pill:hover { background: var(--mer-ink-50); border-color: var(--mer-ink-300); }
+.mer-company-pill .material-symbols-outlined { color: var(--mer-blue); flex-shrink: 0; }
+.mer-company-pill__text { display: flex; flex-direction: column; line-height: 1.15; text-align: left; min-width: 0; }
+.mer-company-pill__code { font-size: 12px; font-weight: 700; color: var(--mer-ink-900); font-family: 'Inter', monospace; }
+.mer-company-pill__name { font-size: 11px; color: var(--mer-ink-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mer-company-pill__caret { color: var(--mer-ink-500); font-size: 18px !important; }
+.mer-company-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); width: 280px;
+    background: var(--mer-surface); border: 1px solid var(--mer-line);
+    border-radius: var(--mer-radius-lg); box-shadow: var(--mer-shadow-lg);
+    padding: 6px; z-index: 50; max-height: 60vh; overflow-y: auto;
+}
+.mer-company-menu__hd { padding: 8px 10px 6px; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--mer-ink-500); }
+.mer-company-menu__item {
+    width: 100%; display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; background: transparent; border: 0;
+    border-radius: var(--mer-radius); cursor: pointer; font-family: inherit; text-align: left;
+}
+.mer-company-menu__item:hover { background: var(--mer-ink-100); }
+.mer-company-menu__item.is-active { background: var(--mer-green-50); }
+.mer-company-menu__code { font-size: 12px; font-weight: 700; color: var(--mer-ink-900); font-family: 'Inter', monospace; min-width: 52px; }
+.mer-company-menu__name { font-size: 12.5px; color: var(--mer-ink-700); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mer-company-ctx {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 32px; padding: 0 12px; margin-right: 4px;
+    border-radius: 999px; border: 1px solid var(--mer-line); background: var(--mer-canvas);
+    color: var(--mer-ink-600); font-size: 12px; font-weight: 600;
+}
+.mer-company-ctx .material-symbols-outlined { color: var(--mer-blue); }
+.mer-company-ctx__label { white-space: nowrap; }
+@media (max-width: 720px) {
+    .mer-company-pill__text, .mer-company-ctx__label { display: none; }
+    .mer-company-pill { max-width: none; }
+}
+
 /* Auth shell (login layout) */
 .mer-auth-shell { display: flex; min-height: 100vh; background: var(--mer-canvas); }
 .mer-auth-aside {

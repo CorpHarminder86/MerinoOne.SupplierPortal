@@ -24,6 +24,8 @@ public class CreateSupplierInviteCommandValidator : AbstractValidator<CreateSupp
     {
         RuleFor(x => x.Body.LegalName).NotEmpty().MaximumLength(300);
         RuleFor(x => x.Body.Email).NotEmpty().EmailAddress().MaximumLength(256);
+        RuleFor(x => x.Body.TenantEntityId).NotEmpty()
+            .WithMessage("A company (TenantEntityId) is required for the invite.");
         RuleFor(x => x.Body.MobileNo)
             .Must(m => string.IsNullOrWhiteSpace(m) || MobileRegex.IsMatch(m!))
             .WithMessage("Mobile number must be 8–15 digits with an optional leading '+'.");
@@ -68,6 +70,18 @@ public class CreateSupplierInviteCommandHandler : IRequestHandler<CreateSupplier
         var email = request.Body.Email.Trim().ToLowerInvariant();
         var now = DateTime.UtcNow;
 
+        // Company must exist in the inviting admin's tenant. IgnoreQueryFilters + explicit tenant restriction
+        // so a cross-tenant / unknown company is rejected as a 400 (the supplier inherits this company).
+        var tenantId = _user.TenantId;
+        var company = await _db.TenantEntities.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(e => !e.IsDeleted && e.Id == request.Body.TenantEntityId
+                                      && (tenantId == null || e.TenantId == tenantId), ct);
+        if (company is null)
+            throw new Common.Exceptions.ValidationException(new Dictionary<string, string[]>
+            {
+                ["tenantEntityId"] = new[] { "The selected company does not exist in your tenant." }
+            });
+
         // Block if there's still a pending (non-consumed, non-expired) invite for this email
         var existingPending = await _db.SupplierInvites
             .AnyAsync(i => i.Email == email && i.ConsumedAt == null && i.ExpiresAt > now, ct);
@@ -85,6 +99,8 @@ public class CreateSupplierInviteCommandHandler : IRequestHandler<CreateSupplier
         var invite = new SupplierInvite
         {
             Id = Guid.NewGuid(),
+            TenantId = company.TenantId,         // explicit — the invite (and resulting supplier) is tenant-scoped
+            TenantEntityId = company.Id,         // company the registered supplier inherits
             LegalName = request.Body.LegalName.Trim(),
             Email = email,
             MobileNo = mobile,

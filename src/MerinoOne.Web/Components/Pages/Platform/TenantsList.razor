@@ -1,0 +1,415 @@
+@page "/platform/tenants"
+@implements IDisposable
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject IJSRuntime JS
+
+<PageTitle>Tenants</PageTitle>
+
+@if (!Token.IsPlatformAdmin)
+{
+    <div class="tl-empty">
+        <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+        <div>Access denied — Platform Admin only.</div>
+    </div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Tenants</h1>
+                    <span class="tl-count-chip">@(tenants?.Count ?? 0)</span>
+                </div>
+                <p class="tl-sub">Cross-tenant onboarding — create tenants, their companies, and the first Tenant Admin</p>
+            </div>
+            <div class="tl-header__actions">
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewTenant">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add_business</span>
+                    New tenant
+                </button>
+            </div>
+        </header>
+
+        <div class="tl-filter-bar">
+            <input class="rz-textbox" placeholder="Search tenant name…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="Reload" />
+        </div>
+
+        @if (loading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (tenants == null || tenants.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">domain</span>
+                <div>No tenants yet.</div>
+            </div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 1.6fr 110px 110px 150px 220px; --tl-min-width: 900px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Tenant</div>
+                    <div class="tlg-col tlg-col--num">Companies</div>
+                    <div class="tlg-col">Status</div>
+                    <div class="tlg-col">Created</div>
+                    <div class="tlg-col tlg-col--actions">Actions</div>
+                </div>
+                @foreach (var t in tenants)
+                {
+                    var tn = t;
+                    <div class="tlg-row">
+                        <div class="tlg-col tlg-name">@tn.Name</div>
+                        <div class="tlg-col tlg-col--num">@tn.CompanyCount</div>
+                        <div class="tlg-col"><span class="tlg-status @(tn.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(tn.IsActive ? "Active" : "Inactive")</span></div>
+                        <div class="tlg-col tlg-code">@tn.CreatedOn.ToString("yyyy-MM-dd")</div>
+                        <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;flex-wrap:wrap;">
+                            <button class="rz-button" style="padding:4px 10px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="() => OpenCompanies(tn)">
+                                <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">apartment</span> Companies
+                            </button>
+                            <button class="rz-button" style="padding:4px 10px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="() => OpenNewAdmin(tn)">
+                                <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">admin_panel_settings</span> Add admin
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    @* New tenant dialog *@
+    @if (showNewTenant)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">add_business</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Platform onboarding</div>
+                        <h2 class="merino-dialog__title">New tenant</h2>
+                        <p class="merino-dialog__subtitle">A scope root for one customer organisation.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showNewTenant = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Tenant name *</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formTenantName" />
+                    @if (!string.IsNullOrEmpty(tenantError))
+                    {
+                        <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@tenantError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showNewTenant = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="CreateTenant" disabled="@busy">@(busy ? "Creating…" : "Create tenant")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* Companies drawer dialog *@
+    @if (companiesTenant is not null)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="lg" style="width:720px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">apartment</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">@companiesTenant.Name</div>
+                        <h2 class="merino-dialog__title">Companies</h2>
+                        <p class="merino-dialog__subtitle">Physical companies (Infor LN logistic companies) in this tenant.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="CloseCompanies"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--mer-line);">
+                        <div style="width:140px;">
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Code *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" placeholder="2000" @bind="formCompanyCode" />
+                        </div>
+                        <div style="flex:1;">
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Name *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="Merino Industries — Hapur" @bind="formCompanyName" />
+                        </div>
+                        <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="CreateCompany" disabled="@busy">
+                            <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">add</span> Add
+                        </button>
+                    </div>
+                    @if (!string.IsNullOrEmpty(companyError))
+                    {
+                        <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:10px;">@companyError</div>
+                    }
+                    @if (companiesLoading)
+                    {
+                        <div class="tl-empty">Loading…</div>
+                    }
+                    else if (companies == null || companies.Count == 0)
+                    {
+                        <p style="color:var(--mer-ink-500);font-size:13px;">No companies yet — add the first one above.</p>
+                    }
+                    else
+                    {
+                        <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                            <thead>
+                                <tr style="border-bottom:1px solid var(--mer-line);">
+                                    <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Code</th>
+                                    <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Name</th>
+                                    <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Status</th>
+                                    <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Created</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var c in companies)
+                                {
+                                    <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                                        <td style="padding:8px 4px;font-family:Inter,monospace;">@c.Code</td>
+                                        <td style="padding:8px 4px;">@c.Name</td>
+                                        <td style="padding:8px 4px;"><span class="tlg-status @(c.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(c.IsActive ? "Active" : "Inactive")</span></td>
+                                        <td style="padding:8px 4px;font-family:Inter,monospace;">@c.CreatedOn.ToString("yyyy-MM-dd")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="CloseCompanies">Close</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* New tenant admin dialog *@
+    @if (adminTenant is not null)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">admin_panel_settings</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">@adminTenant.Name</div>
+                        <h2 class="merino-dialog__title">Add Tenant Admin</h2>
+                        <p class="merino-dialog__subtitle">A temporary password is generated and shown once.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => adminTenant = null"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:flex;flex-direction:column;gap:12px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">User code *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" placeholder="merino-admin" @bind="formAdminCode" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Full name *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formAdminName" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Email *</label>
+                            <input class="rz-textbox" type="email" style="width:100%;padding:8px 10px;" @bind="formAdminEmail" />
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(adminError))
+                    {
+                        <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@adminError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => adminTenant = null">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="CreateAdmin" disabled="@busy">@(busy ? "Creating…" : "Create admin")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* One-time temporary password modal — shown ONCE after admin creation. *@
+    @if (adminResult is not null)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+            <div class="merino-dialog" data-variant="warning" data-size="sm" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">vpn_key</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Tenant Admin created</div>
+                        <h2 class="merino-dialog__title">Temporary password</h2>
+                        <p class="merino-dialog__subtitle">@adminResult.UserCode · @adminResult.Email</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => adminResult = null"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="background:var(--mer-amber-50);border:1px solid var(--mer-warning);color:var(--mer-amber-800);padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;display:flex;gap:8px;align-items:flex-start;">
+                        <span class="material-symbols-outlined" style="font-size:18px;">warning</span>
+                        <div>Copy this now — it will <strong>not be shown again</strong>. The admin must change it on first login.</div>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <code style="flex:1;font-family:Inter,monospace;font-size:14px;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:6px;padding:10px 12px;letter-spacing:.04em;word-break:break-all;">@adminResult.TemporaryPassword</code>
+                        <button class="rz-button" style="padding:8px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="() => CopyText(adminResult!.TemporaryPassword)">
+                            <span class="material-symbols-outlined" style="font-size:18px;">content_copy</span>
+                        </button>
+                    </div>
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="() => adminResult = null">I've copied it — done</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private List<TenantDto>? tenants;
+    private bool loading = true;
+    private bool busy;
+    private string search = string.Empty;
+
+    private bool showNewTenant;
+    private string formTenantName = string.Empty;
+    private string tenantError = string.Empty;
+
+    private TenantDto? companiesTenant;
+    private List<TenantEntityDto>? companies;
+    private bool companiesLoading;
+    private string formCompanyCode = string.Empty;
+    private string formCompanyName = string.Empty;
+    private string companyError = string.Empty;
+
+    private TenantDto? adminTenant;
+    private string formAdminCode = string.Empty;
+    private string formAdminName = string.Empty;
+    private string formAdminEmail = string.Empty;
+    private string adminError = string.Empty;
+    private CreateTenantAdminResultDto? adminResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Token.Changed += OnTokenChanged;
+        await Reload();
+    }
+
+    private void OnTokenChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Token.Changed -= OnTokenChanged;
+
+    private async Task Reload()
+    {
+        loading = true;
+        var url = "api/platform/tenants";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"?search={Uri.EscapeDataString(search.Trim())}";
+        var resp = await Api.GetAsync<List<TenantDto>>(url);
+        tenants = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenNewTenant() { formTenantName = string.Empty; tenantError = string.Empty; showNewTenant = true; }
+
+    private async Task CreateTenant()
+    {
+        if (string.IsNullOrWhiteSpace(formTenantName)) { tenantError = "Tenant name required."; return; }
+        busy = true;
+        var resp = await Api.PostAsync<Guid, CreateTenantRequest>("api/platform/tenants", new CreateTenantRequest(formTenantName.Trim()));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Tenant created" });
+            showNewTenant = false;
+            await Reload();
+        }
+        else { tenantError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task OpenCompanies(TenantDto t)
+    {
+        companiesTenant = t;
+        formCompanyCode = string.Empty;
+        formCompanyName = string.Empty;
+        companyError = string.Empty;
+        await LoadCompanies();
+    }
+
+    private void CloseCompanies() { companiesTenant = null; companies = null; }
+
+    private async Task LoadCompanies()
+    {
+        if (companiesTenant is null) return;
+        companiesLoading = true;
+        var resp = await Api.GetAsync<List<TenantEntityDto>>($"api/platform/tenants/{companiesTenant.Id}/companies");
+        companies = resp?.Data ?? new();
+        companiesLoading = false;
+    }
+
+    private async Task CreateCompany()
+    {
+        if (companiesTenant is null) return;
+        companyError = string.Empty;
+        if (string.IsNullOrWhiteSpace(formCompanyCode)) { companyError = "Company code required."; return; }
+        if (string.IsNullOrWhiteSpace(formCompanyName)) { companyError = "Company name required."; return; }
+        busy = true;
+        var req = new CreateTenantEntityRequest(companiesTenant.Id, formCompanyCode.Trim(), formCompanyName.Trim());
+        var resp = await Api.PostAsync<Guid, CreateTenantEntityRequest>("api/platform/companies", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Company added" });
+            formCompanyCode = string.Empty;
+            formCompanyName = string.Empty;
+            await LoadCompanies();
+            await Reload(); // refresh company counts
+        }
+        else { companyError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private void OpenNewAdmin(TenantDto t)
+    {
+        adminTenant = t;
+        formAdminCode = string.Empty;
+        formAdminName = string.Empty;
+        formAdminEmail = string.Empty;
+        adminError = string.Empty;
+    }
+
+    private async Task CreateAdmin()
+    {
+        if (adminTenant is null) return;
+        adminError = string.Empty;
+        if (string.IsNullOrWhiteSpace(formAdminCode)) { adminError = "User code required."; return; }
+        if (string.IsNullOrWhiteSpace(formAdminName)) { adminError = "Full name required."; return; }
+        if (string.IsNullOrWhiteSpace(formAdminEmail) || !formAdminEmail.Contains('@')) { adminError = "Valid email required."; return; }
+        busy = true;
+        var req = new CreateTenantAdminRequest(adminTenant.Id, formAdminCode.Trim(), formAdminName.Trim(), formAdminEmail.Trim());
+        var resp = await Api.PostAsync<CreateTenantAdminResultDto, CreateTenantAdminRequest>("api/platform/tenant-admins", req);
+        if (resp?.Success == true && resp.Data is not null)
+        {
+            adminTenant = null;
+            adminResult = resp.Data; // shows the one-time password modal
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Tenant Admin created" });
+        }
+        else { adminError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task CopyText(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Info, Summary = "Copied to clipboard" });
+        }
+        catch
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Copy failed", Detail = "Select and copy the password manually." });
+        }
+    }
+}

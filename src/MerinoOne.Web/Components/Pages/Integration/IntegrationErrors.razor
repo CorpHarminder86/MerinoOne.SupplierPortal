@@ -1,4 +1,7 @@
 @page "/integrations/errors"
+@* This page predates the new Contracts.Integration DTOs and binds the Shipments-namespace shape
+   (EntityType/EntityId/RetryCount). Alias to keep it unambiguous now both namespaces are imported. *@
+@using IntegrationErrorDto = MerinoOne.SupplierPortal.Contracts.Shipments.IntegrationErrorDto
 @inject ApiClient Api
 @inject TokenAccessor Token
 @inject NotificationService Notif

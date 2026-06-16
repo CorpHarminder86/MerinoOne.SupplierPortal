@@ -161,12 +161,27 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
         var supplierId = Guid.NewGuid();
         var seccodeId = Guid.NewGuid();
 
+        // Scope (tenant + company) comes from the INVITE — registration is anonymous, so we never trust the
+        // client for tenant/company. Resolve the parent TenantId from the invite's company when the invite's
+        // own TenantId is absent (legacy invites). The created Supplier + its G-seccode both carry the scope.
+        var inviteTenantId = invite.TenantId;
+        var inviteCompanyId = invite.TenantEntityId;
+        if (inviteCompanyId.HasValue && inviteTenantId is null)
+        {
+            inviteTenantId = await _db.TenantEntities.IgnoreQueryFilters()
+                .Where(e => e.Id == inviteCompanyId.Value)
+                .Select(e => e.TenantId)
+                .FirstOrDefaultAsync(ct);
+        }
+
         var seccode = new Seccode
         {
             Id = seccodeId,
             SeccodeType = SeccodeType.G,
             Name = $"{supplierCode} group",
             SupplierId = supplierId,
+            TenantId = inviteTenantId,
+            TenantEntityId = inviteCompanyId,
             CreatedBy = "self-register",
             CreatedOn = now,
         };
@@ -175,6 +190,8 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
         var supplier = new SupplierEntity
         {
             Id = supplierId,
+            TenantId = inviteTenantId,           // inherited from the invite (no client trust)
+            TenantEntityId = inviteCompanyId,    // the supplier's single company
             SupplierCode = supplierCode,
             LegalName = request.Body.LegalName.Trim(),
             TradeName = string.IsNullOrWhiteSpace(request.Body.TradeName) ? null : request.Body.TradeName.Trim(),

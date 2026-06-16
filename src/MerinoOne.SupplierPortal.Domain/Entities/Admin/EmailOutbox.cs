@@ -8,8 +8,11 @@ namespace MerinoOne.SupplierPortal.Domain.Entities.Admin;
 /// drains rows in the background, retries transient SMTP failures with exponential backoff
 /// (1m / 5m / 30m / 2h / 6h), and dead-letters after 5 attempts.
 /// </summary>
-public class EmailOutbox : AuditableEntity
+public class EmailOutbox : AuditableEntity, ITenantOwned
 {
+    /// <summary>Owning tenant so each tenant's outbox is isolated. Template resolution at send time keys on (tenantId, templateKey).</summary>
+    public Guid? TenantId { get; set; }
+
     /// <summary>Template key the message was rendered from (e.g. "Invite"). Diagnostic only.</summary>
     public string TemplateKey { get; set; } = string.Empty;
 

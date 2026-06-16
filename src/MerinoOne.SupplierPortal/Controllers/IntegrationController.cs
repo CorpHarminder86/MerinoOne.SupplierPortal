@@ -63,4 +63,45 @@ Returns: empty success; 404 if not found. Requires permission **Integration.Mana
         await _mediator.Send(new RetryIntegrationErrorCommand(id), ct);
         return Result.Ok(HttpContext.TraceIdentifier);
     }
+
+    [HttpGet("endpoints")]
+    [Authorize(Policy = "Integration.Read")]
+    [EndpointSummary("Infor endpoints + session telemetry")]
+    [EndpointDescription(@"Lists the current tenant's Infor endpoint configuration plus inbound-session liveness telemetry (last received timestamp/status/idempotency-key/message + cumulative received count).
+Filters / params:
+- **direction**: Optional — filter by ""Inbound"" / ""Outbound"" / ""Bidirectional"".
+Returns: List<InforEndpointDto> scoped to the caller's tenant. Requires permission **Integration.Read**.")]
+    public async Task<Result<List<InforEndpointDto>>> Endpoints([FromQuery] string? direction, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetInforEndpointsQuery(direction), ct);
+        return Result<List<InforEndpointDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("endpoints/{id:guid}")]
+    [Authorize(Policy = "Integration.Manage")]
+    [EndpointSummary("Update Infor endpoint")]
+    [EndpointDescription(@"Updates an endpoint's config (URL, BOD name, enabled flag).
+Filters / params:
+- **id**: Required — endpoint GUID.
+Body:
+- **body**: UpdateInforEndpointRequest with the endpoint URL, optional BOD name, and the enabled flag.
+Returns: empty success; 404 if not found; 400 on validation. Requires permission **Integration.Manage**.")]
+    public async Task<Result> UpdateEndpoint(Guid id, [FromBody] UpdateInforEndpointRequest body, CancellationToken ct)
+    {
+        await _mediator.Send(new UpdateInforEndpointCommand(id, body), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("endpoints/{id:guid}/toggle")]
+    [Authorize(Policy = "Integration.Manage")]
+    [EndpointSummary("Toggle Infor endpoint")]
+    [EndpointDescription(@"Flips an endpoint's enabled flag — the inbound kill-switch. When disabled, inbound pushes to that endpoint are rejected with 403.
+Filters / params:
+- **id**: Required — endpoint GUID.
+Returns: the new enabled state (bool); 404 if not found. Requires permission **Integration.Manage**.")]
+    public async Task<Result<bool>> ToggleEndpoint(Guid id, CancellationToken ct)
+    {
+        var enabled = await _mediator.Send(new ToggleInforEndpointCommand(id), ct);
+        return Result<bool>.Ok(enabled, HttpContext.TraceIdentifier);
+    }
 }

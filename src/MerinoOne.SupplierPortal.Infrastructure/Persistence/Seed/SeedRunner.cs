@@ -28,11 +28,31 @@ public static class SeedRunner
         logger?.LogInformation("Seed: EmailTemplateSeeder");
         await EmailTemplateSeeder.SeedAsync(ctx, ct);
 
+        // Tenant/company foundation (TenantCompany module). PlatformSeeder + TenantSeeder run after the
+        // base masters; ScopeBackfillSeeder then retro-tags existing rows. The heavy aggregate scope
+        // stamping (and the Scope.FiltersEnabled flip) stays behind --backfill.
+        var cs = cfg.GetConnectionString("DefaultConnection")!;
+
+        logger?.LogInformation("Seed: PlatformSeeder");
+        await PlatformSeeder.SeedAsync(ctx, cfg, ct);
+
+        logger?.LogInformation("Seed: TenantSeeder");
+        await TenantSeeder.SeedAsync(ctx, ct);
+
+        // Light scope tagging (suppliers/masters/config/UserCompanyMaps + ensure flag OFF) runs BEFORE the
+        // volume backfill so suppliers carry company 2000 when the heavy pass later joins on them.
+        logger?.LogInformation("Seed: ScopeBackfillSeeder (light)");
+        await ScopeBackfillSeeder.SeedLightAsync(ctx, ct);
+
         if (includeBackfill)
         {
             logger?.LogInformation("Seed: BackfillSeeder (large volume)");
-            var cs = cfg.GetConnectionString("DefaultConnection")!;
             await BackfillSeeder.SeedAsync(ctx, cs, ct);
+
+            // Heavy scope stamping runs AFTER the volume backfill so it covers the just-inserted aggregate
+            // rows too, then flips Scope.FiltersEnabled ON (filters begin enforcing).
+            logger?.LogInformation("Seed: ScopeBackfillSeeder (heavy aggregates + flag flip)");
+            await ScopeBackfillSeeder.SeedHeavyAsync(ctx, cs, ct);
         }
 
         logger?.LogInformation("Seed: complete");

@@ -161,6 +161,30 @@ else
             }
             else
             {
+                <div class="rz-card" style="padding:20px;margin-bottom:16px;">
+                    <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);margin-bottom:8px;">Company access</h3>
+                    <p style="color:var(--mer-ink-500);font-size:12px;margin-bottom:12px;">
+                        Mapping a supplier (below) auto-grants the user access to that supplier's company. To <strong>revoke</strong> a
+                        company, pick it here — this removes the user's <code>UserCompanyMap</code> so the always-on company filter
+                        hides that company's data.
+                    </p>
+                    @if (Token.HasPermission("Supplier.Provision"))
+                    {
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <select class="rz-dropdown" style="padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:260px;" @bind="companyToRevoke">
+                                <option value="@Guid.Empty">— Select company to revoke —</option>
+                                @foreach (var c in companies)
+                                {
+                                    <option value="@c.Id">@c.Code — @c.Name</option>
+                                }
+                            </select>
+                            <button class="rz-button" style="padding:8px 12px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="RevokeSelectedCompany" disabled="@(companyToRevoke == Guid.Empty || busy)">
+                                <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">link_off</span> Revoke access
+                            </button>
+                        </div>
+                    }
+                </div>
+
                 <div class="rz-card" style="padding:20px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
                         <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);">Mapped suppliers (@detail.SupplierIds.Length)</h3>
@@ -260,12 +284,25 @@ else
                     <button class="merino-dialog__close" @onclick="() => showMapSupplier = false"><span class="material-symbols-outlined">close</span></button>
                 </header>
                 <div class="merino-dialog__body">
-                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Supplier</label>
-                    <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="supplierToMap">
-                        <option value="">— Select supplier —</option>
-                        @if (availableSuppliers != null)
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Company *</label>
+                    <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="mapCompanyId" @bind:after="OnMapCompanyChanged">
+                        <option value="@Guid.Empty">— Select company —</option>
+                        @if (companies != null)
                         {
-                            @foreach (var s in availableSuppliers.Where(x => !detail.SupplierIds.Contains(x.Id)))
+                            @foreach (var c in companies)
+                            {
+                                <option value="@c.Id">@c.Code — @c.Name</option>
+                            }
+                        }
+                    </select>
+                    <div style="font-size:11px;color:var(--mer-ink-500);margin:2px 0 12px;">Filters suppliers to this company. The user is auto-granted company access.</div>
+
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Supplier *</label>
+                    <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="supplierToMap" disabled="@(mapCompanyId == Guid.Empty || loadingMapSuppliers)">
+                        <option value="">@(mapCompanyId == Guid.Empty ? "— Select a company first —" : (loadingMapSuppliers ? "Loading…" : "— Select supplier —"))</option>
+                        @if (companySuppliers != null)
+                        {
+                            @foreach (var s in companySuppliers.Where(x => !detail.SupplierIds.Contains(x.Id)))
                             {
                                 <option value="@s.Id">@s.SupplierCode — @s.LegalName</option>
                             }
@@ -343,7 +380,10 @@ else
     private Guid supplierToMap = Guid.Empty;
     private bool mapCanWrite = false;
     private string mapError = string.Empty;
-    private List<SupplierListItemDto>? availableSuppliers;
+    private List<SupplierListItemDto>? availableSuppliers;   // all suppliers (used to resolve mapped supplier codes in the table)
+    private List<SupplierListItemDto>? companySuppliers;     // suppliers filtered to the selected company in the map dialog
+    private bool loadingMapSuppliers;
+    private List<CompanyDto> companies = new();
 
     private bool showDeactivate;
 
@@ -357,6 +397,8 @@ else
         availableRoles = rolesResp?.Data ?? new();
         var suppResp = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
         availableSuppliers = suppResp?.Data ?? new();
+        var compResp = await Api.GetAsync<List<CompanyDto>>("api/companies");
+        companies = compResp?.Data ?? new();
     }
 
     private async Task Load()
@@ -433,19 +475,67 @@ else
         busy = false;
     }
 
-    private void OpenMapSupplier() { supplierToMap = Guid.Empty; mapCanWrite = false; mapError = string.Empty; showMapSupplier = true; }
+    // Company the mapping is made under. Selecting it filters the supplier dropdown via
+    // GET api/suppliers?tenantEntityId={mapCompanyId} (server requires supplier ∈ this company), and
+    // the map auto-creates the user's UserCompanyMap if absent.
+    private Guid mapCompanyId = Guid.Empty;
+
+    private void OpenMapSupplier()
+    {
+        supplierToMap = Guid.Empty;
+        mapCanWrite = false;
+        mapCompanyId = Guid.Empty;
+        companySuppliers = null;
+        mapError = string.Empty;
+        showMapSupplier = true;
+    }
+
+    private async Task OnMapCompanyChanged()
+    {
+        supplierToMap = Guid.Empty;
+        companySuppliers = null;
+        if (mapCompanyId == Guid.Empty) return;
+        loadingMapSuppliers = true;
+        StateHasChanged();
+        var resp = await Api.GetAsync<List<SupplierListItemDto>>($"api/suppliers?tenantEntityId={mapCompanyId}");
+        companySuppliers = resp?.Data ?? new();
+        loadingMapSuppliers = false;
+    }
 
     private async Task DoMapSupplier()
     {
+        if (mapCompanyId == Guid.Empty) { mapError = "Select a company."; return; }
         if (supplierToMap == Guid.Empty) { mapError = "Select a supplier."; return; }
         busy = true;
-        var resp = await Api.PostAsync<MapSupplierRequest>($"api/users/{Id}/supplier-maps", new MapSupplierRequest(supplierToMap, mapCanWrite));
+        var resp = await Api.PostAsync<MapSupplierRequest>($"api/users/{Id}/supplier-maps", new MapSupplierRequest(supplierToMap, mapCanWrite, mapCompanyId));
         if (resp?.Success == true)
         {
             showMapSupplier = false;
             await Load();
         }
         else { mapError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    // No per-user company-access GET exists yet (UserDetailDto carries supplier ids only), so company
+    // access is managed by explicit revoke against the tenant's company list. Add is implicit via mapping.
+    private Guid companyToRevoke = Guid.Empty;
+
+    private async Task RevokeSelectedCompany()
+    {
+        if (companyToRevoke == Guid.Empty) return;
+        var c = companies.FirstOrDefault(x => x.Id == companyToRevoke);
+        var label = c is null ? companyToRevoke.ToString() : $"{c.Code} — {c.Name}";
+        if (!await Dialog.ConfirmUnmapAsync(label, "COMPANY ACCESS")) return;
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/users/{Id}/company-maps/{companyToRevoke}");
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Company access revoked" });
+            companyToRevoke = Guid.Empty;
+            await Load();
+        }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
         busy = false;
     }
 

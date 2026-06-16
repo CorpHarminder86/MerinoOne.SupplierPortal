@@ -69,6 +69,13 @@ public class InforEndpointMapConfiguration : IEntityTypeConfiguration<InforEndpo
         b.Property(x => x.InforEndpointUrl).HasColumnName("inforEndpointUrl").HasMaxLength(500).IsRequired();
         b.Property(x => x.BodName).HasColumnName("bodName").HasMaxLength(100);
         b.Property(x => x.IsEnabled).HasColumnName("isEnabled").HasDefaultValue(true);
+        // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
+        // Endpoint "session" liveness telemetry.
+        b.Property(x => x.LastReceivedAt).HasColumnName("lastReceivedAt").HasColumnType("datetime2");
+        b.Property(x => x.LastStatus).HasColumnName("lastStatus").HasMaxLength(20);
+        b.Property(x => x.LastIdempotencyKey).HasColumnName("lastIdempotencyKey").HasMaxLength(100);
+        b.Property(x => x.LastMessage).HasColumnName("lastMessage").HasMaxLength(2000);
+        b.Property(x => x.ReceivedCount).HasColumnName("receivedCount").HasColumnType("int").HasDefaultValue(0);
     }
 }
 

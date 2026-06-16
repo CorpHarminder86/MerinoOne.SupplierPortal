@@ -110,6 +110,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
                     b.Property<string>("UpdatedBy")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
@@ -139,6 +143,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UX_AppUser_appUserSeq");
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("IX_AppUser_tenantId");
 
                     b.HasIndex("UserCode")
                         .IsUnique()
@@ -228,6 +235,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("templateKey");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
 
                     b.Property<string>("ToEmail")
                         .IsRequired()
@@ -331,6 +342,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("templateKey");
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
                     b.Property<string>("UpdatedBy")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
@@ -351,9 +366,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
 
-                    b.HasIndex("TemplateKey")
+                    b.HasIndex("TenantId", "TemplateKey")
                         .IsUnique()
-                        .HasDatabaseName("UX_EmailTemplate_templateKey");
+                        .HasDatabaseName("UX_EmailTemplate_tenant_templateKey")
+                        .HasFilter("[isDeleted] = 0");
 
                     b.ToTable("EmailTemplate", "admin");
                 });
@@ -705,6 +721,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
                     b.Property<string>("UpdatedBy")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
@@ -719,15 +739,16 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
-                    b.HasIndex("Name")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_Role_name");
-
                     b.HasIndex("Seq")
                         .IsUnique()
                         .HasDatabaseName("UX_Role_roleSeq");
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_Role_tenant_name")
+                        .HasFilter("[isDeleted] = 0");
 
                     b.ToTable("Role", "admin");
                 });
@@ -1103,6 +1124,14 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("supplierId");
 
+                    b.Property<Guid?>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
                     b.Property<string>("Token")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1131,6 +1160,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UX_SupplierInvite_supplierInviteSeq");
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantEntityId")
+                        .HasDatabaseName("IX_SupplierInvite_tenantEntityId");
+
+                    b.HasIndex("TenantId");
 
                     b.HasIndex("Token")
                         .IsUnique()
@@ -1253,6 +1287,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("deletedOn");
 
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("isActive");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -1286,6 +1326,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_Tenant_name");
+
                     b.HasIndex("Seq")
                         .IsUnique()
                         .HasDatabaseName("UX_Tenant_tenantSeq");
@@ -1293,6 +1337,190 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
 
                     b.ToTable("Tenant", "admin");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("isActive");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("tenantEntitySeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_TenantEntity");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TenantEntity_tenantEntitySeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_TenantEntity_tenant_code")
+                        .HasFilter("[tenantId] IS NOT NULL");
+
+                    b.ToTable("TenantEntity", "admin");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.UserCompanyMap", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("userCompanyMapId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<Guid>("AppUserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("appUserId");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<bool>("IsDefault")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDefault");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("userCompanyMapSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_UserCompanyMap");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("AppUserId")
+                        .HasDatabaseName("IX_UserCompanyMap_appUserId");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_UserCompanyMap_userCompanyMapSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantEntityId");
+
+                    b.HasIndex("AppUserId", "TenantEntityId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_UserCompanyMap_user_company");
+
+                    b.ToTable("UserCompanyMap", "admin");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.UserRole", b =>
@@ -1744,6 +1972,328 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.ApiKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("apiKeyId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("expiresAt");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("isActive");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<string>("KeyHash")
+                        .IsRequired()
+                        .HasColumnType("char(64)")
+                        .HasColumnName("keyHash");
+
+                    b.Property<string>("KeyPrefix")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("keyPrefix");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("label");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("lastUsedAt");
+
+                    b.Property<Guid?>("ReplacedByApiKeyId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("replacedByApiKeyId");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("revokedAt");
+
+                    b.Property<string>("Scopes")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("scopes");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("apiKeySeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid?>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_ApiKey");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_ApiKey_isActive")
+                        .HasFilter("[isActive] = 1");
+
+                    b.HasIndex("KeyPrefix")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ApiKey_keyPrefix");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ApiKey_apiKeySeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantEntityId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("ApiKey", "integration");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.CompanyShareGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("companyShareGroupId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("endpoint");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<bool>("IsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("isEnabled");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("companyShareGroupSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid>("SourceTenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("sourceTenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_CompanyShareGroup");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_CompanyShareGroup_companyShareGroupSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("SourceTenantEntityId");
+
+                    b.HasIndex("TenantId", "Endpoint", "SourceTenantEntityId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_CompanyShareGroup_tenant_endpoint_source")
+                        .HasFilter("[tenantId] IS NOT NULL");
+
+                    b.ToTable("CompanyShareGroup", "integration");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.CompanyShareGroupMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("companyShareGroupMemberId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<Guid>("CompanyShareGroupId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("companyShareGroupId");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("endpoint");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<Guid>("MemberTenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("memberTenantEntityId");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("companyShareGroupMemberSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_CompanyShareGroupMember");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("MemberTenantEntityId");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_CompanyShareGroupMember_companyShareGroupMemberSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("CompanyShareGroupId", "MemberTenantEntityId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_CompanyShareGroupMember_group_member");
+
+                    b.HasIndex("Endpoint", "MemberTenantEntityId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_CompanyShareGroupMember_endpoint_member")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.ToTable("CompanyShareGroupMember", "integration");
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.InforEndpointMap", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1808,12 +2358,41 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(true)
                         .HasColumnName("isEnabled");
 
+                    b.Property<string>("LastIdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("lastIdempotencyKey");
+
+                    b.Property<string>("LastMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("lastMessage");
+
+                    b.Property<DateTime?>("LastReceivedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("lastReceivedAt");
+
+                    b.Property<string>("LastStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("lastStatus");
+
+                    b.Property<int>("ReceivedCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("receivedCount");
+
                     b.Property<int>("Seq")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasColumnName("inforEndpointMapSeq");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
 
                     b.Property<string>("UpdatedBy")
                         .HasMaxLength(100)
@@ -1916,6 +2495,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("SyncedAt")
                         .HasColumnType("datetime2")
                         .HasColumnName("syncedAt");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
 
                     b.Property<string>("UpdatedBy")
                         .HasMaxLength(100)
@@ -2026,6 +2609,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("SyncLogId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("syncLogId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
 
                     b.Property<string>("UpdatedBy")
                         .HasMaxLength(100)
@@ -2302,6 +2889,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SupplierId")
                         .HasDatabaseName("IX_Asn_supplierId");
+
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_Asn_tenant_company");
 
                     b.ToTable("Asn", "proc");
                 });
@@ -2706,6 +3296,14 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
 
+                    b.Property<Guid?>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
                     b.Property<string>("UpdatedBy")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
@@ -2720,15 +3318,19 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
-                    b.HasIndex("Code")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_DeliveryTerm_code");
-
                     b.HasIndex("Seq")
                         .IsUnique()
                         .HasDatabaseName("UX_DeliveryTerm_deliveryTermSeq");
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantEntityId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_DeliveryTerm_company_code")
+                        .HasFilter("[tenantEntityId] IS NOT NULL AND [isDeleted] = 0");
+
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_DeliveryTerm_tenant_company");
 
                     b.ToTable("DeliveryTerm", "proc");
                 });
@@ -3051,6 +3653,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UQ_Invoice_supplier_invoiceNumber");
 
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_Invoice_tenant_company");
+
                     b.ToTable("Invoice", "proc");
                 });
 
@@ -3322,6 +3927,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.HasIndex("SupplierId")
                         .HasDatabaseName("IX_Payment_supplierId");
 
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_Payment_tenant_company");
+
                     b.ToTable("Payment", "proc");
                 });
 
@@ -3389,6 +3997,14 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
 
+                    b.Property<Guid?>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
                     b.Property<string>("UpdatedBy")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
@@ -3403,15 +4019,19 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
-                    b.HasIndex("Code")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_PaymentTerm_code");
-
                     b.HasIndex("Seq")
                         .IsUnique()
                         .HasDatabaseName("UX_PaymentTerm_paymentTermSeq");
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantEntityId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PaymentTerm_company_code")
+                        .HasFilter("[tenantEntityId] IS NOT NULL AND [isDeleted] = 0");
+
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_PaymentTerm_tenant_company");
 
                     b.ToTable("PaymentTerm", "proc");
                 });
@@ -3591,6 +4211,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SupplierId")
                         .HasDatabaseName("IX_PurchaseOrder_supplierId");
+
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_PurchaseOrder_tenant_company");
 
                     b.ToTable("PurchaseOrder", "proc", t =>
                         {
@@ -4015,10 +4638,6 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
-                    b.HasIndex("LegalName")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_Supplier_legalName");
-
                     b.HasIndex("RegistrationStatus")
                         .HasDatabaseName("IX_Supplier_registrationStatus");
 
@@ -4030,9 +4649,20 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
 
-                    b.HasIndex("SupplierCode")
+                    b.HasIndex("TenantEntityId");
+
+                    b.HasIndex("TenantId", "LegalName")
                         .IsUnique()
-                        .HasDatabaseName("UQ_Supplier_supplierCode");
+                        .HasDatabaseName("UQ_Supplier_tenant_legalName")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.HasIndex("TenantId", "SupplierCode")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_Supplier_tenant_supplierCode")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_Supplier_tenant_company");
 
                     b.ToTable("Supplier", "supplier");
                 });
@@ -4386,6 +5016,17 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.AppUser", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_AppUser_Tenant_TenantId");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.InviteOtp", b =>
                 {
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.SupplierInvite", "Invite")
@@ -4454,6 +5095,21 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Navigation("AppUser");
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.SupplierInvite", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_SupplierInvite_TenantEntity_TenantEntityId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_SupplierInvite_Tenant_TenantId");
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.SupplierUserMap", b =>
                 {
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.AppUser", "AppUser")
@@ -4473,6 +5129,38 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Navigation("AppUser");
 
                     b.Navigation("SecRight");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_TenantEntity_Tenant_TenantId");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.UserCompanyMap", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.AppUser", "AppUser")
+                        .WithMany("CompanyMaps")
+                        .HasForeignKey("AppUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_UserCompanyMap_AppUser_AppUserId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", "TenantEntity")
+                        .WithMany()
+                        .HasForeignKey("TenantEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_UserCompanyMap_TenantEntity_TenantEntityId");
+
+                    b.Navigation("AppUser");
+
+                    b.Navigation("TenantEntity");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.UserRole", b =>
@@ -4518,6 +5206,62 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_DocumentUpload_Seccode_SeccodeId");
 
                     b.Navigation("Owner");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.ApiKey", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", "TenantEntity")
+                        .WithMany()
+                        .HasForeignKey("TenantEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ApiKey_TenantEntity_TenantEntityId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ApiKey_Tenant_TenantId");
+
+                    b.Navigation("TenantEntity");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.CompanyShareGroup", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", "SourceTenantEntity")
+                        .WithMany()
+                        .HasForeignKey("SourceTenantEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_CompanyShareGroup_TenantEntity_SourceTenantEntityId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CompanyShareGroup_Tenant_TenantId");
+
+                    b.Navigation("SourceTenantEntity");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.CompanyShareGroupMember", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Integration.CompanyShareGroup", "CompanyShareGroup")
+                        .WithMany("Members")
+                        .HasForeignKey("CompanyShareGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_CompanyShareGroupMember_CompanyShareGroup_CompanyShareGroupId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", "MemberTenantEntity")
+                        .WithMany()
+                        .HasForeignKey("MemberTenantEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_CompanyShareGroupMember_TenantEntity_MemberTenantEntityId");
+
+                    b.Navigation("CompanyShareGroup");
+
+                    b.Navigation("MemberTenantEntity");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.IntegrationError", b =>
@@ -4788,6 +5532,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasConstraintName("FK_Supplier_Seccode_SeccodeId");
 
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_Supplier_TenantEntity_TenantEntityId");
+
                     b.Navigation("Owner");
                 });
 
@@ -4838,6 +5588,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.AppUser", b =>
                 {
+                    b.Navigation("CompanyMaps");
+
                     b.Navigation("SupplierMaps");
 
                     b.Navigation("UserRoles");
@@ -4858,6 +5610,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.Seccode", b =>
                 {
                     b.Navigation("SecRights");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.CompanyShareGroup", b =>
+                {
+                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.Asn", b =>

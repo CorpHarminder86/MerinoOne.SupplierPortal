@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Scope;
 using MerinoOne.SupplierPortal.Domain.Common;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Audit;
@@ -21,13 +22,25 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence;
 public class AppDbContext : DbContext, IAppDbContext
 {
     private readonly ICurrentUser _currentUser;
+    private readonly ICurrentCompany _currentCompany;
     private readonly AuditableEntityInterceptor _auditInterceptor;
+    private readonly ScopeStampInterceptor _scopeStampInterceptor;
+    private readonly IScopeFilterGate? _scopeFilterGate;
 
-    public AppDbContext(DbContextOptions<AppDbContext> options, ICurrentUser currentUser, AuditableEntityInterceptor auditInterceptor)
+    public AppDbContext(
+        DbContextOptions<AppDbContext> options,
+        ICurrentUser currentUser,
+        ICurrentCompany currentCompany,
+        AuditableEntityInterceptor auditInterceptor,
+        ScopeStampInterceptor scopeStampInterceptor,
+        IScopeFilterGate? scopeFilterGate = null)
         : base(options)
     {
         _currentUser = currentUser;
+        _currentCompany = currentCompany;
         _auditInterceptor = auditInterceptor;
+        _scopeStampInterceptor = scopeStampInterceptor;
+        _scopeFilterGate = scopeFilterGate;
     }
 
     public DbSet<AppUser> AppUsers => Set<AppUser>();
@@ -44,6 +57,8 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
     public DbSet<EmailOutbox> EmailOutbox => Set<EmailOutbox>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<TenantEntity> TenantEntities => Set<TenantEntity>();
+    public DbSet<UserCompanyMap> UserCompanyMaps => Set<UserCompanyMap>();
 
     public DbSet<Item> Items => Set<Item>();
     public DbSet<DeliveryTerm> DeliveryTerms => Set<DeliveryTerm>();
@@ -71,6 +86,9 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<InforEndpointMap> InforEndpointMaps => Set<InforEndpointMap>();
     public DbSet<InforSyncLog> InforSyncLogs => Set<InforSyncLog>();
     public DbSet<IntegrationError> IntegrationErrors => Set<IntegrationError>();
+    public DbSet<CompanyShareGroup> CompanyShareGroups => Set<CompanyShareGroup>();
+    public DbSet<CompanyShareGroupMember> CompanyShareGroupMembers => Set<CompanyShareGroupMember>();
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
 
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
@@ -78,7 +96,7 @@ public class AppDbContext : DbContext, IAppDbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        optionsBuilder.AddInterceptors(_auditInterceptor);
+        optionsBuilder.AddInterceptors(_auditInterceptor, _scopeStampInterceptor);
         base.OnConfiguring(optionsBuilder);
     }
 
@@ -103,11 +121,23 @@ public class AppDbContext : DbContext, IAppDbContext
 
                 Expression filter = notDeleted;
 
+                // 1. Always-on tenant filter — every ITenantOwned / ITenantScoped / ICompanyScoped type.
+                var tenantPredicate = BuildTenantPredicate(clrType, parameter);
+                if (tenantPredicate != null)
+                    filter = Expression.AndAlso(filter, tenantPredicate);
+
+                // 2/3. Always-on company filter — business data only. Sharing-aware for PaymentTerm/DeliveryTerm
+                //      (ICompanyScoped), plain TenantEntityId == ActiveCompanyId for ITenantScoped aggregates.
+                var companyPredicate = BuildCompanyPredicate(clrType, parameter);
+                if (companyPredicate != null)
+                    filter = Expression.AndAlso(filter, companyPredicate);
+
+                // 4. Seccode RLS (unchanged) — ANDed for ISeccode aggregates.
                 if (typeof(ISeccode).IsAssignableFrom(clrType))
                 {
                     var seccodePredicate = BuildSeccodePredicate(parameter);
                     if (seccodePredicate != null)
-                        filter = Expression.AndAlso(notDeleted, seccodePredicate);
+                        filter = Expression.AndAlso(filter, seccodePredicate);
                 }
 
                 var lambda = Expression.Lambda(filter, parameter);
@@ -122,6 +152,102 @@ public class AppDbContext : DbContext, IAppDbContext
                     .HasColumnName("rowVersion");
             }
         }
+    }
+
+    // === Always-on scope filter instance members ====================================================
+    // CRITICAL: like the seccode members, these are read PER QUERY (EF evaluates property access on a
+    // DbContext-typed Expression.Constant), never baked into the cached compiled model.
+
+    // === Feature-flag rollout gate (Scope.FiltersEnabled) ===========================================
+    // The two always-on scope filters (tenant + company) are gated by a global SystemSetting so they can be
+    // flipped ON only AFTER the scope backfill has stamped every legacy row — preventing a "dark portal"
+    // where NULL-scope rows are invisible during the backfill window. The value is read from the singleton
+    // IScopeFilterGate (which loads + caches it via its OWN scope) — NEVER via this request context — so the
+    // per-query predicate never triggers a nested DB read / "second operation" error during query evaluation.
+    // Fail-OPEN (filters bypassed) when the gate is absent (design-time/tests) or off; the seccode RLS filter
+    // is NEVER gated.
+
+    /// <summary>
+    /// True only when the <c>Scope.FiltersEnabled</c> SystemSetting is "true". When false (the default, and
+    /// the state during the backfill window) the tenant + company predicates are bypassed. Reads the cached
+    /// singleton gate — zero DB I/O on this context.
+    /// </summary>
+    public bool ScopeFiltersEnabled => _scopeFilterGate?.FiltersEnabled ?? false;
+
+    /// <summary>Platform Admin (cross-tenant) and the system principal bypass the tenant filter.</summary>
+    public bool TenantFilterBypassed => _currentUser?.IsPlatformAdmin == true || _currentUser is ISystemPrincipal;
+
+    public Guid? CurrentTenantId => _currentUser?.TenantId;
+
+    /// <summary>ONLY the system principal bypasses the company filter — no role-based bypass (even Tenant Admin).</summary>
+    public bool CompanyFilterBypassed => _currentCompany is ISystemCompany;
+
+    public Guid? ActiveCompanyId => _currentCompany?.ActiveCompanyId;
+
+    public Guid? PaymentTermSourceCompanyId =>
+        _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.PaymentTerm, _currentCompany.ActiveCompanyId);
+
+    public Guid? DeliveryTermSourceCompanyId =>
+        _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.DeliveryTerm, _currentCompany.ActiveCompanyId);
+
+    /// <summary>
+    /// tenantFilterBypassed OR (e.TenantId != null AND e.TenantId == CurrentTenantId).
+    /// Applies to every type carrying a TenantId (ITenantOwned / ITenantScoped / ICompanyScoped).
+    /// </summary>
+    private Expression? BuildTenantPredicate(Type clrType, ParameterExpression parameter)
+    {
+        var carriesTenant = typeof(ITenantOwned).IsAssignableFrom(clrType)
+                            || typeof(ITenantScoped).IsAssignableFrom(clrType)
+                            || typeof(ICompanyScoped).IsAssignableFrom(clrType);
+        if (!carriesTenant) return null;
+
+        var ctx = Expression.Constant(this);
+        var bypass = Expression.Property(ctx, nameof(TenantFilterBypassed));
+        var currentTenant = Expression.Property(ctx, nameof(CurrentTenantId));
+
+        var tenantProp = Expression.Property(parameter, "TenantId");          // Guid? on all three markers
+        var tenantNotNull = Expression.NotEqual(tenantProp, Expression.Constant(null, typeof(Guid?)));
+        var tenantEquals = Expression.Equal(tenantProp, currentTenant);
+        var matches = Expression.AndAlso(tenantNotNull, tenantEquals);
+
+        // Feature-flag rollout gate: when Scope.FiltersEnabled is off (backfill window / not yet flipped),
+        // the tenant filter is bypassed so NULL-scope rows remain visible (no dark portal). Read per query.
+        var filtersDisabled = Expression.Not(Expression.Property(ctx, nameof(ScopeFiltersEnabled)));
+
+        return Expression.OrElse(filtersDisabled, Expression.OrElse(bypass, matches));
+    }
+
+    /// <summary>
+    /// Company filter for business data:
+    ///   - PaymentTerm/DeliveryTerm (ICompanyScoped) → sharing-aware: TenantEntityId == X{...}SourceCompanyId.
+    ///   - ITenantScoped aggregates (incl. Supplier) → plain: TenantEntityId == ActiveCompanyId.
+    /// companyFilterBypassed OR (e.TenantEntityId != null AND e.TenantEntityId == source).
+    /// </summary>
+    private Expression? BuildCompanyPredicate(Type clrType, ParameterExpression parameter)
+    {
+        string sourceMember;
+        if (clrType == typeof(PaymentTerm))
+            sourceMember = nameof(PaymentTermSourceCompanyId);
+        else if (clrType == typeof(DeliveryTerm))
+            sourceMember = nameof(DeliveryTermSourceCompanyId);
+        else if (typeof(ITenantScoped).IsAssignableFrom(clrType))
+            sourceMember = nameof(ActiveCompanyId);
+        else
+            return null;   // ITenantOwned config / integration entities are NOT company-scoped.
+
+        var ctx = Expression.Constant(this);
+        var bypass = Expression.Property(ctx, nameof(CompanyFilterBypassed));
+        var source = Expression.Property(ctx, sourceMember);
+
+        var companyProp = Expression.Property(parameter, "TenantEntityId");   // Guid? on the relevant markers
+        var companyNotNull = Expression.NotEqual(companyProp, Expression.Constant(null, typeof(Guid?)));
+        var companyEquals = Expression.Equal(companyProp, source);
+        var matches = Expression.AndAlso(companyNotNull, companyEquals);
+
+        // Same rollout gate as the tenant predicate — bypass the company filter until Scope.FiltersEnabled is on.
+        var filtersDisabled = Expression.Not(Expression.Property(ctx, nameof(ScopeFiltersEnabled)));
+
+        return Expression.OrElse(filtersDisabled, Expression.OrElse(bypass, matches));
     }
 
     // Instance accessors used by the seccode global filter. EF Core evaluates property access
@@ -168,4 +294,14 @@ public class AppDbContext : DbContext, IAppDbContext
 
     public override int SaveChanges() => base.SaveChanges();
     public override Task<int> SaveChangesAsync(CancellationToken ct = default) => base.SaveChangesAsync(ct);
+
+    /// <summary>
+    /// Explicit relational transaction for the inbound integration upsert path. Exposed via
+    /// <see cref="IAppDbContext"/> so Application-layer handlers get transactional access without an
+    /// Infrastructure reference.
+    /// </summary>
+    public Task<Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default)
+        => Database.BeginTransactionAsync(ct);
+
+    public void ClearChangeTracker() => ChangeTracker.Clear();
 }

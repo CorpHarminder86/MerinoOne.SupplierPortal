@@ -7,6 +7,7 @@ using MerinoOne.SupplierPortal.Domain.Entities.Inv;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Entities.Settings;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplier;
 using SupplierVerificationEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierVerification;
 using SupplierAddressEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierAddress;
@@ -30,6 +31,8 @@ public interface IAppDbContext
     DbSet<EmailTemplate> EmailTemplates { get; }
     DbSet<EmailOutbox> EmailOutbox { get; }
     DbSet<Tenant> Tenants { get; }
+    DbSet<TenantEntity> TenantEntities { get; }
+    DbSet<UserCompanyMap> UserCompanyMaps { get; }
 
     DbSet<Item> Items { get; }
     DbSet<DeliveryTerm> DeliveryTerms { get; }
@@ -57,10 +60,28 @@ public interface IAppDbContext
     DbSet<InforEndpointMap> InforEndpointMaps { get; }
     DbSet<InforSyncLog> InforSyncLogs { get; }
     DbSet<IntegrationError> IntegrationErrors { get; }
+    DbSet<CompanyShareGroup> CompanyShareGroups { get; }
+    DbSet<CompanyShareGroupMember> CompanyShareGroupMembers { get; }
+    DbSet<ApiKey> ApiKeys { get; }
 
     DbSet<AuditEntry> AuditEntries { get; }
 
     DbSet<SystemSetting> SystemSettings { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Begins an explicit DB transaction. Used by the inbound integration upsert path so the row
+    /// upserts + the InforSyncLog / IntegrationError write + the endpoint session-column update all
+    /// commit (or roll back) atomically. Delegates to the underlying EF context's relational
+    /// transaction so callers in the Application layer don't need an Infrastructure reference.
+    /// </summary>
+    Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Detaches all tracked entities. Used by the inbound integration path after a failed/rolled-back
+    /// transaction so a follow-up "record the failure" SaveChanges starts from a clean change tracker
+    /// (the previously-tracked Added/Modified entities must not be re-attempted).
+    /// </summary>
+    void ClearChangeTracker();
 }

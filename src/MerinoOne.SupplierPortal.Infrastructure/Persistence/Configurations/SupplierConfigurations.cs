@@ -38,10 +38,22 @@ public class SupplierConfiguration : IEntityTypeConfiguration<SupplierEntity>
 
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_Supplier_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+        // Company the supplier belongs to (TenantEntityId carried by BaseAggregateRoot). No nav prop
+        // on Supplier so configure the FK against the principal type directly.
+        b.HasOne<TenantEntity>().WithMany().HasForeignKey("TenantEntityId")
+            .HasConstraintName("FK_Supplier_TenantEntity_TenantEntityId").OnDelete(DeleteBehavior.Restrict);
 
-        b.HasIndex(x => x.LegalName).HasDatabaseName("UQ_Supplier_legalName").IsUnique();
-        b.HasIndex(x => x.SupplierCode).HasDatabaseName("UQ_Supplier_supplierCode").IsUnique();
+        // supplierCode + legalName are PER-TENANT unique now (was global). Filtered (soft-delete-aware).
+        b.HasIndex("TenantId", "LegalName")
+            .HasDatabaseName("UQ_Supplier_tenant_legalName").IsUnique()
+            .HasFilter("[isDeleted] = 0");
+        b.HasIndex("TenantId", "SupplierCode")
+            .HasDatabaseName("UQ_Supplier_tenant_supplierCode").IsUnique()
+            .HasFilter("[isDeleted] = 0");
         b.HasIndex(x => x.RegistrationStatus).HasDatabaseName("IX_Supplier_registrationStatus");
+        // Composite scope index for the tenant + company business-data filter on the hot supplier path.
+        b.HasIndex("TenantId", "TenantEntityId")
+            .HasDatabaseName("IX_Supplier_tenant_company");
     }
 }
 

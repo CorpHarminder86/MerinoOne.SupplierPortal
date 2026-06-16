@@ -13,6 +13,13 @@ using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
 
+// CLI seed mode runs through a minimal, web-host-free entrypoint (see SeedEntrypoint) — building the
+// full WebApplication host (Serilog file sinks + host integration) hangs under non-interactive CLI runs.
+if (args.Length > 0 && args[0].Equals("seed", StringComparison.OrdinalIgnoreCase))
+{
+    return await MerinoOne.SupplierPortal.SeedEntrypoint.RunAsync(args);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Structured logging — console + per-level rolling daily file sinks (TSD §11 hardening).
@@ -55,6 +62,17 @@ builder.Services.AddOpenApi(options =>
             In = Microsoft.OpenApi.ParameterLocation.Header,
             Description = "JWT obtained from POST /api/auth/login. Paste the raw token (no 'Bearer ' prefix)."
         };
+        // X-APIKey scheme for the inbound integration endpoints (Infor LN). Mirrors the Bearer
+        // definition above so Scalar surfaces an apiKey input. Inbound endpoints opt into this scheme
+        // via [Authorize(AuthenticationSchemes="ApiKey", …)].
+        document.Components.SecuritySchemes["ApiKey"] = new Microsoft.OpenApi.OpenApiSecurityScheme
+        {
+            Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey,
+            Name = "X-APIKey",
+            In = Microsoft.OpenApi.ParameterLocation.Header,
+            Description = "Inbound integration key (X-APIKey header). Format: mok_<base64url>. Issued via POST /api/admin/api-keys; shown once."
+        };
+
         document.Security ??= new List<Microsoft.OpenApi.OpenApiSecurityRequirement>();
         document.Security.Add(new Microsoft.OpenApi.OpenApiSecurityRequirement
         {
@@ -66,6 +84,9 @@ builder.Services.AddOpenApi(options =>
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
+// Active-company context for the always-on company filter. Registered before AddInfrastructure so the
+// system-company fallback inside AddInfrastructure does not override the HttpContext-backed impl.
+builder.Services.AddScoped<ICurrentCompany, HttpContextCurrentCompany>();
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -88,30 +109,43 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = jwt["Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["SigningKey"]!))
         };
-    });
+    })
+    // Named, non-default "ApiKey" scheme for inbound integration (Infor LN). JWT stays the default
+    // scheme; inbound endpoints opt in via [Authorize(AuthenticationSchemes="ApiKey", Policy="Integration.Inbound.*")].
+    .AddScheme<MerinoOne.SupplierPortal.Identity.ApiKeyAuth.ApiKeyAuthenticationOptions,
+               MerinoOne.SupplierPortal.Identity.ApiKeyAuth.ApiKeyAuthenticationHandler>(
+        MerinoOne.SupplierPortal.Identity.ApiKeyAuth.ApiKeyAuthenticationOptions.SchemeName, _ => { });
 
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider, MerinoOne.SupplierPortal.Identity.PermissionPolicyProvider>();
 builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, MerinoOne.SupplierPortal.Identity.PermissionRequirementHandler>();
 
+// Rate limiting for inbound integration. Partitioned on the X-APIKey prefix (fallback to remote IP).
+// The named "inbound" policy is applied to the inbound integration route group by backend-developer.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("inbound", httpContext =>
+    {
+        var apiKey = httpContext.Request.Headers["X-APIKey"].FirstOrDefault();
+        var partitionKey = !string.IsNullOrEmpty(apiKey)
+            ? "key:" + (apiKey.Length >= 8 ? apiKey[..8] : apiKey)        // prefix only — never the full secret
+            : "ip:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+
+        return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey,
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            });
+    });
+});
+
 var app = builder.Build();
 
-// CLI seed mode: `dotnet run -- seed` or `seed --backfill`
-if (args.Length > 0 && args[0].Equals("seed", StringComparison.OrdinalIgnoreCase))
-{
-    using (var scope = app.Services.CreateScope())
-    {
-        var ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await ctx.Database.MigrateAsync();
-    }
-    var withBackfill = args.Any(a => a.Equals("--backfill", StringComparison.OrdinalIgnoreCase));
-    Console.WriteLine($"Seeding (backfill={withBackfill})...");
-    await SeedRunner.RunAsync(app.Services, withBackfill);
-    Console.WriteLine("Seed complete.");
-    return;
-}
-
-// Migrate-only mode for normal startup; seeding is opt-in
+// Migrate-only mode for normal startup; seeding is opt-in (see SeedEntrypoint for `seed` CLI mode)
 if (app.Environment.IsDevelopment())
 {
     using (var scope = app.Services.CreateScope())
@@ -141,7 +175,10 @@ app.UseMiddleware<GlobalExceptionHandler>();
 app.UseHttpsRedirection();
 app.UseCors();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+return 0;

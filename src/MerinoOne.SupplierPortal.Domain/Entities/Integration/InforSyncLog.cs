@@ -3,8 +3,11 @@ using MerinoOne.SupplierPortal.Domain.Enums;
 
 namespace MerinoOne.SupplierPortal.Domain.Entities.Integration;
 
-public class InforSyncLog : AuditableEntity
+public class InforSyncLog : AuditableEntity, ITenantOwned
 {
+    /// <summary>Owning tenant — sync history is tenant-scoped.</summary>
+    public Guid? TenantId { get; set; }
+
     public string EntityName { get; set; } = string.Empty;
     public SyncDirection Direction { get; set; }
     public SyncStatus Status { get; set; }

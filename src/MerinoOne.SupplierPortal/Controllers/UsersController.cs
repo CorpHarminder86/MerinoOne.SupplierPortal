@@ -145,6 +145,22 @@ Returns: empty success; 404 if mapping not found. Requires permission **Supplier
         return Result.Ok(HttpContext.TraceIdentifier);
     }
 
+    [HttpDelete("{id:guid}/company-maps/{tenantEntityId:guid}")]
+    [Authorize(Policy = "Supplier.Provision")]
+    [EndpointSummary("Revoke user company access")]
+    [EndpointDescription(@"Removes a user's access to one company (soft-deletes the UserCompanyMap). If the removed company was the user's default active company, the default is moved to another remaining company.
+Filters / params:
+- **id**: Required — user GUID.
+- **tenantEntityId**: Required — company GUID to revoke.
+Side effects:
+- Soft-deletes the UserCompanyMap; the always-on company filter hides that company's data from the user on next request.
+Returns: empty success; 404 if no active mapping. Requires permission **Supplier.Provision**.")]
+    public async Task<Result> RemoveCompany(Guid id, Guid tenantEntityId, CancellationToken ct)
+    {
+        await _mediator.Send(new RemoveUserCompanyCommand(id, tenantEntityId), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
+
     [HttpPost("{id:guid}/password")]
     [Authorize(Policy = "User.Write")]
     [EndpointSummary("Set user password (admin)")]

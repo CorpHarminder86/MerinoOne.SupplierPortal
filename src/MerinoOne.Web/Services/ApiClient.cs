@@ -18,20 +18,35 @@ namespace MerinoOne.Web.Services;
 /// </summary>
 public class ApiClient
 {
+    private const string ActiveCompanyHeader = "X-Active-Company";
+
     private readonly HttpClient _http;
     private readonly TokenAccessor _token;
+    private readonly CompanyState _company;
 
-    public ApiClient(HttpClient http, TokenAccessor token)
+    public ApiClient(HttpClient http, TokenAccessor token, CompanyState company)
     {
         _http = http;
         _token = token;
+        _company = company;
     }
 
-    private void EnsureAuth()
+    /// <summary>
+    /// Stamp the per-circuit auth + company-scope headers onto the shared typed HttpClient before each
+    /// send. Bearer comes from the scoped <see cref="TokenAccessor"/>; the active-company id from the
+    /// scoped <see cref="CompanyState"/>. Both are scoped state that a DelegatingHandler cannot reach
+    /// (see CompanyState remarks), so we set them here on DefaultRequestHeaders — the established pattern.
+    /// </summary>
+    internal void EnsureAuth()
     {
         _http.DefaultRequestHeaders.Authorization = string.IsNullOrEmpty(_token.Token)
             ? null
             : new AuthenticationHeaderValue("Bearer", _token.Token);
+
+        // Always replace (never accumulate) — DefaultRequestHeaders persists across the shared client.
+        _http.DefaultRequestHeaders.Remove(ActiveCompanyHeader);
+        if (_company.ActiveCompanyId is { } companyId)
+            _http.DefaultRequestHeaders.Add(ActiveCompanyHeader, companyId.ToString());
     }
 
     public async Task<ApiResult<LoginResponse>?> LoginAsync(LoginRequest req)
@@ -107,6 +122,28 @@ public class ApiClient
     {
         EnsureAuth();
         return _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+    }
+
+    /// <summary>
+    /// GET a non-enveloped JSON body straight into <typeparamref name="T"/> (for diagnostic endpoints
+    /// like <c>/api/auth/whoami</c> that return a raw anonymous object rather than the Result&lt;T&gt;
+    /// envelope). Returns null on any failure — never throws.
+    /// </summary>
+    public async Task<T?> GetRawJsonAsync<T>(string url) where T : class
+    {
+        EnsureAuth();
+        try
+        {
+            using var resp = await _http.GetAsync(url);
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { _token.NotifySessionExpired(); return null; }
+            if (!resp.IsSuccessStatusCode) return null;
+            if (resp.Content.Headers.ContentLength == 0) return null;
+            return await resp.Content.ReadFromJsonAsync<T>(new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch { return null; }
     }
 
     public Task LogoutAsync()

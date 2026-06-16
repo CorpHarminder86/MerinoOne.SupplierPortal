@@ -5,7 +5,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MerinoOne.SupplierPortal.Application.Suppliers.Queries;
 
-public record GetSupplierListQuery(string? Status = null, string? Search = null) : IRequest<List<SupplierListItemDto>>;
+public record GetSupplierListQuery(string? Status = null, string? Search = null, Guid? TenantEntityId = null)
+    : IRequest<List<SupplierListItemDto>>;
 
 public class GetSupplierListQueryHandler : IRequestHandler<GetSupplierListQuery, List<SupplierListItemDto>>
 {
@@ -19,6 +20,11 @@ public class GetSupplierListQueryHandler : IRequestHandler<GetSupplierListQuery,
             q = q.Where(s => s.RegistrationStatus.ToString() == request.Status);
         if (!string.IsNullOrEmpty(request.Search))
             q = q.Where(s => s.LegalName.Contains(request.Search) || s.SupplierCode.Contains(request.Search));
+        // Company filter for the "select company → supplier" mapping UI. ANDed on top of the always-on
+        // company filter (which already restricts to the active company); set X-Active-Company to the same
+        // company so this returns rows. Belt-and-braces so the dropdown can't list a different company's suppliers.
+        if (request.TenantEntityId.HasValue)
+            q = q.Where(s => s.TenantEntityId == request.TenantEntityId.Value);
 
         return await q
             .OrderBy(s => s.LegalName)

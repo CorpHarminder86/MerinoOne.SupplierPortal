@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
 @inject TokenAccessor Token
 @inject ApiClient Api
+@inject CompanyState Company
 @inject NavigationManager Nav
 @inject ShellState Shell
 @inject PageRefreshService PageRefresh
@@ -38,6 +39,18 @@ else
                 </div>
             </div>
             <nav class="mer-nav">
+                @if (Token.IsPlatformAdmin)
+                {
+                    @* Platform Admin is cross-tenant and holds NO business-data permissions, so it sees ONLY
+                       the Platform group (separation of duties). *@
+                    <div class="mer-nav__label">Platform</div>
+                    <NavLink class="mer-nav-item" href="platform/tenants" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">domain</span>
+                        <span class="mer-nav-item__label">Tenants</span>
+                    </NavLink>
+                }
+                else
+                {
                 <div class="mer-nav__label">Overview</div>
                 <NavLink class="mer-nav-item" href="" Match="NavLinkMatch.All" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">dashboard</span>
@@ -108,11 +121,23 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">error</span>
                         <span class="mer-nav-item__label">Integration Errors</span>
                     </NavLink>
+                    <NavLink class="mer-nav-item" href="integrations/api-keys" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">key</span>
+                        <span class="mer-nav-item__label">API Keys</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="integrations/endpoints" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">cable</span>
+                        <span class="mer-nav-item__label">Endpoints</span>
+                    </NavLink>
 
                     <div class="mer-nav__label">Administration</div>
                     <NavLink class="mer-nav-item" href="admin/users" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">group</span>
                         <span class="mer-nav-item__label">Users</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="admin/companies" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">apartment</span>
+                        <span class="mer-nav-item__label">Companies</span>
                     </NavLink>
                     <NavLink class="mer-nav-item" href="admin/roles" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">admin_panel_settings</span>
@@ -142,6 +167,11 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">mail</span>
                         <span class="mer-nav-item__label">Email Templates</span>
                     </NavLink>
+                    <NavLink class="mer-nav-item" href="admin/diagnostics" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">bug_report</span>
+                        <span class="mer-nav-item__label">Scope Diagnostics</span>
+                    </NavLink>
+                }
                 }
             </nav>
         </aside>
@@ -154,6 +184,55 @@ else
                 </nav>
                 <GlobalSearch />
                 <div class="mer-topbar__spacer"></div>
+
+                @if (Token.IsPlatformAdmin)
+                {
+                    @* Platform Admin works cross-tenant with no business-data access → show a context
+                       indicator instead of a company selector. *@
+                    <div class="mer-company-ctx" title="Platform Admin — cross-tenant, no business data">
+                        <span class="material-symbols-outlined" style="font-size:16px;">public</span>
+                        <span class="mer-company-ctx__label">Platform · all tenants</span>
+                    </div>
+                }
+                else if (Company.HasMultiple)
+                {
+                    <div class="mer-company-wrap" @onclick:stopPropagation="true">
+                        <button type="button" class="mer-company-pill" @onclick="ToggleCompanyMenu" title="Active company">
+                            <span class="material-symbols-outlined" style="font-size:18px;">apartment</span>
+                            <span class="mer-company-pill__text">
+                                <span class="mer-company-pill__code">@(Company.Active?.Code ?? "—")</span>
+                                <span class="mer-company-pill__name">@(Company.Active?.Name ?? "Select company")</span>
+                            </span>
+                            <span class="material-symbols-outlined mer-company-pill__caret">expand_more</span>
+                        </button>
+                        @if (_companyMenuOpen)
+                        {
+                            <div class="mer-company-menu">
+                                <div class="mer-company-menu__hd">Active company</div>
+                                @foreach (var c in Company.AccessibleCompanies)
+                                {
+                                    <button type="button" class="mer-company-menu__item @(c.Id == Company.ActiveCompanyId ? "is-active" : null)" @onclick="() => SelectCompany(c.Id)">
+                                        <span class="mer-company-menu__code">@c.Code</span>
+                                        <span class="mer-company-menu__name">@c.Name</span>
+                                        @if (c.Id == Company.ActiveCompanyId)
+                                        {
+                                            <span class="material-symbols-outlined" style="font-size:16px;color:var(--mer-green-dark);margin-left:auto;">check</span>
+                                        }
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                else if (Company.Loaded && Company.AccessibleCompanies.Count == 1)
+                {
+                    @* Single company — show it as a static chip (no switcher needed). *@
+                    <div class="mer-company-ctx" title="Active company">
+                        <span class="material-symbols-outlined" style="font-size:16px;">apartment</span>
+                        <span class="mer-company-ctx__label">@Company.AccessibleCompanies[0].Code · @Company.AccessibleCompanies[0].Name</span>
+                    </div>
+                }
+
                 <button type="button" class="mer-topbar__btn" title="Refresh page data"
                         @onclick="RefreshPageAsync" disabled="@_refreshing">
                     <span class="material-symbols-outlined @(_refreshing ? "mer-spin" : "")">refresh</span>
@@ -211,10 +290,14 @@ else
 </div>
 
 @code {
+    private const string ActiveCompanyStorageKey = "merinoone.activeCompany";
+
     private bool _refreshing;
     private bool _userMenuOpen;
+    private bool _companyMenuOpen;
     private bool _signingOut;
     private bool _hydrated;
+    private bool _companiesLoaded;
 
     protected override void OnInitialized()
     {
@@ -222,10 +305,12 @@ else
         Nav.LocationChanged += OnLocationChanged;
         Token.Changed += OnTokenChanged;
         Token.SessionExpired += HandleSessionExpired;
+        Company.Changed += OnCompanyChanged;
     }
 
     private void OnShellChange() => InvokeAsync(StateHasChanged);
     private void OnTokenChanged() => InvokeAsync(StateHasChanged);
+    private void OnCompanyChanged() => InvokeAsync(StateHasChanged);
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
@@ -245,6 +330,48 @@ else
         {
             await Task.Yield();
             Nav.NavigateToRoute("/change-password", forceLoad: false);
+        }
+
+        // Hydrate the active-company selector once the session is live (skip while a password change is
+        // forced, and skip for Platform Admin who has no business-data / company context).
+        if (Token.IsAuthenticated && !Token.MustChangePassword && !Token.IsPlatformAdmin && !_companiesLoaded)
+        {
+            await LoadCompaniesAsync();
+        }
+    }
+
+    /// <summary>
+    /// Load the user's accessible companies (drives the header selector + X-Active-Company header) and
+    /// restore the last-active selection from ProtectedLocalStorage so it survives a page refresh.
+    /// </summary>
+    private async Task LoadCompaniesAsync()
+    {
+        _companiesLoaded = true;
+        try
+        {
+            var resp = await Api.GetAsync<List<MerinoOne.SupplierPortal.Contracts.Companies.CompanyDto>>("api/companies");
+            var companies = resp?.Data ?? new();
+
+            Guid? preferred = null;
+            try
+            {
+                var stored = await Storage.GetAsync<string>(ActiveCompanyStorageKey);
+                if (stored.Success && Guid.TryParse(stored.Value, out var g)) preferred = g;
+            }
+            catch { /* storage may not be ready */ }
+
+            Company.SetCompanies(companies, preferred);
+
+            // Persist the resolved selection so a reload before any manual pick keeps the same company.
+            if (Company.ActiveCompanyId is { } active)
+            {
+                try { await Storage.SetAsync(ActiveCompanyStorageKey, active.ToString()); } catch { }
+            }
+            StateHasChanged();
+        }
+        catch
+        {
+            // Non-fatal: a 403 (e.g. user lacks Settings.Read) just means no selector. Leave empty.
         }
     }
 
@@ -352,6 +479,18 @@ else
         Nav.LocationChanged -= OnLocationChanged;
         Token.Changed -= OnTokenChanged;
         Token.SessionExpired -= HandleSessionExpired;
+        Company.Changed -= OnCompanyChanged;
+    }
+
+    private void ToggleCompanyMenu() => _companyMenuOpen = !_companyMenuOpen;
+
+    private async Task SelectCompany(Guid companyId)
+    {
+        _companyMenuOpen = false;
+        Company.SetActive(companyId);
+        try { await Storage.SetAsync(ActiveCompanyStorageKey, companyId.ToString()); } catch { }
+        // Force a real reload so every page re-fetches its data under the new active company.
+        Nav.NavigateTo(Nav.Uri, forceLoad: true);
     }
 
     private async Task RefreshPageAsync()
@@ -471,7 +610,10 @@ else
     {
         try { await Api.LogoutAsync(); } catch { }
         Token.Clear();
+        Company.Clear();
+        _companiesLoaded = false;
         try { await Storage.DeleteAsync("merinoone.token"); } catch { }
+        try { await Storage.DeleteAsync(ActiveCompanyStorageKey); } catch { }
         try { await JS.InvokeVoidAsync("sessionStorage.removeItem", "merinoone.tabs"); } catch { }
         // Drop the proxy-auth cookie too so a stolen cookie can't outlive the session.
         try { await JS.InvokeVoidAsync("eval", "document.cookie = 'merino-jwt=;Path=/;Max-Age=0';"); } catch { }

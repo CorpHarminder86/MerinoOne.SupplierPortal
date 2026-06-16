@@ -1,3 +1,4 @@
+using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Users;
@@ -10,6 +11,17 @@ using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions
 namespace MerinoOne.SupplierPortal.Application.Users.Commands;
 
 public record MapSupplierCommand(Guid UserId, MapSupplierRequest Body) : IRequest<Unit>;
+
+public class MapSupplierCommandValidator : AbstractValidator<MapSupplierCommand>
+{
+    public MapSupplierCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+        RuleFor(x => x.Body.SupplierId).NotEmpty();
+        RuleFor(x => x.Body.TenantEntityId).NotEmpty()
+            .WithMessage("A company (TenantEntityId) is required — map the user under the supplier's company.");
+    }
+}
 
 public class MapSupplierCommandHandler : IRequestHandler<MapSupplierCommand, Unit>
 {
@@ -31,6 +43,25 @@ public class MapSupplierCommandHandler : IRequestHandler<MapSupplierCommand, Uni
         var supplier = await _db.Suppliers.IgnoreQueryFilters()
             .FirstOrDefaultAsync(s => s.Id == request.Body.SupplierId, ct)
             ?? throw new NotFoundException("Supplier", request.Body.SupplierId);
+
+        // === Company scoping (TenantCompany §5) ============================================
+        // The mapping is made under a specific company; the supplier MUST belong to that company.
+        // This closes the "supplier spanning companies" hole — a supplier lives in exactly one company.
+        var companyId = request.Body.TenantEntityId;
+
+        // Company must exist; its tenant must equal the acting tenant. IgnoreQueryFilters + explicit
+        // tenant restriction so a cross-tenant company can never be referenced.
+        var actingTenant = _user.TenantId;
+        var company = await _db.TenantEntities.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(e => !e.IsDeleted && e.Id == companyId, ct)
+            ?? throw new NotFoundException("Company", companyId);
+
+        if (actingTenant.HasValue && company.TenantId != actingTenant.Value)
+            throw new ConflictException("The selected company belongs to a different tenant.");
+
+        if (supplier.TenantEntityId != companyId)
+            throw new ConflictException(
+                $"Supplier '{supplier.SupplierCode}' does not belong to the selected company. A supplier maps to exactly one company.");
 
         // Load any existing mapping INCLUDING soft-deleted. An active row is a true conflict.
         // A soft-deleted row means the admin previously removed the mapping — restore it + the
@@ -110,6 +141,38 @@ public class MapSupplierCommandHandler : IRequestHandler<MapSupplierCommand, Uni
                 CreatedBy = actor,
                 CreatedOn = now
             });
+        }
+
+        // (c) Auto-grant company access if the user lacks it. A supplier user needs a UserCompanyMap for
+        //     its supplier's company so the always-on company filter doesn't hide its own data. Restore a
+        //     soft-deleted map rather than duplicating (UQ_UserCompanyMap_user_company).
+        var existingCompanyMap = await _db.UserCompanyMaps.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(m => m.AppUserId == user.Id && m.TenantEntityId == companyId, ct);
+
+        if (existingCompanyMap is null)
+        {
+            var hasAnyCompany = await _db.UserCompanyMaps.IgnoreQueryFilters()
+                .AnyAsync(m => m.AppUserId == user.Id && !m.IsDeleted, ct);
+
+            _db.UserCompanyMaps.Add(new UserCompanyMap
+            {
+                Id = Guid.NewGuid(),
+                TenantId = company.TenantId,        // explicit — don't rely on the interceptor cross-tenant
+                AppUserId = user.Id,
+                TenantEntityId = companyId,
+                IsDefault = !hasAnyCompany,         // first company becomes the default active company
+                CreatedBy = actor,
+                CreatedOn = now
+            });
+        }
+        else if (existingCompanyMap.IsDeleted)
+        {
+            existingCompanyMap.IsDeleted = false;
+            existingCompanyMap.DeletedBy = null;
+            existingCompanyMap.DeletedOn = null;
+            existingCompanyMap.TenantId = company.TenantId;
+            existingCompanyMap.UpdatedBy = actor;
+            existingCompanyMap.UpdatedOn = now;
         }
 
         // Single SaveChangesAsync — EF wraps in an implicit transaction.

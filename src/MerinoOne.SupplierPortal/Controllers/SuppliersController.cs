@@ -22,12 +22,17 @@ public class SuppliersController : ControllerBase
 Filters / params:
 - **status**: Optional — onboarding/lifecycle status (Pending / Verified / Approved / Rejected / Inactive).
 - **search**: Optional — free-text on supplier code / legal name.
+- **tenantEntityId**: Optional — restrict to one company (drives the ""select company -> supplier"" mapping UI). Set X-Active-Company to the same company.
 Side effects:
-- Seccode-scoped: non-privileged users see only their mapped suppliers.
+- Seccode-scoped: non-privileged users see only their mapped suppliers. Company-scoped: only the active company's suppliers.
 Returns: List<SupplierListItemDto> ordered by legal name.")]
-    public async Task<Result<List<SupplierListItemDto>>> List([FromQuery] string? status, [FromQuery] string? search, CancellationToken ct)
+    public async Task<Result<List<SupplierListItemDto>>> List(
+        [FromQuery] string? status,
+        [FromQuery] string? search,
+        [FromQuery] Guid? tenantEntityId,
+        CancellationToken ct)
     {
-        var data = await _mediator.Send(new GetSupplierListQuery(status, search), ct);
+        var data = await _mediator.Send(new GetSupplierListQuery(status, search, tenantEntityId), ct);
         return Result<List<SupplierListItemDto>>.Ok(data, HttpContext.TraceIdentifier);
     }
 

@@ -20,7 +20,13 @@ public class AppUserConfiguration : IEntityTypeConfiguration<AppUser>
         b.Property(x => x.MustChangePassword).HasColumnName("mustChangePassword").HasDefaultValue(false);
         b.Property(x => x.LastLoginAt).HasColumnName("lastLoginAt").HasColumnType("datetime2");
 
+        // tenantId nullable (Platform Admin = null); FK to Tenant; index for the tenant filter.
+        b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId)
+            .HasConstraintName("FK_AppUser_Tenant_TenantId").OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.TenantId).HasDatabaseName("IX_AppUser_tenantId");
+
         b.HasIndex(x => x.UserCode).HasDatabaseName("UQ_AppUser_userCode").IsUnique();
+        // Email stays GLOBALLY unique (1 user = 1 tenant).
         b.HasIndex(x => x.Email).HasDatabaseName("UQ_AppUser_email").IsUnique();
     }
 }
@@ -31,7 +37,11 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
     {
         b.ApplyBaseEntityConvention("Role", "admin", "role");
         b.Property(x => x.Name).HasColumnName("name").HasMaxLength(50).IsRequired();
-        b.HasIndex(x => x.Name).HasDatabaseName("UQ_Role_name").IsUnique();
+        // Role name is unique PER TENANT now (was global). Filtered so soft-deleted rows don't collide.
+        b.HasIndex(x => new { x.TenantId, x.Name })
+            .HasDatabaseName("UQ_Role_tenant_name")
+            .IsUnique()
+            .HasFilter("[isDeleted] = 0");
     }
 }
 
@@ -145,5 +155,44 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
     {
         b.ApplyBaseEntityConvention("Tenant", "admin", "tenant");
         b.Property(x => x.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+        b.Property(x => x.IsActive).HasColumnName("isActive").HasColumnType("bit").HasDefaultValue(true);
+        b.HasIndex(x => x.Name).HasDatabaseName("UQ_Tenant_name").IsUnique();
+    }
+}
+
+public class TenantEntityConfiguration : IEntityTypeConfiguration<TenantEntity>
+{
+    public void Configure(EntityTypeBuilder<TenantEntity> b)
+    {
+        b.ApplyBaseEntityConvention("TenantEntity", "admin", "tenantEntity");
+        b.Property(x => x.Code).HasColumnName("code").HasMaxLength(20).IsRequired();
+        b.Property(x => x.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+        b.Property(x => x.IsActive).HasColumnName("isActive").HasColumnType("bit").HasDefaultValue(true);
+
+        b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId)
+            .HasConstraintName("FK_TenantEntity_Tenant_TenantId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => new { x.TenantId, x.Code })
+            .HasDatabaseName("UQ_TenantEntity_tenant_code").IsUnique();
+    }
+}
+
+public class UserCompanyMapConfiguration : IEntityTypeConfiguration<UserCompanyMap>
+{
+    public void Configure(EntityTypeBuilder<UserCompanyMap> b)
+    {
+        b.ApplyBaseEntityConvention("UserCompanyMap", "admin", "userCompanyMap");
+        b.Property(x => x.AppUserId).HasColumnName("appUserId");
+        b.Property(x => x.TenantEntityId).HasColumnName("tenantEntityId");
+        b.Property(x => x.IsDefault).HasColumnName("isDefault").HasColumnType("bit").HasDefaultValue(false);
+
+        b.HasOne(x => x.AppUser).WithMany(u => u.CompanyMaps).HasForeignKey(x => x.AppUserId)
+            .HasConstraintName("FK_UserCompanyMap_AppUser_AppUserId").OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.TenantEntity).WithMany().HasForeignKey(x => x.TenantEntityId)
+            .HasConstraintName("FK_UserCompanyMap_TenantEntity_TenantEntityId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => new { x.AppUserId, x.TenantEntityId })
+            .HasDatabaseName("UQ_UserCompanyMap_user_company").IsUnique();
+        b.HasIndex(x => x.AppUserId).HasDatabaseName("IX_UserCompanyMap_appUserId");
     }
 }

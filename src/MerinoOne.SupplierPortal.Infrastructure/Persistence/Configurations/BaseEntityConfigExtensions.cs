@@ -63,9 +63,23 @@ public static class BaseEntityConfigExtensions
         if (typeof(BaseAggregateRoot).IsAssignableFrom(typeof(T)))
         {
             b.Property("SeccodeId").HasColumnName("seccodeId").HasColumnType("uniqueidentifier").IsRequired();
+            // TenantId/TenantEntityId mapped by the ITenantScoped/ICompanyScoped/ITenantOwned blocks below.
+            // rowVersion configured globally via ApplyGlobalFilters → IHasRowVersion branch
+        }
+
+        // Scope columns (Phase 1: nullable; tightened post-backfill). Mapped centrally so every
+        // tenant-/company-scoped entity gets identical column names + types. ITenantScoped and
+        // ICompanyScoped both carry tenantId + tenantEntityId; ITenantOwned carries tenantId only.
+        var tenantIdMapped = false;
+        if (typeof(ITenantScoped).IsAssignableFrom(typeof(T)) || typeof(ICompanyScoped).IsAssignableFrom(typeof(T)))
+        {
             b.Property("TenantId").HasColumnName("tenantId").HasColumnType("uniqueidentifier");
             b.Property("TenantEntityId").HasColumnName("tenantEntityId").HasColumnType("uniqueidentifier");
-            // rowVersion configured globally via ApplyGlobalFilters → IHasRowVersion branch
+            tenantIdMapped = true;
+        }
+        if (!tenantIdMapped && typeof(ITenantOwned).IsAssignableFrom(typeof(T)))
+        {
+            b.Property("TenantId").HasColumnName("tenantId").HasColumnType("uniqueidentifier");
         }
 
         return b;

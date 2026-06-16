@@ -25,6 +25,12 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
             .Options;
 
         var user = new AnonymousCurrentUser();
-        return new AppDbContext(opts, user, new AuditableEntityInterceptor(user));
+        var company = new AnonymousCurrentCompany();
+        return new AppDbContext(
+            opts,
+            user,
+            company,
+            new AuditableEntityInterceptor(user),
+            new ScopeStampInterceptor(user, company));
     }
 }

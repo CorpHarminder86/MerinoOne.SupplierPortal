@@ -8,8 +8,15 @@ namespace MerinoOne.SupplierPortal.Domain.Entities.Admin;
 /// and HTML body are editable; notes is a freetext placeholder hint for admins.
 /// Admin-global setting (no seccode, no rowversion, no FK to user/tenant).
 /// </summary>
-public class EmailTemplate : AuditableEntity
+public class EmailTemplate : AuditableEntity, ITenantOwned
 {
+    /// <summary>
+    /// Owning tenant — templates are PER TENANT now (uniqueness is (tenantId, templateKey)). The
+    /// default set is cloned into each tenant at onboarding. Stored nullable in Phase 1; legacy
+    /// global rows are re-tagged to the seed tenant during backfill, then tightened to NOT NULL.
+    /// </summary>
+    public Guid? TenantId { get; set; }
+
     public string TemplateKey { get; set; } = string.Empty;
     public string Subject { get; set; } = string.Empty;
     public string HtmlBody { get; set; } = string.Empty;

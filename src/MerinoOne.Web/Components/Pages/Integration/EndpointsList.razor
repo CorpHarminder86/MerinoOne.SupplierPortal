@@ -1,0 +1,223 @@
+@page "/integrations/endpoints"
+@implements IDisposable
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+<PageTitle>Infor endpoints</PageTitle>
+
+@if (!Token.HasPermission("Integration.Read"))
+{
+    <div class="tl-empty">
+        <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+        <div>Access denied — Integration access required.</div>
+    </div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Infor endpoints</h1>
+                    <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
+                </div>
+                <p class="tl-sub">Inbound/outbound channels — enable/disable kill-switch + inbound session telemetry</p>
+            </div>
+        </header>
+
+        <div class="tl-filter-bar">
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="directionFilter" @bind:after="Load">
+                <option value="">All directions</option>
+                <option value="Inbound">Inbound</option>
+                <option value="Outbound">Outbound</option>
+                <option value="Bidirectional">Bidirectional</option>
+            </select>
+        </div>
+
+        @if (loading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (rows == null || rows.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">cable</span>
+                <div>No endpoints configured.</div>
+            </div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 1.2fr 110px 90px 150px 110px 90px 1.4fr 110px; --tl-min-width: 1280px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Entity</div>
+                    <div class="tlg-col">Direction</div>
+                    <div class="tlg-col">Enabled</div>
+                    <div class="tlg-col">Last received</div>
+                    <div class="tlg-col">Last status</div>
+                    <div class="tlg-col tlg-col--num">Received</div>
+                    <div class="tlg-col">Endpoint URL</div>
+                    <div class="tlg-col tlg-col--actions">Actions</div>
+                </div>
+                @foreach (var e in rows)
+                {
+                    var ep = e;
+                    <div class="tlg-row">
+                        <div class="tlg-col tlg-name">@ep.EntityName</div>
+                        <div class="tlg-col">@ep.Direction</div>
+                        <div class="tlg-col">
+                            <span class="tlg-status @(ep.IsEnabled ? "tlg-status--active" : "tlg-status--danger")">@(ep.IsEnabled ? "On" : "Off")</span>
+                        </div>
+                        <div class="tlg-col tlg-code">@(ep.LastReceivedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+                        <div class="tlg-col">
+                            @if (string.IsNullOrEmpty(ep.LastStatus))
+                            {
+                                <span style="color:var(--mer-ink-500);">—</span>
+                            }
+                            else
+                            {
+                                <span class="tlg-status @LastStatusClass(ep.LastStatus)" title="@ep.LastMessage">@ep.LastStatus</span>
+                            }
+                        </div>
+                        <div class="tlg-col tlg-col--num">@ep.ReceivedCount</div>
+                        <div class="tlg-col tlg-desc" title="@ep.InforEndpointUrl">@ep.InforEndpointUrl</div>
+                        <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
+                            @if (Token.HasPermission("Integration.Manage"))
+                            {
+                                <button @onclick="() => OpenEdit(ep)" disabled="@busy" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit URL / BOD">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                                </button>
+                                <button @onclick="() => Toggle(ep)" disabled="@busy" style="background:transparent;border:0;cursor:pointer;color:@(ep.IsEnabled ? "var(--mer-red)" : "var(--mer-green-dark)");" title="@(ep.IsEnabled ? "Disable" : "Enable")">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">@(ep.IsEnabled ? "toggle_on" : "toggle_off")</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    @if (editing is not null)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="md" style="width:560px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">cable</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">@editing.EntityName · @editing.Direction</div>
+                        <h2 class="merino-dialog__title">Edit endpoint</h2>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => editing = null"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:flex;flex-direction:column;gap:12px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Endpoint URL *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formUrl" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">BOD name</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="SyncPaymentTerm" @bind="formBod" />
+                        </div>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" @bind="formEnabled" />
+                            Enabled (inbound kill-switch)
+                        </label>
+                    </div>
+                    @if (!string.IsNullOrEmpty(formError))
+                    {
+                        <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@formError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => editing = null">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private List<InforEndpointDto>? rows;
+    private bool loading = true;
+    private bool busy;
+    private string directionFilter = string.Empty;
+
+    private InforEndpointDto? editing;
+    private string formUrl = string.Empty;
+    private string formBod = string.Empty;
+    private bool formEnabled;
+    private string formError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Token.Changed += OnTokenChanged;
+        await Load();
+    }
+
+    private void OnTokenChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Token.Changed -= OnTokenChanged;
+
+    private async Task Load()
+    {
+        loading = true;
+        var url = "api/integration/endpoints";
+        if (!string.IsNullOrWhiteSpace(directionFilter)) url += $"?direction={Uri.EscapeDataString(directionFilter)}";
+        var resp = await Api.GetAsync<List<InforEndpointDto>>(url);
+        rows = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenEdit(InforEndpointDto e)
+    {
+        editing = e;
+        formUrl = e.InforEndpointUrl;
+        formBod = e.BodName ?? string.Empty;
+        formEnabled = e.IsEnabled;
+        formError = string.Empty;
+    }
+
+    private async Task Save()
+    {
+        if (editing is null) return;
+        formError = string.Empty;
+        if (string.IsNullOrWhiteSpace(formUrl)) { formError = "Endpoint URL required."; return; }
+        busy = true;
+        var req = new UpdateInforEndpointRequest(formUrl.Trim(), string.IsNullOrWhiteSpace(formBod) ? null : formBod.Trim(), formEnabled);
+        var resp = await Api.PutAsync<UpdateInforEndpointRequest>($"api/integration/endpoints/{editing.Id}", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Endpoint updated" });
+            editing = null;
+            await Load();
+        }
+        else { formError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task Toggle(InforEndpointDto e)
+    {
+        busy = true;
+        var resp = await Api.PostAsync<bool, object>($"api/integration/endpoints/{e.Id}/toggle", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = resp.Data ? "Endpoint enabled" : "Endpoint disabled" });
+            await Load();
+        }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Toggle failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    private string LastStatusClass(string? status) => status switch
+    {
+        "Success" or "Reconciled" => "tlg-status--active",
+        "Pending" or "Partial" or "Retrying" => "tlg-status--pending",
+        "Failed" or "Rejected" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

@@ -26,4 +26,11 @@ public class HttpContextCurrentUser : ICurrentUser
     public bool IsManager => Roles.Contains("Buyer") || Roles.Contains("Finance");
     public bool IsAdmin => Roles.Contains("SuperAdmin") || Roles.Contains("Admin");
     public bool HasPermission(string code) => Permissions.Contains(code);
+
+    // The "tenant" claim is minted by AuthController.BuildSessionAsync (backend-developer). Parsed
+    // lazily here; a malformed/absent claim yields null → the tenant filter fails closed for the request.
+    public Guid? TenantId =>
+        Guid.TryParse(Principal?.FindFirst("tenant")?.Value, out var t) ? t : (Guid?)null;
+
+    public bool IsPlatformAdmin => Roles.Contains("PlatformAdmin");
 }

@@ -1,0 +1,218 @@
+@page "/admin/companies"
+@implements IDisposable
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+<PageTitle>Companies</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Companies</h1>
+                <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Physical companies (Infor LN logistic companies) in your tenant — drives the active-company selector</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (Token.HasPermission("Settings.Write"))
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> New company
+                </button>
+            }
+        </div>
+    </header>
+
+    <div class="tl-filter-bar">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;color:var(--mer-ink-700);">
+            <input type="checkbox" @bind="includeInactive" @bind:after="Load" />
+            Show inactive
+        </label>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (rows == null || rows.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">apartment</span>
+            <div>No companies@(includeInactive ? "" : " (active)") found.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.6fr 110px 150px 120px; --tl-min-width: 820px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Code</div>
+                <div class="tlg-col">Name</div>
+                <div class="tlg-col">Status</div>
+                <div class="tlg-col">Created</div>
+                <div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var r in rows)
+            {
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code">@r.Code</div>
+                    <div class="tlg-col tlg-name">@r.Name</div>
+                    <div class="tlg-col"><span class="tlg-status @(r.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(r.IsActive ? "Active" : "Inactive")</span></div>
+                    <div class="tlg-col tlg-code">@r.CreatedOn.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-col--actions">
+                        @if (Token.HasPermission("Settings.Write"))
+                        {
+                            <button @onclick="() => OpenEdit(r)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit">
+                                <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                            </button>
+                            @if (r.IsActive)
+                            {
+                                <button @onclick="() => Deactivate(r)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                                </button>
+                            }
+                            else
+                            {
+                                <button @onclick="() => Reactivate(r)" style="background:transparent;border:0;color:var(--mer-green-dark);cursor:pointer;" title="Reactivate">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">check_circle</span>
+                                </button>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">apartment</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Company</div>
+                    <h2 class="merino-dialog__title">@(editingId.HasValue ? "Edit company" : "New company")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showDialog = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Code *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" placeholder="2000" @bind="formCode" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Name *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formName" />
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@formError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showDialog = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private List<CompanyDto>? rows;
+    private bool loading = true;
+    private bool busy;
+    private bool includeInactive;
+
+    private bool showDialog;
+    private Guid? editingId;
+    private string formCode = string.Empty;
+    private string formName = string.Empty;
+    private string formError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Token.Changed += OnTokenChanged;
+        await Load();
+    }
+
+    private void OnTokenChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Token.Changed -= OnTokenChanged;
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<CompanyDto>>($"api/companies?includeInactive={includeInactive.ToString().ToLowerInvariant()}");
+        rows = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenNew()
+    {
+        editingId = null;
+        formCode = string.Empty;
+        formName = string.Empty;
+        formError = string.Empty;
+        showDialog = true;
+    }
+
+    private void OpenEdit(CompanyDto r)
+    {
+        editingId = r.Id;
+        formCode = r.Code;
+        formName = r.Name;
+        formError = string.Empty;
+        showDialog = true;
+    }
+
+    private async Task Save()
+    {
+        formError = string.Empty;
+        if (string.IsNullOrWhiteSpace(formCode)) { formError = "Code required."; return; }
+        if (string.IsNullOrWhiteSpace(formName)) { formError = "Name required."; return; }
+        busy = true;
+        ApiResult? resp;
+        if (editingId.HasValue)
+            resp = await Api.PutAsync<UpdateCompanyRequest>($"api/companies/{editingId}", new UpdateCompanyRequest(formCode.Trim(), formName.Trim()));
+        else
+        {
+            var created = await Api.PostAsync<Guid, CreateCompanyRequest>("api/companies", new CreateCompanyRequest(formCode.Trim(), formName.Trim()));
+            resp = created is null ? null : new ApiResult { Success = created.Success, Errors = created.Errors };
+        }
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+            showDialog = false;
+            await Load();
+        }
+        else { formError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task Deactivate(CompanyDto r)
+    {
+        if (!await Dialog.ConfirmDeactivateAsync(r.Code, "COMPANY")) return;
+        busy = true;
+        var resp = await Api.PostAsync<object>($"api/companies/{r.Id}/deactivate", new { });
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" }); await Load(); }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    private async Task Reactivate(CompanyDto r)
+    {
+        busy = true;
+        var resp = await Api.PostAsync<object>($"api/companies/{r.Id}/reactivate", new { });
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Reactivated" }); await Load(); }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+}

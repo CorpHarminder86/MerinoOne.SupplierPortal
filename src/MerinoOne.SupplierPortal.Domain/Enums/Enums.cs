@@ -74,3 +74,9 @@ public enum DocumentType
 
 public enum SyncDirection { Inbound, Outbound, Bidirectional }
 public enum SyncStatus { Pending, Success, Failed, Retrying, Reconciled }
+
+/// <summary>
+/// Master-data endpoints that participate in company-wise table sharing. Persisted as a
+/// string (enum name) so the value is stable across reordering.
+/// </summary>
+public enum SharedEndpoint { PaymentTerm, DeliveryTerm }

@@ -45,6 +45,11 @@ public record UpdateUserRequest(
 
 public record AssignRoleRequest(Guid RoleId);
 
-public record MapSupplierRequest(Guid SupplierId, bool CanWrite);
+/// <summary>
+/// Map a user to a supplier. <see cref="TenantEntityId"/> is the company the mapping is made under —
+/// the supplier must belong to that company (closes "supplier spanning companies"), the company's tenant
+/// must equal the acting tenant, and the user is auto-granted company access if missing.
+/// </summary>
+public record MapSupplierRequest(Guid SupplierId, bool CanWrite, Guid TenantEntityId);
 
 public record SetPasswordRequest(string NewPassword);

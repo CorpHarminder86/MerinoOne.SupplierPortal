@@ -14,6 +14,7 @@ builder.Services.AddRazorComponents()
 builder.Services.AddRadzenComponents();
 
 builder.Services.AddScoped<TokenAccessor>();
+builder.Services.AddScoped<CompanyState>();
 builder.Services.AddScoped<ShellState>();
 builder.Services.AddScoped<PageRefreshService>();
 builder.Services.AddScoped<ApiErrorNotifier>();

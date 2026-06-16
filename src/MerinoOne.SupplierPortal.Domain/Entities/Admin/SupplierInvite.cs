@@ -2,8 +2,18 @@ using MerinoOne.SupplierPortal.Domain.Common;
 
 namespace MerinoOne.SupplierPortal.Domain.Entities.Admin;
 
-public class SupplierInvite : AuditableEntity
+public class SupplierInvite : AuditableEntity, ITenantOwned
 {
+    /// <summary>Tenant that issued the invite. Set from the inviting admin's tenant.</summary>
+    public Guid? TenantId { get; set; }
+
+    /// <summary>
+    /// Company the invited supplier will be registered under. Nullable column (legacy invites have
+    /// none) but required in the validator for new invites. RegisterSupplierCommand copies this onto
+    /// the created Supplier so the supplier inherits its company.
+    /// </summary>
+    public Guid? TenantEntityId { get; set; }
+
     public string LegalName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string InvitedBy { get; set; } = string.Empty;

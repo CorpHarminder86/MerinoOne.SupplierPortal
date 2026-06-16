@@ -1,0 +1,331 @@
+@page "/integrations/api-keys"
+@implements IDisposable
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject DialogService Dialog
+@inject IJSRuntime JS
+
+<PageTitle>API keys</PageTitle>
+
+@if (!Token.HasPermission("Integration.Read"))
+{
+    <div class="tl-empty">
+        <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+        <div>Access denied — Integration access required.</div>
+    </div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Inbound API keys</h1>
+                    <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
+                </div>
+                <p class="tl-sub">X-APIKey credentials consumed by Infor LN — each bound to a source company + endpoint scopes</p>
+            </div>
+            <div class="tl-header__actions">
+                @if (Token.HasPermission("Integration.ApiKeys"))
+                {
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">key</span> Generate key
+                    </button>
+                }
+            </div>
+        </header>
+
+        <div class="tl-filter-bar">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;color:var(--mer-ink-700);">
+                <input type="checkbox" @bind="activeOnly" @bind:after="Load" />
+                Active only (hide revoked / rotation history)
+            </label>
+        </div>
+
+        @if (loading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (rows == null || rows.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">key_off</span>
+                <div>No API keys yet.</div>
+            </div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 120px 1.4fr 150px 110px 130px; --tl-min-width: 1180px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Label</div>
+                    <div class="tlg-col">Prefix</div>
+                    <div class="tlg-col">Company</div>
+                    <div class="tlg-col">Scopes</div>
+                    <div class="tlg-col">Last used</div>
+                    <div class="tlg-col">Status</div>
+                    <div class="tlg-col tlg-col--actions">Actions</div>
+                </div>
+                @foreach (var k in rows)
+                {
+                    var key = k;
+                    <div class="tlg-row">
+                        <div class="tlg-col tlg-name">@key.Label</div>
+                        <div class="tlg-col tlg-code">@key.KeyPrefix</div>
+                        <div class="tlg-col tlg-code">@(key.CompanyCode ?? "—")</div>
+                        <div class="tlg-col tlg-desc" title="@string.Join(", ", key.Scopes)">@string.Join(", ", key.Scopes.Select(ScopeShort))</div>
+                        <div class="tlg-col tlg-code">@(key.LastUsedAt?.ToString("yyyy-MM-dd HH:mm") ?? "never")</div>
+                        <div class="tlg-col"><span class="tlg-status @StatusClass(key)">@StatusLabel(key)</span></div>
+                        <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
+                            @if (Token.HasPermission("Integration.ApiKeys") && key.IsActive && key.RevokedAt == null)
+                            {
+                                <button @onclick="() => Rotate(key)" disabled="@busy" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Rotate (mint successor, revoke this)">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">autorenew</span>
+                                </button>
+                                <button @onclick="() => Revoke(key)" disabled="@busy" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Revoke">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    @* Generate-key dialog *@
+    @if (showNew)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">key</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Integration</div>
+                        <h2 class="merino-dialog__title">Generate API key</h2>
+                        <p class="merino-dialog__subtitle">The plaintext key is shown once after creation.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showNew = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:flex;flex-direction:column;gap:12px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Label *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="Infor LN — PT/DT source 2000" @bind="formLabel" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Source company *</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formCompanyId">
+                                <option value="@Guid.Empty">— Select company —</option>
+                                @if (companies != null)
+                                {
+                                    @foreach (var c in companies)
+                                    {
+                                        <option value="@c.Id">@c.Code — @c.Name</option>
+                                    }
+                                }
+                            </select>
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Inbound bodies must resolve (via sharing) to this company.</div>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Scopes *</label>
+                            <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                    <input type="checkbox" @bind="scopePaymentTerm" /> Payment terms <code style="font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-500);">Integration.Inbound.PaymentTerm</code>
+                                </label>
+                                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                    <input type="checkbox" @bind="scopeDeliveryTerm" /> Delivery terms <code style="font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-500);">Integration.Inbound.DeliveryTerm</code>
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Expiry (optional)</label>
+                            <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formExpiry" />
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Leave blank for a non-expiring key.</div>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(newError))
+                    {
+                        <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@newError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showNew = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoCreate" disabled="@busy">@(busy ? "Generating…" : "Generate")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* Copy-once secret modal — shown after create OR rotate. *@
+    @if (secret is not null)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+            <div class="merino-dialog" data-variant="warning" data-size="sm" style="width:520px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">vpn_key</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">@secret.Label</div>
+                        <h2 class="merino-dialog__title">Your API key</h2>
+                        <p class="merino-dialog__subtitle">Prefix @secret.KeyPrefix</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="CloseSecret"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="background:var(--mer-amber-50);border:1px solid var(--mer-warning);color:var(--mer-amber-800);padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;display:flex;gap:8px;align-items:flex-start;">
+                        <span class="material-symbols-outlined" style="font-size:18px;">warning</span>
+                        <div>Copy this key now — it will <strong>not be shown again</strong>. Only its hash is stored.</div>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <code style="flex:1;font-family:Inter,monospace;font-size:13px;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:6px;padding:10px 12px;word-break:break-all;">@secret.PlaintextKey</code>
+                        <button class="rz-button" style="padding:8px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="() => CopyText(secret!.PlaintextKey)">
+                            <span class="material-symbols-outlined" style="font-size:18px;">content_copy</span>
+                        </button>
+                    </div>
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="CloseSecret">I've copied it — done</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private List<ApiKeyDto>? rows;
+    private List<CompanyDto>? companies;
+    private bool loading = true;
+    private bool busy;
+    private bool activeOnly;
+
+    private bool showNew;
+    private string formLabel = string.Empty;
+    private Guid formCompanyId = Guid.Empty;
+    private bool scopePaymentTerm;
+    private bool scopeDeliveryTerm;
+    private DateTime? formExpiry;
+    private string newError = string.Empty;
+
+    private ApiKeySecretDto? secret;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Token.Changed += OnTokenChanged;
+        await Load();
+        var compResp = await Api.GetAsync<List<CompanyDto>>("api/companies");
+        companies = compResp?.Data ?? new();
+    }
+
+    private void OnTokenChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Token.Changed -= OnTokenChanged;
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<ApiKeyDto>>($"api/admin/api-keys?activeOnly={activeOnly.ToString().ToLowerInvariant()}");
+        rows = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenNew()
+    {
+        formLabel = string.Empty;
+        formCompanyId = Guid.Empty;
+        scopePaymentTerm = false;
+        scopeDeliveryTerm = false;
+        formExpiry = null;
+        newError = string.Empty;
+        showNew = true;
+    }
+
+    private async Task DoCreate()
+    {
+        newError = string.Empty;
+        if (string.IsNullOrWhiteSpace(formLabel)) { newError = "Label required."; return; }
+        if (formCompanyId == Guid.Empty) { newError = "Select a source company."; return; }
+        var scopes = new List<string>();
+        if (scopePaymentTerm) scopes.Add("Integration.Inbound.PaymentTerm");
+        if (scopeDeliveryTerm) scopes.Add("Integration.Inbound.DeliveryTerm");
+        if (scopes.Count == 0) { newError = "Select at least one scope."; return; }
+        busy = true;
+        // date-only input → end-of-day UTC so the key is valid through the chosen day.
+        DateTime? expiry = formExpiry.HasValue ? DateTime.SpecifyKind(formExpiry.Value.Date.AddDays(1).AddSeconds(-1), DateTimeKind.Utc) : null;
+        var req = new CreateApiKeyRequest(formLabel.Trim(), formCompanyId, scopes, expiry);
+        var resp = await Api.PostAsync<ApiKeySecretDto, CreateApiKeyRequest>("api/admin/api-keys", req);
+        if (resp?.Success == true && resp.Data is not null)
+        {
+            showNew = false;
+            secret = resp.Data; // copy-once modal
+            await Load();
+        }
+        else { newError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task Rotate(ApiKeyDto key)
+    {
+        if (!await Dialog.ConfirmDeactivateAsync(key.Label, "API KEY ROTATION")) return;
+        busy = true;
+        var resp = await Api.PostAsync<ApiKeySecretDto, object>($"api/admin/api-keys/{key.Id}/rotate", new { });
+        if (resp?.Success == true && resp.Data is not null)
+        {
+            secret = resp.Data; // successor's one-time plaintext
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Key rotated" });
+            await Load();
+        }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Rotate failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    private async Task Revoke(ApiKeyDto key)
+    {
+        if (!await Dialog.ConfirmDeactivateAsync(key.Label, "API KEY")) return;
+        busy = true;
+        var resp = await Api.PostAsync<object>($"api/admin/api-keys/{key.Id}/revoke", new { });
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Key revoked" }); await Load(); }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Revoke failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    private void CloseSecret() => secret = null;
+
+    private async Task CopyText(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Info, Summary = "Copied to clipboard" });
+        }
+        catch
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Copy failed", Detail = "Select and copy the key manually." });
+        }
+    }
+
+    private static string ScopeShort(string scope) => scope switch
+    {
+        "Integration.Inbound.PaymentTerm" => "PaymentTerm",
+        "Integration.Inbound.DeliveryTerm" => "DeliveryTerm",
+        _ => scope
+    };
+
+    private string StatusLabel(ApiKeyDto k)
+    {
+        if (k.RevokedAt != null || !k.IsActive) return "Revoked";
+        if (k.ExpiresAt != null && k.ExpiresAt.Value < DateTime.UtcNow) return "Expired";
+        return "Active";
+    }
+
+    private string StatusClass(ApiKeyDto k)
+    {
+        if (k.RevokedAt != null || !k.IsActive) return "tlg-status--danger";
+        if (k.ExpiresAt != null && k.ExpiresAt.Value < DateTime.UtcNow) return "tlg-status--pending";
+        return "tlg-status--active";
+    }
+}
