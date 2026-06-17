@@ -76,8 +76,13 @@ internal sealed class EmailOutboxWorker : BackgroundService
         var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
 
         var now = DateTime.UtcNow;
+        // IgnoreQueryFilters: this worker is a SYSTEM component that must drain EVERY tenant's outbox. It runs in a
+        // background scope with no HttpContext, so ICurrentUser.TenantId is null — the always-on tenant filter would
+        // otherwise match zero rows (EmailOutbox is ITenantOwned) and silently strand every message once rows carry a
+        // TenantId and Scope.FiltersEnabled is on. Re-apply the soft-delete guard explicitly (IgnoreQueryFilters drops it).
         var batch = await db.EmailOutbox
-            .Where(x => x.Status == EmailOutboxStatus.Pending && x.NextAttemptAt <= now)
+            .IgnoreQueryFilters()
+            .Where(x => !x.IsDeleted && x.Status == EmailOutboxStatus.Pending && x.NextAttemptAt <= now)
             .OrderBy(x => x.NextAttemptAt)
             .Take(BatchSize)
             .ToListAsync(ct);

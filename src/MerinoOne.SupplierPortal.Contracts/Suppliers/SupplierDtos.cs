@@ -39,7 +39,22 @@ public record SupplierDetailDto(
     List<SupplierAddressDto> Addresses,
     List<SupplierContactDto> Contacts,
     List<SupplierDocumentDto> Documents,
-    SupplierInviteSummaryDto? InviteSummary);
+    SupplierInviteSummaryDto? InviteSummary,
+    List<SupplierUserDto> LinkedUsers);
+
+/// <summary>
+/// A portal user mapped to this supplier (via SupplierUserMap → SecRight). Resolved cross-company /
+/// filter-bypassed for the admin supplier-detail view so every linked user shows regardless of the header's
+/// active company. <see cref="CanWrite"/> is the mapping's SecRight access level.
+/// </summary>
+public record SupplierUserDto(
+    Guid UserId,
+    string UserCode,
+    string FullName,
+    string Email,
+    bool IsInternal,
+    bool IsActive,
+    bool CanWrite);
 
 public record SupplierVerificationDto(
     Guid Id,

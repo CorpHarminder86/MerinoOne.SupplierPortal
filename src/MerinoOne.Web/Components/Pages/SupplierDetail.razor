@@ -48,12 +48,63 @@ else
 
         <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;">
             <button class="mer-tab @(tab=="overview"?"mer-tab--active":"")" @onclick="TabOverview" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="overview"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="overview"?"var(--mer-blue)":"var(--mer-ink-700)");">Overview</button>
+            <button class="mer-tab @(tab=="users"?"mer-tab--active":"")" @onclick="TabUsers" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="users"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="users"?"var(--mer-blue)":"var(--mer-ink-700)");">Supplier users (@detail.LinkedUsers.Count)</button>
             <button class="mer-tab @(tab=="history"?"mer-tab--active":"")" @onclick="TabHistory" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="history"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="history"?"var(--mer-blue)":"var(--mer-ink-700)");">History</button>
         </div>
 
         @if (tab == "history")
         {
             <AuditHistoryTab EntityName="Supplier" EntityId="@Id" />
+        }
+        else if (tab == "users")
+        {
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:4px;color:var(--mer-blue-darker);">Linked supplier users (@detail.LinkedUsers.Count)</h3>
+                <p style="color:var(--mer-ink-500);font-size:12px;margin-bottom:14px;">Portal users mapped to this supplier. Manage mappings from the user's detail page (Admin › Users).</p>
+                @if (detail.LinkedUsers.Count == 0)
+                {
+                    <p style="color:var(--mer-ink-500);font-size:13px;">No users are linked to this supplier yet.</p>
+                }
+                else
+                {
+                    <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                        <thead>
+                            <tr style="border-bottom:1px solid var(--mer-line);">
+                                <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">User code</th>
+                                <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Name</th>
+                                <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Email</th>
+                                <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Type</th>
+                                <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Access</th>
+                                <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Status</th>
+                                <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var u in detail.LinkedUsers)
+                        {
+                            var usr = u;
+                            <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                                <td style="padding:8px 4px;font-family:Inter,monospace;">@usr.UserCode</td>
+                                <td style="padding:8px 4px;">@usr.FullName</td>
+                                <td style="padding:8px 4px;font-family:Inter,monospace;">@usr.Email</td>
+                                <td style="padding:8px 4px;">@(usr.IsInternal ? "Internal" : "Supplier")</td>
+                                <td style="padding:8px 4px;">
+                                    <span class="tlg-status @(usr.CanWrite ? "tlg-status--active" : "tlg-status--info")">@(usr.CanWrite ? "Read/Write" : "Read")</span>
+                                </td>
+                                <td style="padding:8px 4px;">
+                                    <span class="tlg-status @(usr.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(usr.IsActive ? "Active" : "Inactive")</span>
+                                </td>
+                                <td style="padding:8px 4px;text-align:right;">
+                                    <a href="admin/users/@usr.UserId" class="rz-link" style="color:var(--mer-blue);text-decoration:none;font-size:12px;">
+                                        <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">open_in_new</span> Manage
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </div>
         }
         else
         {
@@ -283,6 +334,7 @@ else
     private string tab = "overview";
 
     private void TabOverview() => tab = "overview";
+    private void TabUsers() => tab = "users";
     private void TabHistory() => tab = "history";
 
     private bool RequireOverride => detail?.Verifications

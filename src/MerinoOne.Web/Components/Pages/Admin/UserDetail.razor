@@ -152,14 +152,6 @@ else
         }
         else if (tab == "suppliers")
         {
-            if (detail.IsInternal)
-            {
-                <div class="tl-empty">
-                    <span class="material-symbols-outlined" style="font-size:32px;">info</span>
-                    <div>Supplier mappings only apply to non-internal users.</div>
-                </div>
-            }
-            else
             {
                 var canProvision = Token.HasPermission("Supplier.Provision");
                 // Companies the user does NOT already hold a full-access (AllSuppliers=true) grant on.

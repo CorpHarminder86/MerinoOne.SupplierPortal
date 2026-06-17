@@ -104,3 +104,5 @@ node_modules/
 
 # playwright
 .playwright-mcp/*
+
+.claude/skills/*

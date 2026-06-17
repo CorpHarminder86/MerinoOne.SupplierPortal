@@ -42,6 +42,20 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
                 $"files/proxy/{d.Id}"))
             .ToListAsync(ct);
 
+        // Linked portal users — users mapped to this supplier via SupplierUserMap → SecRight. This is tenant-wide
+        // admin config, so IgnoreQueryFilters (drop the company/seccode filters) and re-apply !IsDeleted; every linked
+        // user shows regardless of the header's active company. The supplier itself is already tenant-scoped above.
+        var linkedUsers = await (
+            from m in _db.SupplierUserMaps.IgnoreQueryFilters().Where(m => m.SupplierId == s.Id && !m.IsDeleted)
+            join u in _db.AppUsers.IgnoreQueryFilters().Where(u => !u.IsDeleted) on m.AppUserId equals u.Id
+            join r in _db.SecRights.IgnoreQueryFilters().Where(r => !r.IsDeleted) on m.SecRightId equals r.Id into rj
+            from r in rj.DefaultIfEmpty()
+            orderby u.UserCode
+            select new SupplierUserDto(
+                u.Id, u.UserCode, u.FullName, u.Email, u.IsInternal, u.IsActive,
+                r != null && r.CanWrite))
+            .ToListAsync(ct);
+
         // InviteSummary — originating invite (1:1 via SupplierId).
         var now = DateTime.UtcNow;
         var inviteRow = await _db.SupplierInvites
@@ -81,7 +95,8 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
             s.Contacts.OrderByDescending(c => c.IsPrimary).ThenBy(c => c.ContactName).Select(c =>
                 new SupplierContactDto(c.Id, c.ContactName, c.Designation, c.Email, c.Phone, c.IsPrimary)).ToList(),
             docs,
-            inviteSummary
+            inviteSummary,
+            linkedUsers
         );
     }
 }
