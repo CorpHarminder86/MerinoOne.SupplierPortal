@@ -36,6 +36,25 @@ Returns: List<SupplierListItemDto> ordered by legal name.")]
         return Result<List<SupplierListItemDto>>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    [HttpGet("for-mapping")]
+    [Authorize(Policy = "Supplier.Provision")]
+    [EndpointSummary("Suppliers for the user-mapping picker")]
+    [EndpointDescription(@"Lists a company's suppliers for the admin ""manage supplier maps"" dialog. Unlike GET /api/suppliers,
+this is NOT filtered by the header's active company (X-Active-Company) — admin user↔supplier mapping is tenant-wide config,
+so the admin can map a user under company 2000 while the header sits on 3000. Tenant-scoped + not-deleted.
+Filters / params:
+- **tenantEntityId**: Required — the company whose suppliers to list.
+- **search**: Optional — free-text on supplier code / legal name.
+Returns: List<SupplierListItemDto> ordered by legal name. Requires permission **Supplier.Provision**.")]
+    public async Task<Result<List<SupplierListItemDto>>> ForMapping(
+        [FromQuery] Guid tenantEntityId,
+        [FromQuery] string? search,
+        CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetSuppliersForMappingQuery(tenantEntityId, search), ct);
+        return Result<List<SupplierListItemDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
     [HttpGet("{id:guid}")]
     [EndpointSummary("Supplier detail")]
     [EndpointDescription(@"Full supplier profile + verifications + bank/address blocks.

@@ -168,6 +168,7 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
         {
             Id = Guid.NewGuid(),
             EntityName = "Invoice",
+            EntityId = invoiceId.ToString(),
             Direction = SyncDirection.Outbound,
             Status = sync.Success ? SyncStatus.Success : SyncStatus.Failed,
             IdempotencyKey = sync.IdempotencyKey,

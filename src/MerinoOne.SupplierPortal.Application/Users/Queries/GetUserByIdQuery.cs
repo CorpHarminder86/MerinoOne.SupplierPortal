@@ -66,10 +66,21 @@ public class GetUserByIdQueryHandler : IRequestHandler<GetUserByIdQuery, UserDet
             .Select(s => (Guid?)s.Id)
             .FirstOrDefaultAsync(ct);
 
+        // Company access — the user's UserCompanyMap rows (incl. direct full-access grants), resolved
+        // cross-company (IgnoreQueryFilters) + explicit !IsDeleted. Joined to TenantEntities for code/name.
+        var companyAccess = await (
+            from m in _db.UserCompanyMaps.IgnoreQueryFilters()
+            where m.AppUserId == user.Id && !m.IsDeleted
+            join te in _db.TenantEntities.IgnoreQueryFilters().Where(te => !te.IsDeleted)
+                on m.TenantEntityId equals te.Id
+            orderby te.Code
+            select new CompanyAccessDto(te.Id, te.Code, te.Name, m.AllSuppliers, m.IsDefault))
+            .ToArrayAsync(ct);
+
         return new UserDetailDto(
             user.Id, user.Seq, user.UserCode, user.FullName, user.Email,
             user.IsInternal, user.IsMfaEnabled, user.IsActive,
             roles, mapped.Length, user.CreatedOn,
-            supplierIds, mapped, defaultSeccode ?? Guid.Empty);
+            supplierIds, mapped, defaultSeccode ?? Guid.Empty, companyAccess);
     }
 }

@@ -145,6 +145,42 @@ Returns: empty success; 404 if mapping not found. Requires permission **Supplier
         return Result.Ok(HttpContext.TraceIdentifier);
     }
 
+    [HttpPut("{id:guid}/supplier-maps")]
+    [Authorize(Policy = "Supplier.Provision")]
+    [EndpointSummary("Bulk set user supplier maps for a company")]
+    [EndpointDescription(@"Reconciles a user's supplier maps for ONE company as a diff (Enhancement Round 2 / Feature B).
+Filters / params:
+- **id**: Required — user GUID.
+- **tenantEntityId**: Required (query) — the company the supplier set belongs to.
+Body:
+- **body**: SetSupplierMapsRequest with the desired supplier GUIDs + a single CanWrite flag for the batch.
+Side effects:
+- Adds missing maps, removes extras, and updates CanWrite on kept rows — all in one transaction. An empty SupplierIds list removes every map for THIS company only. Auto-creates the supplier-derived UserCompanyMap if absent.
+Returns: empty success; 404 if user/company/supplier not found; 409 if a supplier belongs to a different company. Requires permission **Supplier.Provision**.")]
+    public async Task<Result> SetSupplierMaps(Guid id, [FromQuery] Guid tenantEntityId,
+        [FromBody] SetSupplierMapsRequest body, CancellationToken ct)
+    {
+        await _mediator.Send(new SetCompanySupplierMapsCommand(id, tenantEntityId, body.SupplierIds, body.CanWrite), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("{id:guid}/company-maps")]
+    [Authorize(Policy = "Supplier.Provision")]
+    [EndpointSummary("Grant user full-access company")]
+    [EndpointDescription(@"Grants a user DIRECT FULL access to a company — every supplier in it, incl. future ones (Enhancement Round 2 / Feature A).
+Filters / params:
+- **id**: Required — user GUID.
+Body:
+- **body**: GrantCompanyRequest with the company GUID.
+Side effects:
+- Creates a UserCompanyMap with AllSuppliers = true (seccode bypass scoped to that company); upgrades an existing supplier-derived map to full access; restores a soft-deleted map. The first company becomes the default active company.
+Returns: empty success; 404 if user/company not found; 409 if the company belongs to a different tenant. Requires permission **Supplier.Provision**.")]
+    public async Task<Result> GrantCompany(Guid id, [FromBody] GrantCompanyRequest body, CancellationToken ct)
+    {
+        await _mediator.Send(new GrantUserCompanyCommand(id, body.TenantEntityId), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
+
     [HttpDelete("{id:guid}/company-maps/{tenantEntityId:guid}")]
     [Authorize(Policy = "Supplier.Provision")]
     [EndpointSummary("Revoke user company access")]

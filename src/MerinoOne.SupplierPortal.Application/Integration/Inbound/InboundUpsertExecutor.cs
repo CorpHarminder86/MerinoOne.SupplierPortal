@@ -46,13 +46,19 @@ public class InboundUpsertExecutor
     public async Task<UpsertResultDto> ExecuteAsync(
         SharedEndpoint endpoint,
         string companyCode,
-        Guid? boundCompanyId,
+        IReadOnlySet<Guid> boundCompanyIds,
         string? idempotencyKey,
         int received,
         IEnumerable<string> canonicalRows,
+        IEnumerable<string> codes,
+        object requestPayload,
         Func<IAppDbContext, Guid, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
         CancellationToken ct)
     {
+        // Feature D — sync-log entity id + payload. Computed once and stamped on both the success and the
+        // failure log writes. EntityId capped to 400 chars; PayloadJson guarded to <= 64 KB.
+        var entityId = InboundUpsertSupport.JoinCodes(codes);
+        var payloadJson = InboundUpsertSupport.SerializePayloadCapped(requestPayload);
         var entityName = InboundUpsertSupport.EntityName(endpoint);
         var tenantId = _user.TenantId
             ?? throw new ForbiddenException("API key has no tenant context.");
@@ -80,10 +86,12 @@ public class InboundUpsertExecutor
                 ["companyCode"] = new[] { "Could not resolve a source company for the supplied company code." }
             });
 
-        // 3. Anti-spoof: the resolved source MUST equal the key's bound source company.
-        if (boundCompanyId is null || sourceId != boundCompanyId.Value)
+        // 3. Anti-spoof: the resolved source MUST be in the key's bound source-company set (Feature C —
+        //    multi-company keys). A 2000-bound key accepts 2000/3000/4000 (all resolve to 2000); a key
+        //    bound to {2000,5000} additionally accepts 5000/6000 (resolve to 5000).
+        if (boundCompanyIds is null || boundCompanyIds.Count == 0 || !boundCompanyIds.Contains(sourceId))
             throw new ForbiddenException(
-                "The supplied company resolves to a different source company than this API key is bound to.");
+                "The supplied company resolves to a source company that this API key is not bound to.");
 
         // 4. Endpoint gate (kill-switch). Missing or disabled inbound map ⇒ reject.
         var map = await _db.InforEndpointMaps.IgnoreQueryFilters()
@@ -134,6 +142,9 @@ public class InboundUpsertExecutor
                 Direction = SyncDirection.Inbound,
                 Status = overallSuccess ? SyncStatus.Success : SyncStatus.Failed,
                 PayloadRef = $"recv:{incoming};src:{sourceId};count:{received}",
+                EntityId = entityId,
+                EntityCount = received,
+                PayloadJson = payloadJson,
                 IdempotencyKey = effectiveKey,
                 SyncedAt = now,
                 ErrorMessage = overallSuccess ? null : $"{failed} of {received} rows failed.",
@@ -201,6 +212,9 @@ public class InboundUpsertExecutor
                     Direction = SyncDirection.Inbound,
                     Status = SyncStatus.Failed,
                     PayloadRef = $"recv:{incoming};src:{sourceId};count:{received}",
+                    EntityId = entityId,
+                    EntityCount = received,
+                    PayloadJson = payloadJson,
                     IdempotencyKey = effectiveKey,
                     SyncedAt = DateTime.UtcNow,
                     ErrorMessage = ex.Message,

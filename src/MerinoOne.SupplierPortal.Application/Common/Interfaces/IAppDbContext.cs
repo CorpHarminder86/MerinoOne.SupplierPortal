@@ -63,6 +63,7 @@ public interface IAppDbContext
     DbSet<CompanyShareGroup> CompanyShareGroups { get; }
     DbSet<CompanyShareGroupMember> CompanyShareGroupMembers { get; }
     DbSet<ApiKey> ApiKeys { get; }
+    DbSet<ApiKeyCompany> ApiKeyCompanies { get; }
 
     DbSet<AuditEntry> AuditEntries { get; }
 

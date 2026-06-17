@@ -11,9 +11,10 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 /// <summary>
 /// Inbound Delivery Term upsert (consumed by Infor LN via X-APIKey). Mirrors
 /// <see cref="UpsertPaymentTermsCommand"/>; shares <see cref="InboundUpsertExecutor"/> for the
-/// cross-cutting algorithm. <paramref name="BoundCompanyId"/> is the key's bound source company.
+/// cross-cutting algorithm. <paramref name="BoundCompanyIds"/> is the key's bound source-company set
+/// (Feature C — multi-company keys).
 /// </summary>
-public record UpsertDeliveryTermsCommand(PushDeliveryTermsRequest Body, Guid? BoundCompanyId, string? IdempotencyKey)
+public record UpsertDeliveryTermsCommand(PushDeliveryTermsRequest Body, IReadOnlySet<Guid> BoundCompanyIds, string? IdempotencyKey)
     : IRequest<UpsertResultDto>;
 
 public class UpsertDeliveryTermsCommandValidator : AbstractValidator<UpsertDeliveryTermsCommand>
@@ -58,14 +59,17 @@ public class UpsertDeliveryTermsCommandHandler : IRequestHandler<UpsertDeliveryT
 
         var canonicalRows = terms.Select(t =>
             $"{t.Code.Trim().ToUpperInvariant()}|{(t.Description ?? string.Empty).Trim()}|{t.IsActive}");
+        var codes = terms.Select(t => t.Code.Trim());
 
         return await _executor.ExecuteAsync(
             SharedEndpoint.DeliveryTerm,
             request.Body.CompanyCode,
-            request.BoundCompanyId,
+            request.BoundCompanyIds,
             request.IdempotencyKey,
             terms.Count,
             canonicalRows,
+            codes,
+            request.Body,
             UpsertRowsAsync,
             ct);
 

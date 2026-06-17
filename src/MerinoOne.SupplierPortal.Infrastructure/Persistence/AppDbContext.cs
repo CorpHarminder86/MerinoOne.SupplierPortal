@@ -89,6 +89,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<CompanyShareGroup> CompanyShareGroups => Set<CompanyShareGroup>();
     public DbSet<CompanyShareGroupMember> CompanyShareGroupMembers => Set<CompanyShareGroupMember>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+    public DbSet<ApiKeyCompany> ApiKeyCompanies => Set<ApiKeyCompany>();
 
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
@@ -257,6 +258,15 @@ public class AppDbContext : DbContext, IAppDbContext
     public bool SecCurrentUserIsPrivileged => _currentUser?.IsAdmin == true || _currentUser?.IsManager == true;
     public bool SecCurrentUserIsAuthenticated => _currentUser?.IsAuthenticated == true;
 
+    /// <summary>
+    /// Direct full-company grant: the active company is one this user has an <c>AllSuppliers=true</c>
+    /// UserCompanyMap for. ORed into the seccode predicate so the user sees EVERY supplier in the active
+    /// company. SAFE because the company filter already ANDs <c>TenantEntityId == ActiveCompanyId</c>, so
+    /// the bypass is scoped to the active company — no cross-company leak. Resolved from the DB per request
+    /// (never a JWT claim) by <see cref="ICurrentCompany.ActiveCompanyFullAccess"/>.
+    /// </summary>
+    public bool SecActiveCompanyFullAccess => _currentCompany?.ActiveCompanyFullAccess == true;
+
     private Expression? BuildSeccodePredicate(ParameterExpression parameter)
     {
         // CRITICAL: do not bake _currentUser values into Expression.Constant — the model is built
@@ -265,6 +275,7 @@ public class AppDbContext : DbContext, IAppDbContext
         var privilegedAccess = Expression.Property(ctx, nameof(SecCurrentUserIsPrivileged));
         var authenticatedAccess = Expression.Property(ctx, nameof(SecCurrentUserIsAuthenticated));
         var userCodeAccess = Expression.Property(ctx, nameof(SecCurrentUserCode));
+        var fullAccess = Expression.Property(ctx, nameof(SecActiveCompanyFullAccess));
 
         var ownerProp = Expression.Property(parameter, nameof(ISeccode.Owner));
         var ownerNotNull = Expression.NotEqual(ownerProp, Expression.Constant(null));
@@ -286,10 +297,12 @@ public class AppDbContext : DbContext, IAppDbContext
         // Per-row check: row owner is set AND a SecRight exists for current user.
         var rowMatchesUser = Expression.AndAlso(ownerNotNull, anyCall);
 
-        // Combined: privileged sees all rows; otherwise authenticated user filtered by SecRights.
-        // Anonymous (not authenticated, not privileged) gets nothing.
+        // Combined: privileged sees all rows; a direct full-company grant (SecActiveCompanyFullAccess) sees
+        // every supplier in the ACTIVE company (the company filter still ANDs TenantEntityId == ActiveCompanyId,
+        // so the bypass can never leak across companies); otherwise an authenticated user is filtered by SecRights.
+        // Anonymous (not authenticated, not privileged, no grant) gets nothing.
         var nonPrivilegedAllowed = Expression.AndAlso(authenticatedAccess, rowMatchesUser);
-        return Expression.OrElse(privilegedAccess, nonPrivilegedAllowed);
+        return Expression.OrElse(privilegedAccess, Expression.OrElse(fullAccess, nonPrivilegedAllowed));
     }
 
     public override int SaveChanges() => base.SaveChanges();

@@ -18,4 +18,15 @@ public class UserCompanyMap : AuditableEntity, ITenantOwned
     public TenantEntity? TenantEntity { get; set; }
 
     public bool IsDefault { get; set; }
+
+    /// <summary>
+    /// Direct full-company grant flag, per (user, company):
+    ///   <c>true</c>  = direct full-company grant — the user sees EVERY supplier in this company (incl.
+    ///                  future ones). Drives a seccode bypass scoped to this company only.
+    ///   <c>false</c> = supplier-derived (today's behaviour) — the company appears in the switcher but the
+    ///                  data is seccode-scoped to the user's mapped suppliers.
+    /// A user can be company-wise on one company and supplier-wise on another. A direct grant and a
+    /// supplier map may coexist on the same company; <c>AllSuppliers=true</c> wins and is never downgraded.
+    /// </summary>
+    public bool AllSuppliers { get; set; }
 }

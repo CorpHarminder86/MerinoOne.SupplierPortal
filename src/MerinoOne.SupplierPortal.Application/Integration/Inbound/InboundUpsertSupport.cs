@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using MerinoOne.SupplierPortal.Domain.Enums;
 
 namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
@@ -11,8 +12,79 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 /// </summary>
 public static class InboundUpsertSupport
 {
+    /// <summary>InforSyncLog.EntityId cap (matches the nvarchar(400) column).</summary>
+    public const int EntityIdMaxLength = 400;
+
+    /// <summary>
+    /// PayloadJson byte cap (~64 KB). Protects the SQL-Express 10 GB cap from a runaway batch body. A
+    /// larger payload is replaced by a small truncation marker rather than truncated mid-JSON (which would
+    /// be unparseable in the viewer).
+    /// </summary>
+    public const int PayloadMaxBytes = 64 * 1024;
+
+    private static readonly JsonSerializerOptions PayloadJsonOptions = new() { WriteIndented = false };
+
     /// <summary>The InforEndpointMap.EntityName used for the inbound endpoint gate + session telemetry.</summary>
     public static string EntityName(SharedEndpoint endpoint) => endpoint.ToString();
+
+    /// <summary>
+    /// Comma-joins the batch's term codes for <c>InforSyncLog.EntityId</c>, capped to
+    /// <see cref="EntityIdMaxLength"/> chars (column width). When truncated, the tail is replaced by a
+    /// <c>…(+N more)</c> marker so the count is still legible.
+    /// </summary>
+    public static string? JoinCodes(IEnumerable<string> codes)
+    {
+        var list = codes?
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim())
+            .ToList() ?? new List<string>();
+
+        if (list.Count == 0) return null;
+
+        var joined = string.Join(",", list);
+        if (joined.Length <= EntityIdMaxLength) return joined;
+
+        // Truncate on a code boundary and append a "+N more" marker that fits inside the cap.
+        var kept = new StringBuilder();
+        var keptCount = 0;
+        foreach (var code in list)
+        {
+            var addition = (kept.Length == 0 ? 0 : 1) + code.Length;
+            // Reserve ~20 chars for the marker.
+            if (kept.Length + addition > EntityIdMaxLength - 20) break;
+            if (kept.Length > 0) kept.Append(',');
+            kept.Append(code);
+            keptCount++;
+        }
+
+        var remaining = list.Count - keptCount;
+        var result = $"{kept}…(+{remaining} more)";
+        return result.Length > EntityIdMaxLength ? result[..EntityIdMaxLength] : result;
+    }
+
+    /// <summary>
+    /// Serializes the inbound request to JSON for <c>InforSyncLog.PayloadJson</c>, guarded to
+    /// <see cref="PayloadMaxBytes"/>. An oversize body is replaced by a
+    /// <c>{"_truncated":true,"_bytes":N}</c> marker (never the full payload). Never throws — on a
+    /// serialization failure a small error marker is stored instead.
+    /// </summary>
+    public static string? SerializePayloadCapped(object? payload)
+    {
+        if (payload is null) return null;
+        try
+        {
+            var json = JsonSerializer.Serialize(payload, PayloadJsonOptions);
+            var bytes = Encoding.UTF8.GetByteCount(json);
+            if (bytes <= PayloadMaxBytes)
+                return json;
+
+            return $"{{\"_truncated\":true,\"_bytes\":{bytes}}}";
+        }
+        catch
+        {
+            return "{\"_truncated\":true,\"_error\":\"serialization_failed\"}";
+        }
+    }
 
     /// <summary>
     /// SHA-256 (hex) of a stable, canonical projection of the batch. Used as the idempotency key when the

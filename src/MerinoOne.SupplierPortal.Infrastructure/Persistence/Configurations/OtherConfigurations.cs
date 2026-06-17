@@ -91,6 +91,10 @@ public class InforSyncLogConfiguration : IEntityTypeConfiguration<InforSyncLog>
         b.Property(x => x.IdempotencyKey).HasColumnName("idempotencyKey").HasMaxLength(100);
         b.Property(x => x.SyncedAt).HasColumnName("syncedAt").HasColumnType("datetime2");
         b.Property(x => x.ErrorMessage).HasColumnName("errorMessage").HasMaxLength(2000);
+        b.Property(x => x.EntityId).HasColumnName("entityId").HasMaxLength(400);
+        b.Property(x => x.EntityCount).HasColumnName("entityCount").HasColumnType("int").HasDefaultValue(0);
+        b.Property(x => x.PayloadJson).HasColumnName("payloadJson").HasColumnType("nvarchar(max)");
+        b.Property(x => x.RetryCount).HasColumnName("retryCount").HasColumnType("int").HasDefaultValue(0);
 
         b.HasIndex(x => x.IdempotencyKey).HasDatabaseName("IX_InforSyncLog_idempotencyKey");
         b.HasIndex(x => x.SyncedAt).HasDatabaseName("IX_InforSyncLog_syncedAt");

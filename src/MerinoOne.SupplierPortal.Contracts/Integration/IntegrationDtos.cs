@@ -9,7 +9,11 @@ public record InforSyncLogDto(
     string? PayloadRef,
     string? IdempotencyKey,
     DateTime SyncedAt,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    string? EntityId,
+    int EntityCount,
+    int RetryCount,
+    bool HasPayload);
 
 public record IntegrationErrorDto(
     Guid Id,

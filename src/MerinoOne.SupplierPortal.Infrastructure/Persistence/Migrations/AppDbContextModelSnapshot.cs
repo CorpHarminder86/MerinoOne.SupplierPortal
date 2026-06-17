@@ -1439,6 +1439,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnName("userCompanyMapId")
                         .HasDefaultValueSql("NEWID()");
 
+                    b.Property<bool>("AllSuppliers")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("allSuppliers");
+
                     b.Property<Guid>("AppUserId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("appUserId");
@@ -2102,6 +2108,89 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.ToTable("ApiKey", "integration");
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.ApiKeyCompany", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("apiKeyCompanyId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<Guid>("ApiKeyId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("apiKeyId");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("apiKeyCompanySeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_ApiKeyCompany");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ApiKeyCompany_apiKeyCompanySeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantEntityId");
+
+                    b.HasIndex("ApiKeyId", "TenantEntityId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_ApiKeyCompany_apiKey_company");
+
+                    b.ToTable("ApiKeyCompany", "integration");
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.CompanyShareGroup", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2452,6 +2541,17 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(20)")
                         .HasColumnName("direction");
 
+                    b.Property<int>("EntityCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("entityCount");
+
+                    b.Property<string>("EntityId")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("entityId");
+
                     b.Property<string>("EntityName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -2474,10 +2574,20 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("isDeleted");
 
+                    b.Property<string>("PayloadJson")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("payloadJson");
+
                     b.Property<string>("PayloadRef")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)")
                         .HasColumnName("payloadRef");
+
+                    b.Property<int>("RetryCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("retryCount");
 
                     b.Property<int>("Seq")
                         .ValueGeneratedOnAdd()
@@ -5225,6 +5335,27 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Navigation("TenantEntity");
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.ApiKeyCompany", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Integration.ApiKey", "ApiKey")
+                        .WithMany("Companies")
+                        .HasForeignKey("ApiKeyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_ApiKeyCompany_ApiKey_ApiKeyId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", "TenantEntity")
+                        .WithMany()
+                        .HasForeignKey("TenantEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ApiKeyCompany_TenantEntity_TenantEntityId");
+
+                    b.Navigation("ApiKey");
+
+                    b.Navigation("TenantEntity");
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.CompanyShareGroup", b =>
                 {
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.TenantEntity", "SourceTenantEntity")
@@ -5610,6 +5741,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Admin.Seccode", b =>
                 {
                     b.Navigation("SecRights");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.ApiKey", b =>
+                {
+                    b.Navigation("Companies");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.CompanyShareGroup", b =>

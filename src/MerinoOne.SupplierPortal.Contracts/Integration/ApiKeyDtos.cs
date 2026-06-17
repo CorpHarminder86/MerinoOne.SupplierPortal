@@ -1,12 +1,13 @@
 namespace MerinoOne.SupplierPortal.Contracts.Integration;
 
 /// <summary>
-/// Create an inbound X-APIKey credential. Bound to a source/shared company and a set of endpoint
-/// scopes (e.g. "Integration.Inbound.PaymentTerm"). The plaintext key is returned ONCE.
+/// Create an inbound X-APIKey credential. Bound to one or more source/shared companies (Enhancement
+/// Round 2 / Feature C — Infor LN needs a single key usable across several companies) and a set of
+/// endpoint scopes (e.g. "Integration.Inbound.PaymentTerm"). The plaintext key is returned ONCE.
 /// </summary>
 public record CreateApiKeyRequest(
     string Label,
-    Guid TenantEntityId,
+    IReadOnlyList<Guid> CompanyIds,
     IReadOnlyList<string> Scopes,
     DateTime? ExpiresAt);
 
@@ -19,7 +20,8 @@ public record ApiKeySecretDto(
     string Label,
     string KeyPrefix,
     string PlaintextKey,
-    Guid? TenantEntityId,
+    IReadOnlyList<Guid> CompanyIds,
+    IReadOnlyList<string> CompanyCodes,
     IReadOnlyList<string> Scopes,
     DateTime? ExpiresAt);
 
@@ -29,8 +31,8 @@ public record ApiKeyDto(
     int Seq,
     string Label,
     string KeyPrefix,
-    Guid? TenantEntityId,
-    string? CompanyCode,
+    IReadOnlyList<Guid> CompanyIds,
+    IReadOnlyList<string> CompanyCodes,
     IReadOnlyList<string> Scopes,
     DateTime? ExpiresAt,
     DateTime? LastUsedAt,

@@ -16,6 +16,16 @@ public interface ICurrentCompany
     IReadOnlyCollection<Guid> AccessibleCompanyIds { get; }
 
     /// <summary>
+    /// True when the active company is one this user holds an <c>AllSuppliers=true</c> UserCompanyMap for —
+    /// a direct full-company grant. Drives a seccode bypass that is SCOPED to the active company only (the
+    /// company filter already ANDs <c>TenantEntityId == ActiveCompanyId</c>, so there is no cross-company
+    /// leak). Read from the DB per request, never from a JWT claim (avoids stale-token privilege escalation).
+    /// Admins are already privileged (bypass seccode via SecCurrentUserIsPrivileged), so this returns false
+    /// / is irrelevant for them.
+    /// </summary>
+    bool ActiveCompanyFullAccess { get; }
+
+    /// <summary>
     /// Sharing-aware normalization for the two master endpoints. Returns the group source for a member
     /// company; the company itself when it belongs to no group; null when <paramref name="companyId"/> is null.
     /// Memoized per request. Reused by the inbound write path to normalize incoming company → source.

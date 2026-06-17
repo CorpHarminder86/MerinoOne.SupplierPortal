@@ -84,9 +84,16 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
         if (key.TenantId.HasValue)
             claims.Add(new Claim("tenant", key.TenantId.Value.ToString()));
 
-        // Bound source company — the inbound write path checks the resolved company against this.
-        if (key.TenantEntityId.HasValue)
-            claims.Add(new Claim("tenantEntityId", key.TenantEntityId.Value.ToString()));
+        // Bound source companies (Feature C — multi-company keys). Load the junction (IgnoreQueryFilters,
+        // re-apply !IsDeleted) and emit ONE tenantEntityId claim per bound company. The inbound write path
+        // checks the resolved incoming source against this set.
+        var boundCompanyIds = await _db.ApiKeyCompanies.IgnoreQueryFilters()
+            .Where(c => c.ApiKeyId == key.Id && !c.IsDeleted)
+            .Select(c => c.TenantEntityId)
+            .ToListAsync();
+
+        foreach (var companyId in boundCompanyIds)
+            claims.Add(new Claim("tenantEntityId", companyId.ToString()));
 
         // One permission claim per scope token so the existing PermissionPolicyProvider authorizes
         // [Authorize(AuthenticationSchemes="ApiKey", Policy="Integration.Inbound.PaymentTerm")] with no

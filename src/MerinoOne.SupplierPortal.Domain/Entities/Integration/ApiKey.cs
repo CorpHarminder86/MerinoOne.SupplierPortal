@@ -23,9 +23,18 @@ public class ApiKey : AuditableEntity, ITenantOwned
     /// <summary>Comma/space-delimited endpoint scopes, e.g. "Integration.Inbound.PaymentTerm".</summary>
     public string Scopes { get; set; } = string.Empty;
 
-    /// <summary>Bound source company. Inbound body company must resolve to this company.</summary>
+    /// <summary>
+    /// Bound source company (legacy single-company binding). TRANSITIONAL: superseded by the multi-company
+    /// <see cref="Companies"/> junction (Enhancement Round 2, Feature C). Kept + still mapped so existing
+    /// readers compile while backend-developer migrates them to the junction; a follow-up migration (_0014)
+    /// drops this column once those readers are off it. Migration _0013 backfills one junction row per key
+    /// from this value. Do not add NEW readers of this property.
+    /// </summary>
     public Guid? TenantEntityId { get; set; }
     public Admin.TenantEntity? TenantEntity { get; set; }
+
+    /// <summary>Companies this key is bound to. A key may bind several (multi-company keys, Feature C).</summary>
+    public ICollection<ApiKeyCompany> Companies { get; set; } = new List<ApiKeyCompany>();
 
     public DateTime? ExpiresAt { get; set; }
     public DateTime? LastUsedAt { get; set; }

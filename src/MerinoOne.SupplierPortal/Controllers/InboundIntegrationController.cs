@@ -41,7 +41,7 @@ Body:
 Behaviour: 200 + UpsertResultDto (per-row outcomes; partial failures flagged + an IntegrationError raised for operator retry); 400 unknown company / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
     public async Task<Result<UpsertResultDto>> PaymentTerms([FromBody] PushPaymentTermsRequest body, CancellationToken ct)
     {
-        var bound = BoundCompanyId();
+        var bound = BoundCompanyIds();
         var key = IdempotencyKey();
         var data = await _mediator.Send(new UpsertPaymentTermsCommand(body, bound, key), ct);
         return Result<UpsertResultDto>.Ok(data, HttpContext.TraceIdentifier);
@@ -61,15 +61,23 @@ Body:
 Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
     public async Task<Result<UpsertResultDto>> DeliveryTerms([FromBody] PushDeliveryTermsRequest body, CancellationToken ct)
     {
-        var bound = BoundCompanyId();
+        var bound = BoundCompanyIds();
         var key = IdempotencyKey();
         var data = await _mediator.Send(new UpsertDeliveryTermsCommand(body, bound, key), ct);
         return Result<UpsertResultDto>.Ok(data, HttpContext.TraceIdentifier);
     }
 
-    /// <summary>The key's bound source company — the "tenantEntityId" claim minted by the API-key auth handler.</summary>
-    private Guid? BoundCompanyId()
-        => Guid.TryParse(User.FindFirst("tenantEntityId")?.Value, out var g) ? g : (Guid?)null;
+    /// <summary>
+    /// The key's bound source companies — every "tenantEntityId" claim minted by the API-key auth handler
+    /// (Feature C — multi-company keys). The inbound write path requires the resolved incoming source to
+    /// be in this set.
+    /// </summary>
+    private HashSet<Guid> BoundCompanyIds()
+        => User.FindAll("tenantEntityId")
+            .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+            .Where(g => g.HasValue)
+            .Select(g => g!.Value)
+            .ToHashSet();
 
     private string? IdempotencyKey()
         => Request.Headers.TryGetValue(IdempotencyHeader, out var v) ? v.FirstOrDefault() : null;

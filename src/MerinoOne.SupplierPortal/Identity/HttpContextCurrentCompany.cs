@@ -34,6 +34,9 @@ public class HttpContextCurrentCompany : ICurrentCompany
     private bool _activeResolved;
     private Guid? _active;
 
+    private bool _fullAccessResolved;
+    private bool _fullAccess;
+
     // member → source map, per endpoint. Lazily loaded once per request.
     private readonly Dictionary<SharedEndpoint, Dictionary<Guid, Guid>> _shareMaps = new();
 
@@ -63,6 +66,17 @@ public class HttpContextCurrentCompany : ICurrentCompany
             _active = ResolveActive();
             _activeResolved = true;
             return _active;
+        }
+    }
+
+    public bool ActiveCompanyFullAccess
+    {
+        get
+        {
+            if (_fullAccessResolved) return _fullAccess;
+            _fullAccess = ResolveFullAccess();
+            _fullAccessResolved = true;
+            return _fullAccess;
         }
     }
 
@@ -137,6 +151,29 @@ public class HttpContextCurrentCompany : ICurrentCompany
         }
 
         return accessible.Count == 1 ? accessible.First() : null;
+    }
+
+    /// <summary>
+    /// True when the active company is one the user holds an <c>AllSuppliers=true</c> UserCompanyMap for.
+    /// Read from a FRESH DbContext scope per request — NEVER a JWT claim — so revoking a grant takes effect
+    /// immediately and a stale token can never carry a full-access flag (stale-token privilege escalation).
+    /// Admins are already privileged at the seccode layer, so this short-circuits to false for them.
+    /// </summary>
+    private bool ResolveFullAccess()
+    {
+        if (_currentUser.IsAdmin) return false;
+
+        var active = ActiveCompanyId;
+        if (active is null) return false;
+
+        var userCode = _currentUser.UserCode;
+        if (string.IsNullOrEmpty(userCode)) return false;
+
+        return WithDb(db => db.UserCompanyMaps.IgnoreQueryFilters()
+            .Any(m => !m.IsDeleted
+                      && m.AppUser!.UserCode == userCode
+                      && m.TenantEntityId == active
+                      && m.AllSuppliers));
     }
 
     private Dictionary<Guid, Guid> GetShareMap(SharedEndpoint endpoint)

@@ -31,8 +31,6 @@ public class GetApiKeysQueryHandler : IRequestHandler<GetApiKeysQuery, List<ApiK
                 k.Seq,
                 k.Label,
                 k.KeyPrefix,
-                k.TenantEntityId,
-                CompanyCode = k.TenantEntity != null ? k.TenantEntity.Code : null,
                 k.Scopes,
                 k.ExpiresAt,
                 k.LastUsedAt,
@@ -43,12 +41,32 @@ public class GetApiKeysQueryHandler : IRequestHandler<GetApiKeysQuery, List<ApiK
             })
             .ToListAsync(ct);
 
-        return rows.Select(k => new ApiKeyDto(
-            k.Id, k.Seq, k.Label, k.KeyPrefix, k.TenantEntityId, k.CompanyCode,
-            string.IsNullOrWhiteSpace(k.Scopes)
-                ? Array.Empty<string>()
-                : k.Scopes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-            k.ExpiresAt, k.LastUsedAt, k.RevokedAt, k.IsActive, k.ReplacedByApiKeyId, k.CreatedOn))
-            .ToList();
+        var keyIds = rows.Select(r => r.Id).ToList();
+
+        // Resolve the bound companies per key from the junction (Feature C). Tenant-filtered like ApiKeys.
+        var companies = await (
+            from c in _db.ApiKeyCompanies
+            where keyIds.Contains(c.ApiKeyId)
+            join te in _db.TenantEntities on c.TenantEntityId equals te.Id
+            orderby te.Code
+            select new { c.ApiKeyId, c.TenantEntityId, te.Code })
+            .ToListAsync(ct);
+
+        var byKey = companies
+            .GroupBy(c => c.ApiKeyId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        return rows.Select(k =>
+        {
+            var bound = byKey.TryGetValue(k.Id, out var list) ? list : new();
+            return new ApiKeyDto(
+                k.Id, k.Seq, k.Label, k.KeyPrefix,
+                bound.Select(b => b.TenantEntityId).ToList(),
+                bound.Select(b => b.Code).ToList(),
+                string.IsNullOrWhiteSpace(k.Scopes)
+                    ? Array.Empty<string>()
+                    : k.Scopes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                k.ExpiresAt, k.LastUsedAt, k.RevokedAt, k.IsActive, k.ReplacedByApiKeyId, k.CreatedOn);
+        }).ToList();
     }
 }

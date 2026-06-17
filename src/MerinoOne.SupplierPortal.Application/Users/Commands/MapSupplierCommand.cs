@@ -27,11 +27,13 @@ public class MapSupplierCommandHandler : IRequestHandler<MapSupplierCommand, Uni
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
+    private readonly SupplierMapService _maps;
 
-    public MapSupplierCommandHandler(IAppDbContext db, ICurrentUser user)
+    public MapSupplierCommandHandler(IAppDbContext db, ICurrentUser user, SupplierMapService maps)
     {
         _db = db;
         _user = user;
+        _maps = maps;
     }
 
     public async Task<Unit> Handle(MapSupplierCommand request, CancellationToken ct)
@@ -63,117 +65,23 @@ public class MapSupplierCommandHandler : IRequestHandler<MapSupplierCommand, Uni
             throw new ConflictException(
                 $"Supplier '{supplier.SupplierCode}' does not belong to the selected company. A supplier maps to exactly one company.");
 
-        // Load any existing mapping INCLUDING soft-deleted. An active row is a true conflict.
-        // A soft-deleted row means the admin previously removed the mapping — restore it + the
-        // paired SecRight (one in, one out per TSD §5.2) instead of inserting a duplicate.
-        var existingMap = await _db.SupplierUserMaps.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(m => m.AppUserId == user.Id && m.SupplierId == supplier.Id, ct);
+        // Load any existing ACTIVE mapping — an active row is a true conflict. (The create-or-restore
+        // logic in SupplierMapService re-loads the row incl. soft-deleted and restores it.)
+        var activeMap = await _db.SupplierUserMaps.IgnoreQueryFilters()
+            .AnyAsync(m => m.AppUserId == user.Id && m.SupplierId == supplier.Id && !m.IsDeleted, ct);
 
-        if (existingMap is not null && !existingMap.IsDeleted)
+        if (activeMap)
             throw new ConflictException($"User '{user.UserCode}' is already mapped to supplier '{supplier.SupplierCode}'.");
-
-        var seccode = await _db.Seccodes.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(s => s.SupplierId == supplier.Id && s.SeccodeType == SeccodeType.G, ct)
-            ?? throw new NotFoundException("Supplier Seccode (G)", supplier.Id);
 
         var actor = string.IsNullOrEmpty(_user.UserCode) ? "api" : _user.UserCode;
         var now = DateTime.UtcNow;
 
-        if (existingMap is not null)
-        {
-            // Restore the soft-deleted map + its paired SecRight (or create a fresh SecRight if
-            // the original is gone — keeps the map row stable while still rebuilding access).
-            var existingSecRight = await _db.SecRights.IgnoreQueryFilters()
-                .FirstOrDefaultAsync(r => r.Id == existingMap.SecRightId, ct);
+        // Create-or-restore the SupplierUserMap + paired SecRight (shared with the bulk command).
+        await _maps.CreateOrRestoreMapAsync(user, supplier, request.Body.CanWrite, actor, now, ct);
 
-            if (existingSecRight is not null)
-            {
-                existingSecRight.IsDeleted = false;
-                existingSecRight.DeletedBy = null;
-                existingSecRight.DeletedOn = null;
-                existingSecRight.CanRead = true;
-                existingSecRight.CanWrite = request.Body.CanWrite;
-                existingSecRight.UpdatedBy = actor;
-                existingSecRight.UpdatedOn = now;
-            }
-            else
-            {
-                var freshSecRight = new SecRight
-                {
-                    Id = Guid.NewGuid(),
-                    SeccodeId = seccode.Id,
-                    UserCode = user.UserCode,
-                    CanRead = true,
-                    CanWrite = request.Body.CanWrite,
-                    CreatedBy = actor,
-                    CreatedOn = now
-                };
-                _db.SecRights.Add(freshSecRight);
-                existingMap.SecRightId = freshSecRight.Id;
-            }
-
-            existingMap.IsDeleted = false;
-            existingMap.DeletedBy = null;
-            existingMap.DeletedOn = null;
-            existingMap.UpdatedBy = actor;
-            existingMap.UpdatedOn = now;
-        }
-        else
-        {
-            var secRight = new SecRight
-            {
-                Id = Guid.NewGuid(),
-                SeccodeId = seccode.Id,
-                UserCode = user.UserCode,
-                CanRead = true,
-                CanWrite = request.Body.CanWrite,
-                CreatedBy = actor,
-                CreatedOn = now
-            };
-            _db.SecRights.Add(secRight);
-
-            _db.SupplierUserMaps.Add(new SupplierUserMap
-            {
-                Id = Guid.NewGuid(),
-                SupplierId = supplier.Id,
-                AppUserId = user.Id,
-                SecRightId = secRight.Id,
-                CreatedBy = actor,
-                CreatedOn = now
-            });
-        }
-
-        // (c) Auto-grant company access if the user lacks it. A supplier user needs a UserCompanyMap for
-        //     its supplier's company so the always-on company filter doesn't hide its own data. Restore a
-        //     soft-deleted map rather than duplicating (UQ_UserCompanyMap_user_company).
-        var existingCompanyMap = await _db.UserCompanyMaps.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(m => m.AppUserId == user.Id && m.TenantEntityId == companyId, ct);
-
-        if (existingCompanyMap is null)
-        {
-            var hasAnyCompany = await _db.UserCompanyMaps.IgnoreQueryFilters()
-                .AnyAsync(m => m.AppUserId == user.Id && !m.IsDeleted, ct);
-
-            _db.UserCompanyMaps.Add(new UserCompanyMap
-            {
-                Id = Guid.NewGuid(),
-                TenantId = company.TenantId,        // explicit — don't rely on the interceptor cross-tenant
-                AppUserId = user.Id,
-                TenantEntityId = companyId,
-                IsDefault = !hasAnyCompany,         // first company becomes the default active company
-                CreatedBy = actor,
-                CreatedOn = now
-            });
-        }
-        else if (existingCompanyMap.IsDeleted)
-        {
-            existingCompanyMap.IsDeleted = false;
-            existingCompanyMap.DeletedBy = null;
-            existingCompanyMap.DeletedOn = null;
-            existingCompanyMap.TenantId = company.TenantId;
-            existingCompanyMap.UpdatedBy = actor;
-            existingCompanyMap.UpdatedOn = now;
-        }
+        // (c) Auto-grant supplier-derived company access (AllSuppliers=false) if missing; restoring a
+        //     soft-deleted map never downgrades an existing AllSuppliers=true grant.
+        await _maps.EnsureCompanyMapAsync(user, company, actor, now, ct);
 
         // Single SaveChangesAsync — EF wraps in an implicit transaction.
         await _db.SaveChangesAsync(ct);

@@ -33,6 +33,19 @@ Returns: PagedResult<InforSyncLogDto>. Requires permission **Integration.Read**.
         return Result<PagedResult<InforSyncLogDto>>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    [HttpGet("sync-log/{id:guid}/payload")]
+    [Authorize(Policy = "Integration.Read")]
+    [EndpointSummary("Infor sync-log payload")]
+    [EndpointDescription(@"Returns the stored request JSON for ONE inbound sync-log row (Enhancement Round 2 / Feature D — payload viewer). The list endpoint never ships the full JSON; this is fetched on demand for the payload dialog.
+Filters / params:
+- **id**: Required — sync-log GUID.
+Returns: the stored JSON string (or null when none was stored / row not found). Tenant-filtered. Requires permission **Integration.Read**.")]
+    public async Task<Result<string?>> SyncLogPayload(Guid id, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetSyncLogPayloadQuery(id), ct);
+        return Result<string?>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
     [HttpGet("errors")]
     [Authorize(Policy = "Integration.Read")]
     [EndpointSummary("Integration errors")]

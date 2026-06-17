@@ -12,5 +12,6 @@ public class AnonymousCurrentCompany : ICurrentCompany, ISystemCompany
 {
     public Guid? ActiveCompanyId => null;
     public IReadOnlyCollection<Guid> AccessibleCompanyIds { get; } = Array.Empty<Guid>();
+    public bool ActiveCompanyFullAccess => false;
     public Guid? ResolveSource(SharedEndpoint endpoint, Guid? companyId) => companyId;
 }

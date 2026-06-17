@@ -24,10 +24,32 @@ public class GetSyncLogQueryHandler : IRequestHandler<GetSyncLogQuery, PagedResu
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .Select(x => new InforSyncLogDto(x.Id, x.Seq, x.EntityName, x.Direction.ToString(),
-                x.Status.ToString(), x.PayloadRef, x.IdempotencyKey, x.SyncedAt, x.ErrorMessage))
+                x.Status.ToString(), x.PayloadRef, x.IdempotencyKey, x.SyncedAt, x.ErrorMessage,
+                x.EntityId, x.EntityCount, x.RetryCount, x.PayloadJson != null))
             .ToListAsync(ct);
 
         return new PagedResult<InforSyncLogDto> { Items = items, Page = request.Page, PageSize = request.PageSize, TotalCount = total };
+    }
+}
+
+/// <summary>
+/// Enhancement Round 2 / Feature D — fetch ONE sync-log row's stored request JSON (the payload viewer).
+/// The list DTO never ships the full JSON; this is fetched on demand. Tenant-filtered (InforSyncLog is
+/// ITenantOwned) so no IgnoreQueryFilters is needed — a tenant can only read its own payloads.
+/// </summary>
+public record GetSyncLogPayloadQuery(Guid Id) : IRequest<string?>;
+
+public class GetSyncLogPayloadQueryHandler : IRequestHandler<GetSyncLogPayloadQuery, string?>
+{
+    private readonly IAppDbContext _db;
+    public GetSyncLogPayloadQueryHandler(IAppDbContext db) => _db = db;
+
+    public async Task<string?> Handle(GetSyncLogPayloadQuery request, CancellationToken ct)
+    {
+        return await _db.InforSyncLogs
+            .Where(x => x.Id == request.Id)
+            .Select(x => x.PayloadJson)
+            .FirstOrDefaultAsync(ct);
     }
 }
 

@@ -56,11 +56,11 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 120px 1.4fr 150px 110px 130px; --tl-min-width: 1180px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 1.2fr 1.4fr 150px 110px 130px; --tl-min-width: 1220px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Label</div>
                     <div class="tlg-col">Prefix</div>
-                    <div class="tlg-col">Company</div>
+                    <div class="tlg-col">Companies</div>
                     <div class="tlg-col">Scopes</div>
                     <div class="tlg-col">Last used</div>
                     <div class="tlg-col">Status</div>
@@ -72,7 +72,19 @@ else
                     <div class="tlg-row">
                         <div class="tlg-col tlg-name">@key.Label</div>
                         <div class="tlg-col tlg-code">@key.KeyPrefix</div>
-                        <div class="tlg-col tlg-code">@(key.CompanyCode ?? "—")</div>
+                        <div class="tlg-col" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+                            @if (key.CompanyCodes.Count == 0)
+                            {
+                                <span style="color:var(--mer-ink-500);">—</span>
+                            }
+                            else
+                            {
+                                @foreach (var cc in key.CompanyCodes)
+                                {
+                                    <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-blue-50);color:var(--mer-blue-700);border:1px solid var(--mer-line);border-radius:4px;padding:1px 6px;">@cc</span>
+                                }
+                            }
+                        </div>
                         <div class="tlg-col tlg-desc" title="@string.Join(", ", key.Scopes)">@string.Join(", ", key.Scopes.Select(ScopeShort))</div>
                         <div class="tlg-col tlg-code">@(key.LastUsedAt?.ToString("yyyy-MM-dd HH:mm") ?? "never")</div>
                         <div class="tlg-col"><span class="tlg-status @StatusClass(key)">@StatusLabel(key)</span></div>
@@ -115,18 +127,26 @@ else
                             <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="Infor LN — PT/DT source 2000" @bind="formLabel" />
                         </div>
                         <div>
-                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Source company *</label>
-                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formCompanyId">
-                                <option value="@Guid.Empty">— Select company —</option>
-                                @if (companies != null)
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Source companies * <span style="font-weight:400;color:var(--mer-ink-500);">(@selectedCompanyIds.Count selected)</span></label>
+                            <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px;max-height:180px;overflow:auto;border:1px solid var(--mer-line);border-radius:6px;padding:8px 10px;background:var(--mer-canvas);">
+                                @if (companies == null || companies.Count == 0)
+                                {
+                                    <span style="font-size:12px;color:var(--mer-ink-500);">No companies available.</span>
+                                }
+                                else
                                 {
                                     @foreach (var c in companies)
                                     {
-                                        <option value="@c.Id">@c.Code — @c.Name</option>
+                                        var checkedNow = selectedCompanyIds.Contains(c.Id);
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                            <input type="checkbox" checked="@checkedNow" @onchange="@((ChangeEventArgs e) => ToggleCompany(c.Id, (bool)(e.Value ?? false)))" />
+                                            <span style="font-family:Inter,monospace;font-size:12px;">@c.Code</span>
+                                            <span style="color:var(--mer-ink-600);">@c.Name</span>
+                                        </label>
                                     }
                                 }
-                            </select>
-                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Inbound bodies must resolve (via sharing) to this company.</div>
+                            </div>
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Inbound bodies must resolve (via sharing) to one of these companies. Pick every source the key may write under.</div>
                         </div>
                         <div>
                             <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Scopes *</label>
@@ -186,6 +206,17 @@ else
                             <span class="material-symbols-outlined" style="font-size:18px;">content_copy</span>
                         </button>
                     </div>
+                    <div style="display:grid;grid-template-columns:90px 1fr;gap:6px 12px;margin-top:14px;font-size:12px;">
+                        <div style="color:var(--mer-ink-600);font-weight:600;">Companies</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                            @foreach (var cc in secret.CompanyCodes)
+                            {
+                                <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-blue-50);color:var(--mer-blue-700);border:1px solid var(--mer-line);border-radius:4px;padding:1px 6px;">@cc</span>
+                            }
+                        </div>
+                        <div style="color:var(--mer-ink-600);font-weight:600;">Scopes</div>
+                        <div style="color:var(--mer-ink-900);">@string.Join(", ", secret.Scopes.Select(ScopeShort))</div>
+                    </div>
                 </div>
                 <footer class="merino-dialog__footer">
                     <div class="merino-dialog__actions">
@@ -206,7 +237,7 @@ else
 
     private bool showNew;
     private string formLabel = string.Empty;
-    private Guid formCompanyId = Guid.Empty;
+    private readonly HashSet<Guid> selectedCompanyIds = new();
     private bool scopePaymentTerm;
     private bool scopeDeliveryTerm;
     private DateTime? formExpiry;
@@ -236,7 +267,7 @@ else
     private void OpenNew()
     {
         formLabel = string.Empty;
-        formCompanyId = Guid.Empty;
+        selectedCompanyIds.Clear();
         scopePaymentTerm = false;
         scopeDeliveryTerm = false;
         formExpiry = null;
@@ -244,11 +275,17 @@ else
         showNew = true;
     }
 
+    private void ToggleCompany(Guid id, bool on)
+    {
+        if (on) selectedCompanyIds.Add(id);
+        else selectedCompanyIds.Remove(id);
+    }
+
     private async Task DoCreate()
     {
         newError = string.Empty;
         if (string.IsNullOrWhiteSpace(formLabel)) { newError = "Label required."; return; }
-        if (formCompanyId == Guid.Empty) { newError = "Select a source company."; return; }
+        if (selectedCompanyIds.Count == 0) { newError = "Select at least one source company."; return; }
         var scopes = new List<string>();
         if (scopePaymentTerm) scopes.Add("Integration.Inbound.PaymentTerm");
         if (scopeDeliveryTerm) scopes.Add("Integration.Inbound.DeliveryTerm");
@@ -256,7 +293,7 @@ else
         busy = true;
         // date-only input → end-of-day UTC so the key is valid through the chosen day.
         DateTime? expiry = formExpiry.HasValue ? DateTime.SpecifyKind(formExpiry.Value.Date.AddDays(1).AddSeconds(-1), DateTimeKind.Utc) : null;
-        var req = new CreateApiKeyRequest(formLabel.Trim(), formCompanyId, scopes, expiry);
+        var req = new CreateApiKeyRequest(formLabel.Trim(), selectedCompanyIds.ToList(), scopes, expiry);
         var resp = await Api.PostAsync<ApiKeySecretDto, CreateApiKeyRequest>("api/admin/api-keys", req);
         if (resp?.Success == true && resp.Data is not null)
         {

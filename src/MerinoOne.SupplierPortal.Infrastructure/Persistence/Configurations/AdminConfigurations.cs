@@ -185,6 +185,7 @@ public class UserCompanyMapConfiguration : IEntityTypeConfiguration<UserCompanyM
         b.Property(x => x.AppUserId).HasColumnName("appUserId");
         b.Property(x => x.TenantEntityId).HasColumnName("tenantEntityId");
         b.Property(x => x.IsDefault).HasColumnName("isDefault").HasColumnType("bit").HasDefaultValue(false);
+        b.Property(x => x.AllSuppliers).HasColumnName("allSuppliers").HasColumnType("bit").HasDefaultValue(false);
 
         b.HasOne(x => x.AppUser).WithMany(u => u.CompanyMaps).HasForeignKey(x => x.AppUserId)
             .HasConstraintName("FK_UserCompanyMap_AppUser_AppUserId").OnDelete(DeleteBehavior.Cascade);

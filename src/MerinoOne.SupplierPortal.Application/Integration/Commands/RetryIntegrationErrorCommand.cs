@@ -62,12 +62,17 @@ public class RetryIntegrationErrorCommandHandler : IRequestHandler<RetryIntegrat
             result = new InforSyncResult(false, null, ex.Message);
         }
 
+        // EntityId: the single entity GUID encoded in the payloadRef ("<target>:<guid>"), when present.
+        var entityId = TryParseGuidFromPayloadRef(payloadRef)?.ToString();
+
         var log = new InforSyncLog
         {
             EntityName    = entityName,
+            EntityId      = entityId,
             Direction     = direction,
             Status        = result.Success ? SyncStatus.Success : SyncStatus.Failed,
             PayloadRef    = payloadRef,
+            RetryCount    = err.RetryCount,
             IdempotencyKey = result.IdempotencyKey ?? Guid.NewGuid().ToString("N"),
             SyncedAt      = DateTime.UtcNow,
             ErrorMessage  = result.Success ? null : result.Message

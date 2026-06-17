@@ -36,12 +36,12 @@ Returns: List<ApiKeyDto>. Requires permission **Integration.Read**.")]
     [HttpPost]
     [Authorize(Policy = "Integration.ApiKeys")]
     [EndpointSummary("Create API key")]
-    [EndpointDescription(@"Mints a new inbound API key bound to a source company + endpoint scopes.
+    [EndpointDescription(@"Mints a new inbound API key bound to one or more source companies + endpoint scopes (Enhancement Round 2 / Feature C — multi-company keys).
 Body:
-- **body**: CreateApiKeyRequest with label, bound TenantEntityId, scopes (Integration.Inbound.PaymentTerm / .DeliveryTerm), optional expiry.
+- **body**: CreateApiKeyRequest with label, CompanyIds (>=1, all in the tenant), scopes (Integration.Inbound.PaymentTerm / .DeliveryTerm), optional expiry.
 Side effects:
-- Stores only the key prefix + SHA-256 hash. The plaintext is returned ONCE and is unrecoverable afterward.
-Returns: ApiKeySecretDto with the one-time plaintext key; 400 on validation; 404 if the company is unknown. Requires permission **Integration.ApiKeys**.")]
+- Stores only the key prefix + SHA-256 hash + one apiKeyCompany junction row per bound company. The plaintext is returned ONCE and is unrecoverable afterward.
+Returns: ApiKeySecretDto with the one-time plaintext key + bound CompanyIds/CompanyCodes; 400 on validation / empty companies / empty scopes; 404 if a company is unknown to the tenant. Requires permission **Integration.ApiKeys**.")]
     public async Task<Result<ApiKeySecretDto>> Create([FromBody] CreateApiKeyRequest body, CancellationToken ct)
     {
         var data = await _mediator.Send(new CreateApiKeyCommand(body), ct);

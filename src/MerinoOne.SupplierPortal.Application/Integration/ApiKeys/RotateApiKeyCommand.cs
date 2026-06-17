@@ -8,8 +8,9 @@ using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions
 namespace MerinoOne.SupplierPortal.Application.Integration.ApiKeys;
 
 /// <summary>
-/// Tenant-Admin: rotate a key. Mints a SUCCESSOR row (fresh plaintext, same tenant/company/scopes/expiry)
-/// and revokes the predecessor, linking them via <see cref="ApiKey.ReplacedByApiKeyId"/>. The new
+/// Tenant-Admin: rotate a key. Mints a SUCCESSOR row (fresh plaintext, same tenant/companies/scopes/expiry)
+/// and revokes the predecessor, linking them via <see cref="ApiKey.ReplacedByApiKeyId"/>. The predecessor's
+/// bound-company set (the <see cref="ApiKeyCompany"/> junction) is copied to the successor. The new
 /// plaintext is returned ONCE. Both writes commit in a single SaveChanges (implicit transaction).
 /// </summary>
 public record RotateApiKeyCommand(Guid Id) : IRequest<ApiKeySecretDto>;
@@ -40,6 +41,14 @@ public class RotateApiKeyCommandHandler : IRequestHandler<RotateApiKeyCommand, A
         var scopes = ApiKeyScopes.Normalize(
             predecessor.Scopes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
+        // Copy the predecessor's bound-company set (Feature C). Resolve codes for the response too.
+        var boundCompanies = await (
+            from c in _db.ApiKeyCompanies
+            where c.ApiKeyId == predecessor.Id
+            join te in _db.TenantEntities on c.TenantEntityId equals te.Id
+            select new { c.TenantEntityId, te.Code })
+            .ToListAsync(ct);
+
         var (plaintext, prefix) = ApiKeyGenerator.Generate();
         var successorId = Guid.NewGuid();
 
@@ -51,12 +60,24 @@ public class RotateApiKeyCommandHandler : IRequestHandler<RotateApiKeyCommand, A
             KeyPrefix = prefix,
             KeyHash = _hasher.Hash(plaintext),
             Scopes = string.Join(",", scopes),
-            TenantEntityId = predecessor.TenantEntityId,
             ExpiresAt = predecessor.ExpiresAt,
             IsActive = true,
             CreatedBy = actor,
             CreatedOn = now
         });
+
+        foreach (var bc in boundCompanies)
+        {
+            _db.ApiKeyCompanies.Add(new ApiKeyCompany
+            {
+                Id = Guid.NewGuid(),
+                TenantId = predecessor.TenantId,
+                ApiKeyId = successorId,
+                TenantEntityId = bc.TenantEntityId,
+                CreatedBy = actor,
+                CreatedOn = now
+            });
+        }
 
         // Revoke the predecessor and link it to its successor.
         predecessor.IsActive = false;
@@ -67,6 +88,10 @@ public class RotateApiKeyCommandHandler : IRequestHandler<RotateApiKeyCommand, A
 
         await _db.SaveChangesAsync(ct);
 
-        return new ApiKeySecretDto(successorId, predecessor.Label, prefix, plaintext, predecessor.TenantEntityId, scopes, predecessor.ExpiresAt);
+        var companyIds = boundCompanies.Select(b => b.TenantEntityId).ToList();
+        var companyCodes = boundCompanies.Select(b => b.Code).ToList();
+
+        return new ApiKeySecretDto(successorId, predecessor.Label, prefix, plaintext,
+            companyIds, companyCodes, scopes, predecessor.ExpiresAt);
     }
 }

@@ -24,7 +24,7 @@ public class CreateApiKeyCommandValidator : AbstractValidator<CreateApiKeyComman
     public CreateApiKeyCommandValidator()
     {
         RuleFor(x => x.Body.Label).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.Body.TenantEntityId).NotEmpty();
+        RuleFor(x => x.Body.CompanyIds).NotEmpty().WithMessage("At least one company is required.");
         RuleFor(x => x.Body.Scopes).NotEmpty().WithMessage("At least one scope is required.");
         RuleForEach(x => x.Body.Scopes)
             .Must(s => ApiKeyScopes.Allowed.Contains(s))
@@ -55,20 +55,35 @@ public class CreateApiKeyCommandHandler : IRequestHandler<CreateApiKeyCommand, A
                 ["scopes"] = new[] { "At least one valid scope is required." }
             });
 
-        // The bound source company must belong to the acting tenant. TenantEntity is tenant-filtered, so
-        // a non-existent / cross-tenant id simply won't be found.
-        var company = await _db.TenantEntities
-            .FirstOrDefaultAsync(e => e.Id == body.TenantEntityId, ct)
-            ?? throw new NotFoundException("Company", body.TenantEntityId);
+        var companyIds = (body.CompanyIds ?? Array.Empty<Guid>()).Distinct().ToList();
+        if (companyIds.Count == 0)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["companyIds"] = new[] { "At least one company is required." }
+            });
 
         var tenantId = _user.TenantId
             ?? throw new ConflictException("The current session has no tenant context.");
+
+        // Every bound company must exist in the acting tenant. TenantEntity is tenant-filtered, so a
+        // cross-tenant / non-existent id simply won't be loaded — surface the first missing one.
+        var companies = await _db.TenantEntities
+            .Where(e => companyIds.Contains(e.Id))
+            .Select(e => new { e.Id, e.Code })
+            .ToListAsync(ct);
+
+        var foundIds = companies.Select(c => c.Id).ToHashSet();
+        var missing = companyIds.FirstOrDefault(id => !foundIds.Contains(id));
+        if (missing != Guid.Empty || companies.Count != companyIds.Count)
+            throw new NotFoundException("Company", missing == Guid.Empty ? companyIds.First() : missing);
 
         var (plaintext, prefix) = ApiKeyGenerator.Generate();
         var now = DateTime.UtcNow;
         var actor = string.IsNullOrEmpty(_user.UserCode) ? "api" : _user.UserCode;
         var id = Guid.NewGuid();
 
+        // Multi-company binding (Feature C): one ApiKeyCompany junction row per bound company. The legacy
+        // ApiKey.TenantEntityId is no longer set — readers resolve the binding from the junction.
         _db.ApiKeys.Add(new ApiKey
         {
             Id = id,
@@ -77,16 +92,32 @@ public class CreateApiKeyCommandHandler : IRequestHandler<CreateApiKeyCommand, A
             KeyPrefix = prefix,
             KeyHash = _hasher.Hash(plaintext),
             Scopes = string.Join(",", scopes),
-            TenantEntityId = company.Id,
             ExpiresAt = body.ExpiresAt,
             IsActive = true,
             CreatedBy = actor,
             CreatedOn = now
         });
 
+        foreach (var companyId in companyIds)
+        {
+            _db.ApiKeyCompanies.Add(new ApiKeyCompany
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ApiKeyId = id,
+                TenantEntityId = companyId,
+                CreatedBy = actor,
+                CreatedOn = now
+            });
+        }
+
         await _db.SaveChangesAsync(ct);
 
-        return new ApiKeySecretDto(id, body.Label.Trim(), prefix, plaintext, company.Id, scopes, body.ExpiresAt);
+        // Order codes by the company list for a stable response.
+        var codeMap = companies.ToDictionary(c => c.Id, c => c.Code);
+        var orderedCodes = companyIds.Select(cid => codeMap[cid]).ToList();
+
+        return new ApiKeySecretDto(id, body.Label.Trim(), prefix, plaintext, companyIds, orderedCodes, scopes, body.ExpiresAt);
     }
 }
 

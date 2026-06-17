@@ -81,3 +81,23 @@ public class ApiKeyConfiguration : IEntityTypeConfiguration<ApiKey>
         b.HasIndex(x => x.IsActive).HasDatabaseName("IX_ApiKey_isActive").HasFilter("[isActive] = 1");
     }
 }
+
+public class ApiKeyCompanyConfiguration : IEntityTypeConfiguration<ApiKeyCompany>
+{
+    public void Configure(EntityTypeBuilder<ApiKeyCompany> b)
+    {
+        b.ApplyBaseEntityConvention("ApiKeyCompany", "integration", "apiKeyCompany");
+        // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
+        b.Property(x => x.ApiKeyId).HasColumnName("apiKeyId");
+        b.Property(x => x.TenantEntityId).HasColumnName("tenantEntityId");
+
+        b.HasOne(x => x.ApiKey).WithMany(k => k.Companies).HasForeignKey(x => x.ApiKeyId)
+            .HasConstraintName("FK_ApiKeyCompany_ApiKey_ApiKeyId").OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.TenantEntity).WithMany().HasForeignKey(x => x.TenantEntityId)
+            .HasConstraintName("FK_ApiKeyCompany_TenantEntity_TenantEntityId").OnDelete(DeleteBehavior.Restrict);
+
+        // A key binds a given company at most once.
+        b.HasIndex(x => new { x.ApiKeyId, x.TenantEntityId })
+            .HasDatabaseName("UQ_ApiKeyCompany_apiKey_company").IsUnique();
+    }
+}

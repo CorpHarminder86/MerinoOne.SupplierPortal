@@ -50,6 +50,7 @@ public class ApproveInvoiceCommandHandler : IRequestHandler<ApproveInvoiceComman
         {
             Id = Guid.NewGuid(),
             EntityName = "Invoice",
+            EntityId = invoice.Id.ToString(),
             Direction = SyncDirection.Inbound,
             Status = SyncStatus.Success,
             IdempotencyKey = $"invoice-approved:{invoice.Id}",

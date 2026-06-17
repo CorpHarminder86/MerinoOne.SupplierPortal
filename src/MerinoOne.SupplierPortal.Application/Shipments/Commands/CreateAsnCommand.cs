@@ -107,6 +107,7 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
         {
             Id = Guid.NewGuid(),
             EntityName = "Asn",
+            EntityId = asnId.ToString(),
             Direction = SyncDirection.Outbound,
             Status = sync.Success ? SyncStatus.Success : SyncStatus.Failed,
             IdempotencyKey = sync.IdempotencyKey,

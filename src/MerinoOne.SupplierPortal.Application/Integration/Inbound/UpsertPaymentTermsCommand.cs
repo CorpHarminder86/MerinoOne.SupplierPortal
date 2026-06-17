@@ -12,10 +12,11 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 /// Inbound Payment Term upsert (consumed by Infor LN via X-APIKey). See <see cref="InboundUpsertExecutor"/>
 /// for the full algorithm (company resolution, share-group normalization, anti-spoof, endpoint gate,
 /// idempotency, transactional per-row upsert, SyncLog/IntegrationError + endpoint session update).
-/// <paramref name="BoundCompanyId"/> is the key's bound source company (tenantEntityId claim) — the
-/// controller reads it from the API-key principal and passes it in for the anti-spoof check.
+/// <paramref name="BoundCompanyIds"/> is the key's bound source-company set (one per tenantEntityId claim,
+/// Feature C — multi-company keys) — the controller reads it from the API-key principal and passes it in
+/// for the anti-spoof check.
 /// </summary>
-public record UpsertPaymentTermsCommand(PushPaymentTermsRequest Body, Guid? BoundCompanyId, string? IdempotencyKey)
+public record UpsertPaymentTermsCommand(PushPaymentTermsRequest Body, IReadOnlySet<Guid> BoundCompanyIds, string? IdempotencyKey)
     : IRequest<UpsertResultDto>;
 
 public class UpsertPaymentTermsCommandValidator : AbstractValidator<UpsertPaymentTermsCommand>
@@ -64,14 +65,17 @@ public class UpsertPaymentTermsCommandHandler : IRequestHandler<UpsertPaymentTer
         // but an edited body does not.
         var canonicalRows = terms.Select(t =>
             $"{t.Code.Trim().ToUpperInvariant()}|{(t.Description ?? string.Empty).Trim()}|{t.NetDays}|{t.IsActive}");
+        var codes = terms.Select(t => t.Code.Trim());
 
         return await _executor.ExecuteAsync(
             SharedEndpoint.PaymentTerm,
             request.Body.CompanyCode,
-            request.BoundCompanyId,
+            request.BoundCompanyIds,
             request.IdempotencyKey,
             terms.Count,
             canonicalRows,
+            codes,
+            request.Body,
             UpsertRowsAsync,
             ct);
 

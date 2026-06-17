@@ -3,6 +3,7 @@ using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Behaviours;
 using MerinoOne.SupplierPortal.Application.Integration.Inbound;
+using MerinoOne.SupplierPortal.Application.Users.Commands;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace MerinoOne.SupplierPortal.Application;
@@ -19,6 +20,10 @@ public static class DependencyInjection
         // Shared inbound master-data upsert orchestration (Payment Term / Delivery Term). Scoped so it
         // ctor-injects the per-request IAppDbContext / ICurrentUser / ICurrentCompany.
         services.AddScoped<InboundUpsertExecutor>();
+
+        // Shared user↔supplier mapping primitives reused by MapSupplier / UnmapSupplier / the bulk
+        // SetCompanySupplierMaps command. Scoped — ctor-injects the per-request IAppDbContext.
+        services.AddScoped<SupplierMapService>();
         return services;
     }
 }

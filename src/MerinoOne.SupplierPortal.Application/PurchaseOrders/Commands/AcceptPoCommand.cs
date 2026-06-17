@@ -45,6 +45,7 @@ public class AcceptPoCommandHandler : IRequestHandler<AcceptPoCommand, Unit>
         {
             Id = Guid.NewGuid(),
             EntityName = "PurchaseOrder",
+            EntityId = po.Id.ToString(),
             Direction = SyncDirection.Outbound,
             Status = sync.Success ? SyncStatus.Success : SyncStatus.Failed,
             IdempotencyKey = sync.IdempotencyKey,

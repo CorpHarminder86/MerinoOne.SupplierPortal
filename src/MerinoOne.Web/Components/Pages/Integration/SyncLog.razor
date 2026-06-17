@@ -1,7 +1,9 @@
 @page "/integrations/sync-log"
-@* This page predates the new Contracts.Integration DTOs and binds the Shipments-namespace shape
-   (EntityType/EntityId/RetryCount). Alias to keep it unambiguous now both namespaces are imported. *@
-@using InforSyncLogDto = MerinoOne.SupplierPortal.Contracts.Shipments.InforSyncLogDto
+@* Bind the live Contracts.Integration shape (EntityName/EntityId/EntityCount/RetryCount/HasPayload).
+   Both Contracts.Shipments and Contracts.Integration are globally imported and BOTH declare an
+   InforSyncLogDto, so we MUST alias to the Integration one to disambiguate (deleting the alias would
+   make the type ambiguous, not resolve to Integration). *@
+@using InforSyncLogDto = MerinoOne.SupplierPortal.Contracts.Integration.InforSyncLogDto
 @inject ApiClient Api
 @inject TokenAccessor Token
 
@@ -56,7 +58,7 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 140px 130px 110px 110px 1fr 160px 80px; --tl-min-width: 1100px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 140px 160px 110px 110px 1fr 160px 80px 70px; --tl-min-width: 1160px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Entity</div>
                     <div class="tlg-col">Entity ID</div>
@@ -65,17 +67,27 @@ else
                     <div class="tlg-col">Idempotency key</div>
                     <div class="tlg-col">Synced at</div>
                     <div class="tlg-col tlg-col--num">Retries</div>
+                    <div class="tlg-col tlg-col--actions">Payload</div>
                 </div>
                 @foreach (var s in paged.Items)
                 {
+                    var row = s;
                     <div class="tlg-row">
-                        <div class="tlg-col">@s.EntityType</div>
-                        <div class="tlg-col tlg-code">@(s.EntityId?.ToString()?[..8] ?? "—")</div>
-                        <div class="tlg-col">@s.Direction</div>
-                        <div class="tlg-col"><span class="tlg-status @StatusClass(s.Status)">@s.Status</span></div>
-                        <div class="tlg-col tlg-code" title="@s.IdempotencyKey">@(string.IsNullOrEmpty(s.IdempotencyKey) ? "—" : s.IdempotencyKey[..Math.Min(24, s.IdempotencyKey.Length)])</div>
-                        <div class="tlg-col tlg-code">@s.SyncedAt.ToString("yyyy-MM-dd HH:mm:ss")</div>
-                        <div class="tlg-col tlg-col--num">@s.RetryCount</div>
+                        <div class="tlg-col">@row.EntityName</div>
+                        <div class="tlg-col tlg-code" title="@EntityIdTitle(row)">@EntityIdDisplay(row)</div>
+                        <div class="tlg-col">@row.Direction</div>
+                        <div class="tlg-col"><span class="tlg-status @StatusClass(row.Status)">@row.Status</span></div>
+                        <div class="tlg-col tlg-code" title="@row.IdempotencyKey">@(string.IsNullOrEmpty(row.IdempotencyKey) ? "—" : row.IdempotencyKey[..Math.Min(24, row.IdempotencyKey.Length)])</div>
+                        <div class="tlg-col tlg-code">@row.SyncedAt.ToString("yyyy-MM-dd HH:mm:ss")</div>
+                        <div class="tlg-col tlg-col--num">@row.RetryCount</div>
+                        <div class="tlg-col tlg-col--actions">
+                            @if (row.HasPayload)
+                            {
+                                <button @onclick="() => ViewPayload(row)" disabled="@busy" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="View stored request JSON">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">data_object</span>
+                                </button>
+                            }
+                        </div>
                     </div>
                 }
             </div>
@@ -89,17 +101,71 @@ else
             </div>
         }
     </div>
+
+    @* Payload viewer — fetches the stored request JSON on demand (never shipped in the list). *@
+    @if (showPayload)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="lg" style="width:880px;max-width:92vw;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">data_object</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Integration</div>
+                        <h2 class="merino-dialog__title">Stored request payload</h2>
+                        <p class="merino-dialog__subtitle">@payloadEntity · @payloadSubtitle</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="ClosePayload"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    @if (payloadLoading)
+                    {
+                        <div style="color:var(--mer-ink-500);font-size:13px;">Loading payload…</div>
+                    }
+                    else if (string.IsNullOrWhiteSpace(payloadText))
+                    {
+                        <div style="color:var(--mer-ink-500);font-size:13px;">No payload stored.</div>
+                    }
+                    else
+                    {
+                        <pre style="margin:0;max-height:60vh;overflow:auto;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:8px;padding:14px 16px;font-family:Inter,monospace;font-size:12.5px;line-height:1.5;color:var(--mer-ink-900);white-space:pre;">@payloadText</pre>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="ClosePayload">Close</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
 }
 
 @code {
     private PagedResult<InforSyncLogDto>? paged;
     private bool loading = true;
+    private bool busy = false;
     private bool notFound = false;
     private string statusFilter = string.Empty;
     private int page = 1;
     private const int PageSize = 50;
 
     protected override async Task OnInitializedAsync() => await Reload();
+
+    // Entity ID column: a single outbound entity id, or the batch's term-code list, or an "N rows" hint
+    // for an inbound batch with no id list, else em-dash. EntityId is now a string (term codes/erp id).
+    private static string EntityIdDisplay(InforSyncLogDto s)
+    {
+        if (!string.IsNullOrWhiteSpace(s.EntityId))
+            return s.EntityId.Length > 22 ? s.EntityId[..22] + "…" : s.EntityId;
+        if (s.EntityCount > 0) return $"{s.EntityCount} rows";
+        return "—";
+    }
+
+    private static string? EntityIdTitle(InforSyncLogDto s) =>
+        !string.IsNullOrWhiteSpace(s.EntityId) ? s.EntityId
+        : s.EntityCount > 0 ? $"{s.EntityCount} rows in this batch"
+        : null;
 
     private async Task Reload()
     {
@@ -118,6 +184,49 @@ else
 
     private async Task Prev() { if (page > 1) { page--; await Reload(); } }
     private async Task Next() { if (paged != null && page < paged.TotalPages) { page++; await Reload(); } }
+
+    // ===== Payload viewer (Feature D) =====
+    private bool showPayload;
+    private bool payloadLoading;
+    private string? payloadText;
+    private string payloadEntity = string.Empty;
+    private string payloadSubtitle = string.Empty;
+
+    private async Task ViewPayload(InforSyncLogDto s)
+    {
+        // Never fetch for rows without a stored payload (guarded in the view too).
+        if (!s.HasPayload) return;
+        showPayload = true;
+        payloadLoading = true;
+        payloadText = null;
+        payloadEntity = s.EntityName;
+        payloadSubtitle = s.SyncedAt.ToString("yyyy-MM-dd HH:mm:ss");
+        busy = true;
+        StateHasChanged();
+
+        var resp = await Api.GetAsync<string>($"api/integration/sync-log/{s.Id}/payload");
+        payloadText = FormatJson(resp?.Data);
+        payloadLoading = false;
+        busy = false;
+    }
+
+    private void ClosePayload() { showPayload = false; payloadText = null; }
+
+    // Pretty-print the stored JSON; if it isn't valid JSON (truncated/oversize-flagged), show the raw text.
+    private static string? FormatJson(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
+            return System.Text.Json.JsonSerializer.Serialize(doc.RootElement,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return raw;
+        }
+    }
 
     private string StatusClass(string status) => status switch
     {
