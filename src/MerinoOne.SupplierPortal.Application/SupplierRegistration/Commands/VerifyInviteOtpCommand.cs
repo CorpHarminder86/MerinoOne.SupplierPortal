@@ -40,7 +40,9 @@ public class VerifyInviteOtpCommandHandler : IRequestHandler<VerifyInviteOtpComm
     {
         var now = DateTime.UtcNow;
 
-        var invite = await _db.SupplierInvites.FirstOrDefaultAsync(x => x.Token == request.Token, ct)
+        var invite = await _db.SupplierInvites
+                         .IgnoreQueryFilters()
+                         .FirstOrDefaultAsync(x => x.Token == request.Token && !x.IsDeleted, ct)
                      ?? throw new NotFoundException("SupplierInvite", request.Token);
 
         if (invite.ConsumedAt.HasValue)

@@ -46,10 +46,14 @@ else
                 </div>
                 @if (slot.File == null)
                 {
-                    <label class="rz-button doc-uploader__choose">
+                    <label class="rz-button doc-uploader__choose" style="position:relative;overflow:hidden;">
                         <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
                         Choose file
-                        <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelectedAsync(slotRef, e))" style="display:none;" accept="@Accept" />
+                        @* Transparent overlay input — the user's click lands DIRECTLY on the file input,
+                           opening the native picker. (A display:none input relying on label-forwarding fails
+                           in some browsers/contexts; an overlay is the reliable cross-browser pattern.) *@
+                        <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelectedAsync(slotRef, e))" accept="@Accept"
+                                   style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
                     </label>
                 }
                 else
@@ -59,9 +63,10 @@ else
                         <span class="doc-uploader__file-name">@slot.File.FileName</span>
                         <span class="doc-uploader__file-size">(@slot.File.FileSizeKb KB)</span>
                     </div>
-                    <label class="doc-uploader__replace">
+                    <label class="doc-uploader__replace" style="position:relative;overflow:hidden;display:inline-block;">
                         Replace file
-                        <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelectedAsync(slotRef, e))" style="display:none;" accept="@Accept" />
+                        <InputFile OnChange="@(async (InputFileChangeEventArgs e) => await OnFileSelectedAsync(slotRef, e))" accept="@Accept"
+                                   style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
                     </label>
                 }
                 @if (!string.IsNullOrEmpty(slot.Error))

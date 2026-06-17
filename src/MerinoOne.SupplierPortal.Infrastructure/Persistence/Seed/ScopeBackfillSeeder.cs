@@ -286,6 +286,19 @@ public static class ScopeBackfillSeeder
             @"UPDATE d SET d.tenantId=s.tenantId, d.tenantEntityId=s.tenantEntityId
               FROM [doc].[DocumentUpload] d JOIN [supplier].[Supplier] s ON s.supplierId=d.ownerEntityId
               WHERE d.tenantId IS NULL AND d.ownerEntityType='Supplier';",
+            // FALLBACK — standalone comm/doc rows with no PO/supplier link are still unscoped; the always-on
+            // company filter would hide them entirely. Tag any remaining NULL-company rows to the legacy
+            // default company 2000 (same convention as masters/suppliers). Runs LAST so the join-based passes
+            // above take precedence; this only catches the leftovers. (Self-contained: tenant + company read
+            // from the TenantEntity '2000' row, no parameters.)
+            @"UPDATE cm SET cm.tenantId=te.tenantId, cm.tenantEntityId=te.tenantEntityId
+              FROM [comm].[CommunicationMessage] cm
+              CROSS JOIN (SELECT TOP 1 tenantId, tenantEntityId FROM [admin].[TenantEntity] WHERE code='2000') te
+              WHERE cm.tenantEntityId IS NULL;",
+            @"UPDATE d SET d.tenantId=te.tenantId, d.tenantEntityId=te.tenantEntityId
+              FROM [doc].[DocumentUpload] d
+              CROSS JOIN (SELECT TOP 1 tenantId, tenantEntityId FROM [admin].[TenantEntity] WHERE code='2000') te
+              WHERE d.tenantEntityId IS NULL;",
         };
 
         foreach (var sql in statements)

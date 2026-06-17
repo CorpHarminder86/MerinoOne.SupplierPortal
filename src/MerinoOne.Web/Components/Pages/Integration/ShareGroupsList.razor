@@ -1,0 +1,428 @@
+@page "/integrations/share-groups"
+@inherits AuthenticatedPageBase
+@inject ApiClient Api
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+<PageTitle>Table sharing</PageTitle>
+
+@if (!AuthState.HasPermission("Integration.Read"))
+{
+    <div class="tl-empty">
+        <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+        <div>Access denied — Integration access required.</div>
+    </div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Endpoint-wise table sharing</h1>
+                    <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
+                </div>
+                <p class="tl-sub">Companies in a share group read/write a single shared master dataset per endpoint, stored under the source company</p>
+            </div>
+            <div class="tl-header__actions">
+                @if (CanManage)
+                {
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">hub</span> New share group
+                    </button>
+                }
+            </div>
+        </header>
+
+        <div style="background:var(--mer-ink-50);border:1px solid var(--mer-line);color:var(--mer-ink-700);padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:14px;display:flex;gap:8px;align-items:flex-start;">
+            <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-blue);">info</span>
+            <div>Changing a group's source/members is not retroactive — already-received master rows keep their original source company.</div>
+        </div>
+
+        <div class="tl-filter-bar">
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="endpointFilter" @bind:after="ReloadAsync">
+                <option value="">All endpoints</option>
+                @foreach (var ep in KnownEndpoints)
+                {
+                    <option value="@ep.Key">@ep.Value</option>
+                }
+            </select>
+        </div>
+
+        @if (rows is null)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (rows.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">hub</span>
+                <div>No share groups configured. Each company keeps its own master data until grouped.</div>
+            </div>
+        }
+        else
+        {
+            @foreach (var group in rows.GroupBy(r => r.Endpoint).OrderBy(g => EndpointLabel(g.Key)))
+            {
+                <section class="rz-card" style="padding:0;margin-bottom:18px;overflow:hidden;">
+                    <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--mer-line);background:var(--mer-canvas);">
+                        <span class="material-symbols-outlined" style="font-size:20px;color:var(--mer-blue);">@EndpointIcon(group.Key)</span>
+                        <h2 style="margin:0;font-size:15px;color:var(--mer-blue-darker);">@EndpointLabel(group.Key)</h2>
+                        <span class="tl-count-chip">@group.Count()</span>
+                    </div>
+
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 2fr 110px 150px; --tl-min-width: 880px;border:0;border-radius:0;">
+                        <div class="tlg-header">
+                            <div class="tlg-col">Group / source company</div>
+                            <div class="tlg-col">Member companies</div>
+                            <div class="tlg-col">Status</div>
+                            <div class="tlg-col tlg-col--actions">Actions</div>
+                        </div>
+                        @foreach (var sg in group.OrderBy(g => g.Name))
+                        {
+                            var grp = sg;
+                            <div class="tlg-row">
+                                <div class="tlg-col">
+                                    <div class="tlg-name">@grp.Name</div>
+                                    <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">
+                                        <span class="material-symbols-outlined" style="font-size:13px;vertical-align:middle;">arrow_upward</span>
+                                        Source <span style="font-family:Inter,monospace;">@grp.SourceCode</span> — @grp.SourceName
+                                    </div>
+                                </div>
+                                <div class="tlg-col">
+                                    @if (grp.Members.Count == 0)
+                                    {
+                                        <span style="color:var(--mer-ink-500);font-size:12px;">No members</span>
+                                    }
+                                    else
+                                    {
+                                        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                                            @foreach (var m in grp.Members)
+                                            {
+                                                <span class="tlg-chip" style="display:inline-flex;align-items:center;gap:4px;background:var(--mer-ink-50);color:var(--mer-blue-darker);border:1px solid var(--mer-line);border-radius:12px;padding:2px 8px;font-size:12px;">
+                                                    <span style="font-family:Inter,monospace;">@m.MemberCode</span>
+                                                    <span style="color:var(--mer-ink-500);">@m.MemberName</span>
+                                                    @if (CanManage)
+                                                    {
+                                                        <button @onclick="() => RemoveMember(grp, m)" disabled="@busy" title="Remove member"
+                                                                style="background:transparent;border:0;cursor:pointer;color:var(--mer-red);display:inline-flex;padding:0;margin-left:2px;">
+                                                            <span class="material-symbols-outlined" style="font-size:14px;">close</span>
+                                                        </button>
+                                                    }
+                                                </span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                                <div class="tlg-col">
+                                    <span class="tlg-status @(grp.IsEnabled ? "tlg-status--active" : "tlg-status--danger")">@(grp.IsEnabled ? "Enabled" : "Disabled")</span>
+                                </div>
+                                <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
+                                    @if (CanManage)
+                                    {
+                                        <button @onclick="() => OpenAddMember(grp)" disabled="@busy" title="Add member"
+                                                style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;">
+                                            <span class="material-symbols-outlined" style="font-size:18px;">person_add</span>
+                                        </button>
+                                        <button @onclick="() => Toggle(grp)" disabled="@busy" title="@(grp.IsEnabled ? "Disable" : "Enable")"
+                                                style="background:transparent;border:0;cursor:pointer;color:@(grp.IsEnabled ? "var(--mer-red)" : "var(--mer-green-dark)");">
+                                            <span class="material-symbols-outlined" style="font-size:18px;">@(grp.IsEnabled ? "toggle_on" : "toggle_off")</span>
+                                        </button>
+                                        <button @onclick="() => DeleteGroup(grp)" disabled="@busy" title="Delete group"
+                                                style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;">
+                                            <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+        }
+    </div>
+
+    @* Create share-group dialog *@
+    @if (showNew)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="md" style="width:640px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">hub</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Integration</div>
+                        <h2 class="merino-dialog__title">New share group</h2>
+                        <p class="merino-dialog__subtitle">Member companies will read/write one shared dataset stored under the source company.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showNew = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:flex;flex-direction:column;gap:12px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Endpoint *</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formEndpoint">
+                                <option value="">— Select endpoint —</option>
+                                @foreach (var ep in KnownEndpoints)
+                                {
+                                    <option value="@ep.Key">@ep.Value</option>
+                                }
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Source company *</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formSourceId">
+                                <option value="@Guid.Empty">— Select company —</option>
+                                @if (companies != null)
+                                {
+                                    @foreach (var c in companies)
+                                    {
+                                        <option value="@c.Id">@c.Code — @c.Name</option>
+                                    }
+                                }
+                            </select>
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">The shared master rows for this endpoint are stored under this company.</div>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Name *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="PT/DT shared — North cluster" @bind="formName" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Member companies</label>
+                            <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px;max-height:200px;overflow:auto;border:1px solid var(--mer-line);border-radius:6px;padding:8px;">
+                                @if (companies is null || companies.Count == 0)
+                                {
+                                    <span style="font-size:12px;color:var(--mer-ink-500);">No companies available.</span>
+                                }
+                                else
+                                {
+                                    @foreach (var c in companies)
+                                    {
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                            <input type="checkbox" checked="@formMemberIds.Contains(c.Id)" @onchange="e => ToggleMember(c.Id, e)" />
+                                            <span style="font-family:Inter,monospace;">@c.Code</span> — @c.Name
+                                        </label>
+                                    }
+                                }
+                            </div>
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">A company can belong to only one group per endpoint.</div>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(newError))
+                    {
+                        <div style="background:var(--mer-ink-50);border:1px solid var(--mer-line);color:var(--mer-red,#A32D2D);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@newError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showNew = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoCreate" disabled="@busy">@(busy ? "Creating…" : "Create")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* Add-member dialog *@
+    @if (addMemberTarget is not null)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">person_add</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">@EndpointLabel(addMemberTarget.Endpoint) · @addMemberTarget.Name</div>
+                        <h2 class="merino-dialog__title">Add member company</h2>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => addMemberTarget = null"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Company *</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="addMemberCompanyId">
+                            <option value="@Guid.Empty">— Select company —</option>
+                            @foreach (var c in AddableCompanies(addMemberTarget))
+                            {
+                                <option value="@c.Id">@c.Code — @c.Name</option>
+                            }
+                        </select>
+                    </div>
+                    @if (!string.IsNullOrEmpty(addMemberError))
+                    {
+                        <div style="background:var(--mer-ink-50);border:1px solid var(--mer-line);color:var(--mer-red,#A32D2D);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@addMemberError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => addMemberTarget = null">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoAddMember" disabled="@busy">@(busy ? "Adding…" : "Add member")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    // SharedEndpoint names — must match what the API parses ("PaymentTerm" / "DeliveryTerm").
+    private static readonly (string Key, string Value)[] KnownEndpoints =
+    {
+        ("PaymentTerm", "Payment Terms"),
+        ("DeliveryTerm", "Delivery Terms")
+    };
+
+    private List<ShareGroupDto>? rows;
+    private List<CompanyDto>? companies;
+    private bool busy;
+    private string endpointFilter = string.Empty;
+
+    private bool CanManage => AuthState.HasPermission("Integration.Manage");
+
+    // Create dialog state
+    private bool showNew;
+    private string formEndpoint = string.Empty;
+    private Guid formSourceId = Guid.Empty;
+    private string formName = string.Empty;
+    private readonly HashSet<Guid> formMemberIds = new();
+    private string newError = string.Empty;
+
+    // Add-member dialog state
+    private ShareGroupDto? addMemberTarget;
+    private Guid addMemberCompanyId = Guid.Empty;
+    private string addMemberError = string.Empty;
+
+    protected override async Task LoadDataAsync()
+    {
+        if (!AuthState.HasPermission("Integration.Read")) { rows = new(); return; }
+
+        var url = "api/integration/share-groups";
+        if (!string.IsNullOrWhiteSpace(endpointFilter)) url += $"?endpoint={Uri.EscapeDataString(endpointFilter)}";
+        var resp = await Api.GetAsync<List<ShareGroupDto>>(url);
+        rows = resp?.Data ?? new();
+
+        // Companies drive both dropdowns + the member multi-select. Load once.
+        if (companies is null)
+        {
+            var compResp = await Api.GetAsync<List<CompanyDto>>("api/companies");
+            companies = compResp?.Data ?? new();
+        }
+    }
+
+    private void OpenNew()
+    {
+        formEndpoint = string.Empty;
+        formSourceId = Guid.Empty;
+        formName = string.Empty;
+        formMemberIds.Clear();
+        newError = string.Empty;
+        showNew = true;
+    }
+
+    private void ToggleMember(Guid companyId, ChangeEventArgs e)
+    {
+        if (e.Value is true) formMemberIds.Add(companyId);
+        else formMemberIds.Remove(companyId);
+    }
+
+    private async Task DoCreate()
+    {
+        newError = string.Empty;
+        if (string.IsNullOrWhiteSpace(formEndpoint)) { newError = "Select an endpoint."; return; }
+        if (formSourceId == Guid.Empty) { newError = "Select a source company."; return; }
+        if (string.IsNullOrWhiteSpace(formName)) { newError = "Name required."; return; }
+
+        busy = true;
+        var req = new CreateShareGroupRequest(formEndpoint, formSourceId, formName.Trim(), formMemberIds.ToList());
+        var resp = await Api.PostAsync<Guid, CreateShareGroupRequest>("api/integration/share-groups", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Share group created" });
+            showNew = false;
+            await ReloadAsync();
+        }
+        else { newError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task Toggle(ShareGroupDto grp)
+    {
+        busy = true;
+        var req = new UpdateShareGroupRequest(grp.Name, !grp.IsEnabled);
+        var resp = await Api.PutAsync<UpdateShareGroupRequest>($"api/integration/share-groups/{grp.Id}", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = grp.IsEnabled ? "Group disabled" : "Group enabled" });
+            await ReloadAsync();
+        }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Update failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    private void OpenAddMember(ShareGroupDto grp)
+    {
+        addMemberTarget = grp;
+        addMemberCompanyId = Guid.Empty;
+        addMemberError = string.Empty;
+    }
+
+    private async Task DoAddMember()
+    {
+        if (addMemberTarget is null) return;
+        addMemberError = string.Empty;
+        if (addMemberCompanyId == Guid.Empty) { addMemberError = "Select a company."; return; }
+
+        busy = true;
+        var req = new AddShareGroupMemberRequest(addMemberCompanyId);
+        var resp = await Api.PostAsync<AddShareGroupMemberRequest>($"api/integration/share-groups/{addMemberTarget.Id}/members", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Member added" });
+            addMemberTarget = null;
+            await ReloadAsync();
+        }
+        else { addMemberError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task RemoveMember(ShareGroupDto grp, ShareGroupMemberDto m)
+    {
+        if (!await Dialog.ConfirmUnmapAsync($"{m.MemberCode} — {m.MemberName}", "MEMBER")) return;
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/integration/share-groups/{grp.Id}/members/{m.MemberTenantEntityId}");
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Member removed" }); await ReloadAsync(); }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Remove failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    private async Task DeleteGroup(ShareGroupDto grp)
+    {
+        if (!await Dialog.ConfirmDeleteAsync(grp.Name, category: "SHARE GROUP",
+                subtitle: "Member companies' master data falls back to per-company storage. Already-received rows are not affected.")) return;
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/integration/share-groups/{grp.Id}");
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Share group deleted" }); await ReloadAsync(); }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Delete failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    /// <summary>Companies eligible to add to a group — exclude its existing members and its source company.</summary>
+    private IEnumerable<CompanyDto> AddableCompanies(ShareGroupDto grp)
+    {
+        if (companies is null) yield break;
+        var taken = grp.Members.Select(m => m.MemberTenantEntityId).ToHashSet();
+        taken.Add(grp.SourceTenantEntityId);
+        foreach (var c in companies)
+            if (!taken.Contains(c.Id)) yield return c;
+    }
+
+    private static string EndpointLabel(string key) =>
+        KnownEndpoints.FirstOrDefault(e => e.Key == key).Value is { Length: > 0 } v ? v : key;
+
+    private static string EndpointIcon(string key) => key switch
+    {
+        "PaymentTerm" => "savings",
+        "DeliveryTerm" => "local_shipping",
+        _ => "hub"
+    };
+}

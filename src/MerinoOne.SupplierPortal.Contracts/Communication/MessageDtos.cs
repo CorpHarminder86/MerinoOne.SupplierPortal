@@ -28,3 +28,11 @@ public record SendMessageRequest(
     Guid? PurchaseOrderId,
     string MessageBody,
     string? AttachmentUrl);
+
+/// <summary>A user the caller may start a new message thread with (compose recipient picker).</summary>
+public record MessageRecipientDto(
+    Guid UserId,
+    string FullName,
+    string UserCode,
+    bool IsInternal,
+    string Roles);

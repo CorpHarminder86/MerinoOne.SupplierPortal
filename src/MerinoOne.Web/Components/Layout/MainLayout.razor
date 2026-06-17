@@ -129,6 +129,10 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">cable</span>
                         <span class="mer-nav-item__label">Endpoints</span>
                     </NavLink>
+                    <NavLink class="mer-nav-item" href="integrations/share-groups" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">hub</span>
+                        <span class="mer-nav-item__label">Table Sharing</span>
+                    </NavLink>
 
                     <div class="mer-nav__label">Administration</div>
                     <NavLink class="mer-nav-item" href="admin/users" ActiveClass="active">
@@ -275,7 +279,11 @@ else
             </header>
 
             <main class="mer-page">
-                <GlobalErrorBoundary>
+                @* Keyed on (active company, refresh tick): changing the active company OR pressing the topbar
+                   refresh changes the key, so Blazor disposes + recreates the routed page — re-running its
+                   OnInitialized/OnAfterRender data load under the new scope. Works for EVERY page (whether or
+                   not it inherits AuthenticatedPageBase) without a jarring full-browser reload. *@
+                <GlobalErrorBoundary @key="PageScopeKey">
                     @Body
                 </GlobalErrorBoundary>
             </main>
@@ -293,6 +301,11 @@ else
     private const string ActiveCompanyStorageKey = "merinoone.activeCompany";
 
     private bool _refreshing;
+    private int _refreshTick;
+
+    // Drives the @key on the routed content. Changing the active company or bumping _refreshTick re-creates
+    // the current page so it re-fetches under the new scope — uniform across all pages, no full reload.
+    private string PageScopeKey => $"{Company.ActiveCompanyId}|{_refreshTick}";
     private bool _userMenuOpen;
     private bool _companyMenuOpen;
     private bool _signingOut;
@@ -349,7 +362,10 @@ else
         _companiesLoaded = true;
         try
         {
-            var resp = await Api.GetAsync<List<MerinoOne.SupplierPortal.Contracts.Companies.CompanyDto>>("api/companies");
+            // The CURRENT user's accessible companies (any authenticated user — supplier users included).
+            // NOT "api/companies" (admin-gated Settings.Read), which 403s for a supplier user and left the
+            // selector empty so it never appeared even when they had multiple companies.
+            var resp = await Api.GetAsync<List<MerinoOne.SupplierPortal.Contracts.Companies.CompanyDto>>("api/companies/accessible");
             var companies = resp?.Data ?? new();
 
             Guid? preferred = null;
@@ -487,32 +503,26 @@ else
     private async Task SelectCompany(Guid companyId)
     {
         _companyMenuOpen = false;
+        if (Company.ActiveCompanyId == companyId) return;
         Company.SetActive(companyId);
         try { await Storage.SetAsync(ActiveCompanyStorageKey, companyId.ToString()); } catch { }
-        // Force a real reload so every page re-fetches its data under the new active company.
-        Nav.NavigateTo(Nav.Uri, forceLoad: true);
+        // The new active company changes PageScopeKey, so the @key on the routed content re-creates the
+        // current page — it re-fetches under the new X-Active-Company scope. Uniform for every page, no
+        // full-browser reload. StateHasChanged re-renders the layout (new key + selector chip).
+        StateHasChanged();
     }
 
     private async Task RefreshPageAsync()
     {
         if (_refreshing) return;
         _refreshing = true;
+        // Bump the tick → PageScopeKey changes → the @key re-creates the routed page, which re-fetches its
+        // data under the current scope. Works for every page (no AuthenticatedPageBase dependency, no reload).
+        _refreshTick++;
         StateHasChanged();
         try
         {
-            // Pages inheriting AuthenticatedPageBase auto-subscribe to this event.
-            await PageRefresh.RequestRefreshAsync();
-
-            // Fallback for pages that load in OnInitializedAsync without inheriting the base.
-            // Use forceReload:true — interactive Server mode treats same-URL Refresh(false) as
-            // a no-op when the route component instance is reused, so OnInitializedAsync never
-            // re-runs. forceLoad does a real HTTP GET → MainLayout.HydrateTokenAsync re-fetches
-            // /api/auth/me to restore the session. Skip on /login.
-            var rel = Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].TrimEnd('/').ToLowerInvariant();
-            if (rel != "login")
-            {
-                Nav.NavigateTo(Nav.Uri, forceLoad: true);
-            }
+            await Task.Delay(350);   // brief spinner while the re-created page loads
         }
         finally { _refreshing = false; StateHasChanged(); }
     }

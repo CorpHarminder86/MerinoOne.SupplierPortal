@@ -1,0 +1,103 @@
+@page "/messages/new"
+@inject ApiClient Api
+@inject NavigationManager Nav
+@using MerinoOne.SupplierPortal.Contracts.Communication
+
+<PageTitle>New message</PageTitle>
+
+<div class="tl-page" style="max-width:760px;">
+    <a href="messages" class="mer-back-link">
+        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+        Back to messages
+    </a>
+    <header class="tl-header">
+        <div>
+            <h1 class="tl-title">New message</h1>
+            <p class="tl-sub">Start a new conversation</p>
+        </div>
+    </header>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (recipients is null || recipients.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">person_off</span>
+            <div>No one available to message.</div>
+        </div>
+    }
+    else
+    {
+        <div class="rz-card" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-bottom:4px;">To</label>
+                <select class="rz-dropdown" style="width:100%;padding:9px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="receiverId">
+                    <option value="">— Select recipient —</option>
+                    @foreach (var r in recipients)
+                    {
+                        <option value="@r.UserId">@r.FullName @(string.IsNullOrWhiteSpace(r.Roles) ? "" : $"· {r.Roles}") @(r.IsInternal ? "(staff)" : "(supplier)")</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-bottom:4px;">Message</label>
+                <textarea class="rz-textbox" rows="5" placeholder="Write your message…" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="messageBody" @bind:event="oninput"></textarea>
+            </div>
+            @if (!string.IsNullOrEmpty(error))
+            {
+                <div class="validation-message">@error</div>
+            }
+            <div style="display:flex;justify-content:flex-end;gap:8px;">
+                <button class="rz-button" style="padding:8px 16px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Cancel">Cancel</button>
+                <button class="rz-button rz-primary" style="padding:8px 16px;border-radius:6px;border:0;color:#fff;cursor:pointer;"
+                        disabled="@(busy || string.IsNullOrWhiteSpace(receiverId) || string.IsNullOrWhiteSpace(messageBody))"
+                        @onclick="Send">@(busy ? "Sending…" : "Send message")</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<MessageRecipientDto>? recipients;
+    private bool loading = true;
+    private string receiverId = string.Empty;
+    private string messageBody = string.Empty;
+    private bool busy = false;
+    private string error = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await Api.GetAsync<List<MessageRecipientDto>>("api/messages/recipients");
+        recipients = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void Cancel() => Nav.NavigateToRoute("/messages");
+
+    private async Task Send()
+    {
+        if (string.IsNullOrWhiteSpace(receiverId) || !Guid.TryParse(receiverId, out var rid))
+        {
+            error = "Select a recipient.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(messageBody)) { error = "Message cannot be empty."; return; }
+
+        busy = true; error = string.Empty;
+        var resp = await Api.PostAsync<MessageDto, SendMessageRequest>("api/messages",
+            new SendMessageRequest(null, rid, null, messageBody, null));
+        busy = false;
+
+        if (resp?.Success == true && resp.Data is not null)
+        {
+            // Jump to the new thread so the sender sees the conversation immediately.
+            Nav.NavigateToRoute($"/threads/{resp.Data.ThreadId}");
+        }
+        else
+        {
+            error = resp?.Errors?.FirstOrDefault() ?? "Failed to send.";
+        }
+    }
+}

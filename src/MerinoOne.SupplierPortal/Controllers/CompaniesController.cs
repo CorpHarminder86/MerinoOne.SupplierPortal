@@ -36,6 +36,17 @@ Returns: List<CompanyDto> scoped to the caller's tenant. Requires permission **S
         return Result<List<CompanyDto>>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    [HttpGet("accessible")]
+    [EndpointSummary("My accessible companies")]
+    [EndpointDescription(@"Companies the CURRENT user may act under — drives the header company selector for every
+authenticated user (Tenant Admin = all active tenant companies; regular/supplier user = their UserCompanyMap set).
+No admin permission required (unlike GET /api/companies). Returns: List<CompanyDto>, tenant-scoped.")]
+    public async Task<Result<List<CompanyDto>>> Accessible(CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetAccessibleCompaniesQuery(), ct);
+        return Result<List<CompanyDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
     [HttpPost]
     [Authorize(Policy = "Settings.Write")]
     [EndpointSummary("Create company")]

@@ -18,7 +18,12 @@ public class GetInviteByTokenQueryHandler : IRequestHandler<GetInviteByTokenQuer
         if (string.IsNullOrWhiteSpace(request.Token))
             throw new NotFoundException("SupplierInvite", request.Token);
 
-        var i = await _db.SupplierInvites.FirstOrDefaultAsync(x => x.Token == request.Token, ct)
+        // Anonymous /register/{token} caller has CurrentTenantId == null and is NOT bypassed by the
+        // always-on tenant filter, so the (valid, tenant-tagged) invite is hidden. IgnoreQueryFilters()
+        // bypasses BOTH the tenant filter AND soft-delete; re-apply !IsDeleted manually. Token remains
+        // the security boundary; all business checks below are preserved. (Mirrors AuthController.Login.)
+        var i = await _db.SupplierInvites.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(x => x.Token == request.Token && !x.IsDeleted, ct)
                 ?? throw new NotFoundException("SupplierInvite", request.Token);
 
         var now = DateTime.UtcNow;

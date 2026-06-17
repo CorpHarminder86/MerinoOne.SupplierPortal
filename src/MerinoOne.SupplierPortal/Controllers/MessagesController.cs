@@ -40,6 +40,17 @@ Returns: List<MessageDto> ordered by SentAt asc; 404 if thread not found; 403 if
         return Result<List<MessageDto>>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    [HttpGet("messages/recipients")]
+    [EndpointSummary("Message recipients")]
+    [EndpointDescription(@"Users the caller may start a new message with (compose picker).
+- Supplier users see internal staff (Buyer/Finance/Admin); internal users see all other active users in the tenant.
+Returns: List<MessageRecipientDto>, tenant-scoped.")]
+    public async Task<Result<List<MessageRecipientDto>>> Recipients(CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetMessageRecipientsQuery(), ct);
+        return Result<List<MessageRecipientDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
     [HttpPost("messages")]
     [EndpointSummary("Send message")]
     [EndpointDescription(@"Posts a new message into an existing thread, or starts a new thread.

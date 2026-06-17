@@ -26,7 +26,20 @@ public record UserDetailDto(
     int SupplierMapCount,
     DateTime CreatedOn,
     Guid[] SupplierIds,
+    MappedSupplierDto[] MappedSuppliers,
     Guid DefaultSeccodeId);
+
+/// <summary>
+/// A supplier a user is mapped to, resolved cross-company for the admin user-detail view. The CompanyCode
+/// is the supplier's company — shown so an admin sees the mapping's company, and ALL mappings appear
+/// regardless of the header's active-company selection (user↔supplier mapping is tenant-wide admin config).
+/// </summary>
+public record MappedSupplierDto(
+    Guid SupplierId,
+    string SupplierCode,
+    string LegalName,
+    string CompanyCode,
+    bool CanWrite);
 
 public record CreateUserRequest(
     string UserCode,

@@ -126,7 +126,12 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
         var now = DateTime.UtcNow;
         var token = request.Body.Token;
 
-        var invite = await _db.SupplierInvites.FirstOrDefaultAsync(x => x.Token == token, ct)
+        // IgnoreQueryFilters — registration is anonymous (null tenant, not bypassed) and SupplierInvite is
+        // ITenantOwned, so the tenant filter would hide the (valid, tenant-tagged) invite and short-circuit
+        // the whole flow with a spurious NotFound. The unique token remains the security boundary; we
+        // re-apply the soft-delete guard explicitly since IgnoreQueryFilters also drops it.
+        var invite = await _db.SupplierInvites.IgnoreQueryFilters()
+                         .FirstOrDefaultAsync(x => x.Token == token && !x.IsDeleted, ct)
                      ?? throw new NotFoundException("SupplierInvite", token);
 
         if (invite.ConsumedAt.HasValue)
@@ -283,6 +288,12 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
             doc.OwnerEntityType = "Supplier";
             doc.OwnerEntityId = supplierId;
             doc.SeccodeId = seccodeId;
+            // Stamp the supplier's tenant + company explicitly. These docs were uploaded ANONYMOUSLY
+            // (the ScopeStampInterceptor stamped null) and are now Modified (not Added), so the interceptor
+            // won't touch them — without this they stay NULL-scoped and the always-on tenant/company filters
+            // hide them on the supplier detail page. Mirror the Supplier/Seccode scope set above.
+            doc.TenantId = inviteTenantId;
+            doc.TenantEntityId = inviteCompanyId;
             doc.UpdatedBy = "self-register";
             doc.UpdatedOn = now;
         }
@@ -303,7 +314,11 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
             try
             {
                 var outcome = await _docValidator.ValidateAsync(docId, ct);
-                var doc = await _db.DocumentUploads.FirstOrDefaultAsync(x => x.Id == docId, ct);
+                // IgnoreQueryFilters — the principal is still anonymous (no SecRights) even though the docs
+                // were just re-stamped with the supplier's G-seccode, so the seccode filter would hide them
+                // and the AI-validation status would silently never persist. Re-apply soft-delete guard.
+                var doc = await _db.DocumentUploads.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(x => x.Id == docId && !x.IsDeleted, ct);
                 if (doc != null)
                 {
                     doc.AiValidationStatus = outcome.Status;
