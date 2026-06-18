@@ -18,6 +18,7 @@ namespace MerinoOne.SupplierPortal.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/integration/inbound")]
+[Tags("Inbound Integration")]
 [EnableRateLimiting("inbound")]
 public class InboundIntegrationController : ControllerBase
 {

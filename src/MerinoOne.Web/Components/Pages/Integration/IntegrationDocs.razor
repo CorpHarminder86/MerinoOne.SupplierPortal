@@ -1,0 +1,400 @@
+@page "/integrations/docs"
+@implements IDisposable
+@using Microsoft.Extensions.Configuration
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject IJSRuntime JS
+@inject IConfiguration Config
+
+<PageTitle>Developer docs</PageTitle>
+
+@if (!Token.HasPermission("Integration.Read"))
+{
+    <div class="tl-empty">
+        <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+        <div>Access denied — Integration access required.</div>
+    </div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Developer docs</h1>
+                    <span class="tl-count-chip">@selectedScopes.Count / @catalog.Count</span>
+                </div>
+                <p class="tl-sub">Pick the inbound endpoints a partner needs, share the docs, and mint an API key scoped to exactly those.</p>
+            </div>
+            <div class="tl-header__actions" style="display:flex;gap:8px;">
+                @if (!string.IsNullOrEmpty(publicApiBaseUrl))
+                {
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="OpenInteractiveReference">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">menu_book</span> Open interactive reference
+                    </button>
+                }
+                @if (Token.HasPermission("Integration.ApiKeys"))
+                {
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenGenerate" disabled="@(selectedScopes.Count == 0)">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">key</span> Generate key for selection
+                    </button>
+                }
+            </div>
+        </header>
+
+        @if (loading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (catalog.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">integration_instructions</span>
+                <div>No integration endpoints available.</div>
+            </div>
+        }
+        else
+        {
+            @if (string.IsNullOrEmpty(publicApiBaseUrl))
+            {
+                <div style="background:var(--mer-amber-50);border:1px solid var(--mer-warning);color:var(--mer-amber-800);padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;">
+                    No public API base URL configured — curl samples below use a <code>{API_BASE_URL}</code> placeholder. Set <code>SupplierPortal:PublicApiBaseUrl</code> to enable the interactive reference link and real URLs.
+                </div>
+            }
+
+            <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start;">
+                @* ── Selection panel ── *@
+                <div style="border:1px solid var(--mer-line);border-radius:8px;background:var(--mer-surface);padding:12px;position:sticky;top:12px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:12px;font-weight:700;color:var(--mer-blue-darker);">Endpoints</span>
+                        <div style="display:flex;gap:8px;">
+                            <button style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;font-size:11px;font-weight:600;" @onclick="SelectAll">All</button>
+                            <button style="background:transparent;border:0;color:var(--mer-ink-500);cursor:pointer;font-size:11px;font-weight:600;" @onclick="SelectNone">None</button>
+                        </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px;">
+                        @foreach (var e in catalog)
+                        {
+                            var item = e;
+                            var on = selectedScopes.Contains(item.Scope);
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:5px 6px;border-radius:6px;background:@(on ? "var(--mer-blue-50)" : "transparent");">
+                                <input type="checkbox" checked="@on" @onchange="@((ChangeEventArgs ev) => ToggleScope(item.Scope, (bool)(ev.Value ?? false)))" />
+                                <span style="flex:1;">@item.DisplayName</span>
+                                @if (item.CompanyScoped)
+                                {
+                                    <span title="Body carries a CompanyCode" style="font-size:10px;color:var(--mer-ink-500);border:1px solid var(--mer-line);border-radius:4px;padding:0 4px;">co</span>
+                                }
+                            </label>
+                        }
+                    </div>
+                </div>
+
+                @* ── Rendered docs for the selected endpoints ── *@
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div style="border:1px solid var(--mer-line);border-radius:8px;background:var(--mer-surface);padding:12px 14px;font-size:12.5px;color:var(--mer-ink-700);">
+                        <div><b>Base URL</b> <code style="font-family:Inter,monospace;">@(string.IsNullOrEmpty(publicApiBaseUrl) ? "{API_BASE_URL}" : publicApiBaseUrl)</code></div>
+                        <div style="margin-top:4px;"><b>Auth</b> send header <code style="font-family:Inter,monospace;">X-APIKey: &lt;your-api-key&gt;</code> — the key must carry the endpoint's scope (and, for company-scoped endpoints, be bound to the source company the body resolves to).</div>
+                    </div>
+
+                    @if (selectedScopes.Count == 0)
+                    {
+                        <div class="tl-empty" style="margin:0;">
+                            <span class="material-symbols-outlined" style="font-size:28px;">checklist</span>
+                            <div>Select one or more endpoints on the left to see their docs.</div>
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (var e in catalog.Where(c => selectedScopes.Contains(c.Scope)))
+                        {
+                            var item = e;
+                            var curl = CurlFor(item);
+                            <div style="border:1px solid var(--mer-line);border-radius:8px;background:var(--mer-surface);overflow:hidden;">
+                                <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--mer-line);background:var(--mer-ink-50);">
+                                    <span style="font-family:Inter,monospace;font-size:11px;font-weight:700;color:#fff;background:var(--mer-green-dark);border-radius:4px;padding:2px 7px;">@item.Method</span>
+                                    <code style="flex:1;font-family:Inter,monospace;font-size:12.5px;color:var(--mer-ink-900);word-break:break-all;">@item.Path</code>
+                                    <code style="font-family:Inter,monospace;font-size:11px;color:var(--mer-blue-700);background:var(--mer-blue-50);border:1px solid var(--mer-line);border-radius:4px;padding:1px 6px;">@item.Scope</code>
+                                </div>
+                                <div style="padding:10px 14px;">
+                                    <div style="font-size:12.5px;color:var(--mer-ink-700);margin-bottom:8px;">@item.Description</div>
+
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0 4px;">
+                                        <span style="font-size:11px;font-weight:700;color:var(--mer-ink-600);text-transform:uppercase;letter-spacing:.04em;">Sample request body</span>
+                                        <button style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;font-size:11px;font-weight:600;" @onclick="() => CopyText(item.SampleJson)">
+                                            <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">content_copy</span> copy
+                                        </button>
+                                    </div>
+                                    <pre style="margin:0;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:6px;padding:10px 12px;font-family:Inter,monospace;font-size:12px;overflow:auto;white-space:pre;">@item.SampleJson</pre>
+
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 4px;">
+                                        <span style="font-size:11px;font-weight:700;color:var(--mer-ink-600);text-transform:uppercase;letter-spacing:.04em;">curl</span>
+                                        <button style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;font-size:11px;font-weight:600;" @onclick="() => CopyText(curl)">
+                                            <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">content_copy</span> copy
+                                        </button>
+                                    </div>
+                                    <pre style="margin:0;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:6px;padding:10px 12px;font-family:Inter,monospace;font-size:12px;overflow:auto;white-space:pre;">@curl</pre>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        }
+    </div>
+
+    @* Generate-key dialog — scopes come from the current selection. *@
+    @if (showGenerate)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">key</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Integration</div>
+                        <h2 class="merino-dialog__title">Generate API key</h2>
+                        <p class="merino-dialog__subtitle">Scoped to the @selectedScopes.Count selected endpoint(s). Shown once.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showGenerate = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:flex;flex-direction:column;gap:12px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Label *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="Acme Corp — inbound masters" @bind="formLabel" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Scopes</label>
+                            <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">
+                                @foreach (var s in selectedScopes)
+                                {
+                                    <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-blue-50);color:var(--mer-blue-700);border:1px solid var(--mer-line);border-radius:4px;padding:1px 6px;">@ScopeShort(s)</span>
+                                }
+                            </div>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Source companies * <span style="font-weight:400;color:var(--mer-ink-500);">(@selectedCompanyIds.Count selected)</span></label>
+                            <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px;max-height:180px;overflow:auto;border:1px solid var(--mer-line);border-radius:6px;padding:8px 10px;background:var(--mer-canvas);">
+                                @if (companies == null || companies.Count == 0)
+                                {
+                                    <span style="font-size:12px;color:var(--mer-ink-500);">No companies available.</span>
+                                }
+                                else
+                                {
+                                    @foreach (var c in companies)
+                                    {
+                                        var checkedNow = selectedCompanyIds.Contains(c.Id);
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                            <input type="checkbox" checked="@checkedNow" @onchange="@((ChangeEventArgs ev) => ToggleCompany(c.Id, (bool)(ev.Value ?? false)))" />
+                                            <span style="font-family:Inter,monospace;font-size:12px;">@c.Code</span>
+                                            <span style="color:var(--mer-ink-600);">@c.Name</span>
+                                        </label>
+                                    }
+                                }
+                            </div>
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">
+                                @(anyCompanyScopedSelected
+                                    ? "Company-scoped endpoints are selected — inbound bodies must resolve (via sharing) to one of these companies."
+                                    : "The key is bound to your tenant; pick at least one company for binding.")
+                            </div>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Expiry (optional)</label>
+                            <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formExpiry" />
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Leave blank for a non-expiring key.</div>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(genError))
+                    {
+                        <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@genError</div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showGenerate = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoGenerate" disabled="@busy">@(busy ? "Generating…" : "Generate")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* Copy-once secret modal. *@
+    @if (secret is not null)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+            <div class="merino-dialog" data-variant="warning" data-size="sm" style="width:520px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">vpn_key</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">@secret.Label</div>
+                        <h2 class="merino-dialog__title">Your API key</h2>
+                        <p class="merino-dialog__subtitle">Prefix @secret.KeyPrefix</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="CloseSecret"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="background:var(--mer-amber-50);border:1px solid var(--mer-warning);color:var(--mer-amber-800);padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;display:flex;gap:8px;align-items:flex-start;">
+                        <span class="material-symbols-outlined" style="font-size:18px;">warning</span>
+                        <div>Copy this key now and share it securely — it will <strong>not be shown again</strong>. Only its hash is stored.</div>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <code style="flex:1;font-family:Inter,monospace;font-size:13px;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:6px;padding:10px 12px;word-break:break-all;">@secret.PlaintextKey</code>
+                        <button class="rz-button" style="padding:8px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="() => CopyText(secret!.PlaintextKey)">
+                            <span class="material-symbols-outlined" style="font-size:18px;">content_copy</span>
+                        </button>
+                    </div>
+                    <div style="display:grid;grid-template-columns:90px 1fr;gap:6px 12px;margin-top:14px;font-size:12px;">
+                        <div style="color:var(--mer-ink-600);font-weight:600;">Companies</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                            @foreach (var cc in secret.CompanyCodes)
+                            {
+                                <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-blue-50);color:var(--mer-blue-700);border:1px solid var(--mer-line);border-radius:4px;padding:1px 6px;">@cc</span>
+                            }
+                        </div>
+                        <div style="color:var(--mer-ink-600);font-weight:600;">Scopes</div>
+                        <div style="color:var(--mer-ink-900);">@string.Join(", ", secret.Scopes.Select(ScopeShort))</div>
+                    </div>
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="CloseSecret">I've copied it — done</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private List<IntegrationEndpointDocDto> catalog = new();
+    private List<CompanyDto>? companies;
+    private readonly HashSet<string> selectedScopes = new(StringComparer.Ordinal);
+    private bool loading = true;
+    private string publicApiBaseUrl = string.Empty;
+
+    private bool showGenerate;
+    private string formLabel = string.Empty;
+    private readonly HashSet<Guid> selectedCompanyIds = new();
+    private DateTime? formExpiry;
+    private string genError = string.Empty;
+    private bool busy;
+
+    private ApiKeySecretDto? secret;
+
+    private bool anyCompanyScopedSelected =>
+        catalog.Any(c => c.CompanyScoped && selectedScopes.Contains(c.Scope));
+
+    protected override async Task OnInitializedAsync()
+    {
+        Token.Changed += OnTokenChanged;
+        publicApiBaseUrl = ResolvePublicApiBaseUrl();
+        if (Token.HasPermission("Integration.Read"))
+        {
+            var resp = await Api.GetAsync<List<IntegrationEndpointDocDto>>("api/integration/catalog");
+            catalog = resp?.Data ?? new();
+            if (Token.HasPermission("Integration.ApiKeys"))
+            {
+                var compResp = await Api.GetAsync<List<CompanyDto>>("api/companies");
+                companies = compResp?.Data ?? new();
+            }
+        }
+        loading = false;
+    }
+
+    private void OnTokenChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Token.Changed -= OnTokenChanged;
+
+    // Browser-facing API origin for the deep-link + curl. Falls back to the configured API base URL only when
+    // it is an absolute http/https URL (the Aspire "https+http://" service-discovery scheme is not navigable).
+    private string ResolvePublicApiBaseUrl()
+    {
+        var candidate = Config["SupplierPortal:PublicApiBaseUrl"]
+                     ?? Config["SupplierPortal:ApiBaseUrl"]
+                     ?? Config["Api:BaseUrl"];
+        if (!string.IsNullOrWhiteSpace(candidate)
+            && Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            return candidate.TrimEnd('/');
+        }
+        return string.Empty;
+    }
+
+    private void ToggleScope(string scope, bool on)
+    {
+        if (on) selectedScopes.Add(scope);
+        else selectedScopes.Remove(scope);
+    }
+
+    private void SelectAll() { foreach (var e in catalog) selectedScopes.Add(e.Scope); }
+    private void SelectNone() => selectedScopes.Clear();
+
+    private async Task OpenInteractiveReference()
+    {
+        if (string.IsNullOrEmpty(publicApiBaseUrl)) return;
+        await JS.InvokeVoidAsync("window.open", $"{publicApiBaseUrl}/integration-docs", "_blank");
+    }
+
+    private string CurlFor(IntegrationEndpointDocDto e)
+    {
+        var url = (string.IsNullOrEmpty(publicApiBaseUrl) ? "{API_BASE_URL}" : publicApiBaseUrl) + "/" + e.Path;
+        return $"curl -X {e.Method} \"{url}\" \\\n  -H \"X-APIKey: <your-api-key>\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{e.SampleJson}'";
+    }
+
+    private void OpenGenerate()
+    {
+        if (selectedScopes.Count == 0) return;
+        formLabel = string.Empty;
+        selectedCompanyIds.Clear();
+        formExpiry = null;
+        genError = string.Empty;
+        showGenerate = true;
+    }
+
+    private void ToggleCompany(Guid id, bool on)
+    {
+        if (on) selectedCompanyIds.Add(id);
+        else selectedCompanyIds.Remove(id);
+    }
+
+    private async Task DoGenerate()
+    {
+        genError = string.Empty;
+        if (selectedScopes.Count == 0) { genError = "Select at least one endpoint."; return; }
+        if (string.IsNullOrWhiteSpace(formLabel)) { genError = "Label required."; return; }
+        if (selectedCompanyIds.Count == 0) { genError = "Select at least one source company."; return; }
+        busy = true;
+        // date-only input → end-of-day UTC so the key is valid through the chosen day.
+        DateTime? expiry = formExpiry.HasValue ? DateTime.SpecifyKind(formExpiry.Value.Date.AddDays(1).AddSeconds(-1), DateTimeKind.Utc) : null;
+        var req = new CreateApiKeyRequest(formLabel.Trim(), selectedCompanyIds.ToList(), selectedScopes.ToList(), expiry);
+        var resp = await Api.PostAsync<ApiKeySecretDto, CreateApiKeyRequest>("api/admin/api-keys", req);
+        if (resp?.Success == true && resp.Data is not null)
+        {
+            showGenerate = false;
+            secret = resp.Data; // copy-once modal
+        }
+        else { genError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private void CloseSecret() => secret = null;
+
+    private async Task CopyText(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Info, Summary = "Copied to clipboard" });
+        }
+        catch
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Copy failed", Detail = "Select and copy manually." });
+        }
+    }
+
+    private static string ScopeShort(string scope) =>
+        scope.StartsWith("Integration.Inbound.", StringComparison.Ordinal) ? scope["Integration.Inbound.".Length..] : scope;
+}

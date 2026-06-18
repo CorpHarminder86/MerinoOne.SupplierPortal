@@ -45,11 +45,10 @@ builder.Host.UseSerilog((ctx, lc) => lc
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddOpenApi(options =>
+// Shared Bearer + X-APIKey security-scheme transformer — applied to BOTH the default "v1" document
+// and the filtered "integration" document below, so Scalar surfaces the JWT + apiKey auth inputs.
+static void AddMerinoSecuritySchemes(Microsoft.AspNetCore.OpenApi.OpenApiOptions options)
 {
-    // Inject a Bearer security scheme into the OpenAPI doc so Scalar surfaces a JWT
-    // "Authorize" input. Without this transformer the doc has no security definitions
-    // and the Scalar auth panel renders empty.
     options.AddDocumentTransformer((document, context, ct) =>
     {
         document.Components ??= new Microsoft.OpenApi.OpenApiComponents();
@@ -80,6 +79,18 @@ builder.Services.AddOpenApi(options =>
         });
         return Task.CompletedTask;
     });
+}
+
+// Default document — every endpoint (unchanged behaviour). Served at /openapi/v1.json.
+builder.Services.AddOpenApi(AddMerinoSecuritySchemes);
+
+// Second, FILTERED document: only the external inbound integration surface (api/integration/inbound/*).
+// Served at /openapi/integration.json and rendered by the partner Scalar UI at /integration-docs.
+builder.Services.AddOpenApi("integration", options =>
+{
+    AddMerinoSecuritySchemes(options);
+    options.ShouldInclude = apiDesc =>
+        (apiDesc.RelativePath ?? string.Empty).StartsWith("api/integration/inbound", StringComparison.OrdinalIgnoreCase);
 });
 
 builder.Services.AddHttpContextAccessor();
@@ -172,6 +183,16 @@ if (app.Environment.IsDevelopment())
         var ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await ctx.Database.MigrateAsync();
     }
+
+    // Fail fast if the developer-docs catalog drifts from the authoritative inbound scope list — every
+    // documented endpoint must map to a real Integration.Inbound.* scope a key can be minted with, and vice-versa.
+    var catalogScopes = MerinoOne.SupplierPortal.Controllers.IntegrationCatalog.All.Select(e => e.Scope).ToHashSet();
+    var allowedScopes = MerinoOne.SupplierPortal.Application.Integration.ApiKeys.ApiKeyScopes.Allowed.ToHashSet();
+    if (!catalogScopes.SetEquals(allowedScopes))
+        throw new InvalidOperationException(
+            "IntegrationCatalog scopes are out of sync with ApiKeyScopes.Allowed. " +
+            $"Catalog-only: [{string.Join(", ", catalogScopes.Except(allowedScopes))}]; " +
+            $"Allowed-only: [{string.Join(", ", allowedScopes.Except(catalogScopes))}].");
 }
 
 // OpenAPI + Scalar exposed in every environment — protected endpoints still require a
@@ -187,6 +208,18 @@ if (app.Configuration.GetValue("Scalar:Enabled", true))
         options.PersistentAuthentication = true;
         options.DefaultHttpClient = new(ScalarTarget.Shell, ScalarClient.Curl);
         options.HideClientButton = false;
+    });
+
+    // Partner-facing reference — ONLY the inbound integration endpoints, X-APIKey preferred. Linked from
+    // the in-app /integrations/docs page; bound to the filtered "integration" OpenAPI document.
+    app.MapScalarApiReference("/integration-docs", options =>
+    {
+        options.Title = "MerinoOne Integration API";
+        options.AddDocument("integration");
+        options.OpenApiRoutePattern = "/openapi/{documentName}.json";
+        options.AddPreferredSecuritySchemes("ApiKey");
+        options.PersistentAuthentication = true;
+        options.DefaultHttpClient = new(ScalarTarget.Shell, ScalarClient.Curl);
     });
 }
 
