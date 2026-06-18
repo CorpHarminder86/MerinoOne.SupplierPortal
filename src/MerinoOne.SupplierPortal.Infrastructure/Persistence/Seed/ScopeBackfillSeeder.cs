@@ -167,6 +167,31 @@ public static class ScopeBackfillSeeder
                 .SetProperty(d => d.TenantId, tenantId)
                 .SetProperty(d => d.TenantEntityId, company2000), ct);
 
+        // Item is now company-scoped (promoted). Stamp legacy null-scope items to company 2000 so they
+        // remain visible once Scope.FiltersEnabled flips. (Group/Unit links stay null for legacy rows.)
+        await ctx.Items.IgnoreQueryFilters()
+            .Where(i => i.TenantId == null)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(i => i.TenantId, tenantId)
+                .SetProperty(i => i.TenantEntityId, company2000), ct);
+
+        // Tenant-scoped reference masters (Currency/Country/State/City/PostalCode + Unit/ItemGroup) — tag any
+        // null-tenant rows to Merino. Unit/ItemGroup are company-scoped; also stamp company 2000.
+        await ctx.Currencies.IgnoreQueryFilters().Where(x => x.TenantId == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.TenantId, tenantId), ct);
+        await ctx.Countries.IgnoreQueryFilters().Where(x => x.TenantId == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.TenantId, tenantId), ct);
+        await ctx.States.IgnoreQueryFilters().Where(x => x.TenantId == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.TenantId, tenantId), ct);
+        await ctx.Cities.IgnoreQueryFilters().Where(x => x.TenantId == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.TenantId, tenantId), ct);
+        await ctx.PostalCodes.IgnoreQueryFilters().Where(x => x.TenantId == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.TenantId, tenantId), ct);
+        await ctx.ItemGroups.IgnoreQueryFilters().Where(x => x.TenantId == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.TenantId, tenantId).SetProperty(x => x.TenantEntityId, company2000), ct);
+        await ctx.Units.IgnoreQueryFilters().Where(x => x.TenantId == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.TenantId, tenantId).SetProperty(x => x.TenantEntityId, company2000), ct);
+
         await ctx.Suppliers.IgnoreQueryFilters()
             .Where(s => s.TenantId == null)
             .ExecuteUpdateAsync(set => set

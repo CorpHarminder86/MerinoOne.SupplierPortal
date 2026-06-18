@@ -1,0 +1,157 @@
+@* Reusable geo typeahead. Data-source agnostic: the parent supplies a Search(query, skip) delegate (which may
+   hit the authenticated api/masters/geo/* or the anonymous api/public/geo/* endpoints). Typing raises
+   ValueChanged (free-text snapshot, id cleared by the parent); committing a suggestion — click, Enter or Tab —
+   raises OnSelected (id + name). Keyboard: ArrowUp/Down move the highlight, Enter/Tab commit, Escape closes.
+   Paged: when a full page comes back a "Load more…" row appends the next page (also via ArrowDown past the end). *@
+
+<div style="position:relative;">
+    <input class="rz-textbox @CssClass" style="@Style" placeholder="@Placeholder" value="@query"
+           @oninput="OnInput" @onkeydown="OnKeyDown" @onfocus="OnFocus" @onfocusout="OnBlur"
+           disabled="@Disabled" autocomplete="off" />
+    @if (open && suggestions.Count > 0)
+    {
+        <div style="position:absolute;z-index:60;left:0;right:0;top:100%;background:#fff;border:1px solid var(--mer-ink-200);border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.12);max-height:240px;overflow:auto;">
+            @for (int i = 0; i < suggestions.Count; i++)
+            {
+                var idx = i;
+                var s = suggestions[idx];
+                <div style="padding:7px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--mer-ink-50);background:@(idx == _active ? "var(--mer-ink-100)" : "#fff");"
+                     @onmousedown:preventDefault="true" @onmousedown="() => Select(s)"
+                     @onmouseenter="() => _active = idx">
+                    <span style="font-family:Inter,monospace;color:var(--mer-ink-500);">@s.Code</span> — @s.Name
+                </div>
+            }
+            @if (_canMore)
+            {
+                <div style="padding:7px 10px;font-size:12px;text-align:center;color:var(--mer-blue);cursor:pointer;font-weight:600;background:var(--mer-ink-50);"
+                     @onmousedown:preventDefault="true" @onmousedown="LoadMore">
+                    @(_loadingMore ? "Loading…" : "Load more…")
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Placeholder { get; set; } = "";
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    /// <summary>Fetch a page of matches: (query, skip) → results. The component pages by passing skip = items already shown.</summary>
+    [Parameter] public Func<string, int, Task<List<GeoLookupDto>>>? Search { get; set; }
+    [Parameter] public EventCallback<GeoLookupDto> OnSelected { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    /// <summary>When true the selected item's Code (not Name) becomes the field text — used for postal codes.</summary>
+    [Parameter] public bool UseCode { get; set; }
+    [Parameter] public string CssClass { get; set; } = "";
+    [Parameter] public string Style { get; set; } = "width:100%;padding:6px 10px;font-size:12px;";
+    /// <summary>Server page size — MUST match the server's GeoLookup.Cap (currently 20). When a fetch returns at
+    /// least this many rows we assume more pages exist and show the "Load more" affordance.</summary>
+    [Parameter] public int PageSize { get; set; } = 20;
+
+    private string query = "";
+    private List<GeoLookupDto> suggestions = new();
+    private bool open;
+    private int _active = -1;
+    private bool _focused;
+    private bool _canMore;
+    private bool _loadingMore;
+    private string _lastQuery = "";
+    private string? _lastValue;
+    private int seq;
+
+    protected override void OnParametersSet()
+    {
+        // Force-sync the textbox to a parent-driven Value change (external reset, dependent-field clear, PIN
+        // reverse-fill) — even while focused. Keystrokes also flow back into Value via ValueChanged, so for
+        // in-progress typing this is a no-op (Value already equals query) and never clobbers it. A programmatic
+        // change while the box is NOT focused also collapses any stale dropdown.
+        if (!string.Equals(Value, _lastValue, StringComparison.Ordinal))
+        {
+            _lastValue = Value;
+            query = Value ?? "";
+            if (!_focused) { open = false; _active = -1; suggestions = new(); }
+        }
+    }
+
+    private void OnFocus() => _focused = true;
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        query = e.Value?.ToString() ?? "";
+        await ValueChanged.InvokeAsync(query);     // free text; parent clears the bound id
+        if (Search is null || Disabled) { open = false; return; }
+
+        var mine = ++seq;
+        await Task.Delay(250);                      // debounce
+        if (mine != seq) return;                    // superseded by a newer keystroke
+
+        _lastQuery = query;
+        suggestions = string.IsNullOrWhiteSpace(query) ? new() : await Search(query, 0);
+        _canMore = suggestions.Count >= PageSize;
+        _active = suggestions.Count > 0 ? 0 : -1;
+        open = suggestions.Count > 0;
+        StateHasChanged();
+    }
+
+    private async Task LoadMore()
+    {
+        if (!_canMore || _loadingMore || Search is null) return;
+        var mine = ++seq;                 // share the debounce token so a newer keystroke supersedes this page
+        var q = _lastQuery;
+        _loadingMore = true;
+        StateHasChanged();
+        var next = await Search(q, suggestions.Count);
+        if (mine != seq) { _loadingMore = false; return; }   // superseded by a keystroke / another load — drop the stale page
+        suggestions.AddRange(next);
+        _canMore = next.Count >= PageSize;
+        _loadingMore = false;
+        open = suggestions.Count > 0;
+        StateHasChanged();
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (!open || suggestions.Count == 0)
+        {
+            if (e.Key == "ArrowDown" && suggestions.Count > 0) { open = true; _active = 0; }
+            return;
+        }
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                if (_active >= suggestions.Count - 1 && _canMore) await LoadMore();
+                _active = Math.Min(_active + 1, suggestions.Count - 1);
+                break;
+            case "ArrowUp":
+                _active = Math.Max(_active - 1, 0);
+                break;
+            case "Enter":
+            case "Tab":
+                if (_active >= 0 && _active < suggestions.Count) await Select(suggestions[_active]);
+                break;
+            case "Escape":
+                open = false;
+                break;
+        }
+    }
+
+    private async Task Select(GeoLookupDto s)
+    {
+        query = UseCode ? s.Code : s.Name;
+        _lastValue = query;     // we set the parent Value to this via OnSelected; pre-record so OnParametersSet no-ops
+        open = false;
+        _active = -1;
+        _focused = false;       // Enter-commit does NOT blur the input; clear the latch so later resets re-sync
+        suggestions = new();
+        _canMore = false;
+        await OnSelected.InvokeAsync(s);
+    }
+
+    private async Task OnBlur()
+    {
+        await Task.Delay(150);                      // let a suggestion mousedown land first
+        _focused = false;
+        open = false;
+        StateHasChanged();
+    }
+}

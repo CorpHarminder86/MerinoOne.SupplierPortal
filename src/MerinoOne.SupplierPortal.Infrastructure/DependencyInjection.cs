@@ -44,7 +44,23 @@ public static class DependencyInjection
         // Mock integration services (Stage 1)
         services.AddScoped<INicValidationService, MockNicValidationService>();
         services.AddScoped<IDocumentValidationService, MockDocumentValidationService>();
-        services.AddScoped<IInforIntegrationService, MockInforIntegrationService>();
+
+        // ── Infor CloudSuite (ION API) ────────────────────────────────────────────────────────
+        // Shared, stateless OAuth2 token client — used by both the Settings "Test connection" path
+        // and the live outbound integration's token provider.
+        services.AddSingleton<InforOAuthTokenClient>();
+        services.AddScoped<IInforConnectionTester, InforConnectionTester>();
+        // Per-tenant connection reader (decrypts secrets) + cached token provider.
+        services.AddScoped<IInforConnectionProvider, InforConnectionProvider>();
+        services.AddScoped<IInforTokenProvider, InforTokenProvider>();
+
+        // Outbound integration implementation — swap mock↔live via Integration:Mode (mirrors Email:Mode).
+        // Default "Mock" so existing behaviour is unchanged until an operator opts in to "Live".
+        var inforMode = cfg["Integration:Mode"] ?? "Mock";
+        if (inforMode.Equals("Live", StringComparison.OrdinalIgnoreCase))
+            services.AddScoped<IInforIntegrationService, LiveInforIntegrationService>();
+        else
+            services.AddScoped<IInforIntegrationService, MockInforIntegrationService>();
 
         // File storage (Mock-then-Live). Stage 1 = local disk under {ContentRoot}/uploads.
         // Stage 2 will swap to Azure Blob behind the same IFileStorageService interface.

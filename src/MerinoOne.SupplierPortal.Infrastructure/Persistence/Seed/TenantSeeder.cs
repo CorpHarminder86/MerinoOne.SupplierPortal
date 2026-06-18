@@ -35,6 +35,22 @@ public static class TenantSeeder
         ("5000", new[] { "5000", "6000" }),
     };
 
+    // Inbound endpoint EntityName → route segment under /api/integration/inbound. Covers both the
+    // company-scoped (SharedEndpoint) and tenant-scoped (TenantInboundEntity) masters.
+    private static readonly (string EntityName, string Route)[] InboundRoutes =
+    {
+        (nameof(SharedEndpoint.PaymentTerm),       "payment-terms"),
+        (nameof(SharedEndpoint.DeliveryTerm),      "delivery-terms"),
+        (nameof(SharedEndpoint.Unit),              "units"),
+        (nameof(SharedEndpoint.ItemGroup),         "item-groups"),
+        (nameof(SharedEndpoint.Item),              "items"),
+        (nameof(TenantInboundEntity.Currency),     "currencies"),
+        (nameof(TenantInboundEntity.Country),      "countries"),
+        (nameof(TenantInboundEntity.State),        "states"),
+        (nameof(TenantInboundEntity.City),         "cities"),
+        (nameof(TenantInboundEntity.PostalCode),   "postal-codes"),
+    };
+
     public static Guid TenantId => DeterministicId.From("Tenant", TenantName);
     public static Guid CompanyId(string code) => DeterministicId.From("TenantEntity", $"{TenantName}|{code}");
 
@@ -160,7 +176,13 @@ public static class TenantSeeder
 
     private static async Task SeedShareGroupsAsync(AppDbContext ctx, Guid tenantId, DateTime now, CancellationToken ct)
     {
-        var endpoints = new[] { SharedEndpoint.PaymentTerm, SharedEndpoint.DeliveryTerm };
+        // Company-scoped sharing participants (PaymentTerm/DeliveryTerm + the new inventory masters).
+        // Tenant-scoped masters (Currency/Country/State/City/PostalCode) do NOT share company-wise.
+        var endpoints = new[]
+        {
+            SharedEndpoint.PaymentTerm, SharedEndpoint.DeliveryTerm,
+            SharedEndpoint.Unit, SharedEndpoint.ItemGroup, SharedEndpoint.Item
+        };
 
         var existingGroupIds = await ctx.CompanyShareGroups.IgnoreQueryFilters()
             .Where(g => g.TenantId == tenantId)
@@ -212,14 +234,12 @@ public static class TenantSeeder
 
     private static async Task SeedInboundEndpointMapsAsync(AppDbContext ctx, Guid tenantId, DateTime now, CancellationToken ct)
     {
-        var entityNames = new[] { nameof(SharedEndpoint.PaymentTerm), nameof(SharedEndpoint.DeliveryTerm) };
-
         var existing = await ctx.InforEndpointMaps.IgnoreQueryFilters()
             .Where(m => m.TenantId == tenantId && m.Direction == SyncDirection.Inbound)
             .Select(m => m.EntityName)
             .ToListAsync(ct);
 
-        foreach (var entityName in entityNames)
+        foreach (var (entityName, route) in InboundRoutes)
         {
             if (existing.Contains(entityName)) continue;
             ctx.InforEndpointMaps.Add(new InforEndpointMap
@@ -228,7 +248,7 @@ public static class TenantSeeder
                 TenantId = tenantId,
                 EntityName = entityName,
                 Direction = SyncDirection.Inbound,
-                InforEndpointUrl = $"/api/integration/inbound/{(entityName == nameof(SharedEndpoint.PaymentTerm) ? "payment-terms" : "delivery-terms")}",
+                InforEndpointUrl = $"/api/integration/inbound/{route}",
                 BodName = $"Sync{entityName}",
                 IsEnabled = true,
                 ReceivedCount = 0,

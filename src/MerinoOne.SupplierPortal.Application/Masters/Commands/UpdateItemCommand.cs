@@ -14,7 +14,6 @@ public class UpdateItemCommandValidator : AbstractValidator<UpdateItemCommand>
     public UpdateItemCommandValidator()
     {
         RuleFor(x => x.Body.Description).NotEmpty().MaximumLength(500);
-        RuleFor(x => x.Body.Uom).NotEmpty().MaximumLength(20);
         RuleFor(x => x.Body.HsnCode).MaximumLength(20);
     }
 }
@@ -30,13 +29,23 @@ public class UpdateItemCommandHandler : IRequestHandler<UpdateItemCommand, ItemD
         var i = await _db.Items.FirstOrDefaultAsync(x => x.Id == request.Id, ct)
                 ?? throw new NotFoundException("Item", request.Id);
 
+        string? groupCode = null, unitCode = null;
+        if (request.Body.ItemGroupId is Guid gid)
+            groupCode = await _db.ItemGroups.Where(g => g.Id == gid).Select(g => g.Code).FirstOrDefaultAsync(ct)
+                ?? throw new NotFoundException("ItemGroup", gid);
+        if (request.Body.UnitId is Guid uid)
+            unitCode = await _db.Units.Where(u => u.Id == uid).Select(u => u.Code).FirstOrDefaultAsync(ct)
+                ?? throw new NotFoundException("Unit", uid);
+
         i.Description = request.Body.Description.Trim();
-        i.Uom = request.Body.Uom.Trim();
         i.HsnCode = string.IsNullOrWhiteSpace(request.Body.HsnCode) ? null : request.Body.HsnCode.Trim();
+        i.ItemGroupId = request.Body.ItemGroupId;
+        i.UnitId = request.Body.UnitId;
         i.IsActive = request.Body.IsActive;
         i.UpdatedBy = _user.UserCode;
         i.UpdatedOn = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        return new ItemDto(i.Id, i.Seq, i.Code, i.Description, i.Uom, i.HsnCode, i.IsActive, i.CreatedOn);
+        return new ItemDto(i.Id, i.Seq, i.Code, i.Description, i.HsnCode,
+            i.ItemGroupId, groupCode, i.UnitId, unitCode, i.IsActive, i.CreatedOn);
     }
 }

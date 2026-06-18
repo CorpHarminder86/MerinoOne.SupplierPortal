@@ -48,10 +48,16 @@ public record SupplierAddressInput(
     string AddressType,
     string Line1,
     string? Line2,
+    string? Area,
     string City,
     string State,
     string PostalCode,
-    string? Country);
+    string? Country,
+    // Optional geo-master links captured via the address autocomplete (snapshot strings stay authoritative).
+    Guid? CountryId = null,
+    Guid? StateId = null,
+    Guid? CityId = null,
+    Guid? PostalCodeId = null);
 
 public record SupplierContactInput(
     string Name,

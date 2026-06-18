@@ -13,11 +13,23 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
         b.ApplyBaseEntityConvention("Item", "inv", "item");
         b.Property(x => x.Code).HasColumnName("code").HasMaxLength(50).IsRequired();
         b.Property(x => x.Description).HasColumnName("description").HasMaxLength(500).IsRequired();
-        b.Property(x => x.Uom).HasColumnName("uom").HasMaxLength(20).IsRequired().HasDefaultValue("EA");
         b.Property(x => x.HsnCode).HasColumnName("hsnCode").HasMaxLength(20);
+        b.Property(x => x.ItemGroupId).HasColumnName("itemGroupId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.UnitId).HasColumnName("unitId").HasColumnType("uniqueidentifier");
         b.Property(x => x.IsActive).HasColumnName("isActive").HasDefaultValue(true);
 
-        b.HasIndex(x => x.Code).HasDatabaseName("UQ_Item_code").IsUnique();
+        b.HasOne(x => x.ItemGroup).WithMany().HasForeignKey(x => x.ItemGroupId)
+            .HasConstraintName("FK_Item_ItemGroup_itemGroupId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId)
+            .HasConstraintName("FK_Item_Unit_unitId").OnDelete(DeleteBehavior.Restrict);
+
+        // Promoted to company-scoped: per-source uniqueness (replaces the old global UQ_Item_code).
+        b.HasIndex(x => new { x.TenantEntityId, x.Code })
+            .HasDatabaseName("UQ_Item_company_code").IsUnique()
+            .HasFilter("[tenantEntityId] IS NOT NULL AND [isDeleted] = 0");
+        b.HasIndex(x => new { x.TenantId, x.TenantEntityId }).HasDatabaseName("IX_Item_tenant_company");
+        b.HasIndex(x => x.ItemGroupId).HasDatabaseName("IX_Item_itemGroupId");
+        b.HasIndex(x => x.UnitId).HasDatabaseName("IX_Item_unitId");
     }
 }
 

@@ -187,25 +187,38 @@ else
                             <option value="Other">Other</option>
                         </select>
                         <div>
-                            <input class="rz-textbox @(InvalidClass(kPostal))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Postal code *" @bind="a.PostalCode" @bind:after="() => Clear(kPostal)" />
-                            @ErrChip(kPostal)
+                            <GeoAutocomplete Placeholder="Country *" Value="@a.Country" CssClass="@InvalidClass(kCountry)"
+                                Search="@((q, sk) => SearchCountries(q, sk))"
+                                ValueChanged="@(v => { a.Country = v; a.CountryId = null; a.StateId = null; a.CityId = null; a.PostalCodeId = null; a.State = string.Empty; a.City = string.Empty; a.PostalCode = string.Empty; a.Area = null; Clear(kCountry); })"
+                                OnSelected="@(g => { a.Country = g.Name; a.CountryId = g.Id; a.StateId = null; a.CityId = null; a.PostalCodeId = null; a.State = string.Empty; a.City = string.Empty; a.PostalCode = string.Empty; a.Area = null; Clear(kCountry); })" />
+                            @ErrChip(kCountry)
                         </div>
                         <div style="grid-column:1 / span 2;">
                             <input class="rz-textbox @(InvalidClass(kLine1))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Line 1 *" @bind="a.Line1" @bind:after="() => Clear(kLine1)" />
                             @ErrChip(kLine1)
                         </div>
                         <input class="rz-textbox" style="padding:6px 10px;font-size:12px;grid-column:1 / span 2;" placeholder="Line 2" @bind="a.Line2" />
-                        <div>
-                            <input class="rz-textbox @(InvalidClass(kCity))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="City *" @bind="a.City" @bind:after="() => Clear(kCity)" />
-                            @ErrChip(kCity)
+                        <div style="grid-column:1 / span 2;">
+                            <GeoAutocomplete Placeholder="Postal code * — pick a PIN to auto-fill area, city, state" Value="@a.PostalCode" UseCode="true" Disabled="@(a.CountryId is null)" CssClass="@InvalidClass(kPostal)"
+                                Search="@((q, sk) => SearchPostals(q, sk, a))"
+                                ValueChanged="@(v => { a.PostalCode = v; a.PostalCodeId = null; a.StateId = null; a.CityId = null; a.State = string.Empty; a.City = string.Empty; a.Area = null; Clear(kPostal); })"
+                                OnSelected="@(g => OnPostalSelected(idx, a, g))" />
+                            @ErrChip(kPostal)
                         </div>
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;grid-column:1 / span 2;" placeholder="Area / locality (auto-filled from PIN)" @bind="a.Area" />
                         <div>
-                            <input class="rz-textbox @(InvalidClass(kState))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="State *" @bind="a.State" @bind:after="() => Clear(kState)" />
+                            <GeoAutocomplete Placeholder="State *" Value="@a.State" Disabled="@(a.CountryId is null || a.PostalCodeId is not null)" CssClass="@InvalidClass(kState)"
+                                Search="@((q, sk) => SearchStates(q, sk, a))"
+                                ValueChanged="@(v => { a.State = v; a.StateId = null; Clear(kState); })"
+                                OnSelected="@(g => { a.State = g.Name; a.StateId = g.Id; a.CityId = null; Clear(kState); })" />
                             @ErrChip(kState)
                         </div>
-                        <div style="grid-column:1 / span 2;">
-                            <input class="rz-textbox @(InvalidClass(kCountry))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Country *" @bind="a.Country" @bind:after="() => Clear(kCountry)" />
-                            @ErrChip(kCountry)
+                        <div>
+                            <GeoAutocomplete Placeholder="City *" Value="@a.City" Disabled="@(a.CountryId is null || a.PostalCodeId is not null)" CssClass="@InvalidClass(kCity)"
+                                Search="@((q, sk) => SearchCities(q, sk, a))"
+                                ValueChanged="@(v => { a.City = v; a.CityId = null; Clear(kCity); })"
+                                OnSelected="@(g => { a.City = g.Name; a.CityId = g.Id; Clear(kCity); })" />
+                            @ErrChip(kCity)
                         </div>
                     </div>
                 </div>
@@ -338,6 +351,7 @@ else
 
     private List<AddressRow> addresses = new();
     private List<ContactRow> contacts = new();
+    private GeoLookupDto? _defaultCountry;   // tenant's "India" row, resolved once for the address cascade default
     // DocSlot type lives in the shared DocumentUploader component; we reuse it via the type alias below.
     private List<DocumentUploader.DocSlot> DocSlots = new();
 
@@ -460,6 +474,7 @@ else
                 legalName = invite.LegalName;
                 addresses.Add(new AddressRow());
                 contacts.Add(new ContactRow { Email = invite.Email, IsPrimary = true });
+                await ResolveDefaultCountry();
             }
         }
         catch
@@ -629,7 +644,12 @@ else
         _ => ""
     };
 
-    private void AddAddress() => addresses.Add(new AddressRow { AddressType = "Billing" });
+    private void AddAddress()
+    {
+        var row = new AddressRow { AddressType = "Billing" };
+        if (_defaultCountry is not null) { row.Country = _defaultCountry.Name; row.CountryId = _defaultCountry.Id; }
+        addresses.Add(row);
+    }
     private void AddContact() => contacts.Add(new ContactRow());
 
     private void SetPrimary(int idx, bool on)
@@ -666,10 +686,15 @@ else
                 addressType = a.AddressType,
                 line1 = a.Line1.Trim(),
                 line2 = string.IsNullOrWhiteSpace(a.Line2) ? null : a.Line2.Trim(),
+                area = string.IsNullOrWhiteSpace(a.Area) ? null : a.Area.Trim(),
                 city = a.City.Trim(),
                 state = a.State.Trim(),
                 postalCode = a.PostalCode.Trim(),
-                country = a.Country.Trim()
+                country = a.Country.Trim(),
+                countryId = a.CountryId,
+                stateId = a.StateId,
+                cityId = a.CityId,
+                postalCodeId = a.PostalCodeId
             }).ToList(),
             contacts = contacts.Select(c => new
             {
@@ -709,15 +734,113 @@ else
         busy = false;
     }
 
+    // ─── Geo autocomplete (anonymous, scoped to the invite's tenant via the token) ───────────
+    // Postal search is intentionally filtered by country only: the PIN reverse-fills state/city, so filtering
+    // it by an already-filled state/city would over-narrow the next search (the "stops working" bug).
+    private Task<List<GeoLookupDto>> SearchCountries(string q, int skip) => Geo("countries", q, null, skip);
+    private Task<List<GeoLookupDto>> SearchStates(string q, int skip, AddressRow a) => Geo("states", q, $"countryId={a.CountryId}", skip);
+    private Task<List<GeoLookupDto>> SearchCities(string q, int skip, AddressRow a) =>
+        Geo("cities", q, $"countryId={a.CountryId}" + (a.StateId is Guid s ? $"&stateId={s}" : ""), skip);
+    private Task<List<GeoLookupDto>> SearchPostals(string q, int skip, AddressRow a) =>
+        Geo("postal-codes", q, $"countryId={a.CountryId}", skip);
+
+    private async Task<List<GeoLookupDto>> Geo(string seg, string q, string? extra, int skip)
+    {
+        var url = $"api/public/geo/{seg}?token={Uri.EscapeDataString(Token)}";
+        if (!string.IsNullOrEmpty(extra)) url += "&" + extra;
+        if (!string.IsNullOrWhiteSpace(q)) url += "&search=" + Uri.EscapeDataString(q.Trim());
+        if (skip > 0) url += "&skip=" + skip;
+        var resp = await Api.GetAsync<List<GeoLookupDto>>(url);
+        return resp?.Data ?? new();
+    }
+
+    // Resolve the tenant's "India" country once so the default address has a CountryId from the start — the
+    // state/city/postal cascade is gated on CountryId, so without this the user must re-pick India manually.
+    private async Task ResolveDefaultCountry()
+    {
+        try
+        {
+            var list = await SearchCountries("India", 0);
+            _defaultCountry = list.FirstOrDefault(c => c.Code == "IN")
+                           ?? list.FirstOrDefault(c => string.Equals(c.Name, "India", StringComparison.OrdinalIgnoreCase))
+                           ?? list.FirstOrDefault();
+            if (_defaultCountry is null)
+            {
+                // Tenant has no resolvable "India" row — don't leave "India" text sitting on a null CountryId (a dead
+                // cascade); blank it so the user is forced to pick a real country (which sets CountryId).
+                foreach (var a in addresses)
+                    if (a.CountryId is null && string.Equals(a.Country, "India", StringComparison.OrdinalIgnoreCase))
+                        a.Country = string.Empty;
+                StateHasChanged();
+                return;
+            }
+            foreach (var a in addresses)
+            {
+                if (a.CountryId is null && (string.IsNullOrWhiteSpace(a.Country) || string.Equals(a.Country, "India", StringComparison.OrdinalIgnoreCase)))
+                {
+                    a.Country = _defaultCountry.Name;
+                    a.CountryId = _defaultCountry.Id;
+                }
+            }
+            StateHasChanged();
+        }
+        catch { /* leave the default text; the user can still pick India manually */ }
+    }
+
+    // Reverse-cascade: picking a PIN fills area/city/state/country from the postal-code master (PIN = source
+    // of truth — city/state inputs lock while a PIN is selected; clearing/retyping the PIN re-enables them).
+    private async Task OnPostalSelected(int idx, AddressRow a, GeoLookupDto g)
+    {
+        a.PostalCode = g.Code;
+        a.PostalCodeId = g.Id;
+        Clear(AddrKey(idx, "postal"));
+
+        var detail = await GetPostalDetail(g.Id);
+        if (detail is null) return;
+
+        if (!string.IsNullOrWhiteSpace(detail.Area)) a.Area = detail.Area;
+        if (detail.CountryId is Guid cid)
+        {
+            a.CountryId = cid;
+            if (!string.IsNullOrWhiteSpace(detail.CountryName)) a.Country = detail.CountryName!;
+            Clear(AddrKey(idx, "country"));
+        }
+        if (detail.StateId is Guid sid)
+        {
+            a.StateId = sid;
+            if (!string.IsNullOrWhiteSpace(detail.StateName)) a.State = detail.StateName!;
+            Clear(AddrKey(idx, "state"));
+        }
+        if (detail.CityId is Guid ctid)
+        {
+            a.CityId = ctid;
+            if (!string.IsNullOrWhiteSpace(detail.CityName)) a.City = detail.CityName!;
+            Clear(AddrKey(idx, "city"));
+        }
+        StateHasChanged();
+    }
+
+    private async Task<PostalCodeDetailDto?> GetPostalDetail(Guid id)
+    {
+        var url = $"api/public/geo/postal-codes/{id}/detail?token={Uri.EscapeDataString(Token)}";
+        var resp = await Api.GetAsync<PostalCodeDetailDto>(url);
+        return resp?.Data;
+    }
+
     private class AddressRow
     {
         public string AddressType { get; set; } = "Registered";
         public string Line1 { get; set; } = string.Empty;
         public string? Line2 { get; set; }
+        public string? Area { get; set; }
         public string City { get; set; } = string.Empty;
         public string State { get; set; } = string.Empty;
         public string PostalCode { get; set; } = string.Empty;
         public string Country { get; set; } = "India";
+        public Guid? CountryId { get; set; }
+        public Guid? StateId { get; set; }
+        public Guid? CityId { get; set; }
+        public Guid? PostalCodeId { get; set; }
     }
 
     private class ContactRow

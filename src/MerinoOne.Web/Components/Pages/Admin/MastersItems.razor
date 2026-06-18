@@ -42,12 +42,12 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.5fr 90px 120px 90px 110px; --tl-min-width: 900px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 150px 1.4fr 110px 110px 90px 100px; --tl-min-width: 900px;">
             <div class="tlg-header">
                 <div class="tlg-col">Code</div>
                 <div class="tlg-col">Description</div>
-                <div class="tlg-col">UoM</div>
-                <div class="tlg-col">HSN</div>
+                <div class="tlg-col">Unit</div>
+                <div class="tlg-col">Group</div>
                 <div class="tlg-col">Active</div>
                 <div class="tlg-col tlg-col--actions">Actions</div>
             </div>
@@ -56,8 +56,8 @@
                 <div class="tlg-row">
                     <div class="tlg-col tlg-code">@r.Code</div>
                     <div class="tlg-col tlg-desc">@r.Description</div>
-                    <div class="tlg-col">@r.Uom</div>
-                    <div class="tlg-col tlg-code">@r.HsnCode</div>
+                    <div class="tlg-col tlg-code">@r.UnitCode</div>
+                    <div class="tlg-col tlg-code">@r.ItemGroupCode</div>
                     <div class="tlg-col"><span class="tlg-status @(r.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(r.IsActive ? "Yes" : "No")</span></div>
                     <div class="tlg-col tlg-col--actions">
                         @if (Token.HasPermission("Settings.Write"))
@@ -103,12 +103,28 @@
                         <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formDescription" />
                     </div>
                     <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">UoM *</label>
-                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formUom" placeholder="KG / PCS / MTR" />
-                    </div>
-                    <div>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">HSN code</label>
                         <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formHsnCode" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Unit</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="formUnitId">
+                            <option value="">— none —</option>
+                            @foreach (var u in units)
+                            {
+                                <option value="@u.Id">@u.Code — @u.Description</option>
+                            }
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Item group</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="formItemGroupId">
+                            <option value="">— none —</option>
+                            @foreach (var g in groups)
+                            {
+                                <option value="@g.Id">@g.Code — @g.Description</option>
+                            }
+                        </select>
                     </div>
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;grid-column:1 / span 2;">
                         <input type="checkbox" @bind="formIsActive" />
@@ -133,19 +149,29 @@
 @code {
     private List<ItemDto>? all;
     private List<ItemDto>? rows;
+    private List<UnitDto> units = new();
+    private List<ItemGroupDto> groups = new();
     private bool loading = true;
     private bool busy;
     private bool showDialog;
     private Guid? editingId;
     private string formCode = string.Empty;
     private string formDescription = string.Empty;
-    private string formUom = string.Empty;
     private string? formHsnCode;
+    private string formUnitId = string.Empty;
+    private string formItemGroupId = string.Empty;
     private bool formIsActive = true;
     private string formError = string.Empty;
     private string search = string.Empty;
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        var u = await Api.GetAsync<List<UnitDto>>("api/masters/units?isActive=true");
+        units = u?.Data ?? new();
+        var g = await Api.GetAsync<List<ItemGroupDto>>("api/masters/item-groups?isActive=true");
+        groups = g?.Data ?? new();
+        await Load();
+    }
 
     private async Task Load()
     {
@@ -174,8 +200,9 @@
         editingId = null;
         formCode = string.Empty;
         formDescription = string.Empty;
-        formUom = string.Empty;
         formHsnCode = null;
+        formUnitId = string.Empty;
+        formItemGroupId = string.Empty;
         formIsActive = true;
         formError = string.Empty;
         showDialog = true;
@@ -186,8 +213,9 @@
         editingId = r.Id;
         formCode = r.Code;
         formDescription = r.Description;
-        formUom = r.Uom;
         formHsnCode = r.HsnCode;
+        formUnitId = r.UnitId?.ToString() ?? string.Empty;
+        formItemGroupId = r.ItemGroupId?.ToString() ?? string.Empty;
         formIsActive = r.IsActive;
         formError = string.Empty;
         showDialog = true;
@@ -197,18 +225,19 @@
     {
         if (!editingId.HasValue && string.IsNullOrWhiteSpace(formCode)) { formError = "Code required."; return; }
         if (string.IsNullOrWhiteSpace(formDescription)) { formError = "Description required."; return; }
-        if (string.IsNullOrWhiteSpace(formUom)) { formError = "UoM required."; return; }
         busy = true;
         ApiResult<ItemDto>? resp;
         var hsn = string.IsNullOrWhiteSpace(formHsnCode) ? null : formHsnCode.Trim();
+        Guid? unitId = Guid.TryParse(formUnitId, out var ug) ? ug : null;
+        Guid? groupId = Guid.TryParse(formItemGroupId, out var gg) ? gg : null;
         if (editingId.HasValue)
         {
-            var req = new UpdateItemRequest(formDescription.Trim(), formUom.Trim(), hsn, formIsActive);
+            var req = new UpdateItemRequest(formDescription.Trim(), hsn, groupId, unitId, formIsActive);
             resp = await Api.PutAsync<ItemDto, UpdateItemRequest>($"api/masters/items/{editingId}", req);
         }
         else
         {
-            var req = new CreateItemRequest(formCode.Trim(), formDescription.Trim(), formUom.Trim(), hsn, formIsActive);
+            var req = new CreateItemRequest(formCode.Trim(), formDescription.Trim(), hsn, groupId, unitId, formIsActive);
             resp = await Api.PostAsync<ItemDto, CreateItemRequest>("api/masters/items", req);
         }
         if (resp?.Success == true)

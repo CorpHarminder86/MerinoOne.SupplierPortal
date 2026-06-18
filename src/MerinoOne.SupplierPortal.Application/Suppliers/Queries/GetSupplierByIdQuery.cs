@@ -90,7 +90,7 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
                 new SupplierVerificationDto(v.Id, v.VerificationType.ToString(), v.AttemptedAt,
                     v.AttemptedBy, v.ProviderName, v.Result.ToString(), v.Comments)).ToList(),
             s.Addresses.OrderBy(a => a.AddressType).Select(a =>
-                new SupplierAddressDto(a.Id, a.AddressType, a.AddressLine1, a.AddressLine2,
+                new SupplierAddressDto(a.Id, a.AddressType, a.AddressLine1, a.AddressLine2, a.Area,
                     a.City, a.State, a.Pincode, a.Country)).ToList(),
             s.Contacts.OrderByDescending(c => c.IsPrimary).ThenBy(c => c.ContactName).Select(c =>
                 new SupplierContactDto(c.Id, c.ContactName, c.Designation, c.Email, c.Phone, c.IsPrimary)).ToList(),

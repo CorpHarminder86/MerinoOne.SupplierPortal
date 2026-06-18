@@ -70,6 +70,7 @@ public record SupplierAddressDto(
     string AddressType,
     string AddressLine1,
     string? AddressLine2,
+    string? Area,
     string City,
     string State,
     string Pincode,

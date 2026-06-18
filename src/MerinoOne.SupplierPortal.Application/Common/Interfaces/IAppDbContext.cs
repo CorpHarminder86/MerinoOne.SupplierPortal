@@ -4,6 +4,7 @@ using MerinoOne.SupplierPortal.Domain.Entities.Comm;
 using MerinoOne.SupplierPortal.Domain.Entities.Doc;
 using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Inv;
+using MerinoOne.SupplierPortal.Domain.Entities.Mdm;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Entities.Settings;
 using Microsoft.EntityFrameworkCore;
@@ -35,8 +36,16 @@ public interface IAppDbContext
     DbSet<UserCompanyMap> UserCompanyMaps { get; }
 
     DbSet<Item> Items { get; }
+    DbSet<ItemGroup> ItemGroups { get; }
+    DbSet<Unit> Units { get; }
     DbSet<DeliveryTerm> DeliveryTerms { get; }
     DbSet<PaymentTerm> PaymentTerms { get; }
+
+    DbSet<Currency> Currencies { get; }
+    DbSet<Country> Countries { get; }
+    DbSet<State> States { get; }
+    DbSet<City> Cities { get; }
+    DbSet<PostalCode> PostalCodes { get; }
 
     DbSet<SupplierEntity> Suppliers { get; }
     DbSet<SupplierVerificationEntity> SupplierVerifications { get; }
@@ -64,6 +73,7 @@ public interface IAppDbContext
     DbSet<CompanyShareGroupMember> CompanyShareGroupMembers { get; }
     DbSet<ApiKey> ApiKeys { get; }
     DbSet<ApiKeyCompany> ApiKeyCompanies { get; }
+    DbSet<InforConnectionSetting> InforConnectionSettings { get; }
 
     DbSet<AuditEntry> AuditEntries { get; }
 

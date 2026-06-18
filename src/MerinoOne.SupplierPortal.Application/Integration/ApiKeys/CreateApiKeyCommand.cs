@@ -131,6 +131,14 @@ public static class ApiKeyScopes
     {
         "Integration.Inbound." + nameof(SharedEndpoint.PaymentTerm),
         "Integration.Inbound." + nameof(SharedEndpoint.DeliveryTerm),
+        "Integration.Inbound." + nameof(SharedEndpoint.Unit),
+        "Integration.Inbound." + nameof(SharedEndpoint.ItemGroup),
+        "Integration.Inbound." + nameof(SharedEndpoint.Item),
+        "Integration.Inbound." + nameof(TenantInboundEntity.Currency),
+        "Integration.Inbound." + nameof(TenantInboundEntity.Country),
+        "Integration.Inbound." + nameof(TenantInboundEntity.State),
+        "Integration.Inbound." + nameof(TenantInboundEntity.City),
+        "Integration.Inbound." + nameof(TenantInboundEntity.PostalCode),
     };
 
     public static List<string> Normalize(IEnumerable<string>? scopes) =>

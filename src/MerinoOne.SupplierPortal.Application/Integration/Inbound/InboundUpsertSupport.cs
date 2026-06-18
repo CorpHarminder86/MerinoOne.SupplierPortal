@@ -27,6 +27,23 @@ public static class InboundUpsertSupport
     /// <summary>The InforEndpointMap.EntityName used for the inbound endpoint gate + session telemetry.</summary>
     public static string EntityName(SharedEndpoint endpoint) => endpoint.ToString();
 
+    /// <summary>EntityName for the tenant-scoped inbound masters (Currency/Country/State/City/PostalCode).</summary>
+    public static string EntityName(TenantInboundEntity endpoint) => endpoint.ToString();
+
+    /// <summary>
+    /// SHA-256 (hex) of a stable canonical projection of the batch, keyed on an arbitrary scope string
+    /// (e.g. "Country|&lt;tenantGuid&gt;"). Tenant-path equivalent of the company-scoped <see cref="CanonicalHash(SharedEndpoint, Guid, IEnumerable{string})"/>.
+    /// </summary>
+    public static string CanonicalHash(string scopeKey, IEnumerable<string> canonicalRows)
+    {
+        var sb = new StringBuilder();
+        sb.Append(scopeKey).Append('|');
+        foreach (var row in canonicalRows.OrderBy(r => r, StringComparer.Ordinal))
+            sb.Append(row).Append(';');
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
     /// <summary>
     /// Comma-joins the batch's term codes for <c>InforSyncLog.EntityId</c>, capped to
     /// <see cref="EntityIdMaxLength"/> chars (column width). When truncated, the tail is replaced by a

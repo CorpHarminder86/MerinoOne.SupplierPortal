@@ -94,13 +94,34 @@ public class SupplierAddressConfiguration : IEntityTypeConfiguration<SupplierAdd
         b.Property(x => x.AddressType).HasColumnName("addressType").HasMaxLength(50).IsRequired();
         b.Property(x => x.AddressLine1).HasColumnName("addressLine1").HasMaxLength(300).IsRequired();
         b.Property(x => x.AddressLine2).HasColumnName("addressLine2").HasMaxLength(300);
+        b.Property(x => x.Area).HasColumnName("area").HasMaxLength(150);
         b.Property(x => x.City).HasColumnName("city").HasMaxLength(100).IsRequired();
         b.Property(x => x.State).HasColumnName("state").HasMaxLength(100).IsRequired();
         b.Property(x => x.Pincode).HasColumnName("pincode").HasMaxLength(20);
         b.Property(x => x.Country).HasColumnName("country").HasMaxLength(100);
 
+        // Optional geo-master links (tenant-scoped masters). Snapshot strings above remain authoritative
+        // for display / international free entry; these resolve when the address was picked via autocomplete.
+        b.Property(x => x.CountryId).HasColumnName("countryId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.StateId).HasColumnName("stateId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.CityId).HasColumnName("cityId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.PostalCodeId).HasColumnName("postalCodeId").HasColumnType("uniqueidentifier");
+
         b.HasOne(x => x.Supplier).WithMany(s => s.Addresses).HasForeignKey(x => x.SupplierId)
             .HasConstraintName("FK_SupplierAddress_Supplier_SupplierId").OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.CountryRef).WithMany().HasForeignKey(x => x.CountryId)
+            .HasConstraintName("FK_SupplierAddress_Country_countryId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.StateRef).WithMany().HasForeignKey(x => x.StateId)
+            .HasConstraintName("FK_SupplierAddress_State_stateId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.CityRef).WithMany().HasForeignKey(x => x.CityId)
+            .HasConstraintName("FK_SupplierAddress_City_cityId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.PostalCodeRef).WithMany().HasForeignKey(x => x.PostalCodeId)
+            .HasConstraintName("FK_SupplierAddress_PostalCode_postalCodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.CountryId).HasDatabaseName("IX_SupplierAddress_countryId");
+        b.HasIndex(x => x.StateId).HasDatabaseName("IX_SupplierAddress_stateId");
+        b.HasIndex(x => x.CityId).HasDatabaseName("IX_SupplierAddress_cityId");
+        b.HasIndex(x => x.PostalCodeId).HasDatabaseName("IX_SupplierAddress_postalCodeId");
     }
 }
 

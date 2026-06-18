@@ -33,6 +33,9 @@
                 <button type="button" class="settings-rail__item @(category == "SupplierInvite" ? "active" : null)" @onclick="@(() => SelectCategory("SupplierInvite"))">
                     <span class="material-symbols-outlined">schedule_send</span> Supplier Invite
                 </button>
+                <button type="button" class="settings-rail__item @(category == "InforConnection" ? "active" : null)" @onclick="@(() => SelectCategory("InforConnection"))">
+                    <span class="material-symbols-outlined">cloud_sync</span> Infor CloudSuite
+                </button>
             </aside>
 
             <main class="rz-card settings-panel">
@@ -83,6 +86,29 @@
                         <div class="settings-actions">
                             <button type="button" class="rz-button rz-primary settings-btn--primary" disabled="@busy" @onclick="SaveInvite">
                                 <span class="material-symbols-outlined">save</span> @(busy ? "Saving…" : "Save changes")
+                            </button>
+                        </div>
+                    }
+                    else if (category == "InforConnection")
+                    {
+                        <h2 class="settings-section__title">Infor CloudSuite (ION API)</h2>
+                        <p class="settings-section__sub">Per-tenant ION API connection. Credentials are stored encrypted; secrets show as •••• once saved. Use Test connection to verify before saving.</p>
+
+                        @RenderInforText("Access Token URL", "Mingle SSO OAuth2 token endpoint", infor.AccessTokenUrl, v => infor.AccessTokenUrl = v, "https://mingle-sso.{...}/{tenant}/as/token.oauth2")
+                        @RenderInforText("Client ID", "OAuth2 client id (ci) from the Authorized App", infor.ClientId, v => infor.ClientId = v, "Enter client ID")
+                        @RenderInforSecret("Client Secret", "OAuth2 client secret (cs). Stored encrypted.", infor.ClientSecret, v => infor.ClientSecret = v, infor.ClientSecretIsMasked, () => { infor.ClientSecret = ""; infor.ClientSecretIsMasked = false; })
+                        @RenderInforText("Username", "Service-account user (saak)", infor.Username, v => infor.Username = v, "Enter username")
+                        @RenderInforSecret("Password", "Service-account secret (sask). Stored encrypted.", infor.Password, v => infor.Password = v, infor.PasswordIsMasked, () => { infor.Password = ""; infor.PasswordIsMasked = false; })
+                        @RenderInforText("ION API Base URL", "ION API base (…/{tenant}/LN/…)", infor.ApiBaseUrl, v => infor.ApiBaseUrl = v, "https://mingle-ionapi.{...}/{tenant}/LN/...")
+                        @RenderInforText("ION C4ws Base URL", "Optional — SOAP/C4ws base URL", infor.IonC4wsBaseUrl, v => infor.IonC4wsBaseUrl = v, "https://mingle-ionapi.{...}/{tenant}/LN/c4ws/services/")
+                        @RenderInforText("Company", "Comma-separated LN company IDs (e.g. 2400,7040)", infor.Company, v => infor.Company = v, "2400,7040")
+
+                        <div class="settings-actions">
+                            <button type="button" class="rz-button rz-primary settings-btn--primary" disabled="@busy" @onclick="SaveInfor">
+                                <span class="material-symbols-outlined">save</span> @(busy ? "Saving…" : "Save changes")
+                            </button>
+                            <button type="button" class="rz-button settings-btn--ghost" disabled="@busy" @onclick="TestInfor">
+                                <span class="material-symbols-outlined">wifi_tethering</span> Test connection
                             </button>
                         </div>
                     }
@@ -138,6 +164,7 @@
 @code {
     private const string EmailCategory = "EmailConfig";
     private const string InviteCategory = "SupplierInvite";
+    private const string InforCategory = "InforConnection";
     private const string PasswordMask = "********";
 
     private string category = EmailCategory;
@@ -148,6 +175,7 @@
 
     private readonly EmailForm email = new();
     private readonly InviteForm invite = new();
+    private readonly InforForm infor = new();
 
     // Track original values per key so Save only sends changed rows.
     private Dictionary<string, string> originalEmail = new();
@@ -171,6 +199,15 @@
     {
         loading = true;
         StateHasChanged();
+
+        if (cat == InforCategory)
+        {
+            await LoadInfor();
+            loading = false;
+            StateHasChanged();
+            return;
+        }
+
         var resp = await Api.GetAsync<List<SettingRowDto>>($"api/system-settings?category={Uri.EscapeDataString(cat)}");
         var rows = resp?.Data ?? new();
         if (cat == EmailCategory)
@@ -332,6 +369,103 @@
         finally { busy = false; }
     }
 
+    // ============ Infor CloudSuite (ION API) ============
+
+    private async Task LoadInfor()
+    {
+        var resp = await Api.GetAsync<InforConnectionDto>("api/infor-connection");
+        var dto = resp?.Data;
+        infor.AccessTokenUrl = dto?.AccessTokenUrl ?? "";
+        infor.ClientId = dto?.ClientId ?? "";
+        infor.Username = dto?.Username ?? "";
+        infor.ApiBaseUrl = dto?.ApiBaseUrl ?? "";
+        infor.IonC4wsBaseUrl = dto?.IonC4wsBaseUrl ?? "";
+        infor.Company = dto?.Company ?? "";
+
+        infor.ClientSecretIsMasked = dto?.ClientSecret == PasswordMask;
+        infor.ClientSecret = infor.ClientSecretIsMasked ? "" : (dto?.ClientSecret ?? "");
+        infor.PasswordIsMasked = dto?.Password == PasswordMask;
+        infor.Password = infor.PasswordIsMasked ? "" : (dto?.Password ?? "");
+    }
+
+    /// <summary>Secret to send: the mask sentinel when masked-and-untouched (keep stored), else the typed value.</summary>
+    private string InforSecretToSend(string typed, bool masked) =>
+        masked && string.IsNullOrEmpty(typed) ? PasswordMask : typed;
+
+    private SaveInforConnectionRequest BuildInforSaveRequest() => new(
+        AccessTokenUrl: infor.AccessTokenUrl?.Trim() ?? "",
+        ClientId: infor.ClientId?.Trim() ?? "",
+        ClientSecret: InforSecretToSend(infor.ClientSecret, infor.ClientSecretIsMasked),
+        Username: infor.Username?.Trim() ?? "",
+        Password: InforSecretToSend(infor.Password, infor.PasswordIsMasked),
+        ApiBaseUrl: infor.ApiBaseUrl?.Trim() ?? "",
+        IonC4wsBaseUrl: string.IsNullOrWhiteSpace(infor.IonC4wsBaseUrl) ? null : infor.IonC4wsBaseUrl.Trim(),
+        Company: infor.Company?.Trim() ?? "");
+
+    private async Task SaveInfor()
+    {
+        busy = true; banner = null;
+        try
+        {
+            var resp = await Api.PutAsync<bool, SaveInforConnectionRequest>("api/infor-connection", BuildInforSaveRequest());
+            if (resp?.Success == true)
+            {
+                Show("Infor connection settings saved.", ok: true);
+                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+                await LoadInfor();
+            }
+            else
+            {
+                Show(resp?.Errors?.FirstOrDefault() ?? "Failed to save Infor settings.", ok: false);
+            }
+        }
+        finally { busy = false; }
+    }
+
+    private async Task TestInfor()
+    {
+        busy = true; banner = null;
+        try
+        {
+            var req = new TestInforConnectionRequest(
+                AccessTokenUrl: infor.AccessTokenUrl?.Trim() ?? "",
+                ClientId: infor.ClientId?.Trim() ?? "",
+                ClientSecret: InforSecretToSend(infor.ClientSecret, infor.ClientSecretIsMasked),
+                Username: infor.Username?.Trim() ?? "",
+                Password: InforSecretToSend(infor.Password, infor.PasswordIsMasked),
+                ApiBaseUrl: infor.ApiBaseUrl?.Trim() ?? "",
+                IonC4wsBaseUrl: string.IsNullOrWhiteSpace(infor.IonC4wsBaseUrl) ? null : infor.IonC4wsBaseUrl.Trim(),
+                Company: infor.Company?.Trim() ?? "");
+
+            var resp = await Api.PostAsync<InforConnectionTestResult, TestInforConnectionRequest>("api/infor-connection/test", req);
+            var result = resp?.Data;
+
+            if (resp?.Success == true && result?.Success == true)
+            {
+                // Mirror the plugin: a successful test persists the verified settings.
+                var save = await Api.PutAsync<bool, SaveInforConnectionRequest>("api/infor-connection", BuildInforSaveRequest());
+                if (save?.Success == true)
+                {
+                    Show($"{result.Message} Settings saved.", ok: true);
+                    await LoadInfor();
+                }
+                else
+                {
+                    Show($"{result.Message} (but saving failed: {save?.Errors?.FirstOrDefault() ?? "unknown error"})", ok: false);
+                }
+            }
+            else if (result != null)
+            {
+                Show(result.Message, ok: false);
+            }
+            else
+            {
+                Show(resp?.Errors?.FirstOrDefault() ?? "Connection test failed.", ok: false);
+            }
+        }
+        finally { busy = false; }
+    }
+
     private void Show(string message, bool ok)
     {
         banner = message;
@@ -395,6 +529,37 @@
         </div>
     };
 
+    // Infor rows have no per-key "Reset to default" affordance (it is a single tenant config row,
+    // not a seeded key/value category), so these omit the reset button the other renderers carry.
+    private RenderFragment RenderInforText(string label, string hint, string value, Action<string> setter, string placeholder) => __builder =>
+    {
+        <div class="settings-row">
+            <div class="settings-row__label">@label<span class="settings-row__hint">@hint</span></div>
+            <div class="settings-row__control">
+                <input type="text" class="settings-row__input" value="@value" placeholder="@placeholder"
+                       autocomplete="off" @oninput="e => setter(e.Value?.ToString() ?? string.Empty)" />
+            </div>
+            <span></span>
+        </div>
+    };
+
+    private RenderFragment RenderInforSecret(string label, string hint, string value, Action<string> setter, bool masked, Action onChange) => __builder =>
+    {
+        <div class="settings-row">
+            <div class="settings-row__label">@label<span class="settings-row__hint">@hint</span></div>
+            <div class="settings-row__control" style="flex-direction:row;gap:8px;align-items:center;">
+                <input type="password" class="settings-row__input" value="@value"
+                       placeholder="@(masked ? PasswordMask : "Enter value")" autocomplete="new-password"
+                       @oninput="e => setter(e.Value?.ToString() ?? string.Empty)" />
+                @if (masked)
+                {
+                    <button type="button" class="settings-row__reset" style="white-space:nowrap;padding:0 4px;" @onclick="@(() => onChange())">Change</button>
+                }
+            </div>
+            <span></span>
+        </div>
+    };
+
     // ============ Local view models (mirror anticipated contracts shape) ============
 
     private class EmailForm
@@ -412,6 +577,20 @@
     private class InviteForm
     {
         public int ExpiryDays { get; set; } = 7;
+    }
+
+    private class InforForm
+    {
+        public string AccessTokenUrl { get; set; } = "";
+        public string ClientId { get; set; } = "";
+        public string ClientSecret { get; set; } = "";
+        public bool ClientSecretIsMasked { get; set; } = false;
+        public string Username { get; set; } = "";
+        public string Password { get; set; } = "";
+        public bool PasswordIsMasked { get; set; } = false;
+        public string ApiBaseUrl { get; set; } = "";
+        public string IonC4wsBaseUrl { get; set; } = "";
+        public string Company { get; set; } = "";
     }
 
     /// <summary>Wire shape returned by GET /api/system-settings — matches anticipated SystemSettingDto.</summary>

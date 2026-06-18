@@ -1,0 +1,206 @@
+@page "/admin/postal-codes"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+<PageTitle>Postal codes</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row"><h1 class="tl-title">Postal codes</h1><span class="tl-count-chip">@(rows?.Count ?? 0)</span></div>
+            <p class="tl-sub">Postal / PIN code master (Infor LN)</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (Token.HasPermission("Settings.Write"))
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add</button>
+            }
+        </div>
+    </header>
+
+    <div class="tl-filter-bar" style="display:flex;gap:8px;">
+        <select class="rz-dropdown" style="padding:8px 12px;" @bind="filterCountryId" @bind:after="Load">
+            <option value="">All countries</option>
+            @foreach (var c in countries) { <option value="@c.Id">@c.Description</option> }
+        </select>
+        <input class="rz-textbox" placeholder="Search code / area…" style="width:220px;padding:8px 12px;" @bind="search" @bind:after="Load" />
+    </div>
+
+    @if (loading) { <div class="tl-empty">Loading…</div> }
+    else if (rows == null || rows.Count == 0)
+    {
+        <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">markunread_mailbox</span><div>No postal codes defined.</div></div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 110px 1.2fr 1fr 1fr 1fr 90px 110px; --tl-min-width: 980px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Code</div><div class="tlg-col">Area</div><div class="tlg-col">Country</div><div class="tlg-col">State</div><div class="tlg-col">City</div><div class="tlg-col">Active</div><div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var r in rows)
+            {
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code">@r.Code</div>
+                    <div class="tlg-col tlg-desc">@r.Area</div>
+                    <div class="tlg-col">@r.CountryName</div>
+                    <div class="tlg-col">@r.StateName</div>
+                    <div class="tlg-col">@r.CityName</div>
+                    <div class="tlg-col"><span class="tlg-status @(r.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(r.IsActive ? "Yes" : "No")</span></div>
+                    <div class="tlg-col tlg-col--actions">
+                        @if (Token.HasPermission("Settings.Write"))
+                        {
+                            <button @onclick="() => OpenEdit(r)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
+                            @if (r.IsActive) { <button @onclick="() => Deactivate(r.Id, r.Code)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate"><span class="material-symbols-outlined" style="font-size:18px;">block</span></button> }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" style="width:540px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">markunread_mailbox</span></div>
+                <div class="merino-dialog__head-text"><div class="merino-dialog__eyebrow">Master</div><h2 class="merino-dialog__title">@(editingId.HasValue ? "Edit postal code" : "New postal code")</h2></div>
+                <button class="merino-dialog__close" @onclick="() => showDialog = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Code @(editingId.HasValue ? "(immutable)" : "*")</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formCode" disabled="@editingId.HasValue" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Area</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formArea" /></div>
+                    <div style="grid-column:1 / span 2;"><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Country *</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="formCountryId" @bind:after="LoadFormStates">
+                            <option value="">— select —</option>
+                            @foreach (var c in countries) { <option value="@c.Id">@c.Description</option> }
+                        </select>
+                    </div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">State (optional)</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="formStateId" @bind:after="LoadFormCities">
+                            <option value="">— none —</option>
+                            @foreach (var s in formStates) { <option value="@s.Id">@s.Description</option> }
+                        </select>
+                    </div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">City (optional)</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="formCityId">
+                            <option value="">— none —</option>
+                            @foreach (var c in formCities) { <option value="@c.Id">@c.Description</option> }
+                        </select>
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;grid-column:1 / span 2;"><input type="checkbox" @bind="formIsActive" /> Active</label>
+                </div>
+                @if (!string.IsNullOrEmpty(formError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@formError</div> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showDialog = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private List<PostalCodeDto>? rows;
+    private List<CountryDto> countries = new();
+    private List<StateDto> formStates = new();
+    private List<CityDto> formCities = new();
+    private bool loading = true, busy, showDialog, formIsActive = true;
+    private Guid? editingId;
+    private string formCode = string.Empty, formError = string.Empty, formCountryId = string.Empty, formStateId = string.Empty, formCityId = string.Empty, filterCountryId = string.Empty, search = string.Empty;
+    private string? formArea;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var c = await Api.GetAsync<List<CountryDto>>("api/masters/countries?isActive=true");
+        countries = c?.Data ?? new();
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        var qp = new List<string>();
+        if (Guid.TryParse(filterCountryId, out var f)) qp.Add($"countryId={f}");
+        if (!string.IsNullOrWhiteSpace(search)) qp.Add($"search={Uri.EscapeDataString(search.Trim())}");
+        var url = "api/masters/postal-codes" + (qp.Count > 0 ? "?" + string.Join("&", qp) : "");
+        var resp = await Api.GetAsync<List<PostalCodeDto>>(url);
+        rows = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private async Task LoadFormStates()
+    {
+        formStateId = ""; formStates = new(); formCityId = ""; formCities = new();
+        if (Guid.TryParse(formCountryId, out var cid))
+        {
+            var s = await Api.GetAsync<List<StateDto>>($"api/masters/states?isActive=true&countryId={cid}");
+            formStates = s?.Data ?? new();
+            await LoadFormCities();
+        }
+    }
+
+    private async Task LoadFormCities()
+    {
+        formCityId = ""; formCities = new();
+        if (Guid.TryParse(formCountryId, out var cid))
+        {
+            var qp = $"isActive=true&countryId={cid}" + (Guid.TryParse(formStateId, out var sid) ? $"&stateId={sid}" : "");
+            var c = await Api.GetAsync<List<CityDto>>($"api/masters/cities?{qp}");
+            formCities = c?.Data ?? new();
+        }
+    }
+
+    private async Task OpenNew()
+    {
+        editingId = null; formCode = ""; formArea = null; formStateId = ""; formCityId = ""; formIsActive = true; formError = "";
+        formCountryId = Guid.TryParse(filterCountryId, out _) ? filterCountryId : "";
+        await LoadFormStates();
+        showDialog = true;
+    }
+
+    private async Task OpenEdit(PostalCodeDto r)
+    {
+        editingId = r.Id; formCode = r.Code; formArea = r.Area; formCountryId = r.CountryId.ToString(); formIsActive = r.IsActive; formError = "";
+        await LoadFormStates();
+        formStateId = r.StateId?.ToString() ?? "";
+        await LoadFormCities();
+        formCityId = r.CityId?.ToString() ?? "";
+        showDialog = true;
+    }
+
+    private async Task Save()
+    {
+        if (!editingId.HasValue && string.IsNullOrWhiteSpace(formCode)) { formError = "Code required."; return; }
+        if (!Guid.TryParse(formCountryId, out var countryId)) { formError = "Country required."; return; }
+        busy = true;
+        var area = string.IsNullOrWhiteSpace(formArea) ? null : formArea!.Trim();
+        Guid? stateId = Guid.TryParse(formStateId, out var sg) ? sg : null;
+        Guid? cityId = Guid.TryParse(formCityId, out var cg) ? cg : null;
+        ApiResult<PostalCodeDto>? resp;
+        if (editingId.HasValue)
+            resp = await Api.PutAsync<PostalCodeDto, UpdatePostalCodeRequest>($"api/masters/postal-codes/{editingId}", new UpdatePostalCodeRequest(area, countryId, stateId, cityId, formIsActive));
+        else
+            resp = await Api.PostAsync<PostalCodeDto, CreatePostalCodeRequest>("api/masters/postal-codes", new CreatePostalCodeRequest(formCode.Trim(), area, countryId, stateId, cityId, formIsActive));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" }); showDialog = false; await Load(); }
+        else { formError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task Deactivate(Guid id, string label)
+    {
+        if (!await Dialog.ConfirmDeactivateAsync(label, "POSTAL CODE")) return;
+        busy = true;
+        var resp = await Api.PostAsync<object>($"api/masters/postal-codes/{id}/deactivate", new { });
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" }); await Load(); }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+}

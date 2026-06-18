@@ -47,6 +47,7 @@ public class RegisterSupplierCommandValidator : AbstractValidator<RegisterSuppli
         {
             a.RuleFor(x => x.AddressType).NotEmpty().MaximumLength(50);
             a.RuleFor(x => x.Line1).NotEmpty().MaximumLength(200);
+            a.RuleFor(x => x.Area).MaximumLength(150);
             a.RuleFor(x => x.City).NotEmpty().MaximumLength(100);
             a.RuleFor(x => x.State).NotEmpty().MaximumLength(100);
             a.RuleFor(x => x.PostalCode).NotEmpty().MaximumLength(20);
@@ -223,10 +224,15 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
                 AddressType = a.AddressType.Trim(),
                 AddressLine1 = a.Line1.Trim(),
                 AddressLine2 = string.IsNullOrWhiteSpace(a.Line2) ? null : a.Line2.Trim(),
+                Area = string.IsNullOrWhiteSpace(a.Area) ? null : a.Area.Trim(),
                 City = a.City.Trim(),
                 State = a.State.Trim(),
                 Pincode = a.PostalCode.Trim(),
                 Country = string.IsNullOrWhiteSpace(a.Country) ? "India" : a.Country.Trim(),
+                CountryId = a.CountryId,
+                StateId = a.StateId,
+                CityId = a.CityId,
+                PostalCodeId = a.PostalCodeId,
                 CreatedBy = "self-register",
                 CreatedOn = now,
             });

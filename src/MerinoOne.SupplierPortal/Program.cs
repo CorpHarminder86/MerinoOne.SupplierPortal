@@ -141,6 +141,25 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0
             });
     });
+
+    // Anonymous geo typeahead for onboarding. Partitioned on the invite-token prefix + remote IP.
+    options.AddPolicy("public-geo", httpContext =>
+    {
+        var token = httpContext.Request.Query["token"].FirstOrDefault();
+        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var partitionKey = (string.IsNullOrEmpty(token)
+            ? "ip:" + ip
+            : "tok:" + (token.Length >= 8 ? token[..8] : token)) + "|" + ip;
+
+        return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey,
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            });
+    });
 });
 
 var app = builder.Build();

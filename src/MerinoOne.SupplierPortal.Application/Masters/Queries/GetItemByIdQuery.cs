@@ -15,8 +15,10 @@ public class GetItemByIdQueryHandler : IRequestHandler<GetItemByIdQuery, ItemDto
 
     public async Task<ItemDto> Handle(GetItemByIdQuery request, CancellationToken ct)
     {
-        var i = await _db.Items.FirstOrDefaultAsync(x => x.Id == request.Id, ct)
-                ?? throw new NotFoundException("Item", request.Id);
-        return new ItemDto(i.Id, i.Seq, i.Code, i.Description, i.Uom, i.HsnCode, i.IsActive, i.CreatedOn);
+        return await _db.Items.Where(x => x.Id == request.Id)
+            .Select(i => new ItemDto(i.Id, i.Seq, i.Code, i.Description, i.HsnCode,
+                i.ItemGroupId, i.ItemGroup!.Code, i.UnitId, i.Unit!.Code, i.IsActive, i.CreatedOn))
+            .FirstOrDefaultAsync(ct)
+            ?? throw new NotFoundException("Item", request.Id);
     }
 }

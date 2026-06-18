@@ -77,6 +77,15 @@ public enum SyncStatus { Pending, Success, Failed, Retrying, Reconciled }
 
 /// <summary>
 /// Master-data endpoints that participate in company-wise table sharing. Persisted as a
-/// string (enum name) so the value is stable across reordering.
+/// string (enum name) so the value is stable across reordering. APPEND-ONLY.
 /// </summary>
-public enum SharedEndpoint { PaymentTerm, DeliveryTerm }
+public enum SharedEndpoint { PaymentTerm, DeliveryTerm, Unit, ItemGroup, Item }
+
+/// <summary>
+/// Tenant-scoped reference masters fed by Infor LN that do NOT participate in company sharing. Drives the
+/// inbound endpoint-gate EntityName for the tenant inbound path. Persisted as the enum name. APPEND-ONLY.
+/// </summary>
+public enum TenantInboundEntity { Currency, Country, State, City, PostalCode }
+
+/// <summary>Unit dimension / quantity type (INFOR LN unit type).</summary>
+public enum UnitType { Quantity, Length, Area, Volume, Mass, Time, Other }

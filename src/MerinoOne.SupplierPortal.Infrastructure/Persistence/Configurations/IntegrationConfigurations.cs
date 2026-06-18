@@ -101,3 +101,29 @@ public class ApiKeyCompanyConfiguration : IEntityTypeConfiguration<ApiKeyCompany
             .HasDatabaseName("UQ_ApiKeyCompany_apiKey_company").IsUnique();
     }
 }
+
+public class InforConnectionSettingConfiguration : IEntityTypeConfiguration<InforConnectionSetting>
+{
+    public void Configure(EntityTypeBuilder<InforConnectionSetting> b)
+    {
+        b.ApplyBaseEntityConvention("InforConnectionSetting", "integration", "inforConnectionSetting");
+        // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
+        b.Property(x => x.AccessTokenUrl).HasColumnName("accessTokenUrl").HasMaxLength(500).IsRequired();
+        b.Property(x => x.ClientId).HasColumnName("clientId").HasMaxLength(500).IsRequired();
+        // Encrypted via ISettingProtector — ciphertext is comfortably under 4000 but use nvarchar(max) to be safe.
+        b.Property(x => x.ClientSecret).HasColumnName("clientSecret").HasColumnType("nvarchar(max)").IsRequired();
+        b.Property(x => x.Username).HasColumnName("username").HasMaxLength(500).IsRequired();
+        b.Property(x => x.Password).HasColumnName("password").HasColumnType("nvarchar(max)").IsRequired();
+        b.Property(x => x.ApiBaseUrl).HasColumnName("apiBaseUrl").HasMaxLength(500).IsRequired();
+        b.Property(x => x.IonC4wsBaseUrl).HasColumnName("ionC4wsBaseUrl").HasMaxLength(500);
+        b.Property(x => x.Company).HasColumnName("company").HasMaxLength(200);
+        b.Property(x => x.IsActive).HasColumnName("isActive").HasColumnType("bit").HasDefaultValue(true);
+
+        // Exactly one live connection-config row per tenant. Filtered so a soft-deleted row never
+        // blocks re-creating the config (mirrors the CompanyShareGroupMember filtered-unique pattern).
+        b.HasIndex(x => x.TenantId)
+            .HasDatabaseName("UQ_InforConnectionSetting_tenantId")
+            .IsUnique()
+            .HasFilter("[tenantId] IS NOT NULL AND [isDeleted] = 0");
+    }
+}

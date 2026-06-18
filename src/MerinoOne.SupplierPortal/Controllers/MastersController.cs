@@ -190,7 +190,7 @@ Returns: ItemDto on success; 404 if not found. Requires permission **Settings.Re
     [EndpointSummary("Create item")]
     [EndpointDescription(@"Creates a new item master row.
 Body:
-- **body**: CreateItemRequest with ItemCode + Description + UnitOfMeasure.
+- **body**: CreateItemRequest with ItemCode + Description + Unit.
 Returns: ItemDto on success; 400 on validation. Requires permission **Settings.Write**.")]
     public async Task<Result<ItemDto>> CreateItem([FromBody] CreateItemRequest body, CancellationToken ct)
     {
@@ -204,7 +204,7 @@ Returns: ItemDto on success; 400 on validation. Requires permission **Settings.W
     [EndpointDescription(@"Updates an existing item master row.
 Filters / params:
 - **id**: Required — item GUID.
-- **body**: UpdateItemRequest with revised Description / UoM.
+- **body**: UpdateItemRequest with revised Description / Unit.
 Returns: ItemDto on success; 404 if not found. Requires permission **Settings.Write**.")]
     public async Task<Result<ItemDto>> UpdateItem(Guid id, [FromBody] UpdateItemRequest body, CancellationToken ct)
     {

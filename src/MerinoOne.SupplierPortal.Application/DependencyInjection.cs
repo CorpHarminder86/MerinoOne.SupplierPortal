@@ -20,6 +20,9 @@ public static class DependencyInjection
         // Shared inbound master-data upsert orchestration (Payment Term / Delivery Term). Scoped so it
         // ctor-injects the per-request IAppDbContext / ICurrentUser / ICurrentCompany.
         services.AddScoped<InboundUpsertExecutor>();
+        // Tenant-scoped variant for the reference masters (Currency/Country/State/City/PostalCode) —
+        // no company resolution / share-group / anti-spoof; reuses the idempotency + SyncLog + endpoint gate.
+        services.AddScoped<TenantInboundUpsertExecutor>();
 
         // Shared user↔supplier mapping primitives reused by MapSupplier / UnmapSupplier / the bulk
         // SetCompanySupplierMaps command. Scoped — ctor-injects the per-request IAppDbContext.

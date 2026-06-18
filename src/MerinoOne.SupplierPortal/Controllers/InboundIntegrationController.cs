@@ -67,6 +67,66 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
         return Result<UpsertResultDto>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    // ---------------- Reference masters — tenant-scoped (no CompanyCode) ----------------
+
+    [HttpPost("currencies")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Currency")]
+    [EndpointSummary("Push currencies (Infor LN)")]
+    public async Task<Result<UpsertResultDto>> Currencies([FromBody] PushCurrenciesRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertCurrenciesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("countries")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Country")]
+    [EndpointSummary("Push countries (Infor LN)")]
+    public async Task<Result<UpsertResultDto>> Countries([FromBody] PushCountriesRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertCountriesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("states")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.State")]
+    [EndpointSummary("Push states (Infor LN)")]
+    public async Task<Result<UpsertResultDto>> States([FromBody] PushStatesRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertStatesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("cities")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.City")]
+    [EndpointSummary("Push cities (Infor LN)")]
+    public async Task<Result<UpsertResultDto>> Cities([FromBody] PushCitiesRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertCitiesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("postal-codes")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.PostalCode")]
+    [EndpointSummary("Push postal codes (Infor LN)")]
+    public async Task<Result<UpsertResultDto>> PostalCodes([FromBody] PushPostalCodesRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertPostalCodesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    // ---------------- Inventory masters — company-scoped (CompanyCode) ----------------
+
+    [HttpPost("units")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Unit")]
+    [EndpointSummary("Push units (Infor LN)")]
+    public async Task<Result<UpsertResultDto>> Units([FromBody] PushUnitsRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertUnitsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("item-groups")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.ItemGroup")]
+    [EndpointSummary("Push item groups (Infor LN)")]
+    public async Task<Result<UpsertResultDto>> ItemGroups([FromBody] PushItemGroupsRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertItemGroupsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("items")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Item")]
+    [EndpointSummary("Push items (Infor LN)")]
+    public async Task<Result<UpsertResultDto>> Items([FromBody] PushItemsRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertItemsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
     /// <summary>
     /// The key's bound source companies — every "tenantEntityId" claim minted by the API-key auth handler
     /// (Feature C — multi-company keys). The inbound write path requires the resolved incoming source to

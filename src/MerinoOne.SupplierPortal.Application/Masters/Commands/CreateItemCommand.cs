@@ -16,7 +16,6 @@ public class CreateItemCommandValidator : AbstractValidator<CreateItemCommand>
     {
         RuleFor(x => x.Body.Code).NotEmpty().MaximumLength(50);
         RuleFor(x => x.Body.Description).NotEmpty().MaximumLength(500);
-        RuleFor(x => x.Body.Uom).NotEmpty().MaximumLength(20);
         RuleFor(x => x.Body.HsnCode).MaximumLength(20);
     }
 }
@@ -33,19 +32,29 @@ public class CreateItemCommandHandler : IRequestHandler<CreateItemCommand, ItemD
         var exists = await _db.Items.AnyAsync(i => i.Code == code, ct);
         if (exists) throw new ConflictException($"Item with code '{code}' already exists.");
 
+        string? groupCode = null, unitCode = null;
+        if (request.Body.ItemGroupId is Guid gid)
+            groupCode = await _db.ItemGroups.Where(g => g.Id == gid).Select(g => g.Code).FirstOrDefaultAsync(ct)
+                ?? throw new NotFoundException("ItemGroup", gid);
+        if (request.Body.UnitId is Guid uid)
+            unitCode = await _db.Units.Where(u => u.Id == uid).Select(u => u.Code).FirstOrDefaultAsync(ct)
+                ?? throw new NotFoundException("Unit", uid);
+
         var entity = new Item
         {
             Id = Guid.NewGuid(),
             Code = code,
             Description = request.Body.Description.Trim(),
-            Uom = request.Body.Uom.Trim(),
             HsnCode = string.IsNullOrWhiteSpace(request.Body.HsnCode) ? null : request.Body.HsnCode.Trim(),
+            ItemGroupId = request.Body.ItemGroupId,
+            UnitId = request.Body.UnitId,
             IsActive = request.Body.IsActive,
             CreatedBy = _user.UserCode,
             CreatedOn = DateTime.UtcNow,
         };
         _db.Items.Add(entity);
         await _db.SaveChangesAsync(ct);
-        return new ItemDto(entity.Id, entity.Seq, entity.Code, entity.Description, entity.Uom, entity.HsnCode, entity.IsActive, entity.CreatedOn);
+        return new ItemDto(entity.Id, entity.Seq, entity.Code, entity.Description, entity.HsnCode,
+            entity.ItemGroupId, groupCode, entity.UnitId, unitCode, entity.IsActive, entity.CreatedOn);
     }
 }

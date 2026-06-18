@@ -8,6 +8,7 @@ using MerinoOne.SupplierPortal.Domain.Entities.Comm;
 using MerinoOne.SupplierPortal.Domain.Entities.Doc;
 using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Inv;
+using MerinoOne.SupplierPortal.Domain.Entities.Mdm;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Entities.Settings;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence.Interceptors;
@@ -61,8 +62,16 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<UserCompanyMap> UserCompanyMaps => Set<UserCompanyMap>();
 
     public DbSet<Item> Items => Set<Item>();
+    public DbSet<ItemGroup> ItemGroups => Set<ItemGroup>();
+    public DbSet<Unit> Units => Set<Unit>();
     public DbSet<DeliveryTerm> DeliveryTerms => Set<DeliveryTerm>();
     public DbSet<PaymentTerm> PaymentTerms => Set<PaymentTerm>();
+
+    public DbSet<Currency> Currencies => Set<Currency>();
+    public DbSet<Country> Countries => Set<Country>();
+    public DbSet<State> States => Set<State>();
+    public DbSet<City> Cities => Set<City>();
+    public DbSet<PostalCode> PostalCodes => Set<PostalCode>();
 
     public DbSet<SupplierEntity> Suppliers => Set<SupplierEntity>();
     public DbSet<SupplierVerificationEntity> SupplierVerifications => Set<SupplierVerificationEntity>();
@@ -90,6 +99,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<CompanyShareGroupMember> CompanyShareGroupMembers => Set<CompanyShareGroupMember>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<ApiKeyCompany> ApiKeyCompanies => Set<ApiKeyCompany>();
+    public DbSet<InforConnectionSetting> InforConnectionSettings => Set<InforConnectionSetting>();
 
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
@@ -191,6 +201,30 @@ public class AppDbContext : DbContext, IAppDbContext
     public Guid? DeliveryTermSourceCompanyId =>
         _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.DeliveryTerm, _currentCompany.ActiveCompanyId);
 
+    public Guid? UnitSourceCompanyId =>
+        _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.Unit, _currentCompany.ActiveCompanyId);
+
+    public Guid? ItemGroupSourceCompanyId =>
+        _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.ItemGroup, _currentCompany.ActiveCompanyId);
+
+    public Guid? ItemSourceCompanyId =>
+        _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.Item, _currentCompany.ActiveCompanyId);
+
+    /// <summary>
+    /// Company-scoped (sharing-aware) types → the DbContext source-company member used in the company
+    /// filter. Replaces a hand-maintained if/else chain so a new company-scoped master can't be silently
+    /// missed (which would hide/leak its rows). Tenant-scoped masters are NOT here — they are covered by
+    /// the generic tenant predicate only.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<Type, string> CompanyScopedSourceMembers = new Dictionary<Type, string>
+    {
+        [typeof(PaymentTerm)]  = nameof(PaymentTermSourceCompanyId),
+        [typeof(DeliveryTerm)] = nameof(DeliveryTermSourceCompanyId),
+        [typeof(Unit)]         = nameof(UnitSourceCompanyId),
+        [typeof(ItemGroup)]    = nameof(ItemGroupSourceCompanyId),
+        [typeof(Item)]         = nameof(ItemSourceCompanyId),
+    };
+
     /// <summary>
     /// tenantFilterBypassed OR (e.TenantId != null AND e.TenantId == CurrentTenantId).
     /// Applies to every type carrying a TenantId (ITenantOwned / ITenantScoped / ICompanyScoped).
@@ -227,14 +261,12 @@ public class AppDbContext : DbContext, IAppDbContext
     private Expression? BuildCompanyPredicate(Type clrType, ParameterExpression parameter)
     {
         string sourceMember;
-        if (clrType == typeof(PaymentTerm))
-            sourceMember = nameof(PaymentTermSourceCompanyId);
-        else if (clrType == typeof(DeliveryTerm))
-            sourceMember = nameof(DeliveryTermSourceCompanyId);
+        if (CompanyScopedSourceMembers.TryGetValue(clrType, out var member))
+            sourceMember = member;                          // sharing-aware master (PaymentTerm/Unit/Item/…)
         else if (typeof(ITenantScoped).IsAssignableFrom(clrType))
-            sourceMember = nameof(ActiveCompanyId);
+            sourceMember = nameof(ActiveCompanyId);          // plain company filter (Supplier aggregates)
         else
-            return null;   // ITenantOwned config / integration entities are NOT company-scoped.
+            return null;   // ITenantOwned config / integration / tenant-scoped masters are NOT company-scoped.
 
         var ctx = Expression.Constant(this);
         var bypass = Expression.Property(ctx, nameof(CompanyFilterBypassed));

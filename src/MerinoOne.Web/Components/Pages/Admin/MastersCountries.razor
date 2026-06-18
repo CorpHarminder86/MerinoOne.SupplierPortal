@@ -1,0 +1,139 @@
+@page "/admin/countries"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+<PageTitle>Countries</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row"><h1 class="tl-title">Countries</h1><span class="tl-count-chip">@(rows?.Count ?? 0)</span></div>
+            <p class="tl-sub">Country master (Infor LN)</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (Token.HasPermission("Settings.Write"))
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add</button>
+            }
+        </div>
+    </header>
+
+    @if (loading) { <div class="tl-empty">Loading…</div> }
+    else if (rows == null || rows.Count == 0)
+    {
+        <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">public</span><div>No countries defined.</div></div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 90px 1.4fr 70px 80px 90px 90px 110px; --tl-min-width: 880px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Code</div><div class="tlg-col">Description</div><div class="tlg-col">ISO2</div><div class="tlg-col">Tel</div><div class="tlg-col">Currency</div><div class="tlg-col">Active</div><div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var r in rows)
+            {
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code">@r.Code</div>
+                    <div class="tlg-col tlg-desc">@r.Description</div>
+                    <div class="tlg-col tlg-code">@r.IsoCode2</div>
+                    <div class="tlg-col">@r.TelephoneCode</div>
+                    <div class="tlg-col tlg-code">@r.CurrencyCode</div>
+                    <div class="tlg-col"><span class="tlg-status @(r.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(r.IsActive ? "Yes" : "No")</span></div>
+                    <div class="tlg-col tlg-col--actions">
+                        @if (Token.HasPermission("Settings.Write"))
+                        {
+                            <button @onclick="() => OpenEdit(r)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
+                            @if (r.IsActive) { <button @onclick="() => Deactivate(r.Id, r.Code)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate"><span class="material-symbols-outlined" style="font-size:18px;">block</span></button> }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" style="width:540px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">public</span></div>
+                <div class="merino-dialog__head-text"><div class="merino-dialog__eyebrow">Master</div><h2 class="merino-dialog__title">@(editingId.HasValue ? "Edit country" : "New country")</h2></div>
+                <button class="merino-dialog__close" @onclick="() => showDialog = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Code @(editingId.HasValue ? "(immutable)" : "*")</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formCode" disabled="@editingId.HasValue" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Currency</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="formCurrencyId">
+                            <option value="">— none —</option>
+                            @foreach (var c in currencies) { <option value="@c.Id">@c.Code — @c.Description</option> }
+                        </select>
+                    </div>
+                    <div style="grid-column:1 / span 2;"><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Description *</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formDescription" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">ISO alpha-2</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formIso2" maxlength="2" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">ISO alpha-3</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formIso3" maxlength="3" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Telephone code</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formTel" placeholder="+91" /></div>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" @bind="formIsActive" /> Active</label>
+                </div>
+                @if (!string.IsNullOrEmpty(formError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@formError</div> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showDialog = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private List<CountryDto>? rows;
+    private List<CurrencyDto> currencies = new();
+    private bool loading = true, busy, showDialog, formIsActive = true;
+    private Guid? editingId;
+    private string formCode = string.Empty, formDescription = string.Empty, formError = string.Empty, formCurrencyId = string.Empty;
+    private string? formIso2, formIso3, formTel;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var c = await Api.GetAsync<List<CurrencyDto>>("api/masters/currencies?isActive=true");
+        currencies = c?.Data ?? new();
+        await Load();
+    }
+
+    private async Task Load() { loading = true; var resp = await Api.GetAsync<List<CountryDto>>("api/masters/countries"); rows = resp?.Data ?? new(); loading = false; }
+
+    private void OpenNew() { editingId = null; formCode = ""; formDescription = ""; formIso2 = null; formIso3 = null; formTel = null; formCurrencyId = ""; formIsActive = true; formError = ""; showDialog = true; }
+    private void OpenEdit(CountryDto r) { editingId = r.Id; formCode = r.Code; formDescription = r.Description; formIso2 = r.IsoCode2; formIso3 = r.IsoCode3; formTel = r.TelephoneCode; formCurrencyId = r.CurrencyId?.ToString() ?? ""; formIsActive = r.IsActive; formError = ""; showDialog = true; }
+
+    private async Task Save()
+    {
+        if (!editingId.HasValue && string.IsNullOrWhiteSpace(formCode)) { formError = "Code required."; return; }
+        if (string.IsNullOrWhiteSpace(formDescription)) { formError = "Description required."; return; }
+        busy = true;
+        string? N(string? s) => string.IsNullOrWhiteSpace(s) ? null : s!.Trim();
+        Guid? curId = Guid.TryParse(formCurrencyId, out var cg) ? cg : null;
+        ApiResult<CountryDto>? resp;
+        if (editingId.HasValue)
+            resp = await Api.PutAsync<CountryDto, UpdateCountryRequest>($"api/masters/countries/{editingId}", new UpdateCountryRequest(formDescription.Trim(), N(formIso2), N(formIso3), N(formTel), curId, formIsActive));
+        else
+            resp = await Api.PostAsync<CountryDto, CreateCountryRequest>("api/masters/countries", new CreateCountryRequest(formCode.Trim(), formDescription.Trim(), N(formIso2), N(formIso3), N(formTel), curId, formIsActive));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" }); showDialog = false; await Load(); }
+        else { formError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task Deactivate(Guid id, string label)
+    {
+        if (!await Dialog.ConfirmDeactivateAsync(label, "COUNTRY")) return;
+        busy = true;
+        var resp = await Api.PostAsync<object>($"api/masters/countries/{id}/deactivate", new { });
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" }); await Load(); }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+}

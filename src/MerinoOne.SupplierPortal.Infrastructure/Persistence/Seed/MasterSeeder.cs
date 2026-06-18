@@ -1,14 +1,20 @@
 using MerinoOne.SupplierPortal.Domain.Entities.Inv;
+using MerinoOne.SupplierPortal.Domain.Entities.Mdm;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
+using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Seed;
 
-public static class MasterSeeder
+public static partial class MasterSeeder
 {
     public record DeliveryTermSpec(string Code, string Description);
     public record PaymentTermSpec(string Code, string Description, int NetDays);
-    public record ItemSpec(string Code, string Description, string Uom, string? HsnCode);
+    public record ItemSpec(string Code, string Description, string UnitCode, string? HsnCode);
+
+    // The legacy default company the new company-scoped masters (Unit/ItemGroup/Item) are seeded under.
+    private static Guid Tenant => TenantSeeder.TenantId;
+    private static Guid Company2000 => TenantSeeder.CompanyId("2000");
 
     public static readonly IReadOnlyList<DeliveryTermSpec> DeliveryTerms = new[]
     {
@@ -54,63 +60,131 @@ public static class MasterSeeder
         new ItemSpec("ITM-00020", "Safety Helmet",          "NOS",  "65061010"),
     };
 
+    // ---- Reference data (tenant-scoped geo/currency) ----
+    // CurrencySpec/CountrySpec/StateSpec/CitySpec/PostalSpec record types and the full
+    // Currencies / Countries / States / Cities / PostalCodes data sets live in the partial
+    // file MasterSeeder.GeoData.cs (ISO 4217 currencies + India states/UTs/cities/PIN codes).
+
+    // ---- Inventory reference (company-scoped, source 2000) ----
+    private record UnitSpec(string Code, string Desc, UnitType Type, string Iso, decimal Factor, string? BaseCode);
+    private record ItemGroupSpec(string Code, string Desc);
+
+    private static readonly UnitSpec[] Units =
+    {
+        new("EA",  "Each",      UnitType.Quantity, "EA",  1m,     null),
+        new("NOS", "Numbers",   UnitType.Quantity, "NOS", 1m,     null),
+        new("KG",  "Kilogram",  UnitType.Mass,     "KGM", 1m,     null),
+        new("GRM", "Gram",      UnitType.Mass,     "GRM", 0.001m, "KG"),
+        new("MTR", "Metre",     UnitType.Length,   "MTR", 1m,     null),
+        new("LTR", "Litre",     UnitType.Volume,   "LTR", 1m,     null),
+        new("BAG", "Bag",       UnitType.Quantity, "BG",  1m,     null),
+    };
+    private static readonly ItemGroupSpec[] ItemGroups =
+    {
+        new("RAW",  "Raw Material"),
+        new("FIN",  "Finished Goods"),
+        new("CONS", "Consumables"),
+    };
+
+    private static Guid CurId(string c) => DeterministicId.From("Currency", c);
+    private static Guid CtryId(string c) => DeterministicId.From("Country", c);
+    private static Guid StId(string c) => DeterministicId.From("State", c);
+    private static Guid CityId(string c) => DeterministicId.From("City", c);
+    private static Guid PinId(string c) => DeterministicId.From("PostalCode", c);
+    private static Guid UnitId(string c) => DeterministicId.From("Unit", c);
+    private static Guid GroupId(string c) => DeterministicId.From("ItemGroup", c);
+
     public static async Task SeedAsync(AppDbContext ctx, CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
 
         // DeliveryTerm
-        var existingDeliveryCodes = await ctx.DeliveryTerms
-            .IgnoreQueryFilters()
-            .Select(d => d.Code).ToListAsync(ct);
-        var newDelivery = DeliveryTerms
-            .Where(d => !existingDeliveryCodes.Contains(d.Code))
-            .Select(d => new DeliveryTerm
-            {
-                Id = DeterministicId.From("DeliveryTerm", d.Code),
-                Code = d.Code,
-                Description = d.Description,
-                IsActive = true,
-                CreatedBy = "seed",
-                CreatedOn = now
-            }).ToList();
+        var existingDeliveryCodes = await ctx.DeliveryTerms.IgnoreQueryFilters().Select(d => d.Code).ToListAsync(ct);
+        var newDelivery = DeliveryTerms.Where(d => !existingDeliveryCodes.Contains(d.Code))
+            .Select(d => new DeliveryTerm { Id = DeterministicId.From("DeliveryTerm", d.Code), Code = d.Code, Description = d.Description, IsActive = true, CreatedBy = "seed", CreatedOn = now }).ToList();
         if (newDelivery.Count > 0) ctx.DeliveryTerms.AddRange(newDelivery);
 
         // PaymentTerm
-        var existingPaymentCodes = await ctx.PaymentTerms
-            .IgnoreQueryFilters()
-            .Select(p => p.Code).ToListAsync(ct);
-        var newPayment = PaymentTerms
-            .Where(p => !existingPaymentCodes.Contains(p.Code))
-            .Select(p => new PaymentTerm
-            {
-                Id = DeterministicId.From("PaymentTerm", p.Code),
-                Code = p.Code,
-                Description = p.Description,
-                NetDays = p.NetDays,
-                IsActive = true,
-                CreatedBy = "seed",
-                CreatedOn = now
-            }).ToList();
+        var existingPaymentCodes = await ctx.PaymentTerms.IgnoreQueryFilters().Select(p => p.Code).ToListAsync(ct);
+        var newPayment = PaymentTerms.Where(p => !existingPaymentCodes.Contains(p.Code))
+            .Select(p => new PaymentTerm { Id = DeterministicId.From("PaymentTerm", p.Code), Code = p.Code, Description = p.Description, NetDays = p.NetDays, IsActive = true, CreatedBy = "seed", CreatedOn = now }).ToList();
         if (newPayment.Count > 0) ctx.PaymentTerms.AddRange(newPayment);
 
-        // Item
-        var existingItemCodes = await ctx.Items
-            .IgnoreQueryFilters()
-            .Select(i => i.Code).ToListAsync(ct);
-        var newItems = Items
-            .Where(i => !existingItemCodes.Contains(i.Code))
+        await SeedReferenceDataAsync(ctx, now, ct);
+        await SeedInventoryReferenceAsync(ctx, now, ct);
+
+        // Item — company-scoped (source 2000), linked to a Unit (by unit code) + the RAW item group.
+        var rawGroupId = GroupId("RAW");
+        var existingItemCodes = await ctx.Items.IgnoreQueryFilters().Select(i => i.Code).ToListAsync(ct);
+        var newItems = Items.Where(i => !existingItemCodes.Contains(i.Code))
             .Select(i => new Item
             {
                 Id = DeterministicId.From("Item", i.Code),
+                TenantId = Tenant,
+                TenantEntityId = Company2000,
                 Code = i.Code,
                 Description = i.Description,
-                Uom = i.Uom,
                 HsnCode = i.HsnCode,
+                UnitId = UnitId(i.UnitCode),
+                ItemGroupId = rawGroupId,
                 IsActive = true,
                 CreatedBy = "seed",
                 CreatedOn = now
             }).ToList();
         if (newItems.Count > 0) ctx.Items.AddRange(newItems);
+
+        // Link any pre-existing seed items (rows that predate the Item↔Unit/ItemGroup promotion) so the
+        // sample set demonstrates the FK links. Idempotent: only touches rows whose link is still null.
+        var seedCodes = Items.Select(i => i.Code).ToList();
+        var unitByCode = Items.ToDictionary(i => i.Code, i => i.UnitCode);
+        var toLink = await ctx.Items.IgnoreQueryFilters()
+            .Where(i => seedCodes.Contains(i.Code) && (i.ItemGroupId == null || i.UnitId == null))
+            .ToListAsync(ct);
+        foreach (var it in toLink)
+        {
+            it.ItemGroupId ??= rawGroupId;
+            it.UnitId ??= UnitId(unitByCode[it.Code]);
+            it.UpdatedBy = "seed";
+            it.UpdatedOn = now;
+        }
+
+        await ctx.SaveChangesAsync(ct);
+    }
+
+    private static async Task SeedReferenceDataAsync(AppDbContext ctx, DateTime now, CancellationToken ct)
+    {
+        var haveCur = await ctx.Currencies.IgnoreQueryFilters().Select(x => x.Code).ToListAsync(ct);
+        ctx.Currencies.AddRange(Currencies.Where(c => !haveCur.Contains(c.Code))
+            .Select(c => new Currency { Id = CurId(c.Code), TenantId = Tenant, Code = c.Code, Description = c.Desc, IsoCode = c.Iso, Symbol = c.Symbol, DecimalPlaces = 2, IsActive = true, CreatedBy = "seed", CreatedOn = now }));
+
+        var haveCtry = await ctx.Countries.IgnoreQueryFilters().Select(x => x.Code).ToListAsync(ct);
+        ctx.Countries.AddRange(Countries.Where(c => !haveCtry.Contains(c.Code))
+            .Select(c => new Country { Id = CtryId(c.Code), TenantId = Tenant, Code = c.Code, Description = c.Desc, IsoCode2 = c.Iso2, IsoCode3 = c.Iso3, TelephoneCode = c.Tel, CurrencyId = CurId(c.CurrencyCode), IsActive = true, CreatedBy = "seed", CreatedOn = now }));
+
+        var haveSt = await ctx.States.IgnoreQueryFilters().Select(x => x.Code).ToListAsync(ct);
+        ctx.States.AddRange(States.Where(s => !haveSt.Contains(s.Code))
+            .Select(s => new State { Id = StId(s.Code), TenantId = Tenant, Code = s.Code, Description = s.Desc, CountryId = CtryId(s.CountryCode), IsActive = true, CreatedBy = "seed", CreatedOn = now }));
+
+        var haveCity = await ctx.Cities.IgnoreQueryFilters().Select(x => x.Code).ToListAsync(ct);
+        ctx.Cities.AddRange(Cities.Where(c => !haveCity.Contains(c.Code))
+            .Select(c => new City { Id = CityId(c.Code), TenantId = Tenant, Code = c.Code, Description = c.Desc, CountryId = CtryId(c.CountryCode), StateId = c.StateCode == null ? null : StId(c.StateCode), IsActive = true, CreatedBy = "seed", CreatedOn = now }));
+
+        var havePin = await ctx.PostalCodes.IgnoreQueryFilters().Select(x => x.Code).ToListAsync(ct);
+        ctx.PostalCodes.AddRange(PostalCodes.Where(p => !havePin.Contains(p.Code))
+            .Select(p => new PostalCode { Id = PinId(p.Code), TenantId = Tenant, Code = p.Code, Area = p.Area, CountryId = CtryId(p.CountryCode), StateId = p.StateCode == null ? null : StId(p.StateCode), CityId = p.CityCode == null ? null : CityId(p.CityCode), IsActive = true, CreatedBy = "seed", CreatedOn = now }));
+
+        await ctx.SaveChangesAsync(ct);   // persist geo FK chain before items reference it
+    }
+
+    private static async Task SeedInventoryReferenceAsync(AppDbContext ctx, DateTime now, CancellationToken ct)
+    {
+        var haveGroups = await ctx.ItemGroups.IgnoreQueryFilters().Select(x => x.Code).ToListAsync(ct);
+        ctx.ItemGroups.AddRange(ItemGroups.Where(g => !haveGroups.Contains(g.Code))
+            .Select(g => new ItemGroup { Id = GroupId(g.Code), TenantId = Tenant, TenantEntityId = Company2000, Code = g.Code, Description = g.Desc, IsActive = true, CreatedBy = "seed", CreatedOn = now }));
+
+        var haveUnits = await ctx.Units.IgnoreQueryFilters().Select(x => x.Code).ToListAsync(ct);
+        ctx.Units.AddRange(Units.Where(u => !haveUnits.Contains(u.Code))
+            .Select(u => new Unit { Id = UnitId(u.Code), TenantId = Tenant, TenantEntityId = Company2000, Code = u.Code, Description = u.Desc, UnitType = u.Type, IsoCode = u.Iso, DecimalPlaces = 2, ConversionFactor = u.Factor, BaseUnitId = u.BaseCode == null ? null : UnitId(u.BaseCode), IsActive = true, CreatedBy = "seed", CreatedOn = now }));
 
         await ctx.SaveChangesAsync(ct);
     }
