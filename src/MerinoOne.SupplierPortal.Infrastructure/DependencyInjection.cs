@@ -11,6 +11,7 @@ using MerinoOne.SupplierPortal.Infrastructure.Persistence;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence.Interceptors;
 using MerinoOne.SupplierPortal.Infrastructure.Security;
 using MerinoOne.SupplierPortal.Infrastructure.Services;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -92,7 +93,18 @@ public static class DependencyInjection
         services.AddSingleton<IApiKeyHasher, ApiKeyHasherService>();
 
         // System settings — generic shell, per-category seeds, password protection, cached readers.
-        services.AddDataProtection();
+        // Data Protection — PERSIST the key ring to a stable folder + fixed app name. Without this the default
+        // key ring lives in the app-pool profile and is regenerated on every publish / app-pool recycle, which
+        // silently makes every previously-encrypted value undecryptable after a deploy (protected SMTP/settings
+        // here; the Blazor Web host's ProtectedLocalStorage JWT separately). Path is configurable
+        // (DataProtection:KeysPath); when unset (design-time tools / tests) it falls back to the default ring.
+        var dp = services.AddDataProtection().SetApplicationName("MerinoOne.SupplierPortal");
+        var dpKeysPath = cfg["DataProtection:KeysPath"];
+        if (!string.IsNullOrWhiteSpace(dpKeysPath))
+        {
+            System.IO.Directory.CreateDirectory(dpKeysPath);
+            dp.PersistKeysToFileSystem(new System.IO.DirectoryInfo(dpKeysPath));
+        }
         // Singleton — DataProtectorSettingProtector wraps the singleton IDataProtectionProvider
         // and is consumed from singleton EmailConfigService and scoped MediatR handlers alike.
         services.AddSingleton<ISettingProtector, DataProtectorSettingProtector>();

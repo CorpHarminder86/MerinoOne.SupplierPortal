@@ -1,5 +1,6 @@
 using MerinoOne.Web.Components;
 using MerinoOne.Web.Services;
+using Microsoft.AspNetCore.DataProtection;
 using Radzen;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,6 +13,18 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddRadzenComponents();
+
+// Data Protection — persist the key ring to a stable folder + fixed app name. Blazor's ProtectedLocalStorage
+// encrypts the stored JWT with this provider; the framework default ring lives in the app-pool profile and is
+// regenerated on every publish / recycle, which makes the stored token undecryptable and silently signs users
+// out after each deploy. Persisting it (DataProtection:KeysPath) fixes that. Same app name + folder as the API.
+var dp = builder.Services.AddDataProtection().SetApplicationName("MerinoOne.SupplierPortal");
+var dpKeysPath = builder.Configuration["DataProtection:KeysPath"];
+if (!string.IsNullOrWhiteSpace(dpKeysPath))
+{
+    System.IO.Directory.CreateDirectory(dpKeysPath);
+    dp.PersistKeysToFileSystem(new System.IO.DirectoryInfo(dpKeysPath));
+}
 
 builder.Services.AddScoped<TokenAccessor>();
 builder.Services.AddScoped<CompanyState>();
