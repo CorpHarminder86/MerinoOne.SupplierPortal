@@ -1,5 +1,6 @@
 @page "/integrations/docs"
 @implements IDisposable
+@using System.Text
 @using Microsoft.Extensions.Configuration
 @inject ApiClient Api
 @inject TokenAccessor Token
@@ -34,6 +35,9 @@ else
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">menu_book</span> Open interactive reference
                     </button>
                 }
+                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="() => ExportPdf(selectedScopes, null)" disabled="@(selectedScopes.Count == 0)">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">picture_as_pdf</span> Export PDF
+                </button>
                 @if (Token.HasPermission("Integration.ApiKeys"))
                 {
                     <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenGenerate" disabled="@(selectedScopes.Count == 0)">
@@ -260,6 +264,9 @@ else
                 </div>
                 <footer class="merino-dialog__footer">
                     <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="secondary" @onclick="() => ExportPdf(secret!.Scopes, secret)">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">picture_as_pdf</span> Export PDF with key
+                        </button>
                         <button class="merino-dialog__btn" data-intent="primary" @onclick="CloseSecret">I've copied it — done</button>
                     </div>
                 </footer>
@@ -338,10 +345,84 @@ else
         await JS.InvokeVoidAsync("window.open", $"{publicApiBaseUrl}/integration-docs", "_blank");
     }
 
-    private string CurlFor(IntegrationEndpointDocDto e)
+    private string CurlFor(IntegrationEndpointDocDto e, string? keyOverride = null)
     {
         var url = (string.IsNullOrEmpty(publicApiBaseUrl) ? "{API_BASE_URL}" : publicApiBaseUrl) + "/" + e.Path;
-        return $"curl -X {e.Method} \"{url}\" \\\n  -H \"X-APIKey: <your-api-key>\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{e.SampleJson}'";
+        var keyValue = string.IsNullOrEmpty(keyOverride) ? "<your-api-key>" : keyOverride;
+        return $"curl -X {e.Method} \"{url}\" \\\n  -H \"X-APIKey: {keyValue}\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{e.SampleJson}'";
+    }
+
+    // Build a self-contained printable HTML guide for the chosen endpoints and hand it to the print helper
+    // (browser "Save as PDF"). When a freshly-minted key is passed it is embedded — this is the one moment the
+    // plaintext exists, and embedding it is the whole point of "export with key". Built client-side; nothing
+    // re-posts the secret to the server.
+    private async Task ExportPdf(IEnumerable<string> scopes, ApiKeySecretDto? key)
+    {
+        var picked = catalog.Where(c => scopes.Contains(c.Scope)).ToList();
+        if (picked.Count == 0)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Nothing to export", Detail = "Select at least one endpoint." });
+            return;
+        }
+        await JS.InvokeVoidAsync("merinoPrintDoc", BuildExportHtml(picked, key));
+    }
+
+    private string BuildExportHtml(List<IntegrationEndpointDocDto> items, ApiKeySecretDto? key)
+    {
+        static string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
+        var baseUrl = string.IsNullOrEmpty(publicApiBaseUrl) ? "{API_BASE_URL}" : publicApiBaseUrl;
+        var sb = new StringBuilder();
+        sb.Append("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>MerinoOne Integration Guide</title><style>");
+        sb.Append("@media print{@page{margin:16mm;}}");
+        sb.Append("body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;font-size:12px;line-height:1.45;margin:24px;}");
+        sb.Append("h1{font-size:20px;margin:0 0 2px;color:#15315f;}h2{font-size:14px;color:#15315f;margin:16px 0 6px;}");
+        sb.Append(".sub{color:#666;font-size:11px;margin-bottom:14px;}");
+        sb.Append("code{font-family:Consolas,'Courier New',monospace;}");
+        sb.Append("pre{background:#f5f6f8;border:1px solid #ddd;border-radius:5px;padding:8px 10px;font-size:11px;white-space:pre-wrap;word-break:break-word;font-family:Consolas,'Courier New',monospace;}");
+        sb.Append(".ep{border:1px solid #ddd;border-radius:6px;margin:10px 0;page-break-inside:avoid;}");
+        sb.Append(".ephead{background:#eef2f8;padding:8px 10px;border-bottom:1px solid #ddd;}");
+        sb.Append(".method{background:#2e7d32;color:#fff;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:bold;}");
+        sb.Append(".scope{color:#15315f;font-size:10px;}.epbody{padding:8px 10px;}");
+        sb.Append(".lbl{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#666;font-weight:bold;margin-top:6px;}");
+        sb.Append(".warn{background:#fff4e5;border:1px solid #e0a900;color:#7a4f00;padding:8px 10px;border-radius:6px;margin:10px 0;}");
+        sb.Append(".key{border:2px solid #b00020;border-radius:6px;padding:10px;margin:8px 0;}");
+        sb.Append(".keyval{font-size:13px;word-break:break-all;background:#f5f6f8;border:1px solid #ddd;border-radius:5px;padding:8px;font-family:Consolas,'Courier New',monospace;}");
+        sb.Append("</style></head><body>");
+        sb.Append("<h1>MerinoOne &mdash; Integration Guide</h1>");
+        sb.Append($"<div class=\"sub\">Generated {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC &middot; Base URL: <code>{Enc(baseUrl)}</code></div>");
+        sb.Append("<div><b>Authentication.</b> Send the header <code>X-APIKey: &lt;your-api-key&gt;</code> on every request. The key must carry the endpoint's scope and, for company-scoped endpoints, be bound to the source company the body resolves to.</div>");
+
+        if (key is not null)
+        {
+            sb.Append("<div class=\"warn\"><b>This document contains a live API key.</b> Treat it as a credential &mdash; store it securely and share only over a trusted channel. It cannot be retrieved again.</div>");
+            sb.Append("<div class=\"key\">");
+            sb.Append($"<div class=\"lbl\">API key &mdash; {Enc(key.Label)}</div>");
+            sb.Append($"<div class=\"keyval\">{Enc(key.PlaintextKey)}</div>");
+            sb.Append($"<div class=\"lbl\">Prefix</div><div><code>{Enc(key.KeyPrefix)}</code></div>");
+            sb.Append($"<div class=\"lbl\">Companies</div><div>{Enc(string.Join(", ", key.CompanyCodes))}</div>");
+            sb.Append($"<div class=\"lbl\">Scopes</div><div>{Enc(string.Join(", ", key.Scopes))}</div>");
+            if (key.ExpiresAt is DateTime exp)
+                sb.Append($"<div class=\"lbl\">Expires</div><div>{exp:yyyy-MM-dd HH:mm} UTC</div>");
+            sb.Append("</div>");
+        }
+
+        sb.Append("<h2>Endpoints</h2>");
+        var curlKey = key?.PlaintextKey;
+        foreach (var e in items)
+        {
+            sb.Append("<div class=\"ep\"><div class=\"ephead\">");
+            sb.Append($"<span class=\"method\">{Enc(e.Method)}</span> <code>{Enc(baseUrl)}/{Enc(e.Path)}</code> &nbsp; <span class=\"scope\">{Enc(e.Scope)}</span>");
+            sb.Append("</div><div class=\"epbody\">");
+            sb.Append($"<div>{Enc(e.Description)}</div>");
+            sb.Append("<div class=\"lbl\">Sample request body</div>");
+            sb.Append($"<pre>{Enc(e.SampleJson)}</pre>");
+            sb.Append("<div class=\"lbl\">curl</div>");
+            sb.Append($"<pre>{Enc(CurlFor(e, curlKey))}</pre>");
+            sb.Append("</div></div>");
+        }
+
+        sb.Append("</body></html>");
+        return sb.ToString();
     }
 
     private void OpenGenerate()
