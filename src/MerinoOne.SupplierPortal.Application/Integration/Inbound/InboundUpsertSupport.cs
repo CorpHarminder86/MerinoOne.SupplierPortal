@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MerinoOne.SupplierPortal.Domain.Enums;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 
 namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 
@@ -23,6 +25,34 @@ public static class InboundUpsertSupport
     public const int PayloadMaxBytes = 64 * 1024;
 
     private static readonly JsonSerializerOptions PayloadJsonOptions = new() { WriteIndented = false };
+
+    /// <summary>SQL Server error numbers for a unique-index / primary-key violation.</summary>
+    private const int SqlUniqueIndexViolation = 2601;
+    private const int SqlPrimaryKeyViolation = 2627;
+
+    /// <summary>
+    /// Review S1 — true when <paramref name="ex"/> is a benign, RETRYABLE write conflict from a concurrent /
+    /// duplicate inbound delivery (two webhooks racing the same row): either an optimistic-concurrency clash
+    /// (<see cref="DbUpdateConcurrencyException"/> on a RowVersion) or a unique-index/PK violation (the loser of an
+    /// outbox enqueue or invoice-post claim hitting <c>UQ_OutboxMessage_tenant_deterministicKey</c>). The executor
+    /// converts these into a retryable per-row skip + a Failed SyncLog and returns 200, instead of rethrowing a
+    /// 500 that rolls back every unrelated row in the batch and makes LN re-deliver the whole batch. A genuine
+    /// (non-conflict) failure still rethrows.
+    /// </summary>
+    public static bool IsRetryableConcurrencyOrUniqueViolation(Exception ex)
+    {
+        if (ex is DbUpdateConcurrencyException) return true;
+
+        // Walk the exception chain for a SqlException carrying a unique/PK-violation number (DbUpdateException
+        // wraps the provider SqlException as its InnerException).
+        for (Exception? cur = ex; cur is not null; cur = cur.InnerException)
+        {
+            if (cur is SqlException sql &&
+                sql.Errors.Cast<SqlError>().Any(e => e.Number is SqlUniqueIndexViolation or SqlPrimaryKeyViolation))
+                return true;
+        }
+        return false;
+    }
 
     /// <summary>The InforEndpointMap.EntityName used for the inbound endpoint gate + session telemetry.</summary>
     public static string EntityName(SharedEndpoint endpoint) => endpoint.ToString();

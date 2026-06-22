@@ -117,7 +117,8 @@ public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, AsnDeta
             throw new ValidationException(errors.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToArray()));
 
         // ---- Flip to Submitted + stamp + ERP correlation key --------------------------------------------
-        var key = OutboxKey.For(OutboxEntity.Asn, asn.AsnNumber, "submit");   // deterministic — reused across retries.
+        // deterministic — reused across retries; tenant-qualified (review B2).
+        var key = OutboxKey.For(OutboxEntity.Asn, asn.TenantId, asn.AsnNumber, "submit");
         asn.AsnStatus = AsnStatus.Submitted;
         asn.SubmittedAt = now;
         asn.SubmittedBy = _user.UserCode;

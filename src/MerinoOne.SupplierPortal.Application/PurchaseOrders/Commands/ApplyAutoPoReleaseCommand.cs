@@ -67,7 +67,7 @@ public class ApplyAutoPoReleaseCommandHandler : IRequestHandler<ApplyAutoPoRelea
 
         // ONE deterministic-keyed acceptance enqueued — the post-commit dispatcher posts it to ERP. The accept key
         // dedupes a re-released PO. No LN HTTP inside this txn.
-        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.PoNumber, "accept");
+        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "accept"); // tenant-qualified (review B2)
         await _outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, null, ct);
 
         await _db.SaveChangesAsync(ct);

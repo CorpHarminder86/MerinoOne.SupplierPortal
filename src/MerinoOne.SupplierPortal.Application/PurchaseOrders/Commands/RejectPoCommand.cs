@@ -47,7 +47,7 @@ public class RejectPoCommandHandler : IRequestHandler<RejectPoCommand, Unit>
         po.PoStatus = PoStatus.Rejected;
         po.RejectionReason = request.Body.Reason;
 
-        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.PoNumber, "reject");
+        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "reject"); // tenant-qualified (review B2)
         var payload = JsonSerializer.Serialize(new { reason = request.Body.Reason });
         await _outbox.EnqueueAsync(OutboxTransactionType.PoReject, OutboxEntity.PurchaseOrder, po.Id, key, payload, ct);
 

@@ -55,7 +55,8 @@ public class AcceptPoCommandHandler : IRequestHandler<AcceptPoCommand, Unit>
             po.Notes = request.Body.Notes;
 
         // Deterministic key — REUSED across retries so LN dedupes (doubles as the ERP correlation id / portalRef).
-        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.PoNumber, "accept");
+        // Tenant-qualified (review B2): PoNumber is unique within the tenant; the key must be tenant-unique.
+        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "accept");
         var payload = JsonSerializer.Serialize(new { proposedDate = request.Body.ProposedDate?.ToString("o") });
         await _outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, payload, ct);
 

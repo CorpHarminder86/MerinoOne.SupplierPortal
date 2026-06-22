@@ -47,7 +47,7 @@ public class AcknowledgePoCommandHandler : IRequestHandler<AcknowledgePoCommand,
             po.AcknowledgmentAt = DateTime.UtcNow;
         }
 
-        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.PoNumber, "acknowledge");
+        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "acknowledge"); // tenant-qualified (review B2)
         await _outbox.EnqueueAsync(OutboxTransactionType.PoAcknowledge, OutboxEntity.PurchaseOrder, po.Id, key, null, ct);
 
         await _db.SaveChangesAsync(ct);

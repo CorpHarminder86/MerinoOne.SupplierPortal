@@ -25,12 +25,21 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 /// <para><b>Auto-post cascade — THREE independent idempotency guards (ALL required):</b> the invoice post fires
 /// ONLY when (a) a GRN <i>transitions into</i> <see cref="GrnStatus.GrnApproved"/> (tracked on the row — never
 /// on re-seeing an already-approved row), AND (b) ALL GRN lines covering that invoice's PO lines are
-/// <see cref="GrnStatus.GrnApproved"/> (<see cref="AllCoveringGrnsApprovedAsync"/> via the InvoiceId FK), AND
-/// (c) the invoice is currently <see cref="InvoiceStatus.Submitted"/> with <c>erpPostedAt IS NULL</c>,
-/// re-checked under <c>RowVersion</c>. Then the post is enqueued on the outbox with the deterministic key
-/// <c>sha256("Invoice|"+invoiceNumber+"|post")</c> (the worker calls SubmitInvoiceAsync; Q-LN confirmed LN
-/// dedupes on the business key — the key is defence-in-depth). <c>erpPostedAt</c> is stamped + a system-actor
-/// AuditEntry (CreatedBy="system:grn-autopost") referencing the triggering GRN. Partial coverage ⇒ NO post.</para>
+/// <see cref="GrnStatus.GrnApproved"/> (<see cref="AllCoveringGrnsApprovedAsync"/> via the InvoiceId FK,
+/// tenant-scoped — review N1), AND (c) the post is won by an ATOMIC CLAIM (review S1): a single conditional
+/// <c>ExecuteUpdateAsync</c> stamps <c>erpPostInitiatedAt = now WHERE invoiceStatus = Submitted AND
+/// erpPostInitiatedAt IS NULL</c> and the post is enqueued ONLY when that affected exactly one row — so a
+/// concurrent/duplicate webhook that already initiated the post loses the claim and is skipped (no double-post, no
+/// batch-nuking exception). The post is enqueued on the outbox with the TENANT+SUPPLIER-qualified deterministic
+/// key <c>sha256("&lt;tenantId&gt;|Invoice|&lt;supplierId&gt;|&lt;invoiceNumber&gt;|post")</c> (review B2; the worker calls
+/// SubmitInvoiceAsync; Q-LN confirmed LN dedupes on the business key — the key is defence-in-depth). A system-actor
+/// AuditEntry (CreatedBy="system:grn-autopost") referencing the triggering GRN is written. Partial coverage ⇒ NO
+/// post.</para>
+///
+/// <para><b>Review S2 — initiated vs posted.</b> The claim stamps <c>erpPostInitiatedAt</c> ("post initiated",
+/// gates re-enqueue). <c>erpPostedAt</c> ("post genuinely landed in ERP") is set LATER by the dispatcher on a
+/// confirmed <c>Dispatched</c> success and/or by <c>/inbound/erp-ack</c> for the InvoicePost. A dispatch FAILURE
+/// leaves <c>erpPostedAt</c> null so the invoice remains re-postable (the old single-marker design stranded it).</para>
 ///
 /// <para><b>Reverse transition.</b> <see cref="GrnStatus.GrnApproved"/> → NotApproved/Rejected from an LN
 /// correction updates the status; if the invoice was already posted (<c>erpPostedAt</c> set) it raises an
@@ -198,11 +207,13 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                 }
 
                 var reverseAlert = false;
-                // Reverse-transition alert: an already-posted invoice whose covering GRN just left GrnApproved.
+                // Reverse-transition alert: an already-POSTED invoice (S2: erpPostedAt = the post genuinely landed
+                // in ERP, not merely initiated) whose covering GRN just left GrnApproved. A merely-initiated post
+                // that has not yet landed does NOT alert here — its dispatch can still resolve. Tenant-scoped.
                 if (oldStatus == GrnStatus.GrnApproved && newStatus != GrnStatus.GrnApproved && grn.InvoiceId is Guid revInvId)
                 {
                     var posted = await db.Invoices.IgnoreQueryFilters()
-                        .AnyAsync(i => i.Id == revInvId && i.ErpPostedAt != null, token);
+                        .AnyAsync(i => i.Id == revInvId && i.TenantId == tenantId && i.ErpPostedAt != null, token);
                     if (posted)
                     {
                         reverseAlert = true;
@@ -222,40 +233,63 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
             {
                 if (!seenInvoices.Add(candidate.invoiceId)) continue;
 
-                // GUARD (b) — all-covering-GRNs-approved (via the InvoiceId FK).
-                if (!await AllCoveringGrnsApprovedAsync(db, candidate.invoiceId, token)) continue;
+                // GUARD (b) — all-covering-GRNs-approved (via the InvoiceId FK), tenant-scoped (review N1).
+                if (!await AllCoveringGrnsApprovedAsync(db, tenantId, sourceId, candidate.invoiceId, token)) continue;
 
-                // GUARD (c) — invoice is Submitted AND erpPostedAt IS NULL (re-checked under RowVersion: we load
-                // the tracked entity, so its RowVersion participates in the executor's SaveChanges concurrency
-                // check; a concurrent revoke/post that bumped RowVersion throws DbUpdateConcurrencyException and
-                // rolls back the whole batch — no double-post).
-                var invoice = await db.Invoices.IgnoreQueryFilters()
-                    .FirstOrDefaultAsync(i => i.Id == candidate.invoiceId && !i.IsDeleted, token);
-                if (invoice is null) continue;
-                if (invoice.InvoiceStatus != InvoiceStatus.Submitted || invoice.ErpPostedAt != null) continue;
+                // Read the invoice fields needed to build the tenant+supplier-qualified key and the audit row.
+                // Tenant-scoped (defence-in-depth: this is the same scope as the S1 claim below).
+                var inv = await db.Invoices.IgnoreQueryFilters()
+                    .Where(i => i.Id == candidate.invoiceId && !i.IsDeleted && i.TenantId == tenantId)
+                    .Select(i => new { i.Id, i.InvoiceNumber, i.SupplierId, i.TenantId })
+                    .FirstOrDefaultAsync(token);
+                if (inv is null) continue;
 
-                // Deterministic outbox key — REUSED across retries so LN dedupes (defence-in-depth on top of
-                // LN's own business-key dedup, Q-LN). Doubles as the ERP correlation id / portalRef.
-                var key = OutboxKey.For(OutboxEntity.Invoice, invoice.InvoiceNumber, "post");
+                // GUARD (c) + S1 — ATOMIC post claim. Instead of read-then-write under RowVersion (which 500s the
+                // whole batch on a concurrency clash), gate the post with a single conditional server-side update:
+                // stamp erpPostInitiatedAt ONLY when it is still NULL AND the invoice is Submitted. We enqueue the
+                // outbox post ONLY when this affected exactly one row. A concurrent/duplicate GRN webhook that
+                // already initiated the post loses the claim (rowcount==0) and is skipped — no double-post, no
+                // batch-nuking exception. The claim runs inside the executor's transaction, so it commits/rolls
+                // back atomically with the GRN status changes, the outbox row and the audit entry.
+                //
+                // S2 — this stamps erpPostInitiatedAt ("post initiated"), NOT erpPostedAt ("post landed").
+                // erpPostedAt is set later by the dispatcher on a confirmed Dispatched/erp-ack; a dispatch FAILURE
+                // therefore leaves the invoice re-postable (a future GRN re-approval re-claims it once a manual
+                // retry/operator clears erpPostInitiatedAt, or the dispatcher's retry path replays the outbox row).
+                var claimed = await db.Invoices
+                    .IgnoreQueryFilters()
+                    .Where(i => i.Id == inv.Id
+                                && i.TenantId == tenantId
+                                && i.InvoiceStatus == InvoiceStatus.Submitted
+                                && i.ErpPostInitiatedAt == null)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(i => i.ErpPostInitiatedAt, now)
+                        .SetProperty(i => i.UpdatedBy, AutoPostActor)
+                        .SetProperty(i => i.UpdatedOn, now), token);
+                if (claimed != 1) continue;
 
-                // Stamp erpPostedAt + erpSyncId in the SAME transaction as the enqueue (post decision is atomic
-                // with the marker that prevents a second post). erpPostedAt = "post initiated"; the ERP ack later
-                // writes erpCode via /inbound/erp-ack.
-                invoice.ErpPostedAt = now;
-                invoice.ErpSyncId = key;
-                invoice.UpdatedBy = AutoPostActor;
-                invoice.UpdatedOn = now;
+                // Deterministic outbox key — REUSED across retries so LN dedupes (defence-in-depth on top of LN's
+                // own business-key dedup, Q-LN). TENANT + SUPPLIER-qualified (review B2): InvoiceNumber is unique
+                // only per (SupplierId, InvoiceNumber) within a tenant, so the key folds both. Doubles as the ERP
+                // correlation id / portalRef echoed back on /inbound/erp-ack — MUST be tenant-unique.
+                var key = OutboxKey.For(OutboxEntity.Invoice, inv.TenantId, $"{inv.SupplierId:N}|{inv.InvoiceNumber}", "post");
 
-                await outbox.EnqueueAsync(OutboxTransactionType.InvoicePost, OutboxEntity.Invoice, invoice.Id, key, null, token);
+                // Stamp erpSyncId (the correlation key) alongside the claim, in the SAME transaction as the enqueue.
+                await db.Invoices
+                    .IgnoreQueryFilters()
+                    .Where(i => i.Id == inv.Id && i.TenantId == tenantId)
+                    .ExecuteUpdateAsync(s => s.SetProperty(i => i.ErpSyncId, key), token);
+
+                await outbox.EnqueueAsync(OutboxTransactionType.InvoicePost, OutboxEntity.Invoice, inv.Id, key, null, token);
 
                 // System-actor audit referencing the triggering GRN — money-movement automation must be legible.
                 db.AuditEntries.Add(new AuditEntry
                 {
                     Id = Guid.NewGuid(),
                     EntityName = nameof(Domain.Entities.Proc.Invoice),
-                    EntityId = invoice.Id,
+                    EntityId = inv.Id,
                     Operation = "AutoPost",
-                    FieldName = nameof(Domain.Entities.Proc.Invoice.ErpPostedAt),
+                    FieldName = nameof(Domain.Entities.Proc.Invoice.ErpPostInitiatedAt),
                     OldValue = null,
                     NewValue = $"GRN-approved auto-post enqueued (key={key}; trigger GRN={candidate.triggeringGrnId})",
                     ChangedBy = AutoPostActor,
@@ -280,19 +314,30 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
     /// end), so a raw SQL count would see the PRE-batch statuses and never observe the just-applied approval that
     /// completes the set. The coverage is therefore computed from the change-tracker's <c>Local</c> view (the
     /// in-flight tracked rows, with their updated statuses) UNIONed with the DB rows not loaded in this batch.</para>
+    ///
+    /// <para>Review N1 — the coverage read is TENANT-SCOPED: the DB-side covering-GRN query filters
+    /// <c>g.TenantId == tenantId &amp;&amp; g.TenantEntityId == sourceId</c>, reading under the SAME scope as the S1
+    /// post claim and the rest of this handler (every other GRN/ASN/Invoice read here is scoped the same way). The
+    /// change-tracker <c>Local</c> merge is preserved (the in-flight rows were themselves loaded under that scope).</para>
     /// </summary>
-    private static async Task<bool> AllCoveringGrnsApprovedAsync(IAppDbContext db, Guid invoiceId, CancellationToken ct)
+    private static async Task<bool> AllCoveringGrnsApprovedAsync(
+        IAppDbContext db, Guid tenantId, Guid sourceId, Guid invoiceId, CancellationToken ct)
     {
-        // In-flight tracked GRNs for this invoice (their statuses reflect the mutations applied above).
+        // In-flight tracked GRNs for this invoice (their statuses reflect the mutations applied above). These were
+        // loaded under the tenant+company scope, but re-assert it on the Local view for symmetry with the DB read.
         var localForInvoice = db.GoodsReceipts.Local
-            .Where(g => !g.IsDeleted && g.InvoiceId == invoiceId)
+            .Where(g => !g.IsDeleted && g.InvoiceId == invoiceId
+                        && g.TenantId == tenantId && g.TenantEntityId == sourceId)
             .ToList();
         var localIds = localForInvoice.Select(g => g.Id).ToHashSet();
 
         // DB rows linked to the invoice that are NOT tracked locally (untouched by this batch). Read only the
-        // status; tracked rows are excluded so their stale DB status doesn't shadow the in-flight value.
+        // status; tracked rows are excluded so their stale DB status doesn't shadow the in-flight value. Tenant +
+        // company scoped (review N1).
         var dbRows = await db.GoodsReceipts.IgnoreQueryFilters()
-            .Where(g => !g.IsDeleted && g.InvoiceId == invoiceId && !localIds.Contains(g.Id))
+            .Where(g => !g.IsDeleted && g.InvoiceId == invoiceId
+                        && g.TenantId == tenantId && g.TenantEntityId == sourceId
+                        && !localIds.Contains(g.Id))
             .Select(g => g.GrnStatus)
             .ToListAsync(ct);
 

@@ -253,6 +253,21 @@ public class InboundUpsertExecutor
         catch (Exception ex)
         {
             await tx.RollbackAsync(ct);
+
+            // Review S1 — a concurrent/duplicate inbound delivery that lost an optimistic-concurrency or a
+            // unique-index race (e.g. the loser of the GRN auto-post claim or the outbox enqueue) is a RETRYABLE
+            // per-row skip, NOT a 500 that nukes the whole batch. Record a Failed SyncLog/IntegrationError for
+            // visibility and return all-Skipped (200) so LN re-delivers later instead of retrying the entire batch.
+            if (InboundUpsertSupport.IsRetryableConcurrencyOrUniqueViolation(ex))
+            {
+                _logger.LogWarning(ex,
+                    "Inbound {EntityName} upsert hit a retryable write conflict (concurrency/unique) for tenant {TenantId}, company {CompanyCode}; reporting Skipped for LN re-delivery.",
+                    entityName, tenantId, incoming);
+                await RecordRetryableConflictAsync(entityName, tenantId, entityId, payloadJson, effectiveKey,
+                    $"recv:{incoming};src:{sourceId};count:{received}", received, ex, ct);
+                return new UpsertResultDto(incoming, received, 0, 0, received, 0, Array.Empty<RowResult>());
+            }
+
             _logger.LogError(ex, "Inbound {EntityName} upsert failed for tenant {TenantId}, company {CompanyCode}.",
                 entityName, tenantId, incoming);
 
@@ -301,6 +316,58 @@ public class InboundUpsertExecutor
             }
 
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Review S1 — best-effort, OUTSIDE the rolled-back transaction, record a Failed SyncLog + a RETRYABLE
+    /// IntegrationError for a concurrency/unique write conflict (the row is skipped + reported to LN as Skipped, so
+    /// LN re-delivers). Clears the change tracker first so the previously-added (and rolled-back) entities are not
+    /// re-attempted by this fresh SaveChanges. Never throws.
+    /// </summary>
+    private async Task RecordRetryableConflictAsync(
+        string entityName, Guid tenantId, string? entityId, string? payloadJson, string effectiveKey,
+        string payloadRef, int received, Exception ex, CancellationToken ct)
+    {
+        try
+        {
+            _db.ClearChangeTracker();
+            var failLog = new InforSyncLog
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                EntityName = entityName,
+                Direction = SyncDirection.Inbound,
+                Status = SyncStatus.Failed,
+                PayloadRef = payloadRef,
+                EntityId = entityId,
+                EntityCount = received,
+                PayloadJson = payloadJson,
+                IdempotencyKey = effectiveKey,
+                SyncedAt = DateTime.UtcNow,
+                ErrorMessage = $"Retryable write conflict (concurrent/duplicate delivery): {ex.Message}",
+                CreatedBy = "infor:inbound",
+                CreatedOn = DateTime.UtcNow
+            };
+            _db.InforSyncLogs.Add(failLog);
+            _db.IntegrationErrors.Add(new IntegrationError
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                SyncLogId = failLog.Id,
+                EntityName = entityName,
+                ErrorMessage = $"Inbound {entityName} skipped — retryable write conflict (re-delivery expected): {ex.Message}",
+                StackTrace = ex.StackTrace,
+                RetryCount = 0,
+                IsResolved = false,
+                CreatedBy = "infor:inbound",
+                CreatedOn = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception logEx)
+        {
+            _logger.LogError(logEx, "Failed to record the inbound retryable-conflict SyncLog/IntegrationError.");
         }
     }
 }

@@ -42,17 +42,24 @@ public class OutboxDispatcher : IOutboxDispatcher
         if (string.IsNullOrWhiteSpace(deterministicKey))
             throw new ArgumentException("deterministicKey is required (and must be reused across retries).", nameof(deterministicKey));
 
-        // Already staged in THIS unit of work? Adding it twice would blow the SaveChanges on the unique index.
+        // Review B2 — the enqueue-idempotency probe MUST be qualified by (TenantId, DeterministicKey) to match the
+        // composite UQ_OutboxMessage_tenant_deterministicKey. A global (cross-tenant) probe would treat tenant A's
+        // outbox row as already-owning tenant B's identically-keyed post and silently no-op it (B marked posted with
+        // NO outbox row → never paid). The deterministic key is already tenant-folded (OutboxKey.For), but the row's
+        // TenantId is stamped by the interceptor from the same principal, so probe on it explicitly.
+        var tenantId = _user.TenantId;
+
+        // Already staged in THIS unit of work? Adding it twice would blow the SaveChanges on the composite unique index.
         var stagedLocally = _db.OutboxMessages.Local
-            .Any(m => m.DeterministicKey == deterministicKey && !m.IsDeleted);
+            .Any(m => m.TenantId == tenantId && m.DeterministicKey == deterministicKey && !m.IsDeleted);
         if (stagedLocally) return;
 
-        // Already persisted (a prior committed enqueue for the same business key/op)? No-op — the dispatcher
-        // (or a later retry) already owns it. IgnoreQueryFilters: the outbox is system infrastructure; a
-        // background dispatch scope has no tenant context, so the always-on tenant filter must not hide it.
+        // Already persisted (a prior committed enqueue for the same tenant + business key/op)? No-op — the dispatcher
+        // (or a later retry) already owns it. IgnoreQueryFilters: the outbox is system infrastructure; a background
+        // dispatch scope has no tenant context, so the always-on tenant filter must not hide it.
         var alreadyPersisted = await _db.OutboxMessages
             .IgnoreQueryFilters()
-            .AnyAsync(m => m.DeterministicKey == deterministicKey && !m.IsDeleted, ct);
+            .AnyAsync(m => m.TenantId == tenantId && m.DeterministicKey == deterministicKey && !m.IsDeleted, ct);
         if (alreadyPersisted) return;
 
         _db.OutboxMessages.Add(new OutboxMessage

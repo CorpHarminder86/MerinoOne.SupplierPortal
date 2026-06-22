@@ -51,7 +51,8 @@ public class ProposePoDateCommandHandler : IRequestHandler<ProposePoDateCommand,
         po.PoStatus = PoStatus.DateProposed;
 
         // Same op as accept-with-date, so the deterministic key dedupes a re-proposal of the same date.
-        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.PoNumber, "accept");
+        // Tenant-qualified (review B2).
+        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "accept");
         var payload = JsonSerializer.Serialize(new { proposedDate = request.Body.ProposedDate.ToString("o") });
         await _outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, payload, ct);
 

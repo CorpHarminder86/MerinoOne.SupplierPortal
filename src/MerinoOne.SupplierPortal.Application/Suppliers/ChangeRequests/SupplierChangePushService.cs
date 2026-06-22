@@ -62,8 +62,9 @@ public sealed class SupplierChangePushService
         var lines = request.Lines.Where(l => !l.IsDeleted).ToList();
 
         // Deterministic key — REUSED across retries so the ERP dedupes (doubles as the ERP correlation id / portalRef
-        // echoed back on /inbound/erp-ack). NEVER a fresh GUID.
-        var key = OutboxKey.For(OutboxEntity.SupplierChange, businessKey, "push");
+        // echoed back on /inbound/erp-ack). NEVER a fresh GUID. Tenant-qualified (review B2) so the key matches the
+        // composite (tenantId, deterministicKey) UQ and is unique across tenants as the erp-ack correlation id.
+        var key = OutboxKey.For(OutboxEntity.SupplierChange, request.TenantId, businessKey, "push");
 
         // Only (re)push lines NOT already confirmed Pushed — a line may have been confirmed by a prior
         // /inbound/erp-ack (per-line erpRef stamped) before a retry of this push. Those stay Pushed; the rest are
