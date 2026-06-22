@@ -105,6 +105,16 @@ else
                     <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
                     <span class="mer-nav-item__label">Goods Receipts</span>
                 </NavLink>
+                @* R4 Module 8 + 9 — read-only PO reporting views. Same visibility as Purchase Orders
+                   (any authenticated business user; supplier rows scoped server-side). *@
+                <NavLink class="mer-nav-item" href="items-to-deliver" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">pallet</span>
+                    <span class="mer-nav-item__label">Items to Deliver</span>
+                </NavLink>
+                <NavLink class="mer-nav-item" href="po-schedule-calendar" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">calendar_month</span>
+                    <span class="mer-nav-item__label">PO Schedule</span>
+                </NavLink>
 
                 <div class="mer-nav__label">Finance</div>
                 <NavLink class="mer-nav-item" href="invoices" ActiveClass="active">
@@ -118,6 +128,12 @@ else
                 <NavLink class="mer-nav-item" href="payments" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">payments</span>
                     <span class="mer-nav-item__label">Payments</span>
+                </NavLink>
+                @* R4 Module 7 — read-only invoice payment summary. Internal + supplier (supplier rows
+                   scoped server-side; the supplier picker is internal-only inside the page). *@
+                <NavLink class="mer-nav-item" href="payment-summary" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">account_balance_wallet</span>
+                    <span class="mer-nav-item__label">Payment Summary</span>
                 </NavLink>
 
                 <div class="mer-nav__label">Communication</div>

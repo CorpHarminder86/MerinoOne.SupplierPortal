@@ -1,0 +1,198 @@
+@page "/payment-summary"
+@inject ApiClient Api
+@inject TokenAccessor Token
+
+@* R4 Module 7 — Payment Summary. Read-only projection (Invoice ⨝ Payment ⨝ GRN). One row per invoice,
+   the 10 spec columns in order. Supplier sees own rows (server seccode); internal sees all + a supplier
+   filter. No write affordances. *@
+
+<PageTitle>Payment Summary</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Payment Summary</h1>
+                <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+            </div>
+            <p class="tl-sub">Read-only — invoice payment status with covering goods receipts</p>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar">
+        @if (!Token.IsSupplier)
+        {
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:220px;" @bind="supplierFilter" @bind:after="OnFilterChanged">
+                <option value="">All suppliers</option>
+                @if (suppliers != null)
+                {
+                    @foreach (var s in suppliers)
+                    {
+                        <option value="@s.Id">@s.SupplierCode — @s.LegalName</option>
+                    }
+                }
+            </select>
+        }
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="OnFilterChanged">
+            <option value="">All statuses</option>
+            <option value="Paid">Paid</option>
+            <option value="PartiallyPaid">Partially Paid</option>
+            <option value="Unpaid">Unpaid</option>
+        </select>
+        <label class="ps-date-lbl">From
+            <input type="date" class="rz-textbox ps-date" @bind="fromDate" @bind:after="OnFilterChanged" />
+        </label>
+        <label class="ps-date-lbl">To
+            <input type="date" class="rz-textbox ps-date" @bind="toDate" @bind:after="OnFilterChanged" />
+        </label>
+        @if (HasAnyFilter)
+        {
+            <button type="button" class="ps-clear" @onclick="ClearFilters">
+                <span class="material-symbols-outlined" style="font-size:15px;">close</span> Clear
+            </button>
+        }
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (paged == null || paged.Items.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">payments</span>
+            <div>No payment rows match.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 150px 110px 130px 150px 110px 1fr 130px 150px 140px 150px; --tl-min-width: 1500px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Invoice No</div>
+                <div class="tlg-col">Date</div>
+                <div class="tlg-col tlg-col--num">Amount</div>
+                <div class="tlg-col">GRN No</div>
+                <div class="tlg-col">GRN Date</div>
+                <div class="tlg-col">Issue Reported</div>
+                <div class="tlg-col">Payment Due Date</div>
+                <div class="tlg-col">Payment Ref</div>
+                <div class="tlg-col tlg-col--num">Received Amount</div>
+                <div class="tlg-col tlg-col--num">Balance to Receive</div>
+            </div>
+            @foreach (var r in paged.Items)
+            {
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code">@r.InvoiceNumber</div>
+                    <div class="tlg-col tlg-code">@r.InvoiceDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-col--num">@r.InvoiceAmount.ToString("N2")</div>
+                    <div class="tlg-col">
+                        @if (!string.IsNullOrWhiteSpace(r.GrnNumber))
+                        {
+                            <span class="tlg-code">@r.GrnNumber</span>
+                            @if (r.GrnCount > 1)
+                            {
+                                <span class="ps-more-badge" title="@r.GrnCount GRNs linked to this invoice">+@(r.GrnCount - 1)</span>
+                            }
+                        }
+                        else
+                        {
+                            <span class="ps-null">—</span>
+                        }
+                    </div>
+                    <div class="tlg-col tlg-code">@(r.GrnDate?.ToString("yyyy-MM-dd") ?? "—")</div>
+                    <div class="tlg-col">
+                        @if (!string.IsNullOrWhiteSpace(r.IssueReported))
+                        {
+                            <span title="@r.IssueReported" style="display:inline-flex;align-items:center;gap:4px;color:var(--mer-red);">
+                                <span class="material-symbols-outlined" style="font-size:15px;">flag</span>
+                                @r.IssueReported
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="ps-null">—</span>
+                        }
+                    </div>
+                    <div class="tlg-col tlg-code">@(r.PaymentDueDate?.ToString("yyyy-MM-dd") ?? "—")</div>
+                    <div class="tlg-col">
+                        @if (!string.IsNullOrWhiteSpace(r.PaymentReference))
+                        {
+                            <span class="tlg-code">@r.PaymentReference</span>
+                        }
+                        else
+                        {
+                            <span class="ps-null">—</span>
+                        }
+                    </div>
+                    <div class="tlg-col tlg-col--num">@r.ReceivedAmount.ToString("N2")</div>
+                    <div class="tlg-col tlg-col--num @(r.BalanceToReceive > 0 ? "ps-balance-due" : null)">@r.BalanceToReceive.ToString("N2")</div>
+                </div>
+            }
+        </div>
+
+        <Pager Page="page" PageSize="PageSize" TotalCount="paged.TotalCount" PageChanged="OnPageChanged" />
+    }
+</div>
+
+<style>
+    .ps-date-lbl { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--mer-ink-600); }
+    .ps-date { padding:7px 10px; border:1px solid var(--mer-ink-300); border-radius:6px; background:var(--mer-surface); color:var(--mer-ink-900); font-family:'Inter',sans-serif; font-size:12.5px; }
+    .ps-clear { display:inline-flex; align-items:center; gap:4px; background:transparent; border:1px solid var(--mer-ink-300); border-radius:6px; padding:7px 12px; color:var(--mer-ink-600); cursor:pointer; font-size:12px; }
+    .ps-clear:hover { background:var(--mer-ink-50); color:var(--mer-ink-900); }
+    .ps-null { color:var(--mer-ink-400); }
+    .ps-balance-due { color:var(--mer-red); font-weight:600; }
+    .ps-more-badge { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px; background:var(--mer-blue-50); color:var(--mer-blue-700); font:600 10.5px/1.5 'Inter',sans-serif; vertical-align:middle; }
+</style>
+
+@code {
+    private PagedResult<PaymentSummaryRowDto>? paged;
+    private List<SupplierListItemDto>? suppliers;
+    private bool loading = true;
+    private string supplierFilter = string.Empty;
+    private string statusFilter = string.Empty;
+    private DateTime? fromDate;
+    private DateTime? toDate;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    private bool HasAnyFilter =>
+        !string.IsNullOrEmpty(supplierFilter) || !string.IsNullOrEmpty(statusFilter) || fromDate.HasValue || toDate.HasValue;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Internal users get a supplier picker; suppliers are scoped server-side and never see the dropdown.
+        if (!Token.IsSupplier)
+        {
+            var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+            suppliers = sup?.Data?.OrderBy(s => s.LegalName).ToList();
+        }
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        loading = true;
+        var url = $"api/payments/summary?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
+        if (!string.IsNullOrWhiteSpace(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
+        if (fromDate.HasValue) url += $"&from={fromDate.Value:yyyy-MM-dd}";
+        if (toDate.HasValue) url += $"&to={toDate.Value:yyyy-MM-dd}";
+        var resp = await Api.GetAsync<PagedResult<PaymentSummaryRowDto>>(url);
+        paged = resp?.Data;
+        loading = false;
+    }
+
+    private async Task OnFilterChanged() { page = 1; await Reload(); }
+
+    private async Task ClearFilters()
+    {
+        supplierFilter = string.Empty;
+        statusFilter = string.Empty;
+        fromDate = null;
+        toDate = null;
+        page = 1;
+        await Reload();
+    }
+
+    private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+}
