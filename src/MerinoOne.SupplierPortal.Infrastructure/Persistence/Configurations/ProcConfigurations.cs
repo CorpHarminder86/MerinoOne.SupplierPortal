@@ -267,6 +267,9 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         b.Property(x => x.RevokedBy).HasColumnName("revokedBy").HasMaxLength(100);
         b.Property(x => x.RevokedAt).HasColumnName("revokedAt").HasColumnType("datetime2");
         b.Property(x => x.RevokeReason).HasColumnName("revokeReason").HasMaxLength(1000);
+        // R4 (2026-06-22, migration 0023, review S2): post-initiated (set at enqueue, gates re-enqueue)
+        // is split from erpPostedAt (true ERP success only) so a dispatch failure no longer strands the invoice.
+        b.Property(x => x.ErpPostInitiatedAt).HasColumnName("erpPostInitiatedAt").HasColumnType("datetime2");
         b.Property(x => x.ErpPostedAt).HasColumnName("erpPostedAt").HasColumnType("datetime2");
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);

@@ -12,9 +12,16 @@ namespace MerinoOne.SupplierPortal.Domain.Entities.Integration;
 ///
 /// <para><b>Idempotency:</b> <see cref="DeterministicKey"/> is <c>sha256("&lt;entity&gt;|&lt;businessKey&gt;|&lt;op&gt;")</c>,
 /// reused across retries so ERP dedupes; it doubles as the correlation id / <c>portalRef</c> echoed back by ERP on
-/// the <c>/inbound/erp-ack</c> endpoint. A filtered-unique index on it enforces enqueue idempotency.</para>
+/// the <c>/inbound/erp-ack</c> endpoint. The enqueue-idempotency unique index is tenant-qualified
+/// (<c>UQ_OutboxMessage_tenant_deterministicKey ON (tenantId, deterministicKey) WHERE [isDeleted]=0</c>) because
+/// <see cref="DeterministicKey"/> is only unique per tenant+supplier (migration 0023, review B2).</para>
+///
+/// <para><b>Atomic claim (migration 0023, review B1):</b> the outbox carries a <see cref="RowVersion"/>
+/// concurrency token (<see cref="IHasRowVersion"/>) so the dispatcher can claim a row
+/// (<c>Pending → Sending</c>) and commit BEFORE the ERP POST — a crash/restart or a second instance then loses
+/// the optimistic-concurrency race rather than re-POSTing. No ERP HTTP call runs against an unclaimed row.</para>
 /// </summary>
-public class OutboxMessage : AuditableEntity, ITenantOwned
+public class OutboxMessage : AuditableEntity, ITenantOwned, IHasRowVersion
 {
     /// <summary>Owning tenant — the outbox is tenant-scoped (covered by the always-on tenant filter).</summary>
     public Guid? TenantId { get; set; }
@@ -42,4 +49,12 @@ public class OutboxMessage : AuditableEntity, ITenantOwned
     public DateTime? DispatchedAt { get; set; }
     public DateTime? AckedAt { get; set; }
     public string? LastError { get; set; }
+
+    /// <summary>
+    /// SQL <c>rowversion</c> optimistic-concurrency token (migration 0023, review B1). Mapped by the
+    /// global <see cref="IHasRowVersion"/> convention in <c>AppDbContext</c> (<c>.IsRowVersion()</c> →
+    /// column <c>rowVersion</c>). Backs the per-row dispatcher claim (<c>Pending → Sending</c> committed
+    /// before the ERP POST).
+    /// </summary>
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 }

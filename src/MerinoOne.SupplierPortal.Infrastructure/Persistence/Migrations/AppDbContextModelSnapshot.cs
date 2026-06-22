@@ -2947,6 +2947,13 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(max)")
                         .HasColumnName("payloadJson");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion")
+                        .HasColumnName("rowVersion");
+
                     b.Property<int>("Seq")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -2986,11 +2993,6 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
-                    b.HasIndex("DeterministicKey")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_OutboxMessage_deterministicKey")
-                        .HasFilter("[isDeleted] = 0");
-
                     b.HasIndex("Seq")
                         .IsUnique()
                         .HasDatabaseName("UX_OutboxMessage_outboxMessageSeq");
@@ -2999,6 +3001,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_OutboxMessage_status")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.HasIndex("TenantId", "DeterministicKey")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_OutboxMessage_tenant_deterministicKey")
                         .HasFilter("[isDeleted] = 0");
 
                     b.ToTable("OutboxMessage", "integration");
@@ -4854,6 +4861,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("erpCode");
+
+                    b.Property<DateTime?>("ErpPostInitiatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("erpPostInitiatedAt");
 
                     b.Property<DateTime?>("ErpPostedAt")
                         .HasColumnType("datetime2")

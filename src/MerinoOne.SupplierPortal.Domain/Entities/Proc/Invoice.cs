@@ -45,6 +45,13 @@ public class Invoice : BaseAggregateRoot
     public string? RevokedBy { get; set; }
     public DateTime? RevokedAt { get; set; }
     public string? RevokeReason { get; set; }
+
+    // R4 (2026-06-22, migration 0023, review S2) — split post-initiated from post-succeeded.
+    // erpPostInitiatedAt is stamped by the backend at ENQUEUE (gates re-enqueue so a draft isn't
+    // double-posted while a dispatch is in flight). erpPostedAt is set ONLY on true ERP success
+    // (Dispatched/erp-ack). A dispatch FAILURE therefore no longer permanently strands the invoice
+    // (erpPostedAt stays null → the invoice remains re-postable), which the old single-marker design did.
+    public DateTime? ErpPostInitiatedAt { get; set; }
     public DateTime? ErpPostedAt { get; set; }
     public string? ErpSyncId { get; set; }
     public string? ErpCode { get; set; }

@@ -24,10 +24,15 @@ public class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage
         b.Property(x => x.DispatchedAt).HasColumnName("dispatchedAt").HasColumnType("datetime2");
         b.Property(x => x.AckedAt).HasColumnName("ackedAt").HasColumnType("datetime2");
         b.Property(x => x.LastError).HasColumnName("lastError").HasMaxLength(2000);
+        // rowVersion (IHasRowVersion) mapped centrally by the AppDbContext convention → .IsRowVersion(),
+        // column "rowVersion". Backs the dispatcher's per-row Pending→Sending claim (review B1, migration 0023).
 
-        // Enqueue idempotency: at most one live row per deterministic key.
-        b.HasIndex(x => x.DeterministicKey)
-            .HasDatabaseName("UQ_OutboxMessage_deterministicKey").IsUnique()
+        // Enqueue idempotency (review B2, migration 0023): the deterministic key is only unique per
+        // tenant+supplier, so the uniqueness MUST be tenant-qualified. A composite (tenantId, deterministicKey)
+        // filtered-unique index — at most one live row per (tenant, key) — replaces the old global
+        // single-column UQ_OutboxMessage_deterministicKey that could collapse two tenants' invoices.
+        b.HasIndex(x => new { x.TenantId, x.DeterministicKey })
+            .HasDatabaseName("UQ_OutboxMessage_tenant_deterministicKey").IsUnique()
             .HasFilter("[isDeleted] = 0");
         // Dispatcher scan: pick live rows by status.
         b.HasIndex(x => x.Status)
