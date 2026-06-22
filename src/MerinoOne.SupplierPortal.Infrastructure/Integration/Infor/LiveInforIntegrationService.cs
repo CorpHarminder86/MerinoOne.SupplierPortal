@@ -44,6 +44,7 @@ public class LiveInforIntegrationService : IInforIntegrationService
         public const string PurchaseOrderReject = "LN/lnapi/odata/tdapi.purchaseOrders/Rejections";
         public const string Invoice = "LN/lnapi/odata/cisli.selfBillingInvoices/Invoices";
         public const string Asn = "LN/lnapi/odata/whinh.advanceShipmentNotices/Asns";
+        public const string SupplierChange = "LN/lnapi/odata/tdapi.bpSuppliers/SupplierChanges";
     }
 
     private readonly IInforConnectionProvider _connections;
@@ -192,10 +193,131 @@ public class LiveInforIntegrationService : IInforIntegrationService
         return await SendAsync("Asn", EndpointPaths.Asn, payload, ct);
     }
 
-    // R4 (2026-06-22) — Module 2. Stubbed to keep the build green; the SupplierChangeRequest entity ships in
-    // Increment C (migration 0018) and the backend-developer owns the real payload map + SendAsync wiring then.
-    public Task<InforSyncResult> SubmitSupplierChangeAsync(Guid changeRequestId, CancellationToken ct = default)
-        => throw new NotImplementedException("SubmitSupplierChangeAsync — backend-developer hand-off (Increment C, after migration 0018).");
+    // R4 Module 2 — pushes an APPROVED supplier change request to LN. Per the plan, it sends the FULL intended
+    // end-state per erpCode-keyed entity (the live row after the deltas were applied) — NOT a since-last delta —
+    // so LN can upsert each entity by its erpCode. The change request's lines tell us WHICH live rows changed; we
+    // resolve each to its current state and project it into the payload. The deterministic outbox key (replayed via
+    // IOutboundIdempotencyContext in SendAsync) is the correlation id LN echoes back on /inbound/erp-ack to stamp
+    // each line's erpRef. The OutboxDispatcherWorker owns the InforSyncLog/IntegrationError write on the result.
+    public async Task<InforSyncResult> SubmitSupplierChangeAsync(Guid changeRequestId, CancellationToken ct = default)
+    {
+        var cr = await _db.SupplierChangeRequests
+            .Include(r => r.Lines)
+            .FirstOrDefaultAsync(r => r.Id == changeRequestId, ct);
+        if (cr is null) return Fail("SupplierChange", $"SupplierChangeRequest {changeRequestId} not found.");
+
+        var supplier = await _db.Suppliers
+            .Include(s => s.Addresses)
+            .Include(s => s.Contacts)
+            .Include(s => s.BankDetails)
+            .Include(s => s.Licenses)
+            .FirstOrDefaultAsync(s => s.Id == cr.SupplierId, ct);
+        if (supplier is null) return Fail("SupplierChange", $"Supplier {cr.SupplierId} not found for change {changeRequestId}.");
+
+        // Build the full intended end-state per erpCode-keyed entity that the change touched. We dedupe by entity so
+        // multiple field-level Edit lines on the same row collapse to one end-state object. Deletes carry the row's
+        // erpCode + a delete flag so LN can retire the matching record.
+        var entities = new List<object>();
+        var seen = new HashSet<string>(); // "<target>:<id>" dedupe key
+
+        foreach (var line in cr.Lines.Where(l => !l.IsDeleted))
+        {
+            var dedupe = $"{line.TargetEntity}:{line.TargetEntityId}";
+            switch (line.TargetEntity)
+            {
+                case Domain.Enums.ChangeTargetEntity.Supplier:
+                    if (seen.Add("Supplier:self"))
+                        entities.Add(new
+                        {
+                            EntityType = "Supplier",
+                            Operation = line.Operation.ToString(),
+                            ErpCode = supplier.ErpCode,
+                            supplier.LegalName,
+                            supplier.TradeName,
+                            supplier.GstNumber,
+                            supplier.PanNumber,
+                            supplier.MsmeRegNumber,
+                            supplier.MsmeCategory,
+                            supplier.Website,
+                        });
+                    break;
+
+                case Domain.Enums.ChangeTargetEntity.Address:
+                {
+                    if (!seen.Add(dedupe)) break;
+                    var a = supplier.Addresses.FirstOrDefault(x => x.Id == line.TargetEntityId);
+                    entities.Add(new
+                    {
+                        EntityType = "Address",
+                        Operation = line.Operation.ToString(),
+                        ErpCode = a?.ErpCode,
+                        a?.AddressType, a?.AddressLine1, a?.AddressLine2, a?.Area,
+                        a?.City, a?.State, a?.Pincode, a?.Country,
+                        Deleted = a is null || a.IsDeleted,
+                    });
+                    break;
+                }
+
+                case Domain.Enums.ChangeTargetEntity.Contact:
+                {
+                    if (!seen.Add(dedupe)) break;
+                    var c = supplier.Contacts.FirstOrDefault(x => x.Id == line.TargetEntityId);
+                    entities.Add(new
+                    {
+                        EntityType = "Contact",
+                        Operation = line.Operation.ToString(),
+                        ErpCode = c?.ErpCode,
+                        c?.ContactName, c?.Designation, c?.Email, c?.Phone, IsPrimary = c?.IsPrimary,
+                        Deleted = c is null || c.IsDeleted,
+                    });
+                    break;
+                }
+
+                case Domain.Enums.ChangeTargetEntity.Bank:
+                {
+                    if (!seen.Add(dedupe)) break;
+                    var b = supplier.BankDetails.FirstOrDefault(x => x.Id == line.TargetEntityId);
+                    entities.Add(new
+                    {
+                        EntityType = "Bank",
+                        Operation = line.Operation.ToString(),
+                        ErpCode = b?.ErpCode,
+                        b?.BankName, b?.BankAddress, b?.AccountName, b?.AccountNumber,
+                        b?.IfscCode, b?.SwiftCode, IsPrimary = b?.IsPrimary,
+                        Deleted = b is null || b.IsDeleted,
+                    });
+                    break;
+                }
+
+                case Domain.Enums.ChangeTargetEntity.License:
+                {
+                    if (!seen.Add(dedupe)) break;
+                    var l = supplier.Licenses.FirstOrDefault(x => x.Id == line.TargetEntityId);
+                    entities.Add(new
+                    {
+                        EntityType = "License",
+                        Operation = line.Operation.ToString(),
+                        ErpCode = l?.ErpCode,
+                        l?.LicenseNumber, l?.LicenseType, l?.Remarks,
+                        IssueDate = l?.IssueDate?.ToString("yyyy-MM-dd"),
+                        ExpiryDate = l?.ExpiryDate?.ToString("yyyy-MM-dd"),
+                        Deleted = l is null || l.IsDeleted,
+                    });
+                    break;
+                }
+            }
+        }
+
+        var payload = new
+        {
+            ChangeRequestId = cr.Id,
+            SupplierCode = supplier.SupplierCode,
+            SupplierErpCode = supplier.ErpCode,
+            Summary = cr.Summary,
+            Entities = entities,
+        };
+        return await SendAsync("SupplierChange", EndpointPaths.SupplierChange, payload, ct);
+    }
 
     // ── plumbing ──────────────────────────────────────────────────────────────────────────────
 

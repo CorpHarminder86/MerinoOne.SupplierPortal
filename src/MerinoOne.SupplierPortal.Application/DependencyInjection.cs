@@ -36,6 +36,12 @@ public static class DependencyInjection
         // Deferred-upload rebind for license attachments — re-points staged doc.DocumentUpload rows onto a
         // saved SupplierLicense inside the license command's transaction. Scoped (per-request IAppDbContext).
         services.AddScoped<LicenseAttachmentRebinder>();
+
+        // R4 Module 2 — supplier change-management. Typed per-target appliers (Add/Edit/Delete onto the live
+        // supplier rows inside the approve transaction) + the post-commit per-line ERP push (Increment-0 outbox).
+        // Scoped — ctor-inject the per-request IAppDbContext / ICurrentUser / IOutboxDispatcher.
+        services.AddScoped<Suppliers.ChangeRequests.SupplierChangeApplier>();
+        services.AddScoped<Suppliers.ChangeRequests.SupplierChangePushService>();
         return services;
     }
 }
