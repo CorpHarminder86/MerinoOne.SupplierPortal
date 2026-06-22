@@ -27,28 +27,55 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 150px 120px 130px 1fr 110px 100px 100px 120px; --tl-min-width: 1150px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 150px 130px 1fr 120px 90px 90px 110px 130px 1fr 140px; --tl-min-width: 1400px;">
             <div class="tlg-header">
                 <div class="tlg-col">GRN #</div>
-                <div class="tlg-col tlg-col--num">PO Pos</div>
                 <div class="tlg-col">PO #</div>
                 <div class="tlg-col">Item</div>
                 <div class="tlg-col">ASN</div>
                 <div class="tlg-col tlg-col--num">Received</div>
                 <div class="tlg-col tlg-col--num">Short</div>
                 <div class="tlg-col">Date</div>
+                <div class="tlg-col">GRN Status</div>
+                <div class="tlg-col">Issue Reported</div>
+                <div class="tlg-col">Invoice</div>
             </div>
             @foreach (var g in paged.Items)
             {
                 <div class="tlg-row">
                     <div class="tlg-col tlg-code">@g.GrnNumber</div>
-                    <div class="tlg-col tlg-col--num">@g.PoPositionNo</div>
                     <div class="tlg-col tlg-code">@g.PoNumber</div>
                     <div class="tlg-col">@g.ItemCode</div>
                     <div class="tlg-col tlg-code">@g.AsnNumber</div>
                     <div class="tlg-col tlg-col--num">@g.ReceivedQty.ToString("0.###")</div>
                     <div class="tlg-col tlg-col--num">@(g.ShortQty > 0 ? g.ShortQty.ToString("0.###") : "—")</div>
                     <div class="tlg-col tlg-code">@g.GrnDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col">
+                        <span class="tlg-status @StatusClass(g.GrnStatus)" title="@StatusTooltip(g)">@StatusLabel(g.GrnStatus)</span>
+                    </div>
+                    <div class="tlg-col">
+                        @if (!string.IsNullOrWhiteSpace(g.IssueReported))
+                        {
+                            <span title="@g.IssueReported" style="display:inline-flex;align-items:center;gap:4px;color:var(--mer-red);">
+                                <span class="material-symbols-outlined" style="font-size:15px;">flag</span>
+                                @g.IssueReported
+                            </span>
+                        }
+                        else
+                        {
+                            <span>—</span>
+                        }
+                    </div>
+                    <div class="tlg-col">
+                        @if (g.InvoiceId.HasValue && !string.IsNullOrWhiteSpace(g.InvoiceNumber))
+                        {
+                            <a class="tlg-code" href="invoices/@g.InvoiceId" style="color:var(--mer-blue);text-decoration:none;">@g.InvoiceNumber</a>
+                        }
+                        else
+                        {
+                            <span>—</span>
+                        }
+                    </div>
                 </div>
             }
         </div>
@@ -74,4 +101,26 @@
     }
 
     private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+
+    // GRN status is ERP-owned (read-only). Map the enum name → existing badge palette.
+    private string StatusClass(string status) => status switch
+    {
+        "GrnApproved" => "tlg-status--active",   // green
+        "Rejected" => "tlg-status--danger",      // red
+        "GrnNotApproved" => "tlg-status--pending", // amber
+        _ => "tlg-status--off"                    // grey fallback (unknown / not yet posted)
+    };
+
+    private string StatusLabel(string status) => status switch
+    {
+        "GrnApproved" => "Approved",
+        "GrnNotApproved" => "Not Approved",
+        "Rejected" => "Rejected",
+        _ => string.IsNullOrWhiteSpace(status) ? "—" : status
+    };
+
+    private string StatusTooltip(GoodsReceiptListItemDto g) =>
+        g.GrnStatus == "GrnApproved" && g.GrnApprovedAt.HasValue
+            ? $"Approved {g.GrnApprovedAt.Value:yyyy-MM-dd HH:mm}"
+            : StatusLabel(g.GrnStatus);
 }
