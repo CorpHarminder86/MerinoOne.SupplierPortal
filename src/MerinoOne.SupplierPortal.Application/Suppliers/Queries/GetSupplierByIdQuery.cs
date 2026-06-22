@@ -1,4 +1,5 @@
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
@@ -19,8 +20,20 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
             .Include(x => x.Verifications)
             .Include(x => x.Addresses)
             .Include(x => x.Contacts)
+            .Include(x => x.BankDetails)
+            .Include(x => x.Licenses)
+            .Include(x => x.Currency)
             .FirstOrDefaultAsync(x => x.Id == request.Id, ct)
             ?? throw new NotFoundException("Supplier", request.Id);
+
+        // Resolve bank-detail currency codes (Currency is ITenantOwned; IgnoreQueryFilters bypasses the company
+        // filter — currencies are tenant-wide reference data, never company-scoped).
+        var bankCurrencyIds = s.BankDetails.Select(b => b.CurrencyId).Distinct().ToList();
+        var currencyCodes = bankCurrencyIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.Currencies.IgnoreQueryFilters()
+                .Where(c => bankCurrencyIds.Contains(c.Id))
+                .ToDictionaryAsync(c => c.Id, c => c.Code, ct);
 
         // Documents — DocumentUpload has no nav back to Supplier (polymorphic owner), query directly.
         var docs = await _db.DocumentUploads
@@ -55,6 +68,32 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
                 u.Id, u.UserCode, u.FullName, u.Email, u.IsInternal, u.IsActive,
                 r != null && r.CanWrite))
             .ToListAsync(ct);
+
+        // License attachments — polymorphic doc.DocumentUpload rows (ownerEntityType='SupplierLicense').
+        // One batched query keyed on the supplier's license ids (no per-license round-trip), grouped client-side.
+        var licenseIds = s.Licenses.Select(l => l.Id).ToList();
+        var attachmentsByLicense = new Dictionary<Guid, List<DocumentAttachmentDto>>();
+        if (licenseIds.Count > 0)
+        {
+            var licenseDocs = await _db.DocumentUploads
+                .Where(d => d.OwnerEntityType == DocumentOwnerTypes.SupplierLicense && licenseIds.Contains(d.OwnerEntityId))
+                .OrderBy(d => d.CreatedOn)
+                .Select(d => new { d.OwnerEntityId, Dto = new DocumentAttachmentDto(
+                    d.Id,
+                    d.FileName,
+                    d.MimeType,
+                    d.FileSizeKb * 1024L, // stored in KB; DTO exposes bytes
+                    d.CreatedOn,
+                    // Base-href-relative (NO leading slash); the Web /files/proxy/{id} route forwards bearer auth
+                    // to the authenticated GET /api/document-uploads/{id} download. Same endpoint serves preview
+                    // (inline Content-Disposition) and download — the UI's <a download> drives the save flow.
+                    $"files/proxy/{d.Id}",
+                    $"files/proxy/{d.Id}") })
+                .ToListAsync(ct);
+            attachmentsByLicense = licenseDocs
+                .GroupBy(x => x.OwnerEntityId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Dto).ToList());
+        }
 
         // InviteSummary — originating invite (1:1 via SupplierId).
         var now = DateTime.UtcNow;
@@ -96,7 +135,25 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
                 new SupplierContactDto(c.Id, c.ContactName, c.Designation, c.Email, c.Phone, c.IsPrimary)).ToList(),
             docs,
             inviteSummary,
-            linkedUsers
+            linkedUsers,
+            s.BankDetails.OrderByDescending(b => b.IsPrimary).ThenBy(b => b.BankName).Select(b =>
+                new SupplierBankDetailDto(
+                    b.Id, b.Seq, b.SupplierId, b.BankName, b.BankAddress, b.AccountName, b.AccountNumber,
+                    b.CurrencyId, currencyCodes.GetValueOrDefault(b.CurrencyId),
+                    b.IfscCode, b.SwiftCode, b.IsPrimary, b.ErpCode, b.CreatedOn)).ToList(),
+            s.Licenses.OrderBy(l => l.ExpiryDate).Select(l =>
+                new SupplierLicenseDto(
+                    l.Id, l.Seq, l.SupplierId, l.LicenseNumber, l.LicenseType, l.Remarks,
+                    l.IssueDate, l.ExpiryDate, l.ErpCode, l.CreatedOn,
+                    attachmentsByLicense.GetValueOrDefault(l.Id, new List<DocumentAttachmentDto>()))).ToList(),
+            s.CurrencyId,
+            s.Currency?.Code,
+            s.PaymentTermId,
+            s.PaymentTermCode,
+            s.DeliveryTermId,
+            s.DeliveryTermCode,
+            s.PoResponseMode.ToString(),
+            s.ErpCode
         );
     }
 }

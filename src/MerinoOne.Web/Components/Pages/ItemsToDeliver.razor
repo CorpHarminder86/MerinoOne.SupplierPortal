@@ -1,0 +1,197 @@
+@page "/items-to-deliver"
+@inject ApiClient Api
+@inject TokenAccessor Token
+
+@* R4 Module 8 — Items to be Delivered. Open PO lines grouped by (ItemCode, DeliveryDate). The API returns
+   flat rows already aggregated per (item, date); we do a client-side group-header pass by ItemCode so each
+   item shows one header then its delivery-date rows. Read-only. *@
+
+<PageTitle>Items to Deliver</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Items to Deliver</h1>
+                <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+            </div>
+            <p class="tl-sub">Read-only — open purchase-order quantities by item and delivery date</p>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar">
+        @if (!Token.IsSupplier)
+        {
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:220px;" @bind="supplierFilter" @bind:after="OnFilterChanged">
+                <option value="">All suppliers</option>
+                @if (suppliers != null)
+                {
+                    @foreach (var s in suppliers)
+                    {
+                        <option value="@s.Id">@s.SupplierCode — @s.LegalName</option>
+                    }
+                }
+            </select>
+        }
+        <input class="rz-textbox" placeholder="Item code…" style="width:200px;padding:8px 12px;" @bind="itemCode" @bind:event="oninput" @onkeyup="OnItemKeyup" />
+        <label class="itd-date-lbl">From
+            <input type="date" class="rz-textbox itd-date" @bind="fromDate" @bind:after="OnFilterChanged" />
+        </label>
+        <label class="itd-date-lbl">To
+            <input type="date" class="rz-textbox itd-date" @bind="toDate" @bind:after="OnFilterChanged" />
+        </label>
+        @if (HasAnyFilter)
+        {
+            <button type="button" class="itd-clear" @onclick="ClearFilters">
+                <span class="material-symbols-outlined" style="font-size:15px;">close</span> Clear
+            </button>
+        }
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (paged == null || paged.Items.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">pallet</span>
+            <div>No open items to deliver.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 1fr 160px 150px 150px 110px; --tl-min-width: 900px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Item</div>
+                <div class="tlg-col">Delivery Date</div>
+                <div class="tlg-col tlg-col--num">Total Qty</div>
+                <div class="tlg-col tlg-col--num">Open Qty</div>
+                <div class="tlg-col tlg-col--num">PO Count</div>
+            </div>
+            @foreach (var grp in Groups)
+            {
+                <div class="itd-grouphdr">
+                    <span class="material-symbols-outlined itd-grouphdr__icon">inventory_2</span>
+                    <span class="tlg-code itd-grouphdr__code">@grp.ItemCode</span>
+                    @if (!string.IsNullOrWhiteSpace(grp.ItemName))
+                    {
+                        <span class="itd-grouphdr__name">@grp.ItemName</span>
+                    }
+                    <span class="itd-grouphdr__meta">@grp.Rows.Count @(grp.Rows.Count == 1 ? "date" : "dates") · open @grp.OpenTotal.ToString("0.###")</span>
+                </div>
+                @foreach (var r in grp.Rows)
+                {
+                    <div class="tlg-row itd-row">
+                        <div class="tlg-col itd-row__spacer"></div>
+                        <div class="tlg-col tlg-code">@(r.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</div>
+                        <div class="tlg-col tlg-col--num">@r.TotalQty.ToString("0.###")</div>
+                        <div class="tlg-col tlg-col--num @(r.OpenQty > 0 ? "itd-open" : null)">@r.OpenQty.ToString("0.###")</div>
+                        <div class="tlg-col tlg-col--num">@r.PoCount</div>
+                    </div>
+                }
+            }
+        </div>
+
+        <Pager Page="page" PageSize="PageSize" TotalCount="paged.TotalCount" PageChanged="OnPageChanged" />
+    }
+</div>
+
+<style>
+    .itd-date-lbl { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--mer-ink-600); }
+    .itd-date { padding:7px 10px; border:1px solid var(--mer-ink-300); border-radius:6px; background:var(--mer-surface); color:var(--mer-ink-900); font-family:'Inter',sans-serif; font-size:12.5px; }
+    .itd-clear { display:inline-flex; align-items:center; gap:4px; background:transparent; border:1px solid var(--mer-ink-300); border-radius:6px; padding:7px 12px; color:var(--mer-ink-600); cursor:pointer; font-size:12px; }
+    .itd-clear:hover { background:var(--mer-ink-50); color:var(--mer-ink-900); }
+    .itd-grouphdr { display:flex; align-items:center; gap:8px; padding:8px 14px; background:var(--mer-bg-tertiary); border-bottom:1px solid var(--mer-line); border-top:1px solid var(--mer-line); }
+    .itd-grouphdr__icon { font-size:16px; color:var(--mer-blue); }
+    .itd-grouphdr__code { font-size:12.5px; font-weight:700; color:var(--mer-blue-darker); }
+    .itd-grouphdr__name { font-size:12.5px; font-weight:600; color:var(--mer-ink-900); }
+    .itd-grouphdr__meta { margin-left:auto; font-size:11px; color:var(--mer-ink-500); font-variant-numeric:tabular-nums; }
+    .itd-row__spacer { border-left:2px solid var(--mer-line); margin-left:18px; }
+    .itd-open { color:var(--mer-amber-800); font-weight:600; }
+</style>
+
+@code {
+    private PagedResult<ItemsToDeliverRowDto>? paged;
+    private List<SupplierListItemDto>? suppliers;
+    private bool loading = true;
+    private string supplierFilter = string.Empty;
+    private string itemCode = string.Empty;
+    private DateTime? fromDate;
+    private DateTime? toDate;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    private bool HasAnyFilter =>
+        !string.IsNullOrEmpty(supplierFilter) || !string.IsNullOrEmpty(itemCode) || fromDate.HasValue || toDate.HasValue;
+
+    // Group the flat page of rows by ItemCode for the group-header pass. Order is preserved from the API
+    // (already sorted item → date), so each item's first appearance fixes the group order.
+    private record ItemGroup(string ItemCode, string? ItemName, List<ItemsToDeliverRowDto> Rows)
+    {
+        public decimal OpenTotal => Rows.Sum(r => r.OpenQty);
+    }
+
+    private IEnumerable<ItemGroup> Groups
+    {
+        get
+        {
+            if (paged?.Items is null) yield break;
+            var keys = new List<string>();
+            var map = new Dictionary<string, ItemGroup>();
+            foreach (var r in paged.Items)
+            {
+                if (!map.TryGetValue(r.ItemCode, out var g))
+                {
+                    g = new ItemGroup(r.ItemCode, r.ItemName, new List<ItemsToDeliverRowDto>());
+                    map[r.ItemCode] = g;
+                    keys.Add(r.ItemCode);
+                }
+                g.Rows.Add(r);
+            }
+            foreach (var k in keys) yield return map[k];
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Token.IsSupplier)
+        {
+            var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+            suppliers = sup?.Data?.OrderBy(s => s.LegalName).ToList();
+        }
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        loading = true;
+        var url = $"api/purchase-orders/items-to-deliver?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
+        if (!string.IsNullOrWhiteSpace(itemCode)) url += $"&itemCode={Uri.EscapeDataString(itemCode.Trim())}";
+        if (fromDate.HasValue) url += $"&from={fromDate.Value:yyyy-MM-dd}";
+        if (toDate.HasValue) url += $"&to={toDate.Value:yyyy-MM-dd}";
+        var resp = await Api.GetAsync<PagedResult<ItemsToDeliverRowDto>>(url);
+        paged = resp?.Data;
+        loading = false;
+    }
+
+    private async Task OnFilterChanged() { page = 1; await Reload(); }
+
+    private async Task OnItemKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { page = 1; await Reload(); }
+    }
+
+    private async Task ClearFilters()
+    {
+        supplierFilter = string.Empty;
+        itemCode = string.Empty;
+        fromDate = null;
+        toDate = null;
+        page = 1;
+        await Reload();
+    }
+
+    private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+}

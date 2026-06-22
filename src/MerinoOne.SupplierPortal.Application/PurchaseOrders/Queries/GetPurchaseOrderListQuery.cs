@@ -64,7 +64,9 @@ public class GetPurchaseOrderListQueryHandler : IRequestHandler<GetPurchaseOrder
                 x.po.Id, x.po.Seq, x.po.PoNumber,
                 x.po.SupplierId, x.s.LegalName, x.s.SupplierCode,
                 x.po.PoType.ToString(), x.po.PoDate, x.po.PoStatus.ToString(),
-                x.po.Version, x.po.CreatedOn))
+                x.po.Version, x.po.CreatedOn,
+                // PO-response mode from the joined supplier — per-row accept/reject gating, no N+1.
+                x.s.PoResponseMode.ToString()))
             .ToListAsync(ct);
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling((double)total / pageSize);

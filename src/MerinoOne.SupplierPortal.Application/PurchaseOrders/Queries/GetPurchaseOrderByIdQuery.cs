@@ -41,6 +41,8 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
             row.po.AcknowledgmentAt, row.po.AcceptedAt,
             row.po.RejectionReason, row.po.ProposedDeliveryDate,
             row.po.Version, null, row.po.ErpSyncId, row.po.Notes,
-            lines);
+            lines,
+            // PO-response mode from the owning supplier (already joined above) — drives accept/reject UI gating.
+            row.s.PoResponseMode.ToString());
     }
 }

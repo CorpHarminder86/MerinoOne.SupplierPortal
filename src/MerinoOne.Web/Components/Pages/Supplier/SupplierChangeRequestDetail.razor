@@ -1,0 +1,436 @@
+@page "/supplier-change-requests/{Id:guid}"
+@using System.Text.Json
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+@* ------------------------------------------------------------------------------------------------
+   Internal review detail. Header + an old→new diff table built from the change-request lines:
+     - Edit   → FieldName: OldValue → NewValue
+     - Add    → parsed PayloadJson (camelCase keys rendered as a small key/value list)
+     - Delete → identifies the target row being removed
+   Each line carries a per-line ERP push-status badge (Pending=grey, Pushed=green, PushFailed=red).
+   Approve / Reject / Request-changes are gated on Supplier.ApproveChange AND the state machine
+   (only while Submitted / UnderReview). 409 (concurrent approve) + 403 are surfaced via toast.
+------------------------------------------------------------------------------------------------ *@
+
+<PageTitle>@(detail is null ? "Change request" : $"CR-{detail.Seq}")</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else if (detail == null)
+{
+    <div class="tl-empty">Change request not found.</div>
+}
+else
+{
+    <div class="tl-page">
+        <a href="supplier-change-requests" class="mer-back-link">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+            Back to change requests
+        </a>
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Change request CR-@detail.Seq</h1>
+                    <span class="tlg-status @SupplierChangeStatus.CssClass(detail.ChangeStatus)">@SupplierChangeStatus.Label(detail.ChangeStatus)</span>
+                </div>
+                <p class="tl-sub">
+                    <a href="suppliers/@detail.SupplierId" style="color:var(--mer-blue);text-decoration:none;">@detail.SupplierLegalName</a>
+                    · @detail.SupplierCode · @detail.Lines.Count change@(detail.Lines.Count == 1 ? "" : "s")
+                </p>
+            </div>
+            @if (CanReview && SupplierChangeStatus.IsReviewable(detail.ChangeStatus))
+            {
+                <div class="tl-header__actions">
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);cursor:pointer;" @onclick="OpenRequestChanges" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">undo</span> Request changes
+                    </button>
+                    <button class="rz-button rz-danger" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenReject" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span> Reject
+                    </button>
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                    </button>
+                </div>
+            }
+        </header>
+
+        @* ---------------- Header meta ---------------- *@
+        <div class="rz-card" style="padding:20px;margin-bottom:16px;">
+            <dl style="display:grid;grid-template-columns:150px 1fr 150px 1fr;gap:6px 16px;font-size:13px;">
+                <dt style="color:var(--mer-ink-500);">Summary</dt>
+                <dd style="grid-column:2 / span 3;">@(string.IsNullOrWhiteSpace(detail.Summary) ? "—" : detail.Summary)</dd>
+                <dt style="color:var(--mer-ink-500);">Requested by</dt><dd>@detail.RequestedBy</dd>
+                <dt style="color:var(--mer-ink-500);">Requested at</dt><dd style="font-family:Inter,monospace;">@detail.RequestedAt.ToString("yyyy-MM-dd HH:mm")</dd>
+                <dt style="color:var(--mer-ink-500);">Reviewed by</dt><dd>@(string.IsNullOrWhiteSpace(detail.ReviewedBy) ? "—" : detail.ReviewedBy)</dd>
+                <dt style="color:var(--mer-ink-500);">Reviewed at</dt><dd style="font-family:Inter,monospace;">@(detail.ReviewedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+            </dl>
+            @if (!string.IsNullOrWhiteSpace(detail.RejectionReason))
+            {
+                <div style="background:var(--mer-red-50);color:var(--mer-red);padding:10px 14px;border-radius:6px;font-size:12.5px;margin-top:12px;display:flex;gap:8px;align-items:flex-start;">
+                    <span class="material-symbols-outlined" style="font-size:16px;">report</span>
+                    <span><b>Reviewer note:</b> @detail.RejectionReason</span>
+                </div>
+            }
+        </div>
+
+        @* ---------------- Diff table ---------------- *@
+        <div class="rz-card" style="padding:20px;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Proposed changes (@detail.Lines.Count)</h3>
+            @if (detail.Lines.Count == 0)
+            {
+                <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">difference</span><div>No lines on this request.</div></div>
+            }
+            else
+            {
+                <div class="tl-grid-wrapper" style="--tl-cols: 110px 90px 1fr 110px; --tl-min-width: 820px;">
+                    <div class="tlg-header">
+                        <div class="tlg-col">Target</div>
+                        <div class="tlg-col">Operation</div>
+                        <div class="tlg-col">Change</div>
+                        <div class="tlg-col">Push status</div>
+                    </div>
+                    @foreach (var line in detail.Lines)
+                    {
+                        <div class="tlg-row" style="align-items:flex-start;">
+                            <div class="tlg-col"><span class="tlg-status tlg-status--info">@line.TargetEntity</span></div>
+                            <div class="tlg-col"><span class="tlg-status @OpClass(line.Operation)">@line.Operation</span></div>
+                            <div class="tlg-col" style="white-space:normal;">@RenderChange(line)</div>
+                            <div class="tlg-col">
+                                <span class="tlg-status @SupplierChangeStatus.PushCssClass(line.PushStatus)" title="@(line.PushedAt?.ToString("yyyy-MM-dd HH:mm"))">@SupplierChangeStatus.PushLabel(line.PushStatus)</span>
+                                @if (!string.IsNullOrWhiteSpace(line.ErpRef))
+                                {
+                                    <div style="font-size:10.5px;color:var(--mer-ink-500);font-family:Inter,monospace;margin-top:2px;">@line.ErpRef</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    @* ---------------- Approve dialog ---------------- *@
+    @if (showApprove)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="success" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">task_alt</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Change request</div>
+                        <h2 class="merino-dialog__title">Approve CR-@detail.Seq?</h2>
+                        <p class="merino-dialog__subtitle">All @detail.Lines.Count change@(detail.Lines.Count == 1 ? "" : "s") will be applied to @detail.SupplierLegalName and queued for ERP push.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showApprove = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    @if (!string.IsNullOrEmpty(actionError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;">@actionError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApprove = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApprove" disabled="@busy">@(busy ? "Approving…" : "Approve & apply")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* ---------------- Reject dialog ---------------- *@
+    @if (showReject)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="danger" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">block</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Change request</div>
+                        <h2 class="merino-dialog__title">Reject CR-@detail.Seq?</h2>
+                        <p class="merino-dialog__subtitle">No changes will be applied. The supplier is notified with your reason.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showReject = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Reason (required)</label>
+                    <textarea class="rz-textbox" rows="4" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="reasonText"></textarea>
+                    @if (!string.IsNullOrEmpty(actionError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@actionError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showReject = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="danger" @onclick="DoReject" disabled="@busy">@(busy ? "Rejecting…" : "Reject")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* ---------------- Request-changes dialog ---------------- *@
+    @if (showRequestChanges)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="warning" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">undo</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Change request</div>
+                        <h2 class="merino-dialog__title">Request changes</h2>
+                        <p class="merino-dialog__subtitle">Bounce CR-@detail.Seq back to the supplier for amendment.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showRequestChanges = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">What needs to change? (required)</label>
+                    <textarea class="rz-textbox" rows="4" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="reasonText"></textarea>
+                    @if (!string.IsNullOrEmpty(actionError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@actionError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showRequestChanges = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoRequestChanges" disabled="@busy">@(busy ? "Sending…" : "Send back")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private SupplierChangeRequestDto? detail;
+    private bool loading = true;
+    private bool busy;
+
+    private bool showApprove;
+    private bool showReject;
+    private bool showRequestChanges;
+    private string reasonText = string.Empty;
+    private string actionError = string.Empty;
+
+    private bool CanReview => Token.HasPermission("Supplier.ApproveChange");
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<SupplierChangeRequestDto>($"api/suppliers/change-requests/{Id}");
+        detail = resp?.Data;
+        loading = false;
+    }
+
+    // ---------------- Diff rendering ----------------
+    private RenderFragment RenderChange(SupplierChangeRequestLineDto line) => builder =>
+    {
+        switch (line.Operation)
+        {
+            case "Edit":
+                builder.OpenElement(0, "div");
+                builder.AddAttribute(1, "style", "font-size:12.5px;");
+                builder.OpenElement(2, "span");
+                builder.AddAttribute(3, "style", "font-weight:600;color:var(--mer-ink-900);");
+                builder.AddContent(4, line.FieldName);
+                builder.CloseElement();
+                builder.AddContent(5, ": ");
+                builder.OpenElement(6, "span");
+                builder.AddAttribute(7, "style", "text-decoration:line-through;color:var(--mer-ink-500);");
+                builder.AddContent(8, Display(line.OldValue));
+                builder.CloseElement();
+                builder.OpenElement(9, "span");
+                builder.AddAttribute(10, "class", "material-symbols-outlined");
+                builder.AddAttribute(11, "style", "font-size:14px;vertical-align:middle;color:var(--mer-ink-400);margin:0 4px;");
+                builder.AddContent(12, "arrow_forward");
+                builder.CloseElement();
+                builder.OpenElement(13, "span");
+                builder.AddAttribute(14, "style", "font-weight:600;color:var(--mer-green-dark);");
+                builder.AddContent(15, Display(line.NewValue));
+                builder.CloseElement();
+                builder.CloseElement();
+                break;
+
+            case "Add":
+                builder.OpenElement(0, "div");
+                builder.AddAttribute(1, "style", "font-size:12.5px;");
+                builder.OpenElement(2, "div");
+                builder.AddAttribute(3, "style", "font-weight:600;color:var(--mer-green-dark);margin-bottom:4px;");
+                builder.AddContent(4, $"New {line.TargetEntity.ToLowerInvariant()}");
+                builder.CloseElement();
+                var kvs = ParsePayload(line.PayloadJson);
+                if (kvs.Count == 0)
+                {
+                    builder.OpenElement(5, "span");
+                    builder.AddAttribute(6, "style", "color:var(--mer-ink-500);");
+                    builder.AddContent(7, "—");
+                    builder.CloseElement();
+                }
+                else
+                {
+                    builder.OpenElement(8, "dl");
+                    builder.AddAttribute(9, "style", "display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:0;");
+                    var seq = 10;
+                    foreach (var (k, v) in kvs)
+                    {
+                        builder.OpenElement(seq++, "dt");
+                        builder.AddAttribute(seq++, "style", "color:var(--mer-ink-500);");
+                        builder.AddContent(seq++, Humanise(k));
+                        builder.CloseElement();
+                        builder.OpenElement(seq++, "dd");
+                        builder.AddAttribute(seq++, "style", "color:var(--mer-ink-900);margin:0;");
+                        builder.AddContent(seq++, v);
+                        builder.CloseElement();
+                    }
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+                break;
+
+            case "Delete":
+                builder.OpenElement(0, "div");
+                builder.AddAttribute(1, "style", "font-size:12.5px;color:var(--mer-red);");
+                builder.OpenElement(2, "span");
+                builder.AddAttribute(3, "style", "font-weight:600;");
+                builder.AddContent(4, $"Remove {line.TargetEntity.ToLowerInvariant()}");
+                builder.CloseElement();
+                builder.OpenElement(5, "div");
+                builder.AddAttribute(6, "style", "font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-500);");
+                builder.AddContent(7, line.TargetEntityId?.ToString() ?? "—");
+                builder.CloseElement();
+                builder.CloseElement();
+                break;
+
+            default:
+                builder.AddContent(0, "—");
+                break;
+        }
+    };
+
+    private static string Display(string? v) => string.IsNullOrWhiteSpace(v) ? "(empty)" : v;
+
+    private static List<KeyValuePair<string, string>> ParsePayload(string? json)
+    {
+        var result = new List<KeyValuePair<string, string>>();
+        if (string.IsNullOrWhiteSpace(json)) return result;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return result;
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                var val = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.String => prop.Value.GetString() ?? "",
+                    JsonValueKind.Number => prop.Value.ToString(),
+                    JsonValueKind.True => "Yes",
+                    JsonValueKind.False => "No",
+                    JsonValueKind.Null => "",
+                    _ => prop.Value.ToString(),
+                };
+                if (!string.IsNullOrWhiteSpace(val))
+                    result.Add(new(prop.Name, val));
+            }
+        }
+        catch { /* malformed payload — show nothing rather than throw in the diff view */ }
+        return result;
+    }
+
+    // camelCase key → "Title Case" label.
+    private static string Humanise(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return key;
+        var sb = new System.Text.StringBuilder();
+        sb.Append(char.ToUpperInvariant(key[0]));
+        for (var i = 1; i < key.Length; i++)
+        {
+            if (char.IsUpper(key[i]) && !char.IsUpper(key[i - 1])) sb.Append(' ');
+            sb.Append(key[i]);
+        }
+        return sb.ToString();
+    }
+
+    private static string OpClass(string op) => op switch
+    {
+        "Add"    => "tlg-status--active",
+        "Edit"   => "tlg-status--pending",
+        "Delete" => "tlg-status--danger",
+        _        => "tlg-status--info",
+    };
+
+    // ---------------- Review actions ----------------
+    private void OpenApprove() { actionError = string.Empty; showApprove = true; }
+    private void OpenReject() { reasonText = string.Empty; actionError = string.Empty; showReject = true; }
+    private void OpenRequestChanges() { reasonText = string.Empty; actionError = string.Empty; showRequestChanges = true; }
+
+    private async Task DoApprove()
+    {
+        busy = true; actionError = string.Empty;
+        var resp = await Api.PostAsync<object?>($"api/suppliers/change-requests/{Id}/approve", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Approved", Detail = "Changes applied and queued for ERP push." });
+            showApprove = false;
+            await Load();
+        }
+        else
+        {
+            // 409 (wrong state / concurrent approve) and 403 (guard denial) arrive as Success=false with the
+            // server's typed title in Errors. Surface via toast AND inline, then refresh so the now-stale
+            // status + disabled actions reflect reality.
+            actionError = FirstError(resp?.Errors, "Approval failed.");
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not approve", Detail = actionError, Duration = 6000 });
+            await Load();
+        }
+        busy = false;
+    }
+
+    private async Task DoReject()
+    {
+        if (string.IsNullOrWhiteSpace(reasonText)) { actionError = "A reason is required."; return; }
+        busy = true; actionError = string.Empty;
+        var resp = await Api.PostAsync($"api/suppliers/change-requests/{Id}/reject", new RejectSupplierChangeRequest(reasonText.Trim()));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Rejected" });
+            showReject = false;
+            await Load();
+        }
+        else
+        {
+            actionError = FirstError(resp?.Errors, "Rejection failed.");
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not reject", Detail = actionError, Duration = 6000 });
+            await Load();
+        }
+        busy = false;
+    }
+
+    private async Task DoRequestChanges()
+    {
+        if (string.IsNullOrWhiteSpace(reasonText)) { actionError = "A reason is required."; return; }
+        busy = true; actionError = string.Empty;
+        var resp = await Api.PostAsync($"api/suppliers/change-requests/{Id}/request-changes", new RequestChangesRequest(reasonText.Trim()));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Sent back to supplier" });
+            showRequestChanges = false;
+            await Load();
+        }
+        else
+        {
+            actionError = FirstError(resp?.Errors, "Request-changes failed.");
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not send back", Detail = actionError, Duration = 6000 });
+            await Load();
+        }
+        busy = false;
+    }
+
+    private static string FirstError(List<string>? errors, string fallback)
+        => errors is { Count: > 0 } ? errors[0] : fallback;
+}

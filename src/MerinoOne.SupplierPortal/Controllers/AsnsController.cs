@@ -60,17 +60,53 @@ Returns: AsnDetailDto on success; 404 if not found; 403 if seccode mismatch. Req
 
     [HttpPost]
     [Authorize(Policy = "Asn.Write")]
-    [EndpointSummary("Create ASN")]
-    [EndpointDescription(@"Supplier-submitted ASN for one or more PO lines.
+    [EndpointSummary("Create ASN (Draft)")]
+    [EndpointDescription(@"Supplier creates a DRAFT ASN spanning one or more POs. NO ERP post on create.
 Body:
-- **body**: CreateAsnRequest with PO reference + ship lines + carrier metadata.
+- **body**: CreateAsnRequest — PurchaseOrderId (single) or PurchaseOrderIds (multi), ship lines, carrier metadata.
 Side effects:
-- Validates dispatched qty against open PO line qty.
-- Triggers downstream GR readiness on the buyer side.
-Returns: AsnDetailDto on success; 400 on validation; 403 if seccode mismatch. Requires permission **Asn.Write**.")]
+- Creates the ASN in Draft, populates the AsnPurchaseOrder junction, snapshots each line's PositionNo/SequenceNo.
+Returns: AsnDetailDto (Draft) on success; 400 on validation; 403 if seccode mismatch. Requires **Asn.Write**.")]
     public async Task<Result<AsnDetailDto>> Create([FromBody] CreateAsnRequest body, CancellationToken ct)
     {
         var data = await _mediator.Send(new CreateAsnCommand(body), ct);
         return Result<AsnDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("{id:guid}")]
+    [Authorize(Policy = "Asn.Write")]
+    [EndpointSummary("Update ASN (Draft only)")]
+    [EndpointDescription(@"Edits a DRAFT ASN (header + lines). Rejected (409) once the ASN is Submitted/Cancelled
+(lock-on-submit). Replaces the line set, re-snapshots PositionNo/SequenceNo, rebuilds the multi-PO junction.
+Returns: AsnDetailDto on success; 404 if not found; 409 if not Draft. Requires **Asn.Write**.")]
+    public async Task<Result<AsnDetailDto>> Update(Guid id, [FromBody] UpdateAsnRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpdateAsnCommand(id, body), ct);
+        return Result<AsnDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("{id:guid}/submit")]
+    [Authorize(Policy = "Asn.Write")]
+    [EndpointSummary("Submit ASN")]
+    [EndpointDescription(@"Submits a DRAFT ASN (Draft -> Submitted). In ONE transaction: validates over-ship,
+lot/serial (per Item flags) and the single-currency guard; stamps submittedAt/by + erpSyncId; creates EXACTLY
+ONE draft Invoice spanning all the ASN's POs; enqueues the ASN->ERP post on the outbox (dispatched post-commit).
+Locks the ASN (and its attachments) against further edits.
+Returns: AsnDetailDto (Submitted, with DraftInvoiceId) on success; 400 on validation; 409 if not Draft. Requires **Asn.Write**.")]
+    public async Task<Result<AsnDetailDto>> Submit(Guid id, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new SubmitAsnCommand(id), ct);
+        return Result<AsnDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("{id:guid}/cancel")]
+    [Authorize(Policy = "Asn.Write")]
+    [EndpointSummary("Cancel ASN")]
+    [EndpointDescription(@"Cancels an ASN (Draft or Submitted -> Cancelled). Terminal for supplier edits.
+Returns: empty success; 404 if not found; 409 if already Cancelled. Requires **Asn.Write**.")]
+    public async Task<Result> Cancel(Guid id, CancellationToken ct)
+    {
+        await _mediator.Send(new CancelAsnCommand(id), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
     }
 }

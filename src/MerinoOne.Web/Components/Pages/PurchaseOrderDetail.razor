@@ -31,13 +31,16 @@ else
                 <p class="tl-sub">@detail.SupplierName · @detail.PoType · @detail.PoDate.ToString("yyyy-MM-dd")</p>
             </div>
             <div class="tl-header__actions">
-                @if (Token.HasPermission("PurchaseOrder.Acknowledge") && detail.PoStatus == "Released")
+                @* PO response actions are shown only when the supplier is in MANUAL response mode.
+                   In AUTO mode the PO is acknowledged + accepted automatically at release, so the
+                   manual Ack/Accept/Reject affordances are hidden (req 3 / §0 Q8). *@
+                @if (ManualResponse && Token.HasPermission("PurchaseOrder.Acknowledge") && detail.PoStatus == "Released")
                 {
                     <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenAcknowledge" disabled="@busy">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">check_circle</span> Acknowledge
                     </button>
                 }
-                @if (Token.HasPermission("PurchaseOrder.Accept") && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
+                @if (ManualResponse && Token.HasPermission("PurchaseOrder.Accept") && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
                 {
                     <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenAccept" disabled="@busy">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Accept
@@ -45,6 +48,12 @@ else
                     <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenReject" disabled="@busy">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject
                     </button>
+                }
+                @if (!ManualResponse && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
+                {
+                    <span class="tlg-status tlg-status--info" title="Supplier is in Auto PO-response mode" style="align-self:center;">
+                        <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">bolt</span> Auto response
+                    </span>
                 }
                 @if (Token.HasPermission("PurchaseOrder.ApproveProposal") && detail.PoStatus == "DateProposed")
                 {
@@ -277,6 +286,11 @@ else
     private bool busy = false;
     private string tab = "overview";
 
+    // Supplier's PO-response mode now travels on PurchaseOrderDetailDto.PoResponseMode (joined from
+    // Supplier.PoResponseMode by the API) — no second GET /api/suppliers/{id} needed. Defaults to Manual
+    // (the DTO's own default) so a missing/empty value never hides the manual actions.
+    private bool ManualResponse => !string.Equals(detail?.PoResponseMode, "Auto", StringComparison.OrdinalIgnoreCase);
+
     private void TabOverview() => tab = "overview";
     private void TabHistory() => tab = "history";
 
@@ -298,6 +312,7 @@ else
         var resp = await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{Id}");
         detail = resp?.Data;
         loading = false;
+        // PoResponseMode is read straight off `detail` (see ManualResponse) — no supplier round-trip.
     }
 
     private void OpenAcknowledge() { dialogNotes = string.Empty; dialogError = string.Empty; showAcknowledge = true; }

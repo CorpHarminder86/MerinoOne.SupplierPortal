@@ -6,6 +6,41 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Configurations;
 
+public class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage>
+{
+    public void Configure(EntityTypeBuilder<OutboxMessage> b)
+    {
+        b.ApplyBaseEntityConvention("OutboxMessage", "integration", "outboxMessage");
+        // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
+        b.Property(x => x.TransactionType).HasColumnName("transactionType").HasMaxLength(60).IsRequired();
+        b.Property(x => x.EntityName).HasColumnName("entityName").HasMaxLength(60).IsRequired();
+        b.Property(x => x.EntityId).HasColumnName("entityId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.DeterministicKey).HasColumnName("deterministicKey").HasMaxLength(200).IsRequired();
+        b.Property(x => x.PayloadJson).HasColumnName("payloadJson").HasColumnType("nvarchar(max)");
+        // Status is a string enum with NO CHECK constraint (the dominant convention; the C# enum is the guard).
+        b.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20)
+            .HasDefaultValue(OutboxStatus.Pending).IsRequired();
+        b.Property(x => x.AttemptCount).HasColumnName("attemptCount").HasColumnType("int").HasDefaultValue(0);
+        b.Property(x => x.DispatchedAt).HasColumnName("dispatchedAt").HasColumnType("datetime2");
+        b.Property(x => x.AckedAt).HasColumnName("ackedAt").HasColumnType("datetime2");
+        b.Property(x => x.LastError).HasColumnName("lastError").HasMaxLength(2000);
+        // rowVersion (IHasRowVersion) mapped centrally by the AppDbContext convention → .IsRowVersion(),
+        // column "rowVersion". Backs the dispatcher's per-row Pending→Sending claim (review B1, migration 0023).
+
+        // Enqueue idempotency (review B2, migration 0023): the deterministic key is only unique per
+        // tenant+supplier, so the uniqueness MUST be tenant-qualified. A composite (tenantId, deterministicKey)
+        // filtered-unique index — at most one live row per (tenant, key) — replaces the old global
+        // single-column UQ_OutboxMessage_deterministicKey that could collapse two tenants' invoices.
+        b.HasIndex(x => new { x.TenantId, x.DeterministicKey })
+            .HasDatabaseName("UQ_OutboxMessage_tenant_deterministicKey").IsUnique()
+            .HasFilter("[isDeleted] = 0");
+        // Dispatcher scan: pick live rows by status.
+        b.HasIndex(x => x.Status)
+            .HasDatabaseName("IX_OutboxMessage_status")
+            .HasFilter("[isDeleted] = 0");
+    }
+}
+
 public class CompanyShareGroupConfiguration : IEntityTypeConfiguration<CompanyShareGroup>
 {
     public void Configure(EntityTypeBuilder<CompanyShareGroup> b)

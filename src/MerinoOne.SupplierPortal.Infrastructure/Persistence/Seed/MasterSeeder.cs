@@ -26,6 +26,16 @@ public static partial class MasterSeeder
         new DeliveryTermSpec("FCA", "Free Carrier"),
     };
 
+    // Tax master (R4 Module 6) — company-shared (ICompanyScoped), seeded under source company 2000 (same as
+    // Item/ItemGroup). createdBy='seed' short-circuits the audit interceptor.
+    public record TaxSpec(string Code, string Description, decimal TaxRate);
+    public static readonly IReadOnlyList<TaxSpec> Taxes = new[]
+    {
+        new TaxSpec("CGST", "Central GST", 9m),
+        new TaxSpec("SGST", "State GST", 9m),
+        new TaxSpec("IGST", "Integrated GST", 18m),
+    };
+
     public static readonly IReadOnlyList<PaymentTermSpec> PaymentTerms = new[]
     {
         new PaymentTermSpec("NET15", "Net 15 days", 15),
@@ -109,6 +119,23 @@ public static partial class MasterSeeder
         var newPayment = PaymentTerms.Where(p => !existingPaymentCodes.Contains(p.Code))
             .Select(p => new PaymentTerm { Id = DeterministicId.From("PaymentTerm", p.Code), Code = p.Code, Description = p.Description, NetDays = p.NetDays, IsActive = true, CreatedBy = "seed", CreatedOn = now }).ToList();
         if (newPayment.Count > 0) ctx.PaymentTerms.AddRange(newPayment);
+
+        // Tax (R4 Module 6) — company-shared, seeded under source company 2000 (mirrors Item/ItemGroup).
+        var existingTaxCodes = await ctx.Taxes.IgnoreQueryFilters().Select(t => t.Code).ToListAsync(ct);
+        var newTaxes = Taxes.Where(t => !existingTaxCodes.Contains(t.Code))
+            .Select(t => new Tax
+            {
+                Id = DeterministicId.From("Tax", t.Code),
+                TenantId = Tenant,
+                TenantEntityId = Company2000,
+                Code = t.Code,
+                Description = t.Description,
+                TaxRate = t.TaxRate,
+                IsActive = true,
+                CreatedBy = "seed",
+                CreatedOn = now
+            }).ToList();
+        if (newTaxes.Count > 0) ctx.Taxes.AddRange(newTaxes);
 
         await SeedReferenceDataAsync(ctx, now, ct);
         await SeedInventoryReferenceAsync(ctx, now, ct);

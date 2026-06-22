@@ -18,6 +18,11 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
         b.Property(x => x.UnitId).HasColumnName("unitId").HasColumnType("uniqueidentifier");
         b.Property(x => x.IsActive).HasColumnName("isActive").HasDefaultValue(true);
 
+        // R4 (2026-06-22) — Addendum A3: LN-fed control flags. NOT NULL with a named default so existing
+        // rows are safe (the migration emits DF_Item_isSerialized / DF_Item_isLotControlled).
+        b.Property(x => x.IsSerialized).HasColumnName("isSerialized").HasColumnType("bit").HasDefaultValue(false);
+        b.Property(x => x.IsLotControlled).HasColumnName("isLotControlled").HasColumnType("bit").HasDefaultValue(false);
+
         b.HasOne(x => x.ItemGroup).WithMany().HasForeignKey(x => x.ItemGroupId)
             .HasConstraintName("FK_Item_ItemGroup_itemGroupId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId)
@@ -72,6 +77,28 @@ public class PaymentTermConfiguration : IEntityTypeConfiguration<PaymentTerm>
         // Composite scope index for the always-on tenant + (sharing-aware) company read filter.
         b.HasIndex(x => new { x.TenantId, x.TenantEntityId })
             .HasDatabaseName("IX_PaymentTerm_tenant_company");
+    }
+}
+
+public class TaxConfiguration : IEntityTypeConfiguration<Tax>
+{
+    public void Configure(EntityTypeBuilder<Tax> b)
+    {
+        b.ApplyBaseEntityConvention("Tax", "proc", "tax");
+        b.Property(x => x.Code).HasColumnName("code").HasMaxLength(20).IsRequired();
+        b.Property(x => x.Description).HasColumnName("description").HasMaxLength(200).IsRequired();
+        b.Property(x => x.TaxRate).HasColumnName("taxRate").HasColumnType("decimal(9,4)");
+        b.Property(x => x.IsActive).HasColumnName("isActive").HasDefaultValue(true);
+
+        // Company-shared (sharing-aware), ERP-fed (Q6 FINAL) — mirrors DeliveryTerm/PaymentTerm.
+        // Per-company (source) uniqueness, soft-delete-aware.
+        b.HasIndex(x => new { x.TenantEntityId, x.Code })
+            .HasDatabaseName("UQ_Tax_company_code")
+            .IsUnique()
+            .HasFilter("[tenantEntityId] IS NOT NULL AND [isDeleted] = 0");
+        // Composite scope index for the always-on tenant + (sharing-aware) company read filter.
+        b.HasIndex(x => new { x.TenantId, x.TenantEntityId })
+            .HasDatabaseName("IX_Tax_tenant_company");
     }
 }
 

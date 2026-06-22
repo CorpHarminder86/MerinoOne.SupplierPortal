@@ -19,13 +19,28 @@
                 @if (!IsNew && detail != null)
                 {
                     <span class="tlg-status @StatusClass(detail.AsnStatus)">@detail.AsnStatus</span>
+                    @if (IsLocked)
+                    {
+                        <span class="tl-count-chip" style="background:var(--mer-ink-100);color:var(--mer-ink-600);">
+                            <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">lock</span> Read-only
+                        </span>
+                    }
                 }
-                <span class="tl-count-chip">Step @currentStep of 4</span>
+                else
+                {
+                    <span class="tl-count-chip">Step @currentStep of 4</span>
+                }
             </div>
-            <p class="tl-sub">@(IsNew ? "Submit shipping notice for a purchase order" : $"ASN for PO {detail?.PoNumber}")</p>
+            <p class="tl-sub">@HeaderSubtitle</p>
         </div>
         <div class="tl-header__actions">
-            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Cancel">Cancel</button>
+            @if (!IsNew && detail != null && !IsLocked && CanWrite)
+            {
+                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenCancelDialog" disabled="@busy">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span> Cancel ASN
+                </button>
+            }
+            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="BackToList">Close</button>
         </div>
     </header>
 
@@ -33,8 +48,109 @@
     {
         <div class="tl-empty">Loading…</div>
     }
+    else if (!IsNew && detail == null)
+    {
+        <div class="tl-empty">ASN not found.</div>
+    }
+    else if (IsLocked && detail != null)
+    {
+        @* ---------------- Read-only (Submitted/Cancelled) view ---------------- *@
+        @if (detail.DraftInvoiceId.HasValue)
+        {
+            <div class="rz-card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;background:var(--mer-green-50);border:1px solid var(--mer-green);">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--mer-green-dark);">receipt_long</span>
+                <div style="flex:1;">
+                    <div style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);">Draft invoice created</div>
+                    <div style="font-size:12px;color:var(--mer-ink-600);">A draft invoice spanning this ASN's PO(s) was generated on submit.</div>
+                </div>
+                <a href="invoices/@detail.DraftInvoiceId" class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;text-decoration:none;">Open draft invoice</a>
+            </div>
+        }
+
+        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;">
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Shipment</h3>
+                <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
+                    <dt style="color:var(--mer-ink-500);">Purchase order(s)</dt><dd>@PoSummaryText</dd>
+                    <dt style="color:var(--mer-ink-500);">Expected delivery</dt><dd style="font-family:Inter,monospace;">@detail.ExpectedDeliveryDate.ToString("yyyy-MM-dd")</dd>
+                    @if (!string.IsNullOrEmpty(detail.TimeWindow)) { <dt style="color:var(--mer-ink-500);">Time window</dt><dd>@detail.TimeWindow</dd> }
+                    @if (!string.IsNullOrEmpty(detail.CarrierName)) { <dt style="color:var(--mer-ink-500);">Carrier</dt><dd>@detail.CarrierName</dd> }
+                    @if (!string.IsNullOrEmpty(detail.TrackingNumber)) { <dt style="color:var(--mer-ink-500);">Tracking</dt><dd style="font-family:Inter,monospace;">@detail.TrackingNumber</dd> }
+                    @if (!string.IsNullOrEmpty(detail.VehicleNumber)) { <dt style="color:var(--mer-ink-500);">Vehicle</dt><dd style="font-family:Inter,monospace;">@detail.VehicleNumber</dd> }
+                    @if (!string.IsNullOrEmpty(detail.DriverName)) { <dt style="color:var(--mer-ink-500);">Driver</dt><dd>@detail.DriverName @(string.IsNullOrEmpty(detail.DriverPhone) ? "" : $"· {detail.DriverPhone}")</dd> }
+                    @if (detail.SubmittedAt.HasValue) { <dt style="color:var(--mer-ink-500);">Submitted</dt><dd style="font-family:Inter,monospace;">@detail.SubmittedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.SubmittedBy) ? "" : $"by {detail.SubmittedBy}")</dd> }
+                    @if (!string.IsNullOrEmpty(detail.ErpSyncId)) { <dt style="color:var(--mer-ink-500);">ERP sync id</dt><dd style="font-family:Inter,monospace;font-size:11px;">@detail.ErpSyncId</dd> }
+                    @if (!string.IsNullOrEmpty(detail.ErpCode)) { <dt style="color:var(--mer-ink-500);">ERP code</dt><dd style="font-family:Inter,monospace;">@detail.ErpCode</dd> }
+                </dl>
+                @if (!string.IsNullOrEmpty(detail.Notes))
+                {
+                    <h4 style="font-size:12px;font-weight:700;margin:16px 0 6px;color:var(--mer-ink-700);">Notes</h4>
+                    <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@detail.Notes</p>
+                }
+            </div>
+
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Attachments (@detail.Attachments.Count)</h3>
+                @if (detail.Attachments.Count == 0)
+                {
+                    <div style="font-size:12px;color:var(--mer-ink-400);">No attachments.</div>
+                }
+                else
+                {
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                        @foreach (var a in detail.Attachments)
+                        {
+                            var att = a;
+                            <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 10px;background:var(--mer-surface);">
+                                <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-blue);">@AttachIcon(att.ContentType)</span>
+                                <div style="flex:1;min-width:0;">
+                                    <div style="font-size:12px;font-weight:600;color:var(--mer-ink-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@att.FileName">@att.FileName</div>
+                                    <div style="font-size:10.5px;color:var(--mer-ink-500);font-family:Inter,monospace;">@($"{att.SizeBytes / 1024d:0.#}") KB</div>
+                                </div>
+                                <button type="button" @onclick="() => PreviewAttachment(att)" title="Preview" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="rz-card" style="padding:20px;margin-top:16px;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)</h3>
+            <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--mer-line);">
+                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">PO</th>
+                        <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
+                        <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Seq</th>
+                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
+                        <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Order Qty</th>
+                        <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Ship Qty</th>
+                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Batch</th>
+                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Expiry</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var ln in detail.Lines)
+                {
+                    <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                        <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PoNumber</td>
+                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.PositionNo ?? ln.PoPositionNo)</td>
+                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.SequenceNo?.ToString() ?? "—")</td>
+                        <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
+                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
+                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.ShippedQty.ToString("0.###")</td>
+                        <td style="padding:6px 4px;">@(string.IsNullOrEmpty(ln.BatchNumber) ? "—" : ln.BatchNumber)</td>
+                        <td style="padding:6px 4px;font-family:Inter,monospace;">@(ln.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
     else
     {
+        @* ---------------- Draft wizard (editable) ---------------- *@
         <div class="rz-card" style="padding:20px;">
             <!-- Stepper -->
             <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--mer-line);">
@@ -51,7 +167,8 @@
 
             @if (currentStep == 1)
             {
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Select purchase order</h3>
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Select purchase order(s)</h3>
+                <p style="font-size:12px;color:var(--mer-ink-500);margin-bottom:12px;">Pick one or more open POs from the same supplier. Lines from every selected PO are merged on the next step.</p>
                 @if (posLoading)
                 {
                     <p style="color:var(--mer-ink-500);font-size:13px;">Loading POs…</p>
@@ -65,34 +182,51 @@
                 }
                 else
                 {
-                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Purchase order (Released / Acknowledged / Accepted)</label>
-                    <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="selectedPoId" @bind:after="LoadPoLines">
-                        <option value="">— Select PO —</option>
-                        @foreach (var sg in availablePos.GroupBy(p => p.SupplierName).OrderBy(g => g.Key))
-                        {
-                            <optgroup label="@sg.Key">
-                                @foreach (var p in sg.OrderByDescending(x => x.PoDate))
+                    @foreach (var sg in availablePos.GroupBy(p => p.SupplierName).OrderBy(g => g.Key))
+                    {
+                        var supplierLocked = selectedSupplierName != null && selectedSupplierName != sg.Key;
+                        <div style="margin-bottom:14px;@(supplierLocked ? "opacity:.45;" : "")">
+                            <div style="font-size:11px;font-weight:700;color:var(--mer-ink-500);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">@sg.Key</div>
+                            <div style="display:flex;flex-direction:column;gap:6px;">
+                                @foreach (var po in sg.OrderByDescending(x => x.PoDate))
                                 {
-                                    <option value="@p.Id">@p.PoNumber · @p.PoDate.ToString("yyyy-MM-dd") (@p.PoStatus)</option>
+                                    var p = po;
+                                    var picked = selectedPoIds.Contains(p.Id);
+                                    <label style="display:flex;align-items:center;gap:10px;border:1px solid @(picked ? "var(--mer-blue)" : "var(--mer-line)");border-radius:6px;padding:8px 12px;cursor:@(supplierLocked ? "not-allowed" : "pointer");background:@(picked ? "var(--mer-blue-50)" : "var(--mer-surface)");">
+                                        <input type="checkbox" checked="@picked" disabled="@supplierLocked" @onchange="@(e => TogglePo(p, (bool)e.Value!))" />
+                                        <span style="font-family:Inter,monospace;font-weight:600;font-size:13px;color:var(--mer-blue-darker);">@p.PoNumber</span>
+                                        <span style="font-size:12px;color:var(--mer-ink-500);">@p.PoDate.ToString("yyyy-MM-dd")</span>
+                                        <span class="tlg-status tlg-status--info" style="margin-left:auto;">@p.PoStatus</span>
+                                    </label>
                                 }
-                            </optgroup>
-                        }
-                    </select>
+                            </div>
+                        </div>
+                    }
+                    @if (selectedPoIds.Count > 0)
+                    {
+                        <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;"><b>@selectedPoIds.Count</b> PO(s) selected · supplier <b>@selectedSupplierName</b></div>
+                    }
                 }
             }
             else if (currentStep == 2)
             {
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@lines.Count)</h3>
-                @if (lines.Count == 0)
+                @if (linesLoading)
                 {
-                    <p style="color:var(--mer-ink-500);font-size:13px;">Select a PO to load lines.</p>
+                    <p style="color:var(--mer-ink-500);font-size:13px;">Loading lines…</p>
+                }
+                else if (lines.Count == 0)
+                {
+                    <p style="color:var(--mer-ink-500);font-size:13px;">Select at least one PO to load lines.</p>
                 }
                 else
                 {
                     <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
                         <thead>
                             <tr style="border-bottom:1px solid var(--mer-line);">
-                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">PO</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Seq</th>
                                 <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
                                 <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Order Qty</th>
                                 <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Ship Qty</th>
@@ -104,7 +238,9 @@
                         @foreach (var ln in lines)
                         {
                             <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                                <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PoPositionNo</td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PoNumber</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@ln.PositionNo</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@(ln.SequenceNo?.ToString() ?? "—")</td>
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
                                 <td style="padding:6px 4px;text-align:right;"><input type="number" step="0.001" class="rz-textbox" style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;" @bind="ln.ShippedQty" /></td>
@@ -114,6 +250,7 @@
                         }
                         </tbody>
                     </table>
+                    <p style="font-size:11px;color:var(--mer-ink-500);margin-top:8px;">Position &amp; sequence are snapshot from the PO line and cannot be edited.</p>
                 }
             }
             else if (currentStep == 3)
@@ -121,7 +258,7 @@
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Shipment details</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Expected delivery date</label>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Expected delivery date *</label>
                         <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="expectedDeliveryDate" />
                     </div>
                     <div>
@@ -151,51 +288,153 @@
                 </div>
                 <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:12px;display:block;">Notes</label>
                 <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="notes"></textarea>
+
+                @* ---------------- Attachments ---------------- *@
+                <div style="margin-top:18px;border-top:1px solid var(--mer-line-soft);padding-top:14px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachments</label>
+                        @if (IsNew)
+                        {
+                            <span style="font-size:11px;color:var(--mer-ink-500);">Available after the draft is saved.</span>
+                        }
+                        else
+                        {
+                            <label class="doc-uploader__choose" style="position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;">
+                                <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
+                                @(attachUploading ? "Uploading…" : "Add file")
+                                <InputFile OnChange="OnAsnFileSelectedAsync" accept=".pdf,.jpg,.jpeg,.png" disabled="@attachUploading"
+                                           style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
+                            </label>
+                        }
+                    </div>
+                    <p style="font-size:11px;color:var(--mer-ink-500);margin-bottom:8px;">PDF or image, up to 5 MB. Attachments are editable only while the ASN is Draft.</p>
+
+                    @if (attachments.Count == 0)
+                    {
+                        <div style="font-size:12px;color:var(--mer-ink-400);padding:8px 0;">No attachments yet.</div>
+                    }
+                    else
+                    {
+                        <div style="display:flex;flex-direction:column;gap:6px;">
+                            @foreach (var a in attachments)
+                            {
+                                var att = a;
+                                <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 10px;background:var(--mer-surface);">
+                                    <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-blue);">@AttachIcon(att.ContentType)</span>
+                                    <div style="flex:1;min-width:0;">
+                                        <div style="font-size:12px;font-weight:600;color:var(--mer-ink-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@att.FileName">@att.FileName</div>
+                                        <div style="font-size:10.5px;color:var(--mer-ink-500);font-family:Inter,monospace;">@($"{att.SizeBytes / 1024d:0.#}") KB</div>
+                                    </div>
+                                    <button type="button" @onclick="() => PreviewAttachment(att)" title="Preview" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>
+                                    <button type="button" @onclick="() => DeleteAttachment(att)" title="Remove" disabled="@attachUploading" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">delete</span></button>
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(attachError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@attachError</div> }
+                </div>
             }
             else if (currentStep == 4)
             {
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Review & submit</h3>
-                <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
-                    <dt style="color:var(--mer-ink-500);">PO</dt><dd>@(availablePos?.FirstOrDefault(p => p.Id == selectedPoId)?.PoNumber)</dd>
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Review &amp; submit</h3>
+                <dl style="display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:13px;">
+                    <dt style="color:var(--mer-ink-500);">Purchase order(s)</dt><dd style="font-family:Inter,monospace;">@string.Join(", ", SelectedPoNumbers)</dd>
                     <dt style="color:var(--mer-ink-500);">Expected delivery</dt><dd style="font-family:Inter,monospace;">@expectedDeliveryDate?.ToString("yyyy-MM-dd")</dd>
-                    <dt style="color:var(--mer-ink-500);">Carrier</dt><dd>@carrierName</dd>
-                    <dt style="color:var(--mer-ink-500);">Tracking</dt><dd style="font-family:Inter,monospace;">@trackingNumber</dd>
-                    <dt style="color:var(--mer-ink-500);">Vehicle</dt><dd style="font-family:Inter,monospace;">@vehicleNumber</dd>
+                    <dt style="color:var(--mer-ink-500);">Carrier</dt><dd>@(string.IsNullOrEmpty(carrierName) ? "—" : carrierName)</dd>
+                    <dt style="color:var(--mer-ink-500);">Tracking</dt><dd style="font-family:Inter,monospace;">@(string.IsNullOrEmpty(trackingNumber) ? "—" : trackingNumber)</dd>
+                    <dt style="color:var(--mer-ink-500);">Vehicle</dt><dd style="font-family:Inter,monospace;">@(string.IsNullOrEmpty(vehicleNumber) ? "—" : vehicleNumber)</dd>
                     <dt style="color:var(--mer-ink-500);">Lines</dt><dd>@lines.Count(l => l.ShippedQty > 0) of @lines.Count being shipped</dd>
+                    <dt style="color:var(--mer-ink-500);">Attachments</dt><dd>@attachments.Count</dd>
                 </dl>
+
+                @if (IsNew)
+                {
+                    <div style="background:var(--mer-blue-50);color:var(--mer-blue-darker);padding:10px 12px;border-radius:6px;font-size:12px;margin-top:12px;">
+                        This saves a <b>Draft</b> ASN. You can add attachments and submit it from the draft.
+                    </div>
+                }
+                else
+                {
+                    <div style="background:var(--mer-blue-50);color:var(--mer-blue-darker);padding:10px 12px;border-radius:6px;font-size:12px;margin-top:12px;">
+                        Submitting locks this ASN (header, lines and attachments become read-only) and creates a draft invoice spanning its PO(s).
+                    </div>
+                }
+
                 @if (!string.IsNullOrEmpty(submitError))
                 {
-                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;">@submitError</div>
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;white-space:pre-wrap;">@submitError</div>
                 }
             }
 
             <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--mer-line);">
                 <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="PrevStep" disabled="@(currentStep == 1)">Back</button>
-                @if (currentStep < 4)
-                {
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NextStep" disabled="@(!CanProceed)">Next</button>
-                }
-                else
-                {
-                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Submit" disabled="@busy">@(busy ? "Submitting…" : (IsNew ? "Create ASN" : "Save changes"))</button>
-                }
+                <div style="display:flex;gap:8px;">
+                    @if (currentStep == 4)
+                    {
+                        <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="SaveDraft" disabled="@busy">@(busy && savingDraft ? "Saving…" : (IsNew ? "Save draft" : "Save changes"))</button>
+                        @if (!IsNew)
+                        {
+                            <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Submit" disabled="@busy">@(busy && !savingDraft ? "Submitting…" : "Submit ASN")</button>
+                        }
+                    }
+                    else
+                    {
+                        <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NextStep" disabled="@(!CanProceed)">Next</button>
+                    }
+                </div>
             </div>
         </div>
     }
 </div>
+
+@if (showCancel && detail != null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="danger" data-size="md" style="width:520px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">block</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">ASN</div>
+                    <h2 class="merino-dialog__title">Cancel @detail.AsnNumber?</h2>
+                    <p class="merino-dialog__subtitle">This is terminal — the ASN can no longer be edited or submitted.</p>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showCancel = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;">@dialogError</div> }
+                else { <p style="font-size:13px;color:var(--mer-ink-700);">Are you sure you want to cancel this ASN?</p> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showCancel = false">Keep ASN</button>
+                    <button class="merino-dialog__btn" data-intent="danger" @onclick="DoCancel" disabled="@busy">@(busy ? "Cancelling…" : "Cancel ASN")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+<DocumentPreviewer Doc="_previewDoc" OnClose="() => _previewDoc = null" />
 
 @code {
     [Parameter] public Guid? Id { get; set; }
     private AsnDetailDto? detail;
     private bool loading = true;
     private bool busy = false;
+    private bool savingDraft = false;
     private int currentStep = 1;
     private string submitError = string.Empty;
+    private const long MaxAttachBytes = 5L * 1024 * 1024;
 
+    // PO selection (multi). selectedSupplierName locks the picker to one supplier (an ASN ships from one supplier).
     private List<PurchaseOrderListItemDto>? availablePos;
     private bool posLoading = false;
-    private Guid? selectedPoId;
+    private readonly HashSet<Guid> selectedPoIds = new();
+    private string? selectedSupplierName;
+
     private List<LineRow> lines = new();
+    private bool linesLoading = false;
     private DateTime? expectedDeliveryDate;
     private string? timeWindow;
     private string? carrierName;
@@ -205,36 +444,53 @@
     private string? driverPhone;
     private string? notes;
 
-    private bool IsNew => NavMgr.Uri.EndsWith("/asns/new") || !Id.HasValue;
+    // Attachments — for an existing Draft ASN we attach directly (ownerEntityType='Asn', ownerEntityId=asnId).
+    // CreateAsnRequest carries no StagingKey, so a brand-new ASN must be saved as a Draft first; the attachment
+    // affordance unlocks once a real asnId exists (and the ASN is still Draft / not IsLocked).
+    private readonly List<DocumentAttachmentDto> attachments = new();
+    private bool attachUploading;
+    private string attachError = string.Empty;
+    private Guid attachSupplierId;
+
+    private bool showCancel = false;
+    private string dialogError = string.Empty;
+
+    private DocumentPreviewer.DocumentDescriptor? _previewDoc;
+
+    private bool IsNew => !Id.HasValue;
+    private bool IsLocked => detail?.IsLocked == true;
+    private bool CanWrite => Token.IsSupplier || Token.HasPermission("Asn.Write");
+
+    private IEnumerable<string> SelectedPoNumbers =>
+        availablePos?.Where(p => selectedPoIds.Contains(p.Id)).Select(p => p.PoNumber)
+        ?? Enumerable.Empty<string>();
+
+    private string PoSummaryText =>
+        detail == null ? "" :
+        detail.PurchaseOrders.Count > 0 ? string.Join(", ", detail.PurchaseOrders.Select(p => p.PoNumber))
+        : (detail.PoNumber ?? "—");
+
+    private string HeaderSubtitle =>
+        IsNew ? "Submit a shipping notice for one or more purchase orders"
+        : detail == null ? ""
+        : $"ASN for PO {PoSummaryText}";
 
     private bool CanProceed => currentStep switch
     {
-        1 => selectedPoId.HasValue,
+        1 => selectedPoIds.Count > 0,
         2 => lines.Any(l => l.ShippedQty > 0),
         3 => expectedDeliveryDate.HasValue,
         _ => true
     };
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
     {
+        loading = true;
         if (IsNew)
         {
-            posLoading = true;
-            // Backend `status` filter is single-valued — query each eligible status separately and merge.
-            // For supplier users the seccode filter on the backend already scopes results to their POs.
-            var eligibleStatuses = new[] { "Released", "Acknowledged", "Accepted", "PartiallyDelivered" };
-            var merged = new Dictionary<Guid, PurchaseOrderListItemDto>();
-            foreach (var st in eligibleStatuses)
-            {
-                var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>($"api/purchase-orders?page=1&pageSize=200&status={st}");
-                if (resp?.Data?.Items != null)
-                {
-                    foreach (var p in resp.Data.Items)
-                        merged[p.Id] = p;
-                }
-            }
-            availablePos = merged.Values.OrderByDescending(p => p.PoDate).ToList();
-            posLoading = false;
+            await LoadAvailablePos();
             loading = false;
         }
         else
@@ -243,7 +499,7 @@
             detail = resp?.Data;
             if (detail != null)
             {
-                selectedPoId = detail.PurchaseOrderId;
+                attachSupplierId = detail.SupplierId;
                 expectedDeliveryDate = detail.ExpectedDeliveryDate;
                 timeWindow = detail.TimeWindow;
                 carrierName = detail.CarrierName;
@@ -252,70 +508,238 @@
                 driverName = detail.DriverName;
                 driverPhone = detail.DriverPhone;
                 notes = detail.Notes;
+
+                attachments.Clear();
+                attachments.AddRange(detail.Attachments);
+
+                // Selected PO set from the covered-PO list (falls back to the scalar header for single-PO).
+                selectedPoIds.Clear();
+                foreach (var po in detail.PurchaseOrders) selectedPoIds.Add(po.PurchaseOrderId);
+                if (selectedPoIds.Count == 0 && detail.PurchaseOrderId is { } pid) selectedPoIds.Add(pid);
+                selectedSupplierName = detail.SupplierName;
+
                 lines = detail.Lines.Select(l => new LineRow
                 {
                     PurchaseOrderLineId = l.PurchaseOrderLineId,
-                    PoPositionNo = l.PoPositionNo,
+                    PurchaseOrderId = l.PurchaseOrderId,
+                    PoNumber = l.PoNumber,
+                    PositionNo = l.PositionNo ?? l.PoPositionNo,
+                    SequenceNo = l.SequenceNo,
                     ItemCode = l.ItemCode,
                     OrderQty = l.OrderQty,
                     ShippedQty = l.ShippedQty,
                     BatchNumber = l.BatchNumber,
                     ExpiryDate = l.ExpiryDate
                 }).ToList();
+
+                // For an editable (Draft) ASN load the available POs too so the picker can add/remove POs.
+                if (!IsLocked) await LoadAvailablePos();
             }
             loading = false;
         }
     }
 
-    private async Task LoadPoLines()
+    private async Task LoadAvailablePos()
     {
-        if (!selectedPoId.HasValue) { lines.Clear(); return; }
-        var resp = await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{selectedPoId}");
-        if (resp?.Data != null)
+        posLoading = true;
+        // The backend status filter is single-valued — query each eligible status and merge. Seccode scoping on
+        // the backend already restricts supplier users to their own POs.
+        var eligibleStatuses = new[] { "Released", "Acknowledged", "Accepted", "PartiallyDelivered" };
+        var merged = new Dictionary<Guid, PurchaseOrderListItemDto>();
+        foreach (var st in eligibleStatuses)
         {
-            lines = resp.Data.Lines.Select(l => new LineRow
-            {
-                PurchaseOrderLineId = l.Id,
-                PoPositionNo = l.PositionNo,
-                ItemCode = l.ItemCode,
-                OrderQty = l.OrderQty,
-                ShippedQty = 0
-            }).ToList();
+            var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>($"api/purchase-orders?page=1&pageSize=200&status={st}");
+            if (resp?.Data?.Items != null)
+                foreach (var p in resp.Data.Items) merged[p.Id] = p;
         }
+        availablePos = merged.Values.OrderByDescending(p => p.PoDate).ToList();
+        posLoading = false;
+    }
+
+    private async Task TogglePo(PurchaseOrderListItemDto po, bool isChecked)
+    {
+        if (isChecked)
+        {
+            if (selectedPoIds.Count == 0) selectedSupplierName = po.SupplierName;
+            if (selectedSupplierName != po.SupplierName) return; // single-supplier guard (UI-disabled already)
+            selectedPoIds.Add(po.Id);
+        }
+        else
+        {
+            selectedPoIds.Remove(po.Id);
+            if (selectedPoIds.Count == 0) selectedSupplierName = null;
+        }
+        await ReloadLines();
+    }
+
+    // Merge PO lines for every selected PO; preserve already-entered ship qty/batch/expiry by line id.
+    private async Task ReloadLines()
+    {
+        linesLoading = true;
+        StateHasChanged();
+        var existing = lines.ToDictionary(l => l.PurchaseOrderLineId);
+        var merged = new List<LineRow>();
+        foreach (var poId in selectedPoIds)
+        {
+            var resp = await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{poId}");
+            if (resp?.Data == null) continue;
+            var poNo = resp.Data.PoNumber;
+            foreach (var l in resp.Data.Lines.OrderBy(x => x.PositionNo).ThenBy(x => x.SequenceNo))
+            {
+                var prev = existing.GetValueOrDefault(l.Id);
+                merged.Add(new LineRow
+                {
+                    PurchaseOrderLineId = l.Id,
+                    PurchaseOrderId = poId,
+                    PoNumber = poNo,
+                    PositionNo = l.PositionNo,
+                    SequenceNo = l.SequenceNo,
+                    ItemCode = l.ItemCode,
+                    OrderQty = l.OrderQty,
+                    ShippedQty = prev?.ShippedQty ?? 0,
+                    BatchNumber = prev?.BatchNumber,
+                    ExpiryDate = prev?.ExpiryDate
+                });
+            }
+        }
+        lines = merged;
+        linesLoading = false;
+        StateHasChanged();
     }
 
     private void GoStep(int s) { if (s <= currentStep) currentStep = s; }
     private void PrevStep() { if (currentStep > 1) currentStep--; }
     private void NextStep() { if (currentStep < 4 && CanProceed) currentStep++; }
+    private string StepLabel(int s) => s switch { 1 => "PO(s)", 2 => "Lines", 3 => "Shipment", 4 => "Review", _ => "" };
 
-    private string StepLabel(int s) => s switch { 1 => "PO", 2 => "Lines", 3 => "Shipment", 4 => "Review", _ => "" };
-
-    private async Task Submit()
+    // ---- Save draft (create or update) ----
+    private async Task SaveDraft()
     {
-        if (!selectedPoId.HasValue || !expectedDeliveryDate.HasValue) { submitError = "Missing required fields."; return; }
-        busy = true; submitError = string.Empty;
+        if (selectedPoIds.Count == 0 || !expectedDeliveryDate.HasValue) { submitError = "Select at least one PO and an expected delivery date."; currentStep = 1; return; }
+        busy = true; savingDraft = true; submitError = string.Empty;
+
         var lineReqs = lines.Where(l => l.ShippedQty > 0)
             .Select(l => new CreateAsnLineRequest(l.PurchaseOrderLineId, l.ShippedQty, l.BatchNumber, l.ExpiryDate))
             .ToList();
+        if (lineReqs.Count == 0) { submitError = "Enter a ship quantity on at least one line."; busy = false; savingDraft = false; currentStep = 2; return; }
 
         if (IsNew)
         {
-            var req = new CreateAsnRequest(selectedPoId.Value, expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
+            // Single-PO → pass the scalar for back-compat; multi-PO → pass the list (scalar null).
+            var poList = selectedPoIds.ToList();
+            var req = new CreateAsnRequest(
+                poList.Count == 1 ? poList[0] : (Guid?)null,
+                poList.Count > 1 ? poList : null,
+                expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
             var resp = await Api.PostAsync<AsnDetailDto, CreateAsnRequest>("api/asns", req);
-            if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN created" }); NavMgr.NavigateToRoute("/asns"); }
-            else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+            if (resp?.Success == true && resp.Data != null)
+            {
+                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft ASN created" });
+                // Navigate to the saved draft so attachments (ownerEntityType='Asn') become available + submit is enabled.
+                NavMgr.NavigateToRoute($"/asns/{resp.Data.Id}");
+            }
+            else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed to create ASN."; }
         }
         else
         {
             var req = new UpdateAsnRequest(expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
-            var resp = await Api.PostAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", req);
-            if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN updated" }); NavMgr.NavigateToRoute("/asns"); }
-            else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+            var resp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", req);
+            if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft saved" }); await Reload(); }
+            else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed to save (the ASN may no longer be Draft)."; }
         }
+        busy = false; savingDraft = false;
+    }
+
+    // ---- Submit (Draft -> Submitted), surface the draft invoice link ----
+    private async Task Submit()
+    {
+        if (IsNew) { await SaveDraft(); return; }
+        busy = true; savingDraft = false; submitError = string.Empty;
+
+        // Persist any pending header/line edits first (submit validates the stored ASN).
+        var lineReqs = lines.Where(l => l.ShippedQty > 0)
+            .Select(l => new CreateAsnLineRequest(l.PurchaseOrderLineId, l.ShippedQty, l.BatchNumber, l.ExpiryDate))
+            .ToList();
+        var upd = new UpdateAsnRequest(expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
+        var saveResp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", upd);
+        if (saveResp?.Success != true)
+        {
+            submitError = saveResp?.Errors?.FirstOrDefault() ?? "Could not save before submit.";
+            busy = false;
+            return;
+        }
+
+        var resp = await Api.PostAsync<AsnDetailDto, object>($"api/asns/{Id}/submit", new { });
+        if (resp?.Success == true && resp.Data != null)
+        {
+            detail = resp.Data;
+            attachments.Clear();
+            attachments.AddRange(resp.Data.Attachments);
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN submitted", Detail = resp.Data.DraftInvoiceId.HasValue ? "A draft invoice was created." : string.Empty });
+        }
+        else { submitError = resp?.Errors?.FirstOrDefault() ?? "Submit failed (over-ship, lot/serial or mixed-currency check, or the ASN is no longer Draft)."; }
         busy = false;
     }
 
-    private void Cancel() => NavMgr.NavigateToRoute("/asns");
+    // ---- Cancel ----
+    private void OpenCancelDialog() { dialogError = string.Empty; showCancel = true; }
+
+    private async Task DoCancel()
+    {
+        busy = true; dialogError = string.Empty;
+        var resp = await Api.PostAsync<object>($"api/asns/{Id}/cancel", new { });
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "ASN cancelled" }); showCancel = false; await Reload(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Could not cancel (it may already be Cancelled)."; }
+        busy = false;
+    }
+
+    // ---- Attachments (direct attach against a Draft ASN) ----
+    private async Task OnAsnFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        attachError = string.Empty;
+        if (IsNew || !Id.HasValue) { attachError = "Save the draft first, then add attachments."; return; }
+        var file = e.File;
+        if (file is null) return;
+        if (file.Size > MaxAttachBytes) { attachError = $"File exceeds 5 MB ({(file.Size / 1024d / 1024d):0.0} MB)."; return; }
+
+        attachUploading = true;
+        StateHasChanged();
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            var streamContent = new StreamContent(file.OpenReadStream(MaxAttachBytes));
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
+            content.Add(streamContent, "file", file.Name);
+            content.Add(new StringContent("Asn"), "ownerEntityType");
+            content.Add(new StringContent(Id.Value.ToString()), "ownerEntityId");
+            content.Add(new StringContent(attachSupplierId.ToString()), "supplierId");
+
+            var resp = await Api.PostMultipartAsync<DocumentAttachmentDto>("api/document-uploads/attach", content);
+            if (resp?.Success == true && resp.Data is not null) attachments.Add(resp.Data);
+            else attachError = resp?.Errors?.FirstOrDefault() ?? "Upload failed (the ASN must be Draft).";
+        }
+        catch (Exception ex) { attachError = $"Upload failed: {ex.Message}"; }
+        finally { attachUploading = false; StateHasChanged(); }
+    }
+
+    private async Task DeleteAttachment(DocumentAttachmentDto att)
+    {
+        attachError = string.Empty;
+        var resp = await Api.DeleteAsync($"api/document-uploads/{att.Id}");
+        if (resp?.Success == true) attachments.Remove(att);
+        else attachError = resp?.Errors?.FirstOrDefault() ?? "Failed to remove attachment.";
+    }
+
+    private void PreviewAttachment(DocumentAttachmentDto att) =>
+        _previewDoc = new DocumentPreviewer.DocumentDescriptor(att.Id, att.FileName, att.ContentType, att.SizeBytes / 1024, att.PreviewUrl);
+
+    private static string AttachIcon(string contentType) =>
+        contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? "image"
+        : string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase) ? "picture_as_pdf"
+        : "description";
+
+    private void BackToList() => NavMgr.NavigateToRoute("/asns");
 
     private string StatusClass(string status) => status switch
     {
@@ -328,7 +752,10 @@
     private class LineRow
     {
         public Guid PurchaseOrderLineId { get; set; }
-        public int PoPositionNo { get; set; }
+        public Guid PurchaseOrderId { get; set; }
+        public string PoNumber { get; set; } = string.Empty;
+        public int PositionNo { get; set; }
+        public int? SequenceNo { get; set; }
         public string ItemCode { get; set; } = string.Empty;
         public decimal OrderQty { get; set; }
         public decimal ShippedQty { get; set; }

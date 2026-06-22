@@ -11,4 +11,7 @@ public class SupplierContact : AuditableEntity
     public string Email { get; set; } = string.Empty;
     public string? Phone { get; set; }
     public bool IsPrimary { get; set; }
+
+    // R4 (2026-06-22) — Module 1e: ERP handle, populated via the /inbound/erp-ack channel.
+    public string? ErpCode { get; set; }
 }

@@ -13,6 +13,10 @@ using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplie
 using SupplierVerificationEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierVerification;
 using SupplierAddressEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierAddress;
 using SupplierContactEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact;
+using SupplierBankDetailEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierBankDetail;
+using SupplierLicenseEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierLicense;
+using SupplierChangeRequestEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierChangeRequest;
+using SupplierChangeRequestLineEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierChangeRequestLine;
 
 namespace MerinoOne.SupplierPortal.Application.Common.Interfaces;
 
@@ -51,12 +55,19 @@ public interface IAppDbContext
     DbSet<SupplierVerificationEntity> SupplierVerifications { get; }
     DbSet<SupplierAddressEntity> SupplierAddresses { get; }
     DbSet<SupplierContactEntity> SupplierContacts { get; }
+    DbSet<SupplierBankDetailEntity> SupplierBankDetails { get; }
+    DbSet<SupplierLicenseEntity> SupplierLicenses { get; }
+    DbSet<SupplierChangeRequestEntity> SupplierChangeRequests { get; }
+    DbSet<SupplierChangeRequestLineEntity> SupplierChangeRequestLines { get; }
+
+    DbSet<Tax> Taxes { get; }
 
     DbSet<PurchaseOrder> PurchaseOrders { get; }
     DbSet<PurchaseOrderLine> PurchaseOrderLines { get; }
     DbSet<DeliverySchedule> DeliverySchedules { get; }
     DbSet<Asn> Asns { get; }
     DbSet<AsnLine> AsnLines { get; }
+    DbSet<AsnPurchaseOrder> AsnPurchaseOrders { get; }
     DbSet<GoodsReceipt> GoodsReceipts { get; }
     DbSet<Invoice> Invoices { get; }
     DbSet<InvoiceLine> InvoiceLines { get; }
@@ -74,6 +85,7 @@ public interface IAppDbContext
     DbSet<ApiKey> ApiKeys { get; }
     DbSet<ApiKeyCompany> ApiKeyCompanies { get; }
     DbSet<InforConnectionSetting> InforConnectionSettings { get; }
+    DbSet<OutboxMessage> OutboxMessages { get; }
 
     DbSet<AuditEntry> AuditEntries { get; }
 

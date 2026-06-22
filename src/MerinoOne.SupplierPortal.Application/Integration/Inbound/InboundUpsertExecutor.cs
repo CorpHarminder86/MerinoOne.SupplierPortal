@@ -55,15 +55,73 @@ public class InboundUpsertExecutor
         Func<IAppDbContext, Guid, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
         CancellationToken ct)
     {
+        var entityName = InboundUpsertSupport.EntityName(endpoint);
+        return await RunCompanyScopedAsync(
+            entityName, companyCode, boundCompanyIds, idempotencyKey, received, canonicalRows, codes, requestPayload,
+            // Share-aware masters normalize CompanyCode → source company (e.g. 3000 → 2000) before the upsert.
+            normalize: companyId => _company.ResolveSource(endpoint, companyId),
+            // The share-aware canonical hash folds the source company in.
+            hash: (sourceId, rows) => InboundUpsertSupport.CanonicalHash(endpoint, sourceId, rows),
+            upsertAsync, ct);
+    }
+
+    /// <summary>
+    /// R4 (2026-06-22) — Module 5 / Increment D. Company-scoped inbound executor for the TRANSACTIONAL entities
+    /// (Grn/Payment/InvoiceStatus). Mirrors the <see cref="SharedEndpoint"/> overload — company resolution,
+    /// anti-spoof, endpoint gate, canonical-hash idempotency, transactional upsert + SyncLog/IntegrationError +
+    /// endpoint-session telemetry — but does NOT apply share-group <c>ResolveSource</c>: these rows belong to the
+    /// literal resolved company (they hang off live PO/invoice transactions, not shared reference data). The
+    /// anti-spoof check therefore requires the resolved company itself to be in the key's bound set.
+    /// </summary>
+    public async Task<UpsertResultDto> ExecuteAsync(
+        TransactionalInboundEntity endpoint,
+        string companyCode,
+        IReadOnlySet<Guid> boundCompanyIds,
+        string? idempotencyKey,
+        int received,
+        IEnumerable<string> canonicalRows,
+        IEnumerable<string> codes,
+        object requestPayload,
+        Func<IAppDbContext, Guid, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
+        CancellationToken ct)
+    {
+        var entityName = InboundUpsertSupport.EntityName(endpoint);
+        return await RunCompanyScopedAsync(
+            entityName, companyCode, boundCompanyIds, idempotencyKey, received, canonicalRows, codes, requestPayload,
+            // NOT share-aware — the transactional row belongs to the literal resolved company (no 3000 → 2000).
+            normalize: companyId => companyId,
+            hash: (sourceId, rows) => InboundUpsertSupport.CanonicalHash($"{entityName}|{sourceId:N}", rows),
+            upsertAsync, ct);
+    }
+
+    /// <summary>
+    /// Shared company-scoped core (steps 1–7). The two public overloads differ only in EntityName, the
+    /// <paramref name="normalize"/> (share-group ResolveSource vs identity) and the <paramref name="hash"/>
+    /// (share-aware vs transactional canonical hash). Keeps the SharedEndpoint and TransactionalInboundEntity
+    /// paths in lock-step.
+    /// </summary>
+    private async Task<UpsertResultDto> RunCompanyScopedAsync(
+        string entityName,
+        string companyCode,
+        IReadOnlySet<Guid> boundCompanyIds,
+        string? idempotencyKey,
+        int received,
+        IEnumerable<string> canonicalRows,
+        IEnumerable<string> codes,
+        object requestPayload,
+        Func<Guid, Guid?> normalize,
+        Func<Guid, IEnumerable<string>, string> hash,
+        Func<IAppDbContext, Guid, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
+        CancellationToken ct)
+    {
         // Feature D — sync-log entity id + payload. Computed once and stamped on both the success and the
         // failure log writes. EntityId capped to 400 chars; PayloadJson guarded to <= 64 KB.
         var entityId = InboundUpsertSupport.JoinCodes(codes);
         var payloadJson = InboundUpsertSupport.SerializePayloadCapped(requestPayload);
-        var entityName = InboundUpsertSupport.EntityName(endpoint);
         var tenantId = _user.TenantId
             ?? throw new ForbiddenException("API key has no tenant context.");
 
-        var incoming = companyCode.Trim();
+        var incoming = (companyCode ?? string.Empty).Trim();
 
         // 1. Resolve CompanyCode → TenantEntityId within the key's tenant. IgnoreQueryFilters because the
         //    company filter is not meaningful for the service principal; restrict by tenant explicitly.
@@ -78,9 +136,9 @@ public class InboundUpsertExecutor
                 ["companyCode"] = new[] { $"Unknown company code '{incoming}' for this tenant." }
             });
 
-        // 2. Normalize to the share-group source company (e.g. 3000 → 2000). ResolveSource reads the share
-        //    map scoped to the key's tenant.
-        var sourceId = _company.ResolveSource(endpoint, company.Id)
+        // 2. Normalize. Share-aware masters fold to the share-group source (3000 → 2000); transactional
+        //    entities stay on the literal resolved company.
+        var sourceId = normalize(company.Id)
             ?? throw new ValidationException(new Dictionary<string, string[]>
             {
                 ["companyCode"] = new[] { "Could not resolve a source company for the supplied company code." }
@@ -104,7 +162,7 @@ public class InboundUpsertExecutor
 
         // 5. Idempotency. Prefer the supplied header; otherwise hash the canonical payload + source.
         var effectiveKey = string.IsNullOrWhiteSpace(idempotencyKey)
-            ? InboundUpsertSupport.CanonicalHash(endpoint, sourceId, canonicalRows)
+            ? hash(sourceId, canonicalRows)
             : idempotencyKey.Trim();
 
         var priorSuccess = await _db.InforSyncLogs.IgnoreQueryFilters()
@@ -195,6 +253,21 @@ public class InboundUpsertExecutor
         catch (Exception ex)
         {
             await tx.RollbackAsync(ct);
+
+            // Review S1 — a concurrent/duplicate inbound delivery that lost an optimistic-concurrency or a
+            // unique-index race (e.g. the loser of the GRN auto-post claim or the outbox enqueue) is a RETRYABLE
+            // per-row skip, NOT a 500 that nukes the whole batch. Record a Failed SyncLog/IntegrationError for
+            // visibility and return all-Skipped (200) so LN re-delivers later instead of retrying the entire batch.
+            if (InboundUpsertSupport.IsRetryableConcurrencyOrUniqueViolation(ex))
+            {
+                _logger.LogWarning(ex,
+                    "Inbound {EntityName} upsert hit a retryable write conflict (concurrency/unique) for tenant {TenantId}, company {CompanyCode}; reporting Skipped for LN re-delivery.",
+                    entityName, tenantId, incoming);
+                await RecordRetryableConflictAsync(entityName, tenantId, entityId, payloadJson, effectiveKey,
+                    $"recv:{incoming};src:{sourceId};count:{received}", received, ex, ct);
+                return new UpsertResultDto(incoming, received, 0, 0, received, 0, Array.Empty<RowResult>());
+            }
+
             _logger.LogError(ex, "Inbound {EntityName} upsert failed for tenant {TenantId}, company {CompanyCode}.",
                 entityName, tenantId, incoming);
 
@@ -243,6 +316,58 @@ public class InboundUpsertExecutor
             }
 
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Review S1 — best-effort, OUTSIDE the rolled-back transaction, record a Failed SyncLog + a RETRYABLE
+    /// IntegrationError for a concurrency/unique write conflict (the row is skipped + reported to LN as Skipped, so
+    /// LN re-delivers). Clears the change tracker first so the previously-added (and rolled-back) entities are not
+    /// re-attempted by this fresh SaveChanges. Never throws.
+    /// </summary>
+    private async Task RecordRetryableConflictAsync(
+        string entityName, Guid tenantId, string? entityId, string? payloadJson, string effectiveKey,
+        string payloadRef, int received, Exception ex, CancellationToken ct)
+    {
+        try
+        {
+            _db.ClearChangeTracker();
+            var failLog = new InforSyncLog
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                EntityName = entityName,
+                Direction = SyncDirection.Inbound,
+                Status = SyncStatus.Failed,
+                PayloadRef = payloadRef,
+                EntityId = entityId,
+                EntityCount = received,
+                PayloadJson = payloadJson,
+                IdempotencyKey = effectiveKey,
+                SyncedAt = DateTime.UtcNow,
+                ErrorMessage = $"Retryable write conflict (concurrent/duplicate delivery): {ex.Message}",
+                CreatedBy = "infor:inbound",
+                CreatedOn = DateTime.UtcNow
+            };
+            _db.InforSyncLogs.Add(failLog);
+            _db.IntegrationErrors.Add(new IntegrationError
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                SyncLogId = failLog.Id,
+                EntityName = entityName,
+                ErrorMessage = $"Inbound {entityName} skipped — retryable write conflict (re-delivery expected): {ex.Message}",
+                StackTrace = ex.StackTrace,
+                RetryCount = 0,
+                IsResolved = false,
+                CreatedBy = "infor:inbound",
+                CreatedOn = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception logEx)
+        {
+            _logger.LogError(logEx, "Failed to record the inbound retryable-conflict SyncLog/IntegrationError.");
         }
     }
 }

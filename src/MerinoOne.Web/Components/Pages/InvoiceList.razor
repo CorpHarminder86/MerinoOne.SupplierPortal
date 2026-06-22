@@ -28,6 +28,7 @@
         <input class="rz-textbox" placeholder="Search invoice / PO #…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="OnSearchKeyup" />
         <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="Reload">
             <option value="">All statuses</option>
+            <option value="Draft">Draft</option>
             <option value="Submitted">Submitted</option>
             <option value="UnderReview">Under Review</option>
             <option value="Matched">Matched</option>
@@ -66,7 +67,7 @@
             {
                 <div class="tlg-row" @onclick="() => OpenDetail(inv.Id)" style="cursor:pointer">
                     <div class="tlg-col tlg-code">@inv.InvoiceNumber</div>
-                    <div class="tlg-col tlg-code">@inv.PoNumber</div>
+                    <div class="tlg-col tlg-code" title="@inv.PoSummary">@(inv.PoCount > 1 ? $"{inv.PoSummary} ({inv.PoCount})" : inv.PoSummary)</div>
                     <div class="tlg-col tlg-name">@inv.SupplierName</div>
                     <div class="tlg-col tlg-code">@inv.InvoiceDate.ToString("yyyy-MM-dd")</div>
                     <div class="tlg-col tlg-col--num">@inv.CurrencyCode @inv.InvoiceAmount.ToString("N2")</div>

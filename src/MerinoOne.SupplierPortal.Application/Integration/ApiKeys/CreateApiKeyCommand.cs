@@ -139,6 +139,11 @@ public static class ApiKeyScopes
         "Integration.Inbound." + nameof(TenantInboundEntity.State),
         "Integration.Inbound." + nameof(TenantInboundEntity.City),
         "Integration.Inbound." + nameof(TenantInboundEntity.PostalCode),
+        // R4 Module 5 / Increment D — the transactional ERP inbound loop (service-to-service scopes).
+        "Integration.Inbound." + nameof(TransactionalInboundEntity.Grn),
+        "Integration.Inbound." + nameof(TransactionalInboundEntity.Payment),
+        "Integration.Inbound." + nameof(TransactionalInboundEntity.InvoiceStatus),
+        "Integration.Inbound." + nameof(TransactionalInboundEntity.ErpAck),
     };
 
     public static List<string> Normalize(IEnumerable<string>? scopes) =>

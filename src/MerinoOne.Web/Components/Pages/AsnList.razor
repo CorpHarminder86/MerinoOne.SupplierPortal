@@ -15,7 +15,7 @@
             <p class="tl-sub">In-transit and delivered shipments</p>
         </div>
         <div class="tl-header__actions">
-            @if (Token.IsSupplier || Token.HasPermission("Asn.Create"))
+            @if (Token.IsSupplier || Token.HasPermission("Asn.Write"))
             {
                 <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NewAsn">
                     <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> New ASN
@@ -61,7 +61,7 @@
             {
                 <div class="tlg-row" @onclick="() => OpenDetail(a.Id)" style="cursor:pointer">
                     <div class="tlg-col tlg-code">@a.AsnNumber</div>
-                    <div class="tlg-col tlg-code">@a.PoNumber</div>
+                    <div class="tlg-col tlg-code" title="@a.PoSummary">@(a.PoCount > 1 ? $"{a.PoSummary} ({a.PoCount})" : a.PoSummary)</div>
                     <div class="tlg-col tlg-code">@a.ExpectedDeliveryDate.ToString("yyyy-MM-dd")</div>
                     <div class="tlg-col">@a.CarrierName</div>
                     <div class="tlg-col tlg-code">@a.TrackingNumber</div>

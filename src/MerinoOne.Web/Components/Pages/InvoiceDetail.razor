@@ -27,9 +27,24 @@ else
                     <h1 class="tl-title">@detail.InvoiceNumber</h1>
                     <span class="tlg-status @StatusClass(detail.InvoiceStatus)">@detail.InvoiceStatus</span>
                 </div>
-                <p class="tl-sub">@detail.SupplierName · PO <a href="purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);">@detail.PoNumber</a> · @detail.InvoiceDate.ToString("yyyy-MM-dd")</p>
+                <p class="tl-sub">@detail.SupplierName · @PoHeaderText · @detail.InvoiceDate.ToString("yyyy-MM-dd")</p>
             </div>
             <div class="tl-header__actions">
+                @if (Token.HasPermission("Invoice.Submit") && detail.InvoiceStatus == "Draft")
+                {
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenEdit" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">edit</span> Edit
+                    </button>
+                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenSubmit" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">send</span> Submit
+                    </button>
+                }
+                @if (Token.HasPermission("Invoice.Revoke") && detail.InvoiceStatus == "Submitted" && !detail.ErpPostedAt.HasValue)
+                {
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-warning);background:var(--mer-surface);color:var(--mer-warning);cursor:pointer;" @onclick="OpenRevoke" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">undo</span> Revoke to Draft
+                    </button>
+                }
                 @if (Token.HasPermission("Invoice.Review") && detail.InvoiceStatus == "Submitted")
                 {
                     <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenReview" disabled="@busy">
@@ -70,10 +85,31 @@ else
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Invoice details</h3>
                 <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
                     <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
-                    <dt style="color:var(--mer-ink-500);">PO</dt><dd><a href="purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.PoNumber</a></dd>
+                    <dt style="color:var(--mer-ink-500);">Purchase order(s)</dt>
+                    <dd style="font-family:Inter,monospace;">
+                        @if (detail.PurchaseOrders.Count > 0)
+                        {
+                            @foreach (var po in detail.PurchaseOrders)
+                            {
+                                <a href="purchase-orders/@po.PurchaseOrderId" style="color:var(--mer-blue);margin-right:8px;">@po.PoNumber</a>
+                            }
+                        }
+                        else if (detail.PurchaseOrderId.HasValue)
+                        {
+                            <a href="purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);">@detail.PoNumber</a>
+                        }
+                        else { <span>—</span> }
+                    </dd>
                     @if (!string.IsNullOrEmpty(detail.AsnNumber))
                     {
-                        <dt style="color:var(--mer-ink-500);">ASN</dt><dd style="font-family:Inter,monospace;">@detail.AsnNumber</dd>
+                        <dt style="color:var(--mer-ink-500);">ASN</dt>
+                        <dd>
+                            @if (detail.AsnId.HasValue)
+                            {
+                                <a href="asns/@detail.AsnId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.AsnNumber</a>
+                            }
+                            else { <span style="font-family:Inter,monospace;">@detail.AsnNumber</span> }
+                        </dd>
                     }
                     <dt style="color:var(--mer-ink-500);">Invoice date</dt><dd style="font-family:Inter,monospace;">@detail.InvoiceDate.ToString("yyyy-MM-dd")</dd>
                     <dt style="color:var(--mer-ink-500);">Matching</dt><dd>@detail.MatchingType</dd>
@@ -93,9 +129,29 @@ else
                     {
                         <dt style="color:var(--mer-ink-500);">e-Way Bill</dt><dd style="font-family:Inter,monospace;">@detail.EWayBillNumber</dd>
                     }
+                    @if (detail.SubmittedAt.HasValue)
+                    {
+                        <dt style="color:var(--mer-ink-500);">Submitted</dt><dd style="font-family:Inter,monospace;">@detail.SubmittedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.SubmittedBy) ? "" : $"by {detail.SubmittedBy}")</dd>
+                    }
                     @if (detail.ApprovedAt.HasValue)
                     {
                         <dt style="color:var(--mer-ink-500);">Approved</dt><dd style="font-family:Inter,monospace;">@detail.ApprovedAt.Value.ToString("yyyy-MM-dd HH:mm") by @detail.ApprovedBy</dd>
+                    }
+                    @if (detail.RevokedAt.HasValue)
+                    {
+                        <dt style="color:var(--mer-ink-500);">Revoked</dt><dd style="font-family:Inter,monospace;">@detail.RevokedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.RevokedBy) ? "" : $"by {detail.RevokedBy}")</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(detail.RevokeReason))
+                    {
+                        <dt style="color:var(--mer-ink-500);">Revoke reason</dt><dd style="white-space:pre-wrap;">@detail.RevokeReason</dd>
+                    }
+                    @if (detail.ErpPostedAt.HasValue)
+                    {
+                        <dt style="color:var(--mer-ink-500);">ERP posted</dt><dd style="font-family:Inter,monospace;">@detail.ErpPostedAt.Value.ToString("yyyy-MM-dd HH:mm")</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(detail.ErpCode))
+                    {
+                        <dt style="color:var(--mer-ink-500);">ERP code</dt><dd style="font-family:Inter,monospace;">@detail.ErpCode</dd>
                     }
                     @if (!string.IsNullOrEmpty(detail.RejectionReason))
                     {
@@ -293,6 +349,114 @@ else
             </div>
         </div>
     }
+
+    @if (showEdit)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="lg" style="width:640px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">edit</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Invoice · Draft</div>
+                        <h2 class="merino-dialog__title">Edit @detail.InvoiceNumber</h2>
+                        <p class="merino-dialog__subtitle">Amounts and lines are inherited from the ASN. Edit the invoice metadata.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showEdit = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Invoice number *</label>
+                            <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="editInvoiceNumber" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Invoice date *</label>
+                            <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="editInvoiceDate" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">e-Invoice IRN</label>
+                            <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:11px;" @bind="editEInvoiceIrn" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">e-Invoice Ack #</label>
+                            <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="editEInvoiceAckNo" />
+                        </div>
+                        <div style="grid-column:1 / span 2;">
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">e-Way Bill #</label>
+                            <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="editEWayBillNumber" />
+                        </div>
+                    </div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:10px;display:block;">Notes</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="editNotes"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showEdit = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoEdit" disabled="@busy">@(busy ? "Saving…" : "Save changes")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showSubmit)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="success" data-size="md" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">send</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Invoice</div>
+                        <h2 class="merino-dialog__title">Submit @detail.InvoiceNumber?</h2>
+                        <p class="merino-dialog__subtitle">Once submitted the invoice is locked against edits and becomes eligible for posting.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showSubmit = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <p style="font-size:13px;color:var(--mer-ink-700);">Confirm the invoice number and date are correct. The draft placeholder number must be replaced before submit.</p>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showSubmit = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoSubmit" disabled="@busy">@(busy ? "Submitting…" : "Submit")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @if (showRevoke)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="danger" data-size="md" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">undo</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Invoice · Admin</div>
+                        <h2 class="merino-dialog__title">Revoke @detail.InvoiceNumber to Draft</h2>
+                        <p class="merino-dialog__subtitle">Pre-post revoke (Submitted → Draft). Returns the invoice to the supplier for amendment.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showRevoke = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Reason (optional)</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="revokeReason"></textarea>
+                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showRevoke = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="danger" @onclick="DoRevoke" disabled="@busy">@(busy ? "Revoking…" : "Revoke to Draft")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -309,6 +473,9 @@ else
     private bool showApprove = false;
     private bool showReject = false;
     private bool showCreateNote = false;
+    private bool showEdit = false;
+    private bool showSubmit = false;
+    private bool showRevoke = false;
     private string dialogNotes = string.Empty;
     private string rejectionReason = string.Empty;
     private string dialogError = string.Empty;
@@ -316,6 +483,25 @@ else
     private string noteNumber = string.Empty;
     private decimal noteAmount = 0;
     private string noteReason = string.Empty;
+
+    // Draft edit fields
+    private string editInvoiceNumber = string.Empty;
+    private DateTime? editInvoiceDate;
+    private string editEInvoiceIrn = string.Empty;
+    private string editEInvoiceAckNo = string.Empty;
+    private string editEWayBillNumber = string.Empty;
+    private string editNotes = string.Empty;
+
+    // Admin revoke
+    private string revokeReason = string.Empty;
+
+    // PO header label tolerant of the nullable single-PO header (multi-PO uses PoSummary on the list DTO).
+    private string PoHeaderText =>
+        detail == null ? "" :
+        detail.PurchaseOrders.Count > 1 ? $"{detail.PurchaseOrders.Count} POs"
+        : detail.PurchaseOrders.Count == 1 ? $"PO {detail.PurchaseOrders[0].PoNumber}"
+        : !string.IsNullOrEmpty(detail.PoNumber) ? $"PO {detail.PoNumber}"
+        : "No PO";
 
     protected override async Task OnInitializedAsync() => await Load();
 
@@ -334,6 +520,76 @@ else
 
     private void SetNoteTypeCN() => noteType = "CN";
     private void SetNoteTypeDN() => noteType = "DN";
+
+    // ---- Draft edit ----
+    private void OpenEdit()
+    {
+        if (detail == null) return;
+        editInvoiceNumber = detail.InvoiceNumber;
+        editInvoiceDate = detail.InvoiceDate;
+        editEInvoiceIrn = detail.EInvoiceIrn ?? string.Empty;
+        editEInvoiceAckNo = detail.EInvoiceAckNo ?? string.Empty;
+        editEWayBillNumber = detail.EWayBillNumber ?? string.Empty;
+        editNotes = detail.Notes ?? string.Empty;
+        dialogError = string.Empty;
+        showEdit = true;
+    }
+
+    private async Task DoEdit()
+    {
+        if (string.IsNullOrWhiteSpace(editInvoiceNumber)) { dialogError = "Invoice number is required."; return; }
+        if (!editInvoiceDate.HasValue) { dialogError = "Invoice date is required."; return; }
+        busy = true; dialogError = string.Empty;
+        var req = new UpdateInvoiceRequest(
+            editInvoiceNumber.Trim(),
+            editInvoiceDate.Value,
+            string.IsNullOrWhiteSpace(editEInvoiceIrn) ? null : editEInvoiceIrn.Trim(),
+            string.IsNullOrWhiteSpace(editEInvoiceAckNo) ? null : editEInvoiceAckNo.Trim(),
+            string.IsNullOrWhiteSpace(editEWayBillNumber) ? null : editEWayBillNumber.Trim(),
+            string.IsNullOrWhiteSpace(editNotes) ? null : editNotes.Trim());
+        var resp = await Api.PutAsync<InvoiceDetailDto, UpdateInvoiceRequest>($"api/invoices/{Id}", req);
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invoice saved" }); showEdit = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Save failed (the invoice may no longer be Draft, or the number is a duplicate)."; }
+        busy = false;
+    }
+
+    // ---- Submit (Draft -> Submitted) ----
+    private void OpenSubmit() { dialogError = string.Empty; showSubmit = true; }
+
+    private async Task DoSubmit()
+    {
+        busy = true; dialogError = string.Empty;
+        var resp = await Api.PostAsync<InvoiceDetailDto, SubmitInvoiceRequest>($"api/invoices/{Id}/submit", new SubmitInvoiceRequest());
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invoice submitted" }); showSubmit = false; await Load(); }
+        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Submit failed (mandatory invoice number + date, or the invoice is no longer Draft)."; }
+        busy = false;
+    }
+
+    // ---- Admin revoke (Submitted -> Draft) — round-trips RowVersion for the optimistic-concurrency guard. ----
+    private void OpenRevoke() { revokeReason = string.Empty; dialogError = string.Empty; showRevoke = true; }
+
+    private async Task DoRevoke()
+    {
+        if (detail == null) return;
+        busy = true; dialogError = string.Empty;
+        var req = new RevokeInvoiceRequest(string.IsNullOrWhiteSpace(revokeReason) ? null : revokeReason.Trim(), detail.RowVersion);
+        var resp = await Api.PostAsync<InvoiceDetailDto, RevokeInvoiceRequest>($"api/invoices/{Id}/revoke", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Invoice revoked to Draft" });
+            showRevoke = false;
+            await Load();
+        }
+        else
+        {
+            // 409 (stale RowVersion / already posted / no longer Submitted) is folded into Errors by ApiClient.
+            // Surface it and reload so the user sees the current state + a fresh RowVersion before retrying.
+            dialogError = (resp?.Errors?.FirstOrDefault() ?? "Revoke failed.")
+                + " The invoice state was refreshed — review it and try again if still applicable.";
+            await Load();
+        }
+        busy = false;
+    }
 
     private async Task DoReview()
     {

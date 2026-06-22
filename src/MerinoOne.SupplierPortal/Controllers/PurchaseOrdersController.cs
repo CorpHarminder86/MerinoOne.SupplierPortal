@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ContractsPagedResult = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PurchaseOrderListItemDto>;
+using ContractsItemsToDeliverPaged = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.PurchaseOrders.ItemsToDeliverRowDto>;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -42,6 +43,56 @@ Returns: PagedResult<PurchaseOrderListItemDto>. Requires permission **PurchaseOr
     {
         var data = await _mediator.Send(new GetPurchaseOrderListQuery(page, pageSize, status, type, supplierId, search), ct);
         return Result<ContractsPagedResult>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpGet("items-to-deliver")]
+    [Authorize(Policy = "PurchaseOrder.Read")]
+    [EndpointSummary("Items to be delivered")]
+    [EndpointDescription(@"Enhancement R4 — Module 8. Open PO lines grouped by (ItemCode, DeliveryDate), netted
+against received GRN qty. OpenQty = OrderQty − Σ GoodsReceipt.ReceivedQty. Open-PO statuses: Released,
+Acknowledged, Accepted, DateProposed, PartiallyDelivered.
+Filters / params:
+- **page**: Optional — 1-based page index (default 1).
+- **pageSize**: Optional — rows per page (default 50, max 200).
+- **from / to**: Optional — delivery-date range.
+- **itemCode**: Optional — restrict to one item.
+- **supplierId**: Optional — restrict to one supplier.
+Side effects:
+- Seccode-scoped: supplier users see only their own open PO lines.
+Returns: PagedResult<ItemsToDeliverRowDto>. Requires permission **PurchaseOrder.Read**.")]
+    public async Task<Result<ContractsItemsToDeliverPaged>> ItemsToDeliver(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? itemCode = null,
+        [FromQuery] Guid? supplierId = null,
+        CancellationToken ct = default)
+    {
+        var data = await _mediator.Send(new GetItemsToDeliverQuery(page, pageSize, from, to, itemCode, supplierId), ct);
+        return Result<ContractsItemsToDeliverPaged>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpGet("schedule-calendar")]
+    [Authorize(Policy = "PurchaseOrder.Read")]
+    [EndpointSummary("PO schedule calendar")]
+    [EndpointDescription(@"Enhancement R4 — Module 9. PO-line delivery dates inside a required [from, to] window,
+grouped PO-wise per date (one event per (Date, PO) carrying that PO's items + qty).
+Filters / params:
+- **from**: Required — window start (validated; window <= 366 days).
+- **to**: Required — window end (must be >= from).
+- **supplierId**: Optional — restrict to one supplier.
+Side effects:
+- Seccode-scoped: supplier users see only their own deliveries.
+Returns: list of PoCalendarEventDto. Requires permission **PurchaseOrder.Read**. 400 if the window is missing/invalid.")]
+    public async Task<Result<IReadOnlyList<PoCalendarEventDto>>> ScheduleCalendar(
+        [FromQuery] DateTime from,
+        [FromQuery] DateTime to,
+        [FromQuery] Guid? supplierId = null,
+        CancellationToken ct = default)
+    {
+        var data = await _mediator.Send(new GetPoScheduleCalendarQuery(from, to, supplierId), ct);
+        return Result<IReadOnlyList<PoCalendarEventDto>>.Ok(data, HttpContext.TraceIdentifier);
     }
 
     [HttpGet("{id:guid}")]

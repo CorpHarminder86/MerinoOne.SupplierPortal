@@ -128,6 +128,67 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
     public async Task<Result<UpsertResultDto>> Items([FromBody] PushItemsRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertItemsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
+    // ---------------- Transactional inbound (R4 Module 5 / Increment D) — the ERP inbound loop ----------------
+
+    [HttpPost("grn-status")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Grn")]
+    [EndpointSummary("Push goods-receipt status (Infor LN)")]
+    [EndpointDescription(@"Pushes goods-receipt (GRN) approval status from Infor LN. GRN status is ERP-owned (no portal approval).
+Auth: X-APIKey scheme; the key must carry the `Integration.Inbound.Grn` scope and be bound to the source company the body resolves to.
+Headers:
+- **Idempotency-Key**: Optional — a replay with the same key (or identical body) is a no-op.
+Body:
+- **CompanyCode**: Infor LN logistic company; resolved to a company in the key's tenant (no share-group normalization — GRNs belong to the literal company).
+- **Receipts**: 1..1000 records { grnNumber, grnStatus (GrnNotApproved|GrnApproved|Rejected), erpSyncId?, receivedQty?, asnNumber?/asnErpRef?, issueReported?, erpCode? }.
+Cascade: on a GRN transitioning INTO GrnApproved, when ALL GRNs covering that invoice are approved AND the invoice is Submitted with erpPostedAt NULL, the invoice post is enqueued on the outbox (deterministic key; idempotent; system-actor audit). A GrnApproved->NotApproved/Rejected reversal on an already-posted invoice raises an operator alert (no auto un-post).
+Behaviour: 200 + UpsertGrnStatusResultDto (per-row outcome + auto-posts-enqueued + reverse-transition-alerts); 400 unknown company / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertGrnStatusResultDto>> GrnStatus([FromBody] PushGrnStatusRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpsertGoodsReceiptStatusCommand(body, BoundCompanyIds(), IdempotencyKey()), ct);
+        return Result<UpsertGrnStatusResultDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("payments")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Payment")]
+    [EndpointSummary("Push payments / remittance (Infor LN)")]
+    [EndpointDescription(@"Writes payment / remittance rows pushed by Infor LN (payments originate in the ERP). The invoice is resolved by invoiceErpSyncId (preferred) else invoiceNumber.
+Auth: X-APIKey scheme; key must carry `Integration.Inbound.Payment` and be bound to the resolved company.
+Body:
+- **CompanyCode**: Infor LN logistic company (resolved to the literal company).
+- **Payments**: 1..1000 records { paymentReference, netPaid, invoiceErpSyncId?/invoiceNumber, paymentAmount?, tdsDeducted?, paymentDate?, paymentMode?, erpSyncId?, erpCode? }. Upsert key = (invoiceId, paymentReference).
+Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertResultDto>> Payments([FromBody] PushPaymentsRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertPaymentsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("invoice-status")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.InvoiceStatus")]
+    [EndpointSummary("Push invoice status (Infor LN)")]
+    [EndpointDescription(@"Advances invoice status from Infor LN (Matched|MatchExceptions|Approved|Rejected|PartiallyPaid|Paid). The writer never regresses a portal-owned state (Draft/Submitted/Cancelled).
+Auth: X-APIKey scheme; key must carry `Integration.Inbound.InvoiceStatus` and be bound to the resolved company.
+Body:
+- **CompanyCode**: Infor LN logistic company (resolved to the literal company).
+- **Invoices**: 1..1000 records { invoiceStatus, invoiceErpSyncId?/invoiceNumber, erpCode? }.
+Behaviour: 200 + UpsertResultDto; 400 unknown company / non-advanceable status / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertResultDto>> InvoiceStatus([FromBody] PushInvoiceStatusRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertInvoiceStatusCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("erp-ack")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.ErpAck")]
+    [EndpointSummary("ERP acknowledgement / erpCode write-back (Infor LN)")]
+    [EndpointDescription(@"The ERP acknowledges a Portal->ERP transaction and (on success) returns the entity's ERP code, written back to the matching record. Tenant-scoped (no CompanyCode).
+Auth: X-APIKey scheme; key must carry `Integration.Inbound.ErpAck`.
+Body:
+- **Acks**: 1..1000 records { transactionType, portalRef (the deterministic outbox correlation id), success, erpCode (required on success), message? }.
+Behaviour: on success resolves portalRef to exactly one outbox row of transactionType, writes erpCode (Supplier->SupCode, Asn->ASNNo, Invoice/Payment/change-line, etc.) and flips the row to Acked. Idempotent on re-ack; transactionType mismatch or missing row -> IntegrationError, no write (risk R17). 200 + UpsertResultDto; 400 validation; 403 disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertResultDto>> ErpAck([FromBody] PushErpAckRequest body, CancellationToken ct)
+        // Review S3 — pass the key's bound companies (anti-spoof), as the other three transactional endpoints do:
+        // an ack may only stamp/erp-code a record whose company is in the key's bound set.
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertErpAckCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
     /// <summary>
     /// The key's bound source companies — every "tenantEntityId" claim minted by the API-key auth handler
     /// (Feature C — multi-company keys). The inbound write path requires the resolved incoming source to

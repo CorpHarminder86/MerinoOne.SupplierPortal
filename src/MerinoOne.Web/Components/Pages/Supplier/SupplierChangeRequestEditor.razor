@@ -1,0 +1,814 @@
+@page "/suppliers/{SupplierId:guid}/change-request"
+@page "/suppliers/{SupplierId:guid}/change-request/{ChangeRequestId:guid}"
+@using System.Text.Json
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+@* ------------------------------------------------------------------------------------------------
+   Supplier-side change-request editor (R4 Module 2). Seeded from the supplier's CURRENT live values
+   (reusing the Increment-A field layouts). The supplier edits in-place; on Save we diff each section
+   against the seed and build SupplierChangeLineInput lines:
+     - changed scalar / allow-listed field  → Edit  (TargetEntity + TargetEntityId + FieldName + NewValue)
+     - newly added child row                → Add   (PayloadJson with the camelCase keys)
+     - removed child row                    → Delete(TargetEntityId)
+   Live supplier data is NEVER mutated here — POST creates a Draft, PUT replaces lines while
+   Draft/ChangesRequested, POST /submit sends it for review.
+
+   NOTE (delta scope): this is a genuine field-level delta builder for the Supplier scalar Info block
+   plus existing-row edits, with explicit Add/Delete for child rows. It does not attempt a structural
+   "before/after collection" auto-diff for child rows beyond Add/Edit/Delete — those three explicit
+   operations are exactly the SupplierChangeLineInput verbs, so the produced lines are valid as-is.
+------------------------------------------------------------------------------------------------ *@
+
+<PageTitle>Request a change</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else if (supplier == null)
+{
+    <div class="tl-empty">Supplier not found.</div>
+}
+else if (!CanRaise)
+{
+    <div class="tl-empty">
+        <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+        <div>You do not have permission to raise a change request for this supplier.</div>
+    </div>
+}
+else
+{
+    <div class="tl-page">
+        <a href="suppliers/@SupplierId" class="mer-back-link">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+            Back to supplier
+        </a>
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Request a change</h1>
+                    @if (existingStatus != null)
+                    {
+                        <span class="tlg-status @SupplierChangeStatus.CssClass(existingStatus)">@SupplierChangeStatus.Label(existingStatus)</span>
+                    }
+                </div>
+                <p class="tl-sub">@supplier.LegalName · @supplier.SupplierCode — propose updates to your master data. Changes are reviewed before they take effect.</p>
+            </div>
+        </header>
+
+        @if (existingStatus == "ChangesRequested" && !string.IsNullOrWhiteSpace(reviewerNote))
+        {
+            <div style="background:var(--mer-amber-50);color:var(--mer-amber-800);padding:10px 14px;border-radius:6px;font-size:12.5px;margin-bottom:14px;display:flex;gap:8px;align-items:flex-start;">
+                <span class="material-symbols-outlined" style="font-size:16px;">undo</span>
+                <span><b>Reviewer asked for changes:</b> @reviewerNote</span>
+            </div>
+        }
+        @if (ReadOnlyExisting)
+        {
+            <div style="background:var(--mer-blue-50);color:var(--mer-blue-700);padding:10px 14px;border-radius:6px;font-size:12.5px;margin-bottom:14px;display:flex;gap:8px;align-items:flex-start;">
+                <span class="material-symbols-outlined" style="font-size:16px;">info</span>
+                <span>This request is <b>@SupplierChangeStatus.Label(existingStatus!)</b> and can no longer be edited. <a href="supplier-change-requests/@changeRequestId" style="color:var(--mer-blue);">View its diff and status</a>.</span>
+            </div>
+        }
+
+        @* ---------------- Summary ---------------- *@
+        <div class="rz-card" style="padding:20px;margin-bottom:16px;">
+            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Summary (optional)</label>
+            <input class="rz-textbox" style="width:100%;padding:8px 10px;" maxlength="500" placeholder="e.g. Updated bank account + new license" @bind="summary" />
+        </div>
+
+        @* ---------------- Tabs ---------------- *@
+        <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;flex-wrap:wrap;">
+            @foreach (var t in Tabs)
+            {
+                var key = t.Key;
+                <button class="mer-tab" @onclick="() => tab = key"
+                        style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab==key?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab==key?"var(--mer-blue)":"var(--mer-ink-700)");">
+                    @t.Value @if (TabCount(key) > 0) { <span class="tl-count-chip" style="margin-left:4px;">@TabCount(key)</span> }
+                </button>
+            }
+        </div>
+
+        @* ============ INFO (scalar) ============ *@
+        @if (tab == "info")
+        {
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Company information</h3>
+                <p style="color:var(--mer-ink-500);font-size:12px;margin-bottom:14px;">Edit any field; only changed fields are submitted.</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Legal name</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="info.LegalName" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Trade name</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="info.TradeName" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Website</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="info.Website" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">GST number</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;text-transform:uppercase;" @bind="info.GstNumber" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">PAN number</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;text-transform:uppercase;" @bind="info.PanNumber" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">MSME number</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="info.MsmeRegNumber" /></div>
+                    <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">MSME category</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="info.MsmeCategory" /></div>
+                </div>
+            </div>
+        }
+
+        @* ============ ADDRESSES ============ *@
+        else if (tab == "addresses")
+        {
+            <div class="rz-card" style="padding:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);">Addresses</h3>
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="AddAddress"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add address</button>
+                </div>
+                @foreach (var a in addresses.Where(x => !x.Removed))
+                {
+                    var row = a;
+                    <div style="border:1px solid var(--mer-line);border-radius:6px;padding:14px;margin-bottom:10px;@(row.IsNew ? "background:var(--mer-green-soft);" : "")">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:11px;font-weight:600;color:var(--mer-ink-500);">@(row.IsNew ? "NEW" : "EXISTING")</span>
+                            <button @onclick="() => RemoveAddress(row)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Remove"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Type</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.AddressType" placeholder="Registered / Billing / Shipping" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Line 1</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.AddressLine1" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Line 2</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.AddressLine2" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Area</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.Area" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">City</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.City" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">State</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.State" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Pincode</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.Pincode" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Country</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.Country" /></div>
+                        </div>
+                    </div>
+                }
+                @if (!addresses.Any(x => !x.Removed)) { <div class="tl-empty">No addresses. Click "Add address" to propose one.</div> }
+            </div>
+        }
+
+        @* ============ CONTACTS ============ *@
+        else if (tab == "contacts")
+        {
+            <div class="rz-card" style="padding:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);">Contacts</h3>
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="AddContact"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add contact</button>
+                </div>
+                @foreach (var c in contacts.Where(x => !x.Removed))
+                {
+                    var row = c;
+                    <div style="border:1px solid var(--mer-line);border-radius:6px;padding:14px;margin-bottom:10px;@(row.IsNew ? "background:var(--mer-green-soft);" : "")">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:11px;font-weight:600;color:var(--mer-ink-500);">@(row.IsNew ? "NEW" : "EXISTING")</span>
+                            <button @onclick="() => RemoveContact(row)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Remove"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Name</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.ContactName" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Designation</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.Designation" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Email</label><input class="rz-textbox" style="width:100%;padding:7px 9px;font-family:Inter,monospace;" @bind="row.Email" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Phone</label><input class="rz-textbox" style="width:100%;padding:7px 9px;font-family:Inter,monospace;" @bind="row.Phone" /></div>
+                            <label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" @bind="row.IsPrimary" /> Primary contact</label>
+                        </div>
+                    </div>
+                }
+                @if (!contacts.Any(x => !x.Removed)) { <div class="tl-empty">No contacts. Click "Add contact" to propose one.</div> }
+            </div>
+        }
+
+        @* ============ BANK ============ *@
+        else if (tab == "bank")
+        {
+            <div class="rz-card" style="padding:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);">Bank accounts</h3>
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="AddBank"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add account</button>
+                </div>
+                @foreach (var b in banks.Where(x => !x.Removed))
+                {
+                    var row = b;
+                    <div style="border:1px solid var(--mer-line);border-radius:6px;padding:14px;margin-bottom:10px;@(row.IsNew ? "background:var(--mer-green-soft);" : "")">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:11px;font-weight:600;color:var(--mer-ink-500);">@(row.IsNew ? "NEW" : "EXISTING")</span>
+                            <button @onclick="() => RemoveBank(row)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Remove"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                            <div style="grid-column:1 / span 2;"><label style="font-size:12px;color:var(--mer-ink-700);">Bank name</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.BankName" /></div>
+                            <div style="grid-column:1 / span 2;"><label style="font-size:12px;color:var(--mer-ink-700);">Bank address</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.BankAddress" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Account name</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.AccountName" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Account number</label><input class="rz-textbox" style="width:100%;padding:7px 9px;font-family:Inter,monospace;" @bind="row.AccountNumber" /></div>
+                            <div>
+                                <label style="font-size:12px;color:var(--mer-ink-700);">Currency</label>
+                                @if (row.IsNew)
+                                {
+                                    <select class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.CurrencyId">
+                                        <option value="">Select…</option>
+                                        @foreach (var cur in currencies)
+                                        {
+                                            <option value="@cur.Id">@cur.Code — @cur.Description</option>
+                                        }
+                                    </select>
+                                }
+                                else
+                                {
+                                    @* Currency is not in the Bank Edit allow-list — show read-only for existing rows. *@
+                                    <input class="rz-textbox" style="width:100%;padding:7px 9px;background:var(--mer-ink-50);" value="@row.CurrencyCode" disabled />
+                                }
+                            </div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">IFSC code</label><input class="rz-textbox" style="width:100%;padding:7px 9px;font-family:Inter,monospace;text-transform:uppercase;" @bind="row.IfscCode" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">SWIFT code</label><input class="rz-textbox" style="width:100%;padding:7px 9px;font-family:Inter,monospace;text-transform:uppercase;" @bind="row.SwiftCode" /></div>
+                            <label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" @bind="row.IsPrimary" /> Primary settlement account</label>
+                        </div>
+                    </div>
+                }
+                @if (!banks.Any(x => !x.Removed)) { <div class="tl-empty">No bank accounts. Click "Add account" to propose one.</div> }
+            </div>
+        }
+
+        @* ============ LICENSES ============ *@
+        else if (tab == "licenses")
+        {
+            <div class="rz-card" style="padding:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);">Licenses</h3>
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="AddLicense"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add license</button>
+                </div>
+                @foreach (var l in licenses.Where(x => !x.Removed))
+                {
+                    var row = l;
+                    <div style="border:1px solid var(--mer-line);border-radius:6px;padding:14px;margin-bottom:10px;@(row.IsNew ? "background:var(--mer-green-soft);" : "")">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:11px;font-weight:600;color:var(--mer-ink-500);">@(row.IsNew ? "NEW" : "EXISTING")</span>
+                            <button @onclick="() => RemoveLicense(row)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Remove"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">License number</label><input class="rz-textbox" style="width:100%;padding:7px 9px;font-family:Inter,monospace;" @bind="row.LicenseNumber" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">License type</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.LicenseType" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Issue date</label><input type="date" class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.IssueDate" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Expiry date</label><input type="date" class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.ExpiryDate" /></div>
+                            @* (date inputs bind to DateOnly? on LicenseRow) *@
+                            <div style="grid-column:1 / span 2;"><label style="font-size:12px;color:var(--mer-ink-700);">Remarks</label><textarea class="rz-textbox" rows="2" style="width:100%;padding:7px 9px;font-family:inherit;" @bind="row.Remarks"></textarea></div>
+                        </div>
+                    </div>
+                }
+                @if (!licenses.Any(x => !x.Removed)) { <div class="tl-empty">No licenses. Click "Add license" to propose one.</div> }
+            </div>
+        }
+
+        @* ---------------- Footer actions ---------------- *@
+        @if (!ReadOnlyExisting)
+        {
+            <div style="display:flex;align-items:center;gap:10px;margin-top:18px;justify-content:flex-end;">
+                @if (!string.IsNullOrEmpty(saveError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-right:auto;">@saveError</div>
+                }
+                <span style="color:var(--mer-ink-500);font-size:12px;">@PendingCount pending change@(PendingCount == 1 ? "" : "s")</span>
+                <button class="rz-button" style="padding:8px 16px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);cursor:pointer;" @onclick="SaveDraft" disabled="@busy">
+                    @(busy ? "Saving…" : (changeRequestId.HasValue ? "Save draft" : "Save as draft"))
+                </button>
+                <button class="rz-button rz-primary" style="padding:8px 16px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="SubmitForReview" disabled="@busy">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">send</span> Submit for review
+                </button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Guid SupplierId { get; set; }
+    [Parameter] public Guid? ChangeRequestId { get; set; }
+
+    private SupplierDetailDto? supplier;
+    private List<CurrencyDto> currencies = new();
+    private bool loading = true;
+    private bool busy;
+    private string tab = "info";
+    private string summary = string.Empty;
+    private string saveError = string.Empty;
+
+    // When resuming an existing Draft / ChangesRequested request we PUT instead of POST.
+    private Guid? changeRequestId;
+    private string? existingStatus;
+    private string? reviewerNote;
+
+    private static readonly KeyValuePair<string, string>[] Tabs =
+    {
+        new("info", "Info"),
+        new("addresses", "Addresses"),
+        new("contacts", "Contacts"),
+        new("bank", "Bank"),
+        new("licenses", "Licenses"),
+    };
+
+    // Permission gate: only a supplier user with Supplier.ChangeRequest may raise. (The backend guard also
+    // enforces verified SupplierUserMap membership; this is the UI affordance gate.)
+    private bool CanRaise => Token.HasPermission("Supplier.ChangeRequest");
+
+    // Resuming a request that has already left the supplier's hands (Submitted / under review / actioned) →
+    // the editor is view-only; the supplier cannot Save/Submit (the API would 409 anyway).
+    private bool ReadOnlyExisting => existingStatus != null && !SupplierChangeStatus.IsEditable(existingStatus);
+
+    // ---------------- Working models (seeded from live values) ----------------
+    private InfoModel info = new();
+    private readonly List<AddressRow> addresses = new();
+    private readonly List<ContactRow> contacts = new();
+    private readonly List<BankRow> banks = new();
+    private readonly List<LicenseRow> licenses = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<SupplierDetailDto>($"api/suppliers/{SupplierId}");
+        supplier = resp?.Data;
+        var cur = await Api.GetAsync<List<CurrencyDto>>("api/masters/currencies?isActive=true");
+        currencies = cur?.Data ?? new();
+
+        if (supplier != null) SeedFromSupplier(supplier);
+
+        // Resuming an existing draft/bounced request: load its lines and apply them over the seed so the
+        // editor shows the in-progress proposal (existing-row edits patched, adds appended, deletes hidden).
+        if (ChangeRequestId is { } crId)
+        {
+            var cr = await Api.GetAsync<SupplierChangeRequestDto>($"api/suppliers/change-requests/{crId}");
+            if (cr?.Data is { } d)
+            {
+                changeRequestId = d.Id;
+                existingStatus = d.ChangeStatus;
+                reviewerNote = d.RejectionReason;
+                summary = d.Summary ?? string.Empty;
+                if (SupplierChangeStatus.IsEditable(d.ChangeStatus)) ApplyDraftLines(d.Lines);
+            }
+        }
+        loading = false;
+    }
+
+    private void SeedFromSupplier(SupplierDetailDto s)
+    {
+        info = new InfoModel
+        {
+            LegalName = s.LegalName,
+            TradeName = s.TradeName,
+            Website = s.Website,
+            GstNumber = s.GstNumber,
+            PanNumber = s.PanNumber,
+            MsmeRegNumber = s.MsmeRegNumber,
+            MsmeCategory = s.MsmeCategory,
+        };
+        infoSeed = info.Clone();
+
+        addresses.Clear();
+        foreach (var a in s.Addresses)
+            addresses.Add(new AddressRow
+            {
+                Id = a.Id, IsNew = false,
+                AddressType = a.AddressType, AddressLine1 = a.AddressLine1, AddressLine2 = a.AddressLine2,
+                Area = a.Area, City = a.City, State = a.State, Pincode = a.Pincode, Country = a.Country,
+                Seed = new AddressRow { AddressType = a.AddressType, AddressLine1 = a.AddressLine1, AddressLine2 = a.AddressLine2, Area = a.Area, City = a.City, State = a.State, Pincode = a.Pincode, Country = a.Country },
+            });
+
+        contacts.Clear();
+        foreach (var c in s.Contacts)
+            contacts.Add(new ContactRow
+            {
+                Id = c.Id, IsNew = false,
+                ContactName = c.ContactName, Designation = c.Designation, Email = c.Email, Phone = c.Phone, IsPrimary = c.IsPrimary,
+                Seed = new ContactRow { ContactName = c.ContactName, Designation = c.Designation, Email = c.Email, Phone = c.Phone, IsPrimary = c.IsPrimary },
+            });
+
+        banks.Clear();
+        foreach (var b in s.BankDetails)
+            banks.Add(new BankRow
+            {
+                Id = b.Id, IsNew = false,
+                BankName = b.BankName, BankAddress = b.BankAddress, AccountName = b.AccountName, AccountNumber = b.AccountNumber,
+                CurrencyId = b.CurrencyId, CurrencyCode = b.CurrencyCode, IfscCode = b.IfscCode, SwiftCode = b.SwiftCode, IsPrimary = b.IsPrimary,
+                Seed = new BankRow { BankName = b.BankName, BankAddress = b.BankAddress, AccountName = b.AccountName, AccountNumber = b.AccountNumber, IfscCode = b.IfscCode, SwiftCode = b.SwiftCode, IsPrimary = b.IsPrimary },
+            });
+
+        licenses.Clear();
+        foreach (var l in s.Licenses)
+            licenses.Add(new LicenseRow
+            {
+                Id = l.Id, IsNew = false,
+                LicenseNumber = l.LicenseNumber, LicenseType = l.LicenseType, Remarks = l.Remarks,
+                IssueDate = l.IssueDate, ExpiryDate = l.ExpiryDate,
+                Seed = new LicenseRow { LicenseNumber = l.LicenseNumber, LicenseType = l.LicenseType, Remarks = l.Remarks, IssueDate = l.IssueDate, ExpiryDate = l.ExpiryDate },
+            });
+    }
+
+    private InfoModel infoSeed = new();
+
+    // Apply a saved draft's lines back onto the seeded working set so the editor resumes the in-progress proposal.
+    private void ApplyDraftLines(List<SupplierChangeRequestLineDto> lines)
+    {
+        foreach (var ln in lines)
+        {
+            switch (ln.TargetEntity, ln.Operation)
+            {
+                case ("Supplier", "Edit"):
+                    info.Set(ln.FieldName, ln.NewValue);
+                    break;
+                case ("Address", "Edit"): SetField(addresses.FirstOrDefault(x => x.Id == ln.TargetEntityId), ln.FieldName, ln.NewValue); break;
+                case ("Contact", "Edit"): SetField(contacts.FirstOrDefault(x => x.Id == ln.TargetEntityId), ln.FieldName, ln.NewValue); break;
+                case ("Bank", "Edit"): SetField(banks.FirstOrDefault(x => x.Id == ln.TargetEntityId), ln.FieldName, ln.NewValue); break;
+                case ("License", "Edit"): SetField(licenses.FirstOrDefault(x => x.Id == ln.TargetEntityId), ln.FieldName, ln.NewValue); break;
+
+                case (_, "Delete"):
+                    MarkRemoved(ln.TargetEntity, ln.TargetEntityId);
+                    break;
+
+                case ("Address", "Add"): addresses.Add(AddressRow.FromPayload(ln.PayloadJson)); break;
+                case ("Contact", "Add"): contacts.Add(ContactRow.FromPayload(ln.PayloadJson)); break;
+                case ("Bank", "Add"): banks.Add(BankRow.FromPayload(ln.PayloadJson)); break;
+                case ("License", "Add"): licenses.Add(LicenseRow.FromPayload(ln.PayloadJson)); break;
+            }
+        }
+    }
+
+    private static void SetField(IFieldSettable? row, string? field, string? value) => row?.Set(field, value);
+
+    private void MarkRemoved(string target, Guid? id)
+    {
+        if (id is not { } gid) return;
+        switch (target)
+        {
+            case "Address": foreach (var x in addresses.Where(x => x.Id == gid)) x.Removed = true; break;
+            case "Contact": foreach (var x in contacts.Where(x => x.Id == gid)) x.Removed = true; break;
+            case "Bank": foreach (var x in banks.Where(x => x.Id == gid)) x.Removed = true; break;
+            case "License": foreach (var x in licenses.Where(x => x.Id == gid)) x.Removed = true; break;
+        }
+    }
+
+    // ---------------- Add / remove row affordances ----------------
+    private void AddAddress() => addresses.Add(new AddressRow { IsNew = true });
+    private void AddContact() => contacts.Add(new ContactRow { IsNew = true });
+    private void AddBank() => banks.Add(new BankRow { IsNew = true });
+    private void AddLicense() => licenses.Add(new LicenseRow { IsNew = true });
+
+    // New rows are dropped entirely; existing rows are flagged Removed (→ Delete line).
+    private void RemoveAddress(AddressRow r) { if (r.IsNew) addresses.Remove(r); else r.Removed = true; }
+    private void RemoveContact(ContactRow r) { if (r.IsNew) contacts.Remove(r); else r.Removed = true; }
+    private void RemoveBank(BankRow r) { if (r.IsNew) banks.Remove(r); else r.Removed = true; }
+    private void RemoveLicense(LicenseRow r) { if (r.IsNew) licenses.Remove(r); else r.Removed = true; }
+
+    private int TabCount(string key) => key switch
+    {
+        "info" => BuildInfoLines().Count,
+        "addresses" => addresses.Count(x => !x.Removed),
+        "contacts" => contacts.Count(x => !x.Removed),
+        "bank" => banks.Count(x => !x.Removed),
+        "licenses" => licenses.Count(x => !x.Removed),
+        _ => 0,
+    };
+
+    private int PendingCount => BuildLines().Count;
+
+    // ---------------- Delta → SupplierChangeLineInput builder ----------------
+    private List<SupplierChangeLineInput> BuildInfoLines()
+    {
+        var lines = new List<SupplierChangeLineInput>();
+        void Cmp(string field, string? cur, string? seed)
+        {
+            if (!Eq(cur, seed))
+                lines.Add(new SupplierChangeLineInput("Supplier", "Edit", FieldName: field, NewValue: cur?.Trim() ?? string.Empty));
+        }
+        Cmp("LegalName", info.LegalName, infoSeed.LegalName);
+        Cmp("TradeName", info.TradeName, infoSeed.TradeName);
+        Cmp("Website", info.Website, infoSeed.Website);
+        Cmp("GstNumber", info.GstNumber, infoSeed.GstNumber);
+        Cmp("PanNumber", info.PanNumber, infoSeed.PanNumber);
+        Cmp("MsmeRegNumber", info.MsmeRegNumber, infoSeed.MsmeRegNumber);
+        Cmp("MsmeCategory", info.MsmeCategory, infoSeed.MsmeCategory);
+        return lines;
+    }
+
+    private List<SupplierChangeLineInput> BuildLines()
+    {
+        var lines = new List<SupplierChangeLineInput>();
+        lines.AddRange(BuildInfoLines());
+
+        // Addresses
+        foreach (var a in addresses)
+        {
+            if (a.Removed && !a.IsNew) { lines.Add(new("Address", "Delete", TargetEntityId: a.Id)); continue; }
+            if (a.Removed) continue;
+            if (a.IsNew) { lines.Add(new("Address", "Add", PayloadJson: a.ToPayload())); continue; }
+            EditCmp(lines, "Address", a.Id, "AddressType", a.AddressType, a.Seed!.AddressType);
+            EditCmp(lines, "Address", a.Id, "AddressLine1", a.AddressLine1, a.Seed.AddressLine1);
+            EditCmp(lines, "Address", a.Id, "AddressLine2", a.AddressLine2, a.Seed.AddressLine2);
+            EditCmp(lines, "Address", a.Id, "Area", a.Area, a.Seed.Area);
+            EditCmp(lines, "Address", a.Id, "City", a.City, a.Seed.City);
+            EditCmp(lines, "Address", a.Id, "State", a.State, a.Seed.State);
+            EditCmp(lines, "Address", a.Id, "Pincode", a.Pincode, a.Seed.Pincode);
+            EditCmp(lines, "Address", a.Id, "Country", a.Country, a.Seed.Country);
+        }
+
+        // Contacts
+        foreach (var c in contacts)
+        {
+            if (c.Removed && !c.IsNew) { lines.Add(new("Contact", "Delete", TargetEntityId: c.Id)); continue; }
+            if (c.Removed) continue;
+            if (c.IsNew) { lines.Add(new("Contact", "Add", PayloadJson: c.ToPayload())); continue; }
+            EditCmp(lines, "Contact", c.Id, "ContactName", c.ContactName, c.Seed!.ContactName);
+            EditCmp(lines, "Contact", c.Id, "Designation", c.Designation, c.Seed.Designation);
+            EditCmp(lines, "Contact", c.Id, "Email", c.Email, c.Seed.Email);
+            EditCmp(lines, "Contact", c.Id, "Phone", c.Phone, c.Seed.Phone);
+            EditBool(lines, "Contact", c.Id, "IsPrimary", c.IsPrimary, c.Seed.IsPrimary);
+        }
+
+        // Bank
+        foreach (var b in banks)
+        {
+            if (b.Removed && !b.IsNew) { lines.Add(new("Bank", "Delete", TargetEntityId: b.Id)); continue; }
+            if (b.Removed) continue;
+            if (b.IsNew) { lines.Add(new("Bank", "Add", PayloadJson: b.ToPayload())); continue; }
+            EditCmp(lines, "Bank", b.Id, "BankName", b.BankName, b.Seed!.BankName);
+            EditCmp(lines, "Bank", b.Id, "BankAddress", b.BankAddress, b.Seed.BankAddress);
+            EditCmp(lines, "Bank", b.Id, "AccountName", b.AccountName, b.Seed.AccountName);
+            EditCmp(lines, "Bank", b.Id, "AccountNumber", b.AccountNumber, b.Seed.AccountNumber);
+            EditCmp(lines, "Bank", b.Id, "IfscCode", b.IfscCode, b.Seed.IfscCode);
+            EditCmp(lines, "Bank", b.Id, "SwiftCode", b.SwiftCode, b.Seed.SwiftCode);
+            EditBool(lines, "Bank", b.Id, "IsPrimary", b.IsPrimary, b.Seed.IsPrimary);
+        }
+
+        // Licenses
+        foreach (var l in licenses)
+        {
+            if (l.Removed && !l.IsNew) { lines.Add(new("License", "Delete", TargetEntityId: l.Id)); continue; }
+            if (l.Removed) continue;
+            if (l.IsNew) { lines.Add(new("License", "Add", PayloadJson: l.ToPayload())); continue; }
+            EditCmp(lines, "License", l.Id, "LicenseNumber", l.LicenseNumber, l.Seed!.LicenseNumber);
+            EditCmp(lines, "License", l.Id, "LicenseType", l.LicenseType, l.Seed.LicenseType);
+            EditCmp(lines, "License", l.Id, "Remarks", l.Remarks, l.Seed.Remarks);
+            EditCmp(lines, "License", l.Id, "IssueDate", l.IssueStr, l.Seed.IssueStr);
+            EditCmp(lines, "License", l.Id, "ExpiryDate", l.ExpiryStr, l.Seed.ExpiryStr);
+        }
+        return lines;
+    }
+
+    private static void EditCmp(List<SupplierChangeLineInput> lines, string target, Guid? id, string field, string? cur, string? seed)
+    {
+        if (!Eq(cur, seed))
+            lines.Add(new SupplierChangeLineInput(target, "Edit", TargetEntityId: id, FieldName: field, NewValue: cur?.Trim() ?? string.Empty));
+    }
+
+    private static void EditBool(List<SupplierChangeLineInput> lines, string target, Guid? id, string field, bool cur, bool seed)
+    {
+        if (cur != seed)
+            lines.Add(new SupplierChangeLineInput(target, "Edit", TargetEntityId: id, FieldName: field, NewValue: cur ? "true" : "false"));
+    }
+
+    private static bool Eq(string? a, string? b) => (a ?? string.Empty).Trim() == (b ?? string.Empty).Trim();
+
+    // ---------------- Persist ----------------
+    private async Task<bool> PersistAsync(List<SupplierChangeLineInput> lines)
+    {
+        saveError = string.Empty;
+        var summaryVal = string.IsNullOrWhiteSpace(summary) ? null : summary.Trim();
+
+        if (changeRequestId is { } existing)
+        {
+            var resp = await Api.PutAsync<SupplierChangeRequestDto, UpdateSupplierChangeRequestRequest>(
+                $"api/suppliers/change-requests/{existing}", new UpdateSupplierChangeRequestRequest(summaryVal, lines));
+            if (resp?.Success == true) return true;
+            saveError = resp?.Errors?.FirstOrDefault() ?? "Failed to save change request.";
+            return false;
+        }
+        else
+        {
+            var resp = await Api.PostAsync<SupplierChangeRequestDto, CreateSupplierChangeRequestRequest>(
+                "api/suppliers/change-requests", new CreateSupplierChangeRequestRequest(SupplierId, summaryVal, lines));
+            if (resp?.Success == true && resp.Data is not null)
+            {
+                changeRequestId = resp.Data.Id;
+                existingStatus = resp.Data.ChangeStatus;
+                return true;
+            }
+            saveError = resp?.Errors?.FirstOrDefault() ?? "Failed to create change request.";
+            return false;
+        }
+    }
+
+    private async Task SaveDraft()
+    {
+        busy = true;
+        var lines = BuildLines();
+        if (await PersistAsync(lines))
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft saved", Detail = $"{lines.Count} change(s) staged." });
+        else
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Save failed", Detail = saveError, Duration = 6000 });
+        busy = false;
+    }
+
+    private async Task SubmitForReview()
+    {
+        busy = true;
+        var lines = BuildLines();
+        if (lines.Count == 0)
+        {
+            saveError = "Make at least one change before submitting.";
+            busy = false;
+            return;
+        }
+        // Persist the latest line-set first (create-or-replace), then submit.
+        if (!await PersistAsync(lines))
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Save failed", Detail = saveError, Duration = 6000 });
+            busy = false;
+            return;
+        }
+
+        var submit = await Api.PostAsync<object?>($"api/suppliers/change-requests/{changeRequestId}/submit", new { });
+        if (submit?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Submitted for review", Detail = "You will be notified once it is reviewed." });
+            Nav.NavigateToRoute("/my-change-requests");
+        }
+        else
+        {
+            saveError = submit?.Errors?.FirstOrDefault() ?? "Submit failed.";
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Submit failed", Detail = saveError, Duration = 6000 });
+        }
+        busy = false;
+    }
+
+    // ============================================================================================
+    // Working-row models. Each existing row carries a Seed (snapshot of live values) for field-diff;
+    // new rows carry IsNew and serialise to the camelCase Add PayloadJson the backend allow-lists.
+    // ============================================================================================
+    private interface IFieldSettable { void Set(string? field, string? value); }
+
+    private sealed class InfoModel
+    {
+        public string? LegalName, TradeName, Website, GstNumber, PanNumber, MsmeRegNumber, MsmeCategory;
+        public InfoModel Clone() => (InfoModel)MemberwiseClone();
+        public void Set(string? field, string? value)
+        {
+            switch (field)
+            {
+                case "LegalName": LegalName = value; break;
+                case "TradeName": TradeName = value; break;
+                case "Website": Website = value; break;
+                case "GstNumber": GstNumber = value; break;
+                case "PanNumber": PanNumber = value; break;
+                case "MsmeRegNumber": MsmeRegNumber = value; break;
+                case "MsmeCategory": MsmeCategory = value; break;
+            }
+        }
+    }
+
+    private sealed class AddressRow : IFieldSettable
+    {
+        public Guid? Id; public bool IsNew; public bool Removed; public AddressRow? Seed;
+        public string? AddressType, AddressLine1, AddressLine2, Area, City, State, Pincode, Country;
+        public void Set(string? field, string? value)
+        {
+            switch (field)
+            {
+                case "AddressType": AddressType = value; break;
+                case "AddressLine1": AddressLine1 = value; break;
+                case "AddressLine2": AddressLine2 = value; break;
+                case "Area": Area = value; break;
+                case "City": City = value; break;
+                case "State": State = value; break;
+                case "Pincode": Pincode = value; break;
+                case "Country": Country = value; break;
+            }
+        }
+        public string ToPayload() => JsonSerializer.Serialize(new
+        {
+            addressType = AddressType, addressLine1 = AddressLine1, addressLine2 = AddressLine2,
+            area = Area, city = City, state = State, pincode = Pincode, country = Country,
+        });
+        public static AddressRow FromPayload(string? json)
+        {
+            var r = new AddressRow { IsNew = true };
+            var d = Parse(json);
+            r.AddressType = Get(d, "addressType"); r.AddressLine1 = Get(d, "addressLine1"); r.AddressLine2 = Get(d, "addressLine2");
+            r.Area = Get(d, "area"); r.City = Get(d, "city"); r.State = Get(d, "state"); r.Pincode = Get(d, "pincode"); r.Country = Get(d, "country");
+            return r;
+        }
+    }
+
+    private sealed class ContactRow : IFieldSettable
+    {
+        public Guid? Id; public bool IsNew; public bool Removed; public ContactRow? Seed;
+        public string? ContactName, Designation, Email, Phone; public bool IsPrimary;
+        public void Set(string? field, string? value)
+        {
+            switch (field)
+            {
+                case "ContactName": ContactName = value; break;
+                case "Designation": Designation = value; break;
+                case "Email": Email = value; break;
+                case "Phone": Phone = value; break;
+                case "IsPrimary": IsPrimary = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase); break;
+            }
+        }
+        public string ToPayload() => JsonSerializer.Serialize(new
+        {
+            contactName = ContactName, designation = Designation, email = Email, phone = Phone, isPrimary = IsPrimary,
+        });
+        public static ContactRow FromPayload(string? json)
+        {
+            var r = new ContactRow { IsNew = true };
+            var d = Parse(json);
+            r.ContactName = Get(d, "contactName"); r.Designation = Get(d, "designation"); r.Email = Get(d, "email"); r.Phone = Get(d, "phone");
+            r.IsPrimary = string.Equals(Get(d, "isPrimary"), "true", StringComparison.OrdinalIgnoreCase);
+            return r;
+        }
+    }
+
+    private sealed class BankRow : IFieldSettable
+    {
+        public Guid? Id; public bool IsNew; public bool Removed; public BankRow? Seed;
+        public string? BankName, BankAddress, AccountName, AccountNumber, IfscCode, SwiftCode, CurrencyCode;
+        public Guid? CurrencyId; public bool IsPrimary;
+        public void Set(string? field, string? value)
+        {
+            switch (field)
+            {
+                case "BankName": BankName = value; break;
+                case "BankAddress": BankAddress = value; break;
+                case "AccountName": AccountName = value; break;
+                case "AccountNumber": AccountNumber = value; break;
+                case "IfscCode": IfscCode = value; break;
+                case "SwiftCode": SwiftCode = value; break;
+                case "IsPrimary": IsPrimary = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase); break;
+            }
+        }
+        public string ToPayload() => JsonSerializer.Serialize(new
+        {
+            bankName = BankName, bankAddress = BankAddress, accountName = AccountName, accountNumber = AccountNumber,
+            currencyId = CurrencyId?.ToString(), ifscCode = IfscCode, swiftCode = SwiftCode, isPrimary = IsPrimary,
+        });
+        public static BankRow FromPayload(string? json)
+        {
+            var r = new BankRow { IsNew = true };
+            var d = Parse(json);
+            r.BankName = Get(d, "bankName"); r.BankAddress = Get(d, "bankAddress"); r.AccountName = Get(d, "accountName"); r.AccountNumber = Get(d, "accountNumber");
+            r.IfscCode = Get(d, "ifscCode"); r.SwiftCode = Get(d, "swiftCode");
+            r.IsPrimary = string.Equals(Get(d, "isPrimary"), "true", StringComparison.OrdinalIgnoreCase);
+            if (Guid.TryParse(Get(d, "currencyId"), out var g)) r.CurrencyId = g;
+            return r;
+        }
+    }
+
+    private sealed class LicenseRow : IFieldSettable
+    {
+        public Guid? Id; public bool IsNew; public bool Removed; public LicenseRow? Seed;
+        public string? LicenseNumber, LicenseType, Remarks;
+        public DateOnly? IssueDate, ExpiryDate;   // bound to <input type="date">; serialised to yyyy-MM-dd
+
+        // yyyy-MM-dd round-trips for diff / payload / draft-resume.
+        public string? IssueStr => IssueDate?.ToString("yyyy-MM-dd");
+        public string? ExpiryStr => ExpiryDate?.ToString("yyyy-MM-dd");
+
+        public void Set(string? field, string? value)
+        {
+            switch (field)
+            {
+                case "LicenseNumber": LicenseNumber = value; break;
+                case "LicenseType": LicenseType = value; break;
+                case "Remarks": Remarks = value; break;
+                case "IssueDate": IssueDate = ParseDate(value); break;
+                case "ExpiryDate": ExpiryDate = ParseDate(value); break;
+            }
+        }
+        public string ToPayload() => JsonSerializer.Serialize(new
+        {
+            licenseNumber = LicenseNumber, licenseType = LicenseType, remarks = Remarks,
+            issueDate = IssueStr, expiryDate = ExpiryStr,
+        });
+        public static LicenseRow FromPayload(string? json)
+        {
+            var r = new LicenseRow { IsNew = true };
+            var d = Parse(json);
+            r.LicenseNumber = Get(d, "licenseNumber"); r.LicenseType = Get(d, "licenseType"); r.Remarks = Get(d, "remarks");
+            r.IssueDate = ParseDate(Get(d, "issueDate")); r.ExpiryDate = ParseDate(Get(d, "expiryDate"));
+            return r;
+        }
+        private static DateOnly? ParseDate(string? v) => DateOnly.TryParse(v, out var d) ? d : null;
+    }
+
+    private static Dictionary<string, string?> Parse(string? json)
+    {
+        var d = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(json)) return d;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                foreach (var p in doc.RootElement.EnumerateObject())
+                    d[p.Name] = p.Value.ValueKind switch
+                    {
+                        JsonValueKind.String => p.Value.GetString(),
+                        JsonValueKind.True => "true",
+                        JsonValueKind.False => "false",
+                        JsonValueKind.Null => null,
+                        _ => p.Value.ToString(),
+                    };
+        }
+        catch { }
+        return d;
+    }
+
+    private static string? Get(Dictionary<string, string?> d, string key) => d.TryGetValue(key, out var v) ? v : null;
+}

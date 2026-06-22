@@ -28,7 +28,9 @@ public class GetGoodsReceiptListQueryHandler : IRequestHandler<GetGoodsReceiptLi
                 join po in _db.PurchaseOrders on pol.PurchaseOrderId equals po.Id
                 join a in _db.Asns on g.AsnId equals (Guid?)a.Id into ag
                 from a in ag.DefaultIfEmpty()
-                select new { g, pol, po, a };
+                join inv in _db.Invoices on g.InvoiceId equals (Guid?)inv.Id into ig
+                from inv in ig.DefaultIfEmpty()
+                select new { g, pol, po, a, inv };
 
         if (request.PurchaseOrderId.HasValue)
             q = q.Where(x => x.po.Id == request.PurchaseOrderId.Value);
@@ -49,7 +51,9 @@ public class GetGoodsReceiptListQueryHandler : IRequestHandler<GetGoodsReceiptLi
                 x.g.PurchaseOrderLineId, x.pol.PositionNo, x.po.PoNumber, x.pol.ItemCode,
                 x.g.AsnId, x.a != null ? x.a.AsnNumber : null,
                 x.g.ReceivedQty, x.g.ShortQty, x.g.RejectedQty,
-                x.g.GrnDate, x.g.ErpSyncId))
+                x.g.GrnDate, x.g.ErpSyncId,
+                x.g.GrnStatus.ToString(), x.g.GrnApprovedAt, x.g.IssueReported,
+                x.g.InvoiceId, x.inv != null ? x.inv.InvoiceNumber : null))
             .ToListAsync(ct);
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling((double)total / pageSize);

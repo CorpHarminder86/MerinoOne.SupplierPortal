@@ -156,6 +156,74 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
         return Result.Ok(HttpContext.TraceIdentifier);
     }
 
+    // ---------------- Taxes (R4 Module 6) ----------------
+
+    [HttpGet("taxes")]
+    [Authorize(Policy = "Settings.Read")]
+    [EndpointSummary("Tax master list")]
+    [EndpointDescription(@"All tax codes (company-shared master) used on PO / invoice lines.
+Filters / params:
+- **isActive**: Optional — true active only, false inactive only, omit for all.
+Returns: List<TaxDto>. Requires permission **Settings.Read**.")]
+    public async Task<Result<List<TaxDto>>> ListTaxes([FromQuery] bool? isActive, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetTaxesQuery(isActive), ct);
+        return Result<List<TaxDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpGet("taxes/{id:guid}")]
+    [Authorize(Policy = "Settings.Read")]
+    [EndpointSummary("Tax detail")]
+    [EndpointDescription(@"Single tax code by GUID.
+Filters / params:
+- **id**: Required — tax GUID.
+Returns: TaxDto on success; 404 if not found. Requires permission **Settings.Read**.")]
+    public async Task<Result<TaxDto>> GetTax(Guid id, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetTaxByIdQuery(id), ct);
+        return Result<TaxDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("taxes")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Create tax")]
+    [EndpointDescription(@"Creates a new tax code row.
+Body:
+- **body**: CreateTaxRequest with Code + Description (+ optional TaxRate).
+Returns: TaxDto on success; 400 on validation; 409 if code exists. Requires permission **Settings.Write**.")]
+    public async Task<Result<TaxDto>> CreateTax([FromBody] CreateTaxRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new CreateTaxCommand(body), ct);
+        return Result<TaxDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("taxes/{id:guid}")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Update tax")]
+    [EndpointDescription(@"Updates an existing tax code (Code immutable).
+Filters / params:
+- **id**: Required — tax GUID.
+- **body**: UpdateTaxRequest with revised Description / TaxRate / IsActive.
+Returns: TaxDto on success; 404 if not found. Requires permission **Settings.Write**.")]
+    public async Task<Result<TaxDto>> UpdateTax(Guid id, [FromBody] UpdateTaxRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpdateTaxCommand(id, body), ct);
+        return Result<TaxDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("taxes/{id:guid}/deactivate")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Deactivate tax")]
+    [EndpointDescription(@"Marks a tax code inactive; preserved on historical PO/invoice lines.
+Filters / params:
+- **id**: Required — tax GUID.
+Returns: empty success; 404 if not found. Requires permission **Settings.Write**.")]
+    public async Task<Result> DeactivateTax(Guid id, CancellationToken ct)
+    {
+        await _mediator.Send(new DeactivateTaxCommand(id), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
+
     // ---------------- Items ----------------
 
     [HttpGet("items")]

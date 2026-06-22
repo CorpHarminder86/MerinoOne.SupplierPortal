@@ -29,7 +29,7 @@ public class TenantInboundUpsertExecutor
         _logger = logger;
     }
 
-    public async Task<UpsertResultDto> ExecuteAsync(
+    public Task<UpsertResultDto> ExecuteAsync(
         TenantInboundEntity endpoint,
         string? idempotencyKey,
         int received,
@@ -38,8 +38,35 @@ public class TenantInboundUpsertExecutor
         object requestPayload,
         Func<IAppDbContext, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
         CancellationToken ct)
+        => RunAsync(InboundUpsertSupport.EntityName(endpoint), idempotencyKey, received, canonicalRows, codes, requestPayload, upsertAsync, ct);
+
+    /// <summary>
+    /// R4 (2026-06-22) — Module 5 / Increment D. Tenant-scoped sibling for the transactional ErpAck endpoint
+    /// (/inbound/erp-ack has no CompanyCode — it resolves <c>portalRef</c> → an outbox row in the key's tenant).
+    /// Mirrors the <see cref="TenantInboundEntity"/> overload (endpoint gate, idempotency, transactional
+    /// SyncLog/IntegrationError + endpoint-session telemetry) keyed on the transactional EntityName.
+    /// </summary>
+    public Task<UpsertResultDto> ExecuteAsync(
+        TransactionalInboundEntity endpoint,
+        string? idempotencyKey,
+        int received,
+        IEnumerable<string> canonicalRows,
+        IEnumerable<string> codes,
+        object requestPayload,
+        Func<IAppDbContext, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
+        CancellationToken ct)
+        => RunAsync(InboundUpsertSupport.EntityName(endpoint), idempotencyKey, received, canonicalRows, codes, requestPayload, upsertAsync, ct);
+
+    private async Task<UpsertResultDto> RunAsync(
+        string entityName,
+        string? idempotencyKey,
+        int received,
+        IEnumerable<string> canonicalRows,
+        IEnumerable<string> codes,
+        object requestPayload,
+        Func<IAppDbContext, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
+        CancellationToken ct)
     {
-        var entityName = InboundUpsertSupport.EntityName(endpoint);
         var entityId = InboundUpsertSupport.JoinCodes(codes);
         var payloadJson = InboundUpsertSupport.SerializePayloadCapped(requestPayload);
         var tenantId = _user.TenantId ?? throw new ForbiddenException("API key has no tenant context.");
@@ -137,6 +164,19 @@ public class TenantInboundUpsertExecutor
         catch (Exception ex)
         {
             await tx.RollbackAsync(ct);
+
+            // Review S1 — a concurrent/duplicate inbound delivery that lost an optimistic-concurrency or unique-index
+            // race (e.g. two erp-acks racing the same outbox row) is a RETRYABLE per-row skip, NOT a 500 that nukes
+            // the whole batch. Record a Failed SyncLog/IntegrationError and return all-Skipped (200) for re-delivery.
+            if (InboundUpsertSupport.IsRetryableConcurrencyOrUniqueViolation(ex))
+            {
+                _logger.LogWarning(ex,
+                    "Inbound {EntityName} upsert hit a retryable write conflict (concurrency/unique) for tenant {TenantId}; reporting Skipped for LN re-delivery.",
+                    entityName, tenantId);
+                await RecordRetryableConflictAsync(entityName, tenantId, entityId, payloadJson, effectiveKey, received, ex, ct);
+                return new UpsertResultDto(entityName, received, 0, 0, received, 0, Array.Empty<RowResult>());
+            }
+
             _logger.LogError(ex, "Inbound {EntityName} upsert failed for tenant {TenantId}.", entityName, tenantId);
             try
             {
@@ -179,6 +219,57 @@ public class TenantInboundUpsertExecutor
                 _logger.LogError(logEx, "Failed to record the inbound failure SyncLog/IntegrationError.");
             }
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Review S1 — best-effort, OUTSIDE the rolled-back transaction, record a Failed SyncLog + a RETRYABLE
+    /// IntegrationError for a concurrency/unique write conflict (the batch is skipped + reported to LN as Skipped,
+    /// so LN re-delivers). Never throws.
+    /// </summary>
+    private async Task RecordRetryableConflictAsync(
+        string entityName, Guid tenantId, string? entityId, string? payloadJson, string effectiveKey,
+        int received, Exception ex, CancellationToken ct)
+    {
+        try
+        {
+            _db.ClearChangeTracker();
+            var failLog = new InforSyncLog
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                EntityName = entityName,
+                Direction = SyncDirection.Inbound,
+                Status = SyncStatus.Failed,
+                PayloadRef = $"tenant:{tenantId:N};count:{received}",
+                EntityId = entityId,
+                EntityCount = received,
+                PayloadJson = payloadJson,
+                IdempotencyKey = effectiveKey,
+                SyncedAt = DateTime.UtcNow,
+                ErrorMessage = $"Retryable write conflict (concurrent/duplicate delivery): {ex.Message}",
+                CreatedBy = "infor:inbound",
+                CreatedOn = DateTime.UtcNow
+            };
+            _db.InforSyncLogs.Add(failLog);
+            _db.IntegrationErrors.Add(new IntegrationError
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                SyncLogId = failLog.Id,
+                EntityName = entityName,
+                ErrorMessage = $"Inbound {entityName} skipped — retryable write conflict (re-delivery expected): {ex.Message}",
+                StackTrace = ex.StackTrace,
+                RetryCount = 0,
+                IsResolved = false,
+                CreatedBy = "infor:inbound",
+                CreatedOn = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception logEx)
+        {
+            _logger.LogError(logEx, "Failed to record the inbound retryable-conflict SyncLog/IntegrationError.");
         }
     }
 }

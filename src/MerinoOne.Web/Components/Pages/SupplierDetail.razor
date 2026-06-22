@@ -3,6 +3,7 @@
 @inject TokenAccessor Token
 @inject NavigationManager Nav
 @inject NotificationService Notif
+@inject DialogService Dialog
 
 <PageTitle>@detail?.LegalName</PageTitle>
 
@@ -31,6 +32,18 @@ else
                 <p class="tl-sub">Seq #@detail.Seq · @detail.SupplierType · @detail.TradeName</p>
             </div>
             <div class="tl-header__actions">
+                @if (CanRaiseChangeRequest)
+                {
+                    <a href="suppliers/@Id/change-request" class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;text-decoration:none;">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">edit_note</span> Request a change
+                    </a>
+                }
+                @if (Token.HasPermission("Supplier.ApproveChange"))
+                {
+                    <a href="supplier-change-requests" class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);cursor:pointer;text-decoration:none;">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">rule_settings</span> Change requests
+                    </a>
+                }
                 @if (Token.HasPermission("Supplier.VerifyNic"))
                 {
                     <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="VerifyAll" disabled="@busy">
@@ -48,6 +61,8 @@ else
 
         <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;">
             <button class="mer-tab @(tab=="overview"?"mer-tab--active":"")" @onclick="TabOverview" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="overview"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="overview"?"var(--mer-blue)":"var(--mer-ink-700)");">Overview</button>
+            <button class="mer-tab @(tab=="bank"?"mer-tab--active":"")" @onclick='() => tab = "bank"' style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="bank"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="bank"?"var(--mer-blue)":"var(--mer-ink-700)");">Bank details (@detail.BankDetails.Count)</button>
+            <button class="mer-tab @(tab=="licenses"?"mer-tab--active":"")" @onclick='() => tab = "licenses"' style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="licenses"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="licenses"?"var(--mer-blue)":"var(--mer-ink-700)");">Licenses (@detail.Licenses.Count)</button>
             <button class="mer-tab @(tab=="users"?"mer-tab--active":"")" @onclick="TabUsers" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="users"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="users"?"var(--mer-blue)":"var(--mer-ink-700)");">Supplier users (@detail.LinkedUsers.Count)</button>
             <button class="mer-tab @(tab=="history"?"mer-tab--active":"")" @onclick="TabHistory" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="history"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="history"?"var(--mer-blue)":"var(--mer-ink-700)");">History</button>
         </div>
@@ -55,6 +70,176 @@ else
         @if (tab == "history")
         {
             <AuditHistoryTab EntityName="Supplier" EntityId="@Id" />
+        }
+        else if (tab == "bank")
+        {
+            @* ---------------- Bank details tab ---------------- *@
+            <div class="rz-card" style="padding:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <div>
+                        <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">Bank accounts (@detail.BankDetails.Count)</h3>
+                        <p style="color:var(--mer-ink-500);font-size:12px;">Settlement accounts. The primary account is starred and used by default for payments.</p>
+                    </div>
+                    @if (CanWriteMaster)
+                    {
+                        <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewBank">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add account
+                        </button>
+                    }
+                </div>
+
+                @if (ReadOnlyMaster)
+                {
+                    <div style="background:var(--mer-amber-50);color:var(--mer-amber-800);padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:14px;display:flex;gap:8px;align-items:center;justify-content:space-between;">
+                        <span style="display:flex;gap:8px;align-items:flex-start;">
+                            <span class="material-symbols-outlined" style="font-size:16px;">info</span>
+                            <span>This supplier is <b>Active</b>. Bank details are read-only here — edits must be submitted through a <b>Change Request</b>.</span>
+                        </span>
+                        @if (CanRaiseChangeRequest)
+                        {
+                            <a href="suppliers/@Id/change-request" class="rz-button rz-primary" style="padding:6px 12px;border-radius:6px;border:0;color:#fff;cursor:pointer;text-decoration:none;font-size:12px;white-space:nowrap;">
+                                <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">edit_note</span> Request a change
+                            </a>
+                        }
+                    </div>
+                }
+
+                @if (detail.BankDetails.Count == 0)
+                {
+                    <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">account_balance</span><div>No bank accounts on file.</div></div>
+                }
+                else
+                {
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.2fr 1fr 90px 1fr 80px 110px; --tl-min-width: 980px;">
+                        <div class="tlg-header">
+                            <div class="tlg-col">Bank</div>
+                            <div class="tlg-col">Account name</div>
+                            <div class="tlg-col">Account no.</div>
+                            <div class="tlg-col">Currency</div>
+                            <div class="tlg-col">IFSC / SWIFT</div>
+                            <div class="tlg-col">Primary</div>
+                            <div class="tlg-col tlg-col--actions">Actions</div>
+                        </div>
+                        @foreach (var b in detail.BankDetails)
+                        {
+                            var bank = b;
+                            <div class="tlg-row">
+                                <div class="tlg-col tlg-desc">@bank.BankName<div style="font-size:11px;color:var(--mer-ink-500);">@bank.BankAddress</div></div>
+                                <div class="tlg-col">@bank.AccountName</div>
+                                <div class="tlg-col tlg-code">@bank.AccountNumber</div>
+                                <div class="tlg-col tlg-code">@(bank.CurrencyCode ?? "—")</div>
+                                <div class="tlg-col tlg-code">@bank.IfscCode@(string.IsNullOrEmpty(bank.SwiftCode) ? "" : $" · {bank.SwiftCode}")</div>
+                                <div class="tlg-col">@if (bank.IsPrimary) { <span class="tlg-status tlg-status--active">Primary</span> } else { <span style="color:var(--mer-ink-400);">—</span> }</div>
+                                <div class="tlg-col tlg-col--actions">
+                                    @if (CanWriteMaster)
+                                    {
+                                        <button @onclick="() => OpenEditBank(bank)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
+                                        <button @onclick="() => DeleteBank(bank)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Delete"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else if (tab == "licenses")
+        {
+            @* ---------------- Licenses tab ---------------- *@
+            <div class="rz-card" style="padding:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <div>
+                        <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">Licenses &amp; certifications (@detail.Licenses.Count)</h3>
+                        <p style="color:var(--mer-ink-500);font-size:12px;">Statutory licenses, registrations and certificates with issue / expiry tracking.</p>
+                    </div>
+                    @if (CanWriteMaster)
+                    {
+                        <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewLicense">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add license
+                        </button>
+                    }
+                </div>
+
+                @if (ReadOnlyMaster)
+                {
+                    <div style="background:var(--mer-amber-50);color:var(--mer-amber-800);padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:14px;display:flex;gap:8px;align-items:center;justify-content:space-between;">
+                        <span style="display:flex;gap:8px;align-items:flex-start;">
+                            <span class="material-symbols-outlined" style="font-size:16px;">info</span>
+                            <span>This supplier is <b>Active</b>. Licenses are read-only here — edits must be submitted through a <b>Change Request</b>.</span>
+                        </span>
+                        @if (CanRaiseChangeRequest)
+                        {
+                            <a href="suppliers/@Id/change-request" class="rz-button rz-primary" style="padding:6px 12px;border-radius:6px;border:0;color:#fff;cursor:pointer;text-decoration:none;font-size:12px;white-space:nowrap;">
+                                <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">edit_note</span> Request a change
+                            </a>
+                        }
+                    </div>
+                }
+
+                @if (detail.Licenses.Count == 0)
+                {
+                    <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">workspace_premium</span><div>No licenses on file.</div></div>
+                }
+                else
+                {
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.2fr 1fr 1.4fr 110px 110px 1fr 110px; --tl-min-width: 1080px;">
+                        <div class="tlg-header">
+                            <div class="tlg-col">License no.</div>
+                            <div class="tlg-col">Type</div>
+                            <div class="tlg-col">Remarks</div>
+                            <div class="tlg-col">Issued</div>
+                            <div class="tlg-col">Expires</div>
+                            <div class="tlg-col">Attachments</div>
+                            <div class="tlg-col tlg-col--actions">Actions</div>
+                        </div>
+                        @foreach (var l in detail.Licenses)
+                        {
+                            var lic = l;
+                            <div class="tlg-row">
+                                <div class="tlg-col tlg-code">@lic.LicenseNumber</div>
+                                <div class="tlg-col">@lic.LicenseType</div>
+                                <div class="tlg-col" style="color:var(--mer-ink-700);">@(string.IsNullOrEmpty(lic.Remarks) ? "—" : lic.Remarks)</div>
+                                <div class="tlg-col tlg-code">@(lic.IssueDate?.ToString("yyyy-MM-dd") ?? "—")</div>
+                                <div class="tlg-col tlg-code">
+                                    @if (lic.ExpiryDate is { } exp)
+                                    {
+                                        var days = exp.DayNumber - DateOnly.FromDateTime(DateTime.UtcNow).DayNumber;
+                                        <span class="tlg-status @(days < 0 ? "tlg-status--danger" : days <= 30 ? "tlg-status--pending" : "tlg-status--active")">@exp.ToString("yyyy-MM-dd")</span>
+                                    }
+                                    else { <span>—</span> }
+                                </div>
+                                <div class="tlg-col">
+                                    @if (lic.Attachments is { Count: > 0 } atts)
+                                    {
+                                        <div style="display:flex;flex-direction:column;gap:4px;">
+                                            @foreach (var a in atts)
+                                            {
+                                                var att = a;
+                                                <button type="button" @onclick="() => PreviewAttachment(att)" title="@att.FileName"
+                                                        style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:0;padding:0;cursor:pointer;color:var(--mer-blue);font-size:11.5px;text-align:left;max-width:100%;">
+                                                    <span class="material-symbols-outlined" style="font-size:15px;">@AttachIcon(att.ContentType)</span>
+                                                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@att.FileName</span>
+                                                </button>
+                                            }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span style="color:var(--mer-ink-400);">—</span>
+                                    }
+                                </div>
+                                <div class="tlg-col tlg-col--actions">
+                                    @if (CanWriteMaster)
+                                    {
+                                        <button @onclick="() => OpenEditLicense(lic)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
+                                        <button @onclick="() => DeleteLicense(lic)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Delete"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
         }
         else if (tab == "users")
         {
@@ -178,6 +363,36 @@ else
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+            <div class="rz-card" style="padding:20px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Commercial terms</h3>
+                <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
+                    <dt style="color:var(--mer-ink-500);">Currency</dt><dd style="font-family:Inter,monospace;">@(detail.CurrencyCode ?? "—")</dd>
+                    <dt style="color:var(--mer-ink-500);">Payment term</dt><dd>@(detail.PaymentTermCode ?? "—")</dd>
+                    <dt style="color:var(--mer-ink-500);">Delivery term</dt><dd>@(detail.DeliveryTermCode ?? "—")</dd>
+                    <dt style="color:var(--mer-ink-500);">ERP code</dt><dd style="font-family:Inter,monospace;">@(detail.ErpCode ?? "—")</dd>
+                </dl>
+
+                <div style="border-top:1px solid var(--mer-line-soft);margin-top:14px;padding-top:14px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                        <div>
+                            <div style="font-size:12.5px;font-weight:600;color:var(--mer-ink-900);">PO response mode</div>
+                            <div style="font-size:11.5px;color:var(--mer-ink-500);max-width:340px;">
+                                @(detail.PoResponseMode == "Auto"
+                                    ? "Auto — incoming POs are acknowledged and accepted automatically at release."
+                                    : "Manual — the supplier must acknowledge / accept / reject each PO.")
+                            </div>
+                        </div>
+                        <span class="tlg-status @(detail.PoResponseMode == "Auto" ? "tlg-status--info" : "tlg-status--active")">@detail.PoResponseMode</span>
+                    </div>
+                    @if (Token.HasPermission("Supplier.Approve"))
+                    {
+                        <button class="rz-button" style="margin-top:10px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);cursor:pointer;font-size:12px;" @onclick="OpenPoMode" disabled="@busy">
+                            <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">swap_horiz</span> Change mode
+                        </button>
+                    }
+                </div>
+            </div>
+
             <div class="rz-card" style="padding:20px;">
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Addresses (@detail.Addresses.Count)</h3>
                 @if (detail.Addresses.Count == 0)
@@ -318,6 +533,163 @@ else
             </div>
         </div>
     }
+
+    @* ---------------- Bank detail dialog ---------------- *@
+    @if (showBank)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" style="width:640px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">account_balance</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Bank account</div>
+                        <h2 class="merino-dialog__title">@(editingBankId.HasValue ? "Edit bank account" : "New bank account")</h2>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showBank = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div style="grid-column:1 / span 2;"><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Bank name *</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="bankForm.BankName" /></div>
+                        <div style="grid-column:1 / span 2;"><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Bank address *</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="bankForm.BankAddress" /></div>
+                        <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Account name *</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="bankForm.AccountName" /></div>
+                        <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Account number *</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="bankForm.AccountNumber" /></div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Currency *</label>
+                            <select class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="bankForm.CurrencyId">
+                                <option value="">Select…</option>
+                                @foreach (var c in currencies)
+                                {
+                                    <option value="@c.Id">@c.Code — @c.Description</option>
+                                }
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">IFSC code @(IfscRequired ? "*" : "")</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;text-transform:uppercase;" @bind="bankForm.IfscCode" placeholder="ABCD0123456" />
+                            @if (IfscRequired) { <div style="font-size:10.5px;color:var(--mer-ink-500);">Required for INR. Format: ^[A-Z]{4}0[A-Z0-9]{6}$</div> }
+                        </div>
+                        <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">SWIFT code (optional)</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;text-transform:uppercase;" @bind="bankForm.SwiftCode" /></div>
+                        <label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" @bind="bankForm.IsPrimary" /> Primary settlement account</label>
+                    </div>
+                    @if (!string.IsNullOrEmpty(bankError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@bankError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showBank = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="SaveBank" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* ---------------- License dialog ---------------- *@
+    @if (showLicense)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" style="width:640px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">workspace_premium</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">License</div>
+                        <h2 class="merino-dialog__title">@(editingLicenseId.HasValue ? "Edit license" : "New license")</h2>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showLicense = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">License number *</label><input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="licenseForm.LicenseNumber" /></div>
+                        <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">License type *</label><input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="licenseForm.LicenseType" placeholder="e.g. GST, ISO 9001, Factory" /></div>
+                        <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Issue date</label><input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="licenseIssue" /></div>
+                        <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Expiry date</label><input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="licenseExpiry" /></div>
+                        <div style="grid-column:1 / span 2;"><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Remarks</label><textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="licenseForm.Remarks"></textarea></div>
+                    </div>
+
+                    @* ---------------- License attachments ---------------- *@
+                    <div style="margin-top:14px;border-top:1px solid var(--mer-line-soft);padding-top:14px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachments</label>
+                            <label class="doc-uploader__choose" style="position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;">
+                                <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
+                                @(attachUploading ? "Uploading…" : "Add file")
+                                <InputFile OnChange="OnLicenseFileSelectedAsync" accept=".pdf,.jpg,.jpeg,.png" disabled="@attachUploading"
+                                           style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
+                            </label>
+                        </div>
+                        <p style="font-size:11px;color:var(--mer-ink-500);margin-bottom:8px;">PDF or image, up to 5 MB. Files are saved as you add them@(editingLicenseId.HasValue ? "." : " and attached to the license when you click Save.")</p>
+
+                        @if (licenseAttachments.Count == 0)
+                        {
+                            <div style="font-size:12px;color:var(--mer-ink-400);padding:8px 0;">No attachments yet.</div>
+                        }
+                        else
+                        {
+                            <div style="display:flex;flex-direction:column;gap:6px;">
+                                @foreach (var a in licenseAttachments)
+                                {
+                                    var att = a;
+                                    <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 10px;background:var(--mer-surface);">
+                                        <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-blue);">@AttachIcon(att.ContentType)</span>
+                                        <div style="flex:1;min-width:0;">
+                                            <div style="font-size:12px;font-weight:600;color:var(--mer-ink-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@att.FileName">@att.FileName</div>
+                                            <div style="font-size:10.5px;color:var(--mer-ink-500);font-family:Inter,monospace;">@($"{att.SizeBytes / 1024d:0.#}") KB</div>
+                                        </div>
+                                        <button type="button" @onclick="() => PreviewAttachment(att)" title="Preview" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>
+                                        <button type="button" @onclick="() => DeleteAttachment(att)" title="Remove" disabled="@attachUploading" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">delete</span></button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(attachError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@attachError</div> }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(licenseError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@licenseError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showLicense = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="SaveLicense" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* ---------------- PO response-mode dialog ---------------- *@
+    @if (showPoMode)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">swap_horiz</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Supplier</div>
+                        <h2 class="merino-dialog__title">PO response mode</h2>
+                        <p class="merino-dialog__subtitle">How this supplier responds to released purchase orders.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showPoMode = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="display:block;font-size:13px;font-weight:600;color:var(--mer-ink-700);margin-bottom:8px;">
+                        <input type="radio" name="pomode" checked="@(poModeValue == "Manual")" @onchange='() => poModeValue = "Manual"' /> Manual — supplier acknowledges / accepts / rejects each PO
+                    </label>
+                    <label style="display:block;font-size:13px;font-weight:600;color:var(--mer-ink-700);">
+                        <input type="radio" name="pomode" checked="@(poModeValue == "Auto")" @onchange='() => poModeValue = "Auto"' /> Auto — POs are acknowledged + accepted automatically at release
+                    </label>
+                    @if (!string.IsNullOrEmpty(poModeError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@poModeError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showPoMode = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="SavePoMode" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
 }
 
 @* Reusable preview overlay — rendered once, driven by _previewDoc state. *@
@@ -337,12 +709,318 @@ else
     private void TabUsers() => tab = "users";
     private void TabHistory() => tab = "history";
 
+    // ---------------- Bank / License / PO-mode dialog state ----------------
+    private List<CurrencyDto> currencies = new();
+
+    private bool showBank;
+    private Guid? editingBankId;
+    private BankFormModel bankForm = new();
+    private string bankError = string.Empty;
+    // IFSC is conditionally required (INR only). Resolve the selected currency's code.
+    private bool IfscRequired => currencies.FirstOrDefault(c => c.Id == bankForm.CurrencyId)?.Code?.Equals("INR", StringComparison.OrdinalIgnoreCase) == true;
+
+    private bool showLicense;
+    private Guid? editingLicenseId;
+    private LicenseFormModel licenseForm = new();
+    private DateTime? licenseIssue;
+    private DateTime? licenseExpiry;
+    private string licenseError = string.Empty;
+
+    // License attachment state. For a NEW license we generate a client draft GUID (staging key); files are
+    // uploaded immediately under ownerEntityType="Staging" and rebound onto the saved license via StagingKey
+    // on create. For an EDIT we attach directly under ownerEntityType="SupplierLicense"/ownerEntityId=licenseId.
+    private Guid licenseStagingKey;
+    private readonly List<DocumentAttachmentDto> licenseAttachments = new();
+    private bool attachUploading;
+    private string attachError = string.Empty;
+    private const long MaxAttachBytes = 5L * 1024 * 1024;
+
+    private bool showPoMode;
+    private string poModeValue = "Manual";
+    private string poModeError = string.Empty;
+
+    private static readonly System.Text.RegularExpressions.Regex IfscRegex =
+        new("^[A-Z]{4}0[A-Z0-9]{6}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private sealed class BankFormModel
+    {
+        public string BankName = string.Empty;
+        public string BankAddress = string.Empty;
+        public string AccountName = string.Empty;
+        public string AccountNumber = string.Empty;
+        public Guid? CurrencyId;
+        public string IfscCode = string.Empty;
+        public string? SwiftCode;
+        public bool IsPrimary;
+    }
+
+    private sealed class LicenseFormModel
+    {
+        public string LicenseNumber = string.Empty;
+        public string LicenseType = string.Empty;
+        public string? Remarks;
+    }
+
+    // ---- Bank actions ----
+    private void OpenNewBank()
+    {
+        editingBankId = null;
+        bankForm = new BankFormModel { IsPrimary = detail?.BankDetails.Count == 0 };
+        bankError = string.Empty;
+        showBank = true;
+    }
+
+    private void OpenEditBank(SupplierBankDetailDto b)
+    {
+        editingBankId = b.Id;
+        bankForm = new BankFormModel
+        {
+            BankName = b.BankName,
+            BankAddress = b.BankAddress,
+            AccountName = b.AccountName,
+            AccountNumber = b.AccountNumber,
+            CurrencyId = b.CurrencyId,
+            IfscCode = b.IfscCode,
+            SwiftCode = b.SwiftCode,
+            IsPrimary = b.IsPrimary,
+        };
+        bankError = string.Empty;
+        showBank = true;
+    }
+
+    private async Task SaveBank()
+    {
+        bankError = string.Empty;
+        if (string.IsNullOrWhiteSpace(bankForm.BankName)) { bankError = "Bank name is required."; return; }
+        if (string.IsNullOrWhiteSpace(bankForm.BankAddress)) { bankError = "Bank address is required."; return; }
+        if (string.IsNullOrWhiteSpace(bankForm.AccountName)) { bankError = "Account name is required."; return; }
+        if (string.IsNullOrWhiteSpace(bankForm.AccountNumber)) { bankError = "Account number is required."; return; }
+        if (bankForm.CurrencyId is null || bankForm.CurrencyId == Guid.Empty) { bankError = "Currency is required."; return; }
+        var ifsc = (bankForm.IfscCode ?? string.Empty).Trim().ToUpperInvariant();
+        if (IfscRequired)
+        {
+            if (string.IsNullOrWhiteSpace(ifsc)) { bankError = "IFSC code is required for INR accounts."; return; }
+            if (!IfscRegex.IsMatch(ifsc)) { bankError = "IFSC must match ^[A-Z]{4}0[A-Z0-9]{6}$."; return; }
+        }
+        else if (!string.IsNullOrWhiteSpace(ifsc) && !IfscRegex.IsMatch(ifsc))
+        {
+            bankError = "IFSC must match ^[A-Z]{4}0[A-Z0-9]{6}$.";
+            return;
+        }
+
+        busy = true;
+        var swift = string.IsNullOrWhiteSpace(bankForm.SwiftCode) ? null : bankForm.SwiftCode!.Trim().ToUpperInvariant();
+        ApiResult<SupplierBankDetailDto>? resp;
+        if (editingBankId.HasValue)
+        {
+            var req = new UpdateSupplierBankDetailRequest(
+                bankForm.BankName.Trim(), bankForm.BankAddress.Trim(), bankForm.AccountName.Trim(),
+                bankForm.AccountNumber.Trim(), bankForm.CurrencyId!.Value, ifsc, swift, bankForm.IsPrimary);
+            resp = await Api.PutAsync<SupplierBankDetailDto, UpdateSupplierBankDetailRequest>(
+                $"api/suppliers/{Id}/bank-details/{editingBankId}", req);
+        }
+        else
+        {
+            var req = new AddSupplierBankDetailRequest(
+                bankForm.BankName.Trim(), bankForm.BankAddress.Trim(), bankForm.AccountName.Trim(),
+                bankForm.AccountNumber.Trim(), bankForm.CurrencyId!.Value, ifsc, swift, bankForm.IsPrimary);
+            resp = await Api.PostAsync<SupplierBankDetailDto, AddSupplierBankDetailRequest>(
+                $"api/suppliers/{Id}/bank-details", req);
+        }
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" }); showBank = false; await Load(); }
+        else { bankError = resp?.Errors?.FirstOrDefault() ?? "Failed to save bank account."; }
+        busy = false;
+    }
+
+    private async Task DeleteBank(SupplierBankDetailDto b)
+    {
+        if (!await Dialog.ConfirmDeleteAsync(b.AccountNumber, category: "BANK ACCOUNT", subtitle: "This bank account will be removed from the supplier.")) return;
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/suppliers/{Id}/bank-details/{b.Id}");
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deleted" }); await Load(); }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+    // ---- License actions ----
+    private void OpenNewLicense()
+    {
+        editingLicenseId = null;
+        licenseForm = new LicenseFormModel();
+        licenseIssue = null;
+        licenseExpiry = null;
+        licenseError = string.Empty;
+        // New license has no id yet — stage attachments under a fresh client-generated draft GUID.
+        licenseStagingKey = Guid.NewGuid();
+        licenseAttachments.Clear();
+        attachError = string.Empty;
+        attachUploading = false;
+        showLicense = true;
+    }
+
+    private void OpenEditLicense(SupplierLicenseDto l)
+    {
+        editingLicenseId = l.Id;
+        licenseForm = new LicenseFormModel { LicenseNumber = l.LicenseNumber, LicenseType = l.LicenseType, Remarks = l.Remarks };
+        licenseIssue = l.IssueDate?.ToDateTime(TimeOnly.MinValue);
+        licenseExpiry = l.ExpiryDate?.ToDateTime(TimeOnly.MinValue);
+        licenseError = string.Empty;
+        // Editing an existing license — attach directly against the license id; seed the list from the
+        // attachments already loaded by GET /api/suppliers/{id}.
+        licenseStagingKey = Guid.Empty;
+        licenseAttachments.Clear();
+        if (l.Attachments is { Count: > 0 } existing) licenseAttachments.AddRange(existing);
+        attachError = string.Empty;
+        attachUploading = false;
+        showLicense = true;
+    }
+
+    // ---- License attachment upload / delete / preview ----
+    private async Task OnLicenseFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        attachError = string.Empty;
+        var file = e.File;
+        if (file is null) return;
+        if (file.Size > MaxAttachBytes)
+        {
+            attachError = $"File exceeds 5 MB ({(file.Size / 1024d / 1024d):0.0} MB).";
+            return;
+        }
+
+        attachUploading = true;
+        StateHasChanged();
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            var streamContent = new StreamContent(file.OpenReadStream(MaxAttachBytes));
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
+            content.Add(streamContent, "file", file.Name);
+
+            // Existing license → attach onto the license row; new license → stage under the draft GUID.
+            var isEdit = editingLicenseId.HasValue;
+            content.Add(new StringContent(isEdit ? "SupplierLicense" : "Staging"), "ownerEntityType");
+            content.Add(new StringContent((isEdit ? editingLicenseId!.Value : licenseStagingKey).ToString()), "ownerEntityId");
+            content.Add(new StringContent(Id.ToString()), "supplierId");
+
+            var resp = await Api.PostMultipartAsync<DocumentAttachmentDto>("api/document-uploads/attach", content);
+            if (resp?.Success == true && resp.Data is not null)
+            {
+                licenseAttachments.Add(resp.Data);
+            }
+            else
+            {
+                attachError = resp?.Errors?.FirstOrDefault() ?? "Upload failed.";
+            }
+        }
+        catch (Exception ex)
+        {
+            attachError = $"Upload failed: {ex.Message}";
+        }
+        finally
+        {
+            attachUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeleteAttachment(DocumentAttachmentDto att)
+    {
+        attachError = string.Empty;
+        var resp = await Api.DeleteAsync($"api/document-uploads/{att.Id}");
+        if (resp?.Success == true)
+        {
+            licenseAttachments.Remove(att);
+        }
+        else
+        {
+            attachError = resp?.Errors?.FirstOrDefault() ?? "Failed to remove attachment.";
+        }
+    }
+
+    private void PreviewAttachment(DocumentAttachmentDto att)
+    {
+        // DocumentAttachmentDto.PreviewUrl == "files/proxy/{id}" (base-href-relative, bearer-injected by the Web proxy).
+        _previewDoc = new DocumentPreviewer.DocumentDescriptor(
+            att.Id, att.FileName, att.ContentType, att.SizeBytes / 1024, att.PreviewUrl);
+    }
+
+    private static string AttachIcon(string contentType) =>
+        contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? "image"
+        : string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase) ? "picture_as_pdf"
+        : "description";
+
+    private async Task SaveLicense()
+    {
+        licenseError = string.Empty;
+        if (string.IsNullOrWhiteSpace(licenseForm.LicenseNumber)) { licenseError = "License number is required."; return; }
+        if (string.IsNullOrWhiteSpace(licenseForm.LicenseType)) { licenseError = "License type is required."; return; }
+        DateOnly? issue = licenseIssue.HasValue ? DateOnly.FromDateTime(licenseIssue.Value) : null;
+        DateOnly? expiry = licenseExpiry.HasValue ? DateOnly.FromDateTime(licenseExpiry.Value) : null;
+        if (issue.HasValue && expiry.HasValue && expiry.Value < issue.Value) { licenseError = "Expiry date must be on or after issue date."; return; }
+        var remarks = string.IsNullOrWhiteSpace(licenseForm.Remarks) ? null : licenseForm.Remarks!.Trim();
+
+        busy = true;
+        ApiResult<SupplierLicenseDto>? resp;
+        if (editingLicenseId.HasValue)
+        {
+            // Edit: attachments were already bound directly to the license id as they were uploaded —
+            // no staging rebind needed.
+            var req = new UpdateSupplierLicenseRequest(licenseForm.LicenseNumber.Trim(), licenseForm.LicenseType.Trim(), remarks, issue, expiry);
+            resp = await Api.PutAsync<SupplierLicenseDto, UpdateSupplierLicenseRequest>($"api/suppliers/{Id}/licenses/{editingLicenseId}", req);
+        }
+        else
+        {
+            // Create: pass the staging key so the backend atomically re-points the staged rows onto the new
+            // license. (AttachmentIds left null → ALL rows under the key owned by the caller are rebound.)
+            var req = new AddSupplierLicenseRequest(licenseForm.LicenseNumber.Trim(), licenseForm.LicenseType.Trim(), remarks, issue, expiry,
+                StagingKey: licenseAttachments.Count > 0 ? licenseStagingKey : null);
+            resp = await Api.PostAsync<SupplierLicenseDto, AddSupplierLicenseRequest>($"api/suppliers/{Id}/licenses", req);
+        }
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" }); showLicense = false; await Load(); }
+        else { licenseError = resp?.Errors?.FirstOrDefault() ?? "Failed to save license."; }
+        busy = false;
+    }
+
+    private async Task DeleteLicense(SupplierLicenseDto l)
+    {
+        if (!await Dialog.ConfirmDeleteAsync(l.LicenseNumber, category: "LICENSE", subtitle: "This license will be removed from the supplier.")) return;
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/suppliers/{Id}/licenses/{l.Id}");
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deleted" }); await Load(); }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+    // ---- PO response mode ----
+    private void OpenPoMode()
+    {
+        poModeValue = detail?.PoResponseMode ?? "Manual";
+        poModeError = string.Empty;
+        showPoMode = true;
+    }
+
+    private async Task SavePoMode()
+    {
+        busy = true; poModeError = string.Empty;
+        var resp = await Api.PostAsync<SetPoResponseModeRequest>($"api/suppliers/{Id}/po-response-mode", new SetPoResponseModeRequest(poModeValue));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "PO response mode updated" }); showPoMode = false; await Load(); }
+        else { poModeError = resp?.Errors?.FirstOrDefault() ?? "Failed to update mode."; }
+        busy = false;
+    }
+
     private bool RequireOverride => detail?.Verifications
         .GroupBy(v => v.VerificationType)
         .Select(g => g.OrderByDescending(v => v.AttemptedAt).First())
         .Any(v => v.Result == "Fail") == true;
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        // Currency dropdown source for the bank dialog. api/masters/currencies returns Id+Code+Description.
+        var cur = await Api.GetAsync<List<CurrencyDto>>("api/masters/currencies?isActive=true");
+        currencies = cur?.Data ?? new();
+    }
 
     private async Task Load()
     {
@@ -351,6 +1029,18 @@ else
         detail = resp?.Data;
         loading = false;
     }
+
+    // ---------------- Bank / License master read-only gating ----------------
+    // Internal users with Supplier.Write may CRUD bank/license rows. A supplier's OWN master becomes
+    // read-only once Active (§4) — edits then route through a Change Request (later increment). We treat
+    // any supplier-role principal as read-once-Active; internal staff with the write permission keep CRUD.
+    private bool ReadOnlyMaster => Token.IsSupplier && detail?.RegistrationStatus == "Active";
+    private bool CanWriteMaster => !ReadOnlyMaster && Token.HasPermission("Supplier.Write");
+
+    // R4 Module 2 — a supplier user with Supplier.ChangeRequest may route master edits through a change
+    // request once their master is read-only (Active). Gates the "Request a change" entry points.
+    private bool CanRaiseChangeRequest => Token.HasPermission("Supplier.ChangeRequest")
+        && detail?.RegistrationStatus is "Active" or "Approved";
 
     private async Task VerifyAll()
     {

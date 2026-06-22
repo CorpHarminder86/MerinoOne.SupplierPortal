@@ -71,6 +71,22 @@ else
                         <span class="mer-nav-item__label">Onboarding Queue</span>
                     </NavLink>
                 }
+                @* R4 Module 2 — change-request lifecycle. Internal reviewers see the full review queue;
+                   a supplier user sees only its own raised requests. *@
+                @if (Token.HasPermission("Supplier.ApproveChange"))
+                {
+                    <NavLink class="mer-nav-item" href="supplier-change-requests" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">rule_settings</span>
+                        <span class="mer-nav-item__label">Change Requests</span>
+                    </NavLink>
+                }
+                else if (Token.HasPermission("Supplier.ChangeRequest"))
+                {
+                    <NavLink class="mer-nav-item" href="my-change-requests" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">edit_document</span>
+                        <span class="mer-nav-item__label">My Change Requests</span>
+                    </NavLink>
+                }
 
                 <div class="mer-nav__label">Procurement</div>
                 <NavLink class="mer-nav-item" href="purchase-orders" ActiveClass="active">
@@ -89,6 +105,16 @@ else
                     <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
                     <span class="mer-nav-item__label">Goods Receipts</span>
                 </NavLink>
+                @* R4 Module 8 + 9 — read-only PO reporting views. Same visibility as Purchase Orders
+                   (any authenticated business user; supplier rows scoped server-side). *@
+                <NavLink class="mer-nav-item" href="items-to-deliver" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">pallet</span>
+                    <span class="mer-nav-item__label">Items to Deliver</span>
+                </NavLink>
+                <NavLink class="mer-nav-item" href="po-schedule-calendar" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">calendar_month</span>
+                    <span class="mer-nav-item__label">PO Schedule</span>
+                </NavLink>
 
                 <div class="mer-nav__label">Finance</div>
                 <NavLink class="mer-nav-item" href="invoices" ActiveClass="active">
@@ -102,6 +128,12 @@ else
                 <NavLink class="mer-nav-item" href="payments" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">payments</span>
                     <span class="mer-nav-item__label">Payments</span>
+                </NavLink>
+                @* R4 Module 7 — read-only invoice payment summary. Internal + supplier (supplier rows
+                   scoped server-side; the supplier picker is internal-only inside the page). *@
+                <NavLink class="mer-nav-item" href="payment-summary" ActiveClass="active">
+                    <span class="mer-nav-item__icon material-symbols-outlined">account_balance_wallet</span>
+                    <span class="mer-nav-item__label">Payment Summary</span>
                 </NavLink>
 
                 <div class="mer-nav__label">Communication</div>
@@ -162,6 +194,10 @@ else
                     <NavLink class="mer-nav-item" href="admin/payment-terms" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">savings</span>
                         <span class="mer-nav-item__label">Payment Terms</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="admin/taxes" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">percent</span>
+                        <span class="mer-nav-item__label">Taxes</span>
                     </NavLink>
                     <NavLink class="mer-nav-item" href="admin/items" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
