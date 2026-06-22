@@ -1,0 +1,136 @@
+@page "/supplier-change-requests"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+
+@* ------------------------------------------------------------------------------------------------
+   Internal review list — all supplier change requests visible to the caller's seccode. Gated to
+   internal users (Supplier.ApproveChange or any non-supplier staff). Filter by supplier + status.
+   Columns map straight off SupplierChangeRequestListItemDto.
+------------------------------------------------------------------------------------------------ *@
+
+<PageTitle>Supplier change requests</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Supplier change requests</h1>
+                <span class="tl-count-chip">@(filtered?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Post-registration changes raised by suppliers, awaiting review or already actioned.</p>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar">
+        <input class="rz-textbox" placeholder="Search supplier / code / summary…" style="width:300px;padding:8px 12px;" @bind="search" @bind:event="oninput" @bind:after="ApplyFilters" />
+        <select class="rz-textbox" style="width:200px;padding:8px 12px;" @bind="statusFilter" @bind:after="Load">
+            <option value="">All statuses</option>
+            @foreach (var s in StatusFilterOptions)
+            {
+                <option value="@s">@SupplierChangeStatus.Label(s)</option>
+            }
+        </select>
+        <select class="rz-textbox" style="width:130px;padding:8px 12px;" @bind="reviewFilter" @bind:after="ApplyFilters">
+            <option value="all">All</option>
+            <option value="pending">Awaiting review</option>
+        </select>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (filtered == null || filtered.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">rule_settings</span>
+            <div>No change requests match.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 80px 110px 1.4fr 130px 70px 130px 130px 130px; --tl-min-width: 1180px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Ref</div>
+                <div class="tlg-col">Supplier</div>
+                <div class="tlg-col">Legal name / summary</div>
+                <div class="tlg-col">Status</div>
+                <div class="tlg-col">Lines</div>
+                <div class="tlg-col">Requested by</div>
+                <div class="tlg-col">Requested</div>
+                <div class="tlg-col">Reviewed</div>
+            </div>
+            @foreach (var r in filtered)
+            {
+                var row = r;
+                <div class="tlg-row" @onclick="() => Open(row.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">CR-@row.Seq</div>
+                    <div class="tlg-col tlg-code">@row.SupplierCode</div>
+                    <div class="tlg-col tlg-name">
+                        @row.SupplierLegalName
+                        @if (!string.IsNullOrWhiteSpace(row.Summary))
+                        {
+                            <div class="tlg-desc" style="font-size:11px;color:var(--mer-ink-500);">@row.Summary</div>
+                        }
+                    </div>
+                    <div class="tlg-col"><span class="tlg-status @SupplierChangeStatus.CssClass(row.ChangeStatus)">@SupplierChangeStatus.Label(row.ChangeStatus)</span></div>
+                    <div class="tlg-col">@row.LineCount</div>
+                    <div class="tlg-col tlg-desc">@row.RequestedBy</div>
+                    <div class="tlg-col tlg-code">@row.RequestedAt.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@(row.ReviewedAt?.ToString("yyyy-MM-dd") ?? "—")</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<SupplierChangeRequestListItemDto>? all;
+    private List<SupplierChangeRequestListItemDto>? filtered;
+    private bool loading = true;
+    private string search = string.Empty;
+    private string statusFilter = string.Empty;
+    private string reviewFilter = "all";
+
+    private static readonly string[] StatusFilterOptions =
+        { "Draft", "Submitted", "UnderReview", "ChangesRequested", "Approved", "Rejected", "Pushed", "PartiallyPushed", "PushFailed" };
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        // Server-side status filter (the endpoint supports ?status=). Free-text + "awaiting review" are
+        // refined client-side so toggling them stays instant without a round-trip.
+        var url = "api/suppliers/change-requests";
+        if (!string.IsNullOrEmpty(statusFilter)) url += $"?status={Uri.EscapeDataString(statusFilter)}";
+        var resp = await Api.GetAsync<List<SupplierChangeRequestListItemDto>>(url);
+        all = resp?.Data ?? new();
+        ApplyFilters();
+        loading = false;
+    }
+
+    private void ApplyFilters()
+    {
+        if (all == null) { filtered = new(); return; }
+        IEnumerable<SupplierChangeRequestListItemDto> q = all;
+
+        // statusFilter is applied server-side on Load(); re-apply client-side too so changing it via the
+        // bind:after re-runs Load (which re-queries). For the free-text + review filters we stay local.
+        if (reviewFilter == "pending")
+            q = q.Where(x => SupplierChangeStatus.IsReviewable(x.ChangeStatus));
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x =>
+                x.SupplierLegalName.Contains(s, StringComparison.OrdinalIgnoreCase)
+                || x.SupplierCode.Contains(s, StringComparison.OrdinalIgnoreCase)
+                || (x.Summary?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+        filtered = q.ToList();
+    }
+
+    private void Open(Guid id) => Nav.NavigateToRoute($"/supplier-change-requests/{id}");
+}

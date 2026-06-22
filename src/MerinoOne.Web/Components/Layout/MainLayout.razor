@@ -71,6 +71,22 @@ else
                         <span class="mer-nav-item__label">Onboarding Queue</span>
                     </NavLink>
                 }
+                @* R4 Module 2 — change-request lifecycle. Internal reviewers see the full review queue;
+                   a supplier user sees only its own raised requests. *@
+                @if (Token.HasPermission("Supplier.ApproveChange"))
+                {
+                    <NavLink class="mer-nav-item" href="supplier-change-requests" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">rule_settings</span>
+                        <span class="mer-nav-item__label">Change Requests</span>
+                    </NavLink>
+                }
+                else if (Token.HasPermission("Supplier.ChangeRequest"))
+                {
+                    <NavLink class="mer-nav-item" href="my-change-requests" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">edit_document</span>
+                        <span class="mer-nav-item__label">My Change Requests</span>
+                    </NavLink>
+                }
 
                 <div class="mer-nav__label">Procurement</div>
                 <NavLink class="mer-nav-item" href="purchase-orders" ActiveClass="active">

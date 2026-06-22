@@ -1,0 +1,112 @@
+@page "/my-change-requests"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+
+@* ------------------------------------------------------------------------------------------------
+   Supplier-facing list of the caller's OWN change requests. The list endpoint is seccode-scoped,
+   so a supplier principal already only sees its own requests — no supplierId filter needed here.
+   Draft / ChangesRequested rows expose an "Edit" affordance (resume the editor); everything else
+   is read-only (open the internal detail diff view, which is also seccode-scoped).
+------------------------------------------------------------------------------------------------ *@
+
+<PageTitle>My change requests</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">My change requests</h1>
+                <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Proposed changes to your supplier master. Approved changes are applied and pushed to ERP.</p>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar">
+        <select class="rz-textbox" style="width:200px;padding:8px 12px;" @bind="statusFilter" @bind:after="Load">
+            <option value="">All statuses</option>
+            @foreach (var s in StatusFilterOptions)
+            {
+                <option value="@s">@s</option>
+            }
+        </select>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (rows == null || rows.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">edit_document</span>
+            <div>No change requests yet.</div>
+            <p style="color:var(--mer-ink-500);font-size:12px;margin-top:6px;">Raise one from your supplier profile when you need to update bank, license, contact or address details.</p>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 90px 1fr 110px 90px 150px 150px 120px; --tl-min-width: 980px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Ref</div>
+                <div class="tlg-col">Summary</div>
+                <div class="tlg-col">Status</div>
+                <div class="tlg-col">Lines</div>
+                <div class="tlg-col">Requested</div>
+                <div class="tlg-col">Reviewed</div>
+                <div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var r in rows)
+            {
+                var row = r;
+                var editable = row.ChangeStatus is "Draft" or "ChangesRequested";
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code">CR-@row.Seq</div>
+                    <div class="tlg-col tlg-desc">@(string.IsNullOrWhiteSpace(row.Summary) ? "—" : row.Summary)</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(row.ChangeStatus)">@StatusLabel(row.ChangeStatus)</span></div>
+                    <div class="tlg-col">@row.LineCount</div>
+                    <div class="tlg-col tlg-code">@row.RequestedAt.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@(row.ReviewedAt?.ToString("yyyy-MM-dd") ?? "—")</div>
+                    <div class="tlg-col tlg-col--actions">
+                        @if (editable)
+                        {
+                            <button @onclick="() => Edit(row)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit / submit"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
+                        }
+                        else
+                        {
+                            <button @onclick="() => View(row)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="View"><span class="material-symbols-outlined" style="font-size:18px;">visibility</span></button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<SupplierChangeRequestListItemDto>? rows;
+    private bool loading = true;
+    private string statusFilter = string.Empty;
+
+    private static readonly string[] StatusFilterOptions =
+        { "Draft", "Submitted", "UnderReview", "ChangesRequested", "Approved", "Rejected", "Pushed", "PartiallyPushed", "PushFailed" };
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var url = "api/suppliers/change-requests";
+        if (!string.IsNullOrEmpty(statusFilter)) url += $"?status={Uri.EscapeDataString(statusFilter)}";
+        var resp = await Api.GetAsync<List<SupplierChangeRequestListItemDto>>(url);
+        rows = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void Edit(SupplierChangeRequestListItemDto r) => Nav.NavigateToRoute($"/suppliers/{r.SupplierId}/change-request/{r.Id}");
+    private void View(SupplierChangeRequestListItemDto r) => Nav.NavigateToRoute($"/supplier-change-requests/{r.Id}");
+
+    private static string StatusLabel(string s) => SupplierChangeStatus.Label(s);
+    private static string StatusClass(string s) => SupplierChangeStatus.CssClass(s);
+}

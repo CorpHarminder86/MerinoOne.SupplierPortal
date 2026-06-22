@@ -32,6 +32,18 @@ else
                 <p class="tl-sub">Seq #@detail.Seq · @detail.SupplierType · @detail.TradeName</p>
             </div>
             <div class="tl-header__actions">
+                @if (CanRaiseChangeRequest)
+                {
+                    <a href="suppliers/@Id/change-request" class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;text-decoration:none;">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">edit_note</span> Request a change
+                    </a>
+                }
+                @if (Token.HasPermission("Supplier.ApproveChange"))
+                {
+                    <a href="supplier-change-requests" class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);cursor:pointer;text-decoration:none;">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">rule_settings</span> Change requests
+                    </a>
+                }
                 @if (Token.HasPermission("Supplier.VerifyNic"))
                 {
                     <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="VerifyAll" disabled="@busy">
@@ -78,9 +90,17 @@ else
 
                 @if (ReadOnlyMaster)
                 {
-                    <div style="background:var(--mer-amber-50);color:var(--mer-amber-800);padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:14px;display:flex;gap:8px;align-items:flex-start;">
-                        <span class="material-symbols-outlined" style="font-size:16px;">info</span>
-                        <span>This supplier is <b>Active</b>. Bank details are read-only here — edits must be submitted through a <b>Change Request</b> (available in a later release).</span>
+                    <div style="background:var(--mer-amber-50);color:var(--mer-amber-800);padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:14px;display:flex;gap:8px;align-items:center;justify-content:space-between;">
+                        <span style="display:flex;gap:8px;align-items:flex-start;">
+                            <span class="material-symbols-outlined" style="font-size:16px;">info</span>
+                            <span>This supplier is <b>Active</b>. Bank details are read-only here — edits must be submitted through a <b>Change Request</b>.</span>
+                        </span>
+                        @if (CanRaiseChangeRequest)
+                        {
+                            <a href="suppliers/@Id/change-request" class="rz-button rz-primary" style="padding:6px 12px;border-radius:6px;border:0;color:#fff;cursor:pointer;text-decoration:none;font-size:12px;white-space:nowrap;">
+                                <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">edit_note</span> Request a change
+                            </a>
+                        }
                     </div>
                 }
 
@@ -142,9 +162,17 @@ else
 
                 @if (ReadOnlyMaster)
                 {
-                    <div style="background:var(--mer-amber-50);color:var(--mer-amber-800);padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:14px;display:flex;gap:8px;align-items:flex-start;">
-                        <span class="material-symbols-outlined" style="font-size:16px;">info</span>
-                        <span>This supplier is <b>Active</b>. Licenses are read-only here — edits must be submitted through a <b>Change Request</b> (available in a later release).</span>
+                    <div style="background:var(--mer-amber-50);color:var(--mer-amber-800);padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:14px;display:flex;gap:8px;align-items:center;justify-content:space-between;">
+                        <span style="display:flex;gap:8px;align-items:flex-start;">
+                            <span class="material-symbols-outlined" style="font-size:16px;">info</span>
+                            <span>This supplier is <b>Active</b>. Licenses are read-only here — edits must be submitted through a <b>Change Request</b>.</span>
+                        </span>
+                        @if (CanRaiseChangeRequest)
+                        {
+                            <a href="suppliers/@Id/change-request" class="rz-button rz-primary" style="padding:6px 12px;border-radius:6px;border:0;color:#fff;cursor:pointer;text-decoration:none;font-size:12px;white-space:nowrap;">
+                                <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">edit_note</span> Request a change
+                            </a>
+                        }
                     </div>
                 }
 
@@ -1008,6 +1036,11 @@ else
     // any supplier-role principal as read-once-Active; internal staff with the write permission keep CRUD.
     private bool ReadOnlyMaster => Token.IsSupplier && detail?.RegistrationStatus == "Active";
     private bool CanWriteMaster => !ReadOnlyMaster && Token.HasPermission("Supplier.Write");
+
+    // R4 Module 2 — a supplier user with Supplier.ChangeRequest may route master edits through a change
+    // request once their master is read-only (Active). Gates the "Request a change" entry points.
+    private bool CanRaiseChangeRequest => Token.HasPermission("Supplier.ChangeRequest")
+        && detail?.RegistrationStatus is "Active" or "Approved";
 
     private async Task VerifyAll()
     {
