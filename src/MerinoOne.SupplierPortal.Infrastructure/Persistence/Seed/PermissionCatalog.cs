@@ -12,6 +12,9 @@ public static class PermissionCatalog
         new PermissionSeed("Supplier.Approve",             "Approve supplier",          "Supplier",       "Approve or reject a supplier registration"),
         new PermissionSeed("Supplier.Provision",           "Provision supplier users",  "Supplier",       "Map portal users to suppliers"),
         new PermissionSeed("Supplier.VerifyNic",           "Verify NIC",                "Supplier",       "Trigger NIC verification of GST/PAN/MSME"),
+        // R4 Module 2 — supplier change-management lifecycle (supplier raises; internal approves).
+        new PermissionSeed("Supplier.ChangeRequest",       "Raise supplier change",     "Supplier",       "Raise a post-registration supplier change request (and edit own bank/license records)"),
+        new PermissionSeed("Supplier.ApproveChange",       "Approve supplier change",   "Supplier",       "Review/approve/reject a supplier change request"),
         new PermissionSeed("PurchaseOrder.Read",           "View POs",                  "Purchase Order", "View purchase orders"),
         new PermissionSeed("PurchaseOrder.Acknowledge",    "Acknowledge PO",            "Purchase Order", "Acknowledge receipt of a PO"),
         new PermissionSeed("PurchaseOrder.Accept",         "Accept PO",                 "Purchase Order", "Accept, reject or propose a date on a PO"),
@@ -27,6 +30,8 @@ public static class PermissionCatalog
         new PermissionSeed("Invoice.Submit",               "Submit invoice",            "Invoice",        "Submit an invoice"),
         new PermissionSeed("Invoice.Review",               "Review invoice",            "Invoice",        "Mark an invoice under review"),
         new PermissionSeed("Invoice.Approve",              "Approve invoice",           "Invoice",        "Approve or reject an invoice"),
+        // R4 Module 4 — admin pre-post invoice revoke (Submitted -> Draft).
+        new PermissionSeed("Invoice.Revoke",               "Revoke invoice",            "Invoice",        "Admin revoke a submitted (pre-post) invoice back to Draft"),
         new PermissionSeed("CreditDebitNote.Read",         "View CN/DN",                "Invoice",        "View credit / debit notes"),
         new PermissionSeed("CreditDebitNote.Write",        "Create CN/DN",              "Invoice",        "Create a credit / debit note"),
         new PermissionSeed("CreditDebitNote.Approve",      "Approve CN/DN",             "Invoice",        "Approve a credit / debit note"),
@@ -42,6 +47,12 @@ public static class PermissionCatalog
         new PermissionSeed("Integration.Read",             "View integration",          "Integration",    "View Infor endpoints, sync log and errors"),
         new PermissionSeed("Integration.Manage",           "Manage integration",        "Integration",    "Retry integration errors, manage endpoint mapping"),
         new PermissionSeed("Integration.ApiKeys",          "Manage API keys",           "Integration",    "Generate, rotate and revoke inbound X-APIKey credentials"),
+        // R4 cross-cutting — service-to-service inbound scopes (X-APIKey). NOT granted to any human role; bound to
+        // API keys via their scope list. Seeded here so the catalogue is complete and the inbound endpoint-gate resolves.
+        new PermissionSeed("Integration.Inbound.ErpAck",       "Inbound: ERP ack",          "Integration", "Inbound /erp-ack: ERP acknowledges a Portal->ERP transaction (writes back erpCode)"),
+        new PermissionSeed("Integration.Inbound.Grn",          "Inbound: GRN status",       "Integration", "Inbound /grn-status: ERP pushes goods-receipt status"),
+        new PermissionSeed("Integration.Inbound.Payment",      "Inbound: payments",         "Integration", "Inbound /payments: ERP pushes payment / remittance data"),
+        new PermissionSeed("Integration.Inbound.InvoiceStatus","Inbound: invoice status",   "Integration", "Inbound /invoice-status: ERP advances invoice to Matched/Approved/Paid"),
         // Platform-tier permissions — held ONLY by the cross-tenant PlatformAdmin (separation of duties:
         // a Platform Admin onboards tenants/companies/first-admins but reads NO business data).
         new PermissionSeed("Platform.Tenants",             "Manage tenants",            "Platform",       "View and manage tenants and their companies (cross-tenant)"),
@@ -59,6 +70,8 @@ public static class PermissionCatalog
         ["Supplier.Approve"]              = new[] { "SuperAdmin","Admin" },
         ["Supplier.Provision"]            = new[] { "SuperAdmin","Admin" },
         ["Supplier.VerifyNic"]            = new[] { "SuperAdmin","Admin" },
+        ["Supplier.ChangeRequest"]        = new[] { "Supplier" },
+        ["Supplier.ApproveChange"]        = new[] { "SuperAdmin","Admin" },
         ["PurchaseOrder.Read"]            = new[] { "SuperAdmin","Admin","Buyer","Finance","Supplier","ReadOnly" },
         ["PurchaseOrder.Acknowledge"]     = new[] { "SuperAdmin","Supplier" },
         ["PurchaseOrder.Accept"]          = new[] { "SuperAdmin","Supplier" },
@@ -74,6 +87,7 @@ public static class PermissionCatalog
         ["Invoice.Submit"]                = new[] { "SuperAdmin","Supplier" },
         ["Invoice.Review"]                = new[] { "SuperAdmin","Finance" },
         ["Invoice.Approve"]               = new[] { "SuperAdmin","Finance" },
+        ["Invoice.Revoke"]                = new[] { "SuperAdmin","Finance" },
         ["CreditDebitNote.Read"]          = new[] { "SuperAdmin","Admin","Buyer","Finance","Supplier","ReadOnly" },
         ["CreditDebitNote.Write"]         = new[] { "SuperAdmin","Supplier" },
         ["CreditDebitNote.Approve"]       = new[] { "SuperAdmin","Finance" },

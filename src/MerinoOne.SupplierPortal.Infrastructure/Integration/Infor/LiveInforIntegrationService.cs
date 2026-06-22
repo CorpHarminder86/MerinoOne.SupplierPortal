@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Infor;
@@ -48,34 +49,64 @@ public class LiveInforIntegrationService : IInforIntegrationService
     private readonly IInforConnectionProvider _connections;
     private readonly IInforTokenProvider _tokens;
     private readonly IAppDbContext _db;
+    private readonly IOutboundIdempotencyContext _idempotency;
     private readonly ILogger<LiveInforIntegrationService> _logger;
 
     public LiveInforIntegrationService(
         IInforConnectionProvider connections,
         IInforTokenProvider tokens,
         IAppDbContext db,
+        IOutboundIdempotencyContext idempotency,
         ILogger<LiveInforIntegrationService> logger)
     {
         _connections = connections;
         _tokens = tokens;
         _db = db;
+        _idempotency = idempotency;
         _logger = logger;
     }
 
     public async Task<InforSyncResult> SyncSupplierAsync(Guid supplierId, CancellationToken ct = default)
     {
-        var supplier = await _db.Suppliers.FindAsync(new object?[] { supplierId }, ct);
+        var supplier = await _db.Suppliers
+            .Include(s => s.BankDetails)
+            .Include(s => s.Licenses)
+            .FirstOrDefaultAsync(s => s.Id == supplierId, ct);
         if (supplier is null) return Fail("Supplier", $"Supplier {supplierId} not found.");
 
-        // TODO: confirm the real LN supplier (business partner) field map.
+        // R4 Module 1 — extended supplier payload: carries bank details, licenses, term/currency codes,
+        // poResponseMode and erpCode. TODO: confirm the real LN supplier (business partner) field map.
         var payload = new
         {
             SupplierCode = supplier.SupplierCode,
+            ErpCode = supplier.ErpCode,
             Name = supplier.LegalName,
             TradeName = supplier.TradeName,
             GstNumber = supplier.GstNumber,
             PanNumber = supplier.PanNumber,
             IsActive = supplier.IsActiveSupplier,
+            PaymentTermCode = supplier.PaymentTermCode,
+            DeliveryTermCode = supplier.DeliveryTermCode,
+            PoResponseMode = supplier.PoResponseMode.ToString(),
+            BankDetails = supplier.BankDetails.Select(b => new
+            {
+                b.BankName,
+                b.BankAddress,
+                b.AccountName,
+                b.AccountNumber,
+                b.IfscCode,
+                b.SwiftCode,
+                b.IsPrimary,
+                b.ErpCode,
+            }).ToList(),
+            Licenses = supplier.Licenses.Select(l => new
+            {
+                l.LicenseNumber,
+                l.LicenseType,
+                IssueDate = l.IssueDate?.ToString("yyyy-MM-dd"),
+                ExpiryDate = l.ExpiryDate?.ToString("yyyy-MM-dd"),
+                l.ErpCode,
+            }).ToList(),
         };
         return await SendAsync("Supplier", EndpointPaths.Supplier, payload, ct);
     }
@@ -183,7 +214,9 @@ public class LiveInforIntegrationService : IInforIntegrationService
         if (!TryBuildUrl(conn.ApiBaseUrl, relativePath, out var url))
             return Fail(entity, $"Could not build a valid endpoint URL from ION API Base URL '{conn.ApiBaseUrl}'.");
 
-        var idempotencyKey = Guid.NewGuid().ToString("N");
+        // Replay the deterministic outbox key (reused verbatim across retries so LN dedupes — fixes D2). Only
+        // legacy direct calls with no ambient key fall back to a fresh GUID.
+        var idempotencyKey = _idempotency.CurrentKey ?? Guid.NewGuid().ToString("N");
 
         try
         {

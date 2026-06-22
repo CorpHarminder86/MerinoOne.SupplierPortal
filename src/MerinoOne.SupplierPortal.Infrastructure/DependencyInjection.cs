@@ -62,6 +62,15 @@ public static class DependencyInjection
         else
             services.AddScoped<IInforIntegrationService, MockInforIntegrationService>();
 
+        // ── Outbound transactional outbox (Increment 0) ────────────────────────────────────────
+        // EnqueueAsync adds a Pending OutboxMessage in the caller's unit of work; the post-commit
+        // OutboxDispatcherWorker drains it (no ERP HTTP call ever inside a DB txn — fixes D1/D2/D3).
+        services.AddScoped<IOutboxDispatcher, Integration.Outbox.OutboxDispatcher>();
+        // Scoped so the dispatcher (and RetryIntegrationErrorCommand) can thread the deterministic key into the
+        // Live service without changing the IInforIntegrationService interface. Replayed as the ERP idempotency key.
+        services.AddScoped<IOutboundIdempotencyContext, Integration.Outbox.OutboundIdempotencyContext>();
+        services.AddHostedService<Integration.Outbox.OutboxDispatcherWorker>();
+
         // File storage (Mock-then-Live). Stage 1 = local disk under {ContentRoot}/uploads.
         // Stage 2 will swap to Azure Blob behind the same IFileStorageService interface.
         services.AddSingleton<IFileStorageService, LocalDiskFileStorageService>();

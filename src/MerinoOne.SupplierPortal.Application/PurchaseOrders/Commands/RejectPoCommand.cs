@@ -1,9 +1,10 @@
+using System.Text.Json;
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
+using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
-using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,15 +20,18 @@ public class RejectPoCommandValidator : AbstractValidator<RejectPoCommand>
     }
 }
 
+/// <summary>
+/// PO rejection (supplier). MIGRATED onto the Increment 0 outbox: local state change + outbox row in one
+/// transaction; the post-commit dispatcher posts the rejection (with reason) to LN. Gated on <c>poResponseMode = Manual</c>.
+/// </summary>
 public class RejectPoCommandHandler : IRequestHandler<RejectPoCommand, Unit>
 {
     private readonly IAppDbContext _db;
-    private readonly ICurrentUser _user;
-    private readonly IInforIntegrationService _infor;
+    private readonly IOutboxDispatcher _outbox;
 
-    public RejectPoCommandHandler(IAppDbContext db, ICurrentUser user, IInforIntegrationService infor)
+    public RejectPoCommandHandler(IAppDbContext db, IOutboxDispatcher outbox)
     {
-        _db = db; _user = user; _infor = infor;
+        _db = db; _outbox = outbox;
     }
 
     public async Task<Unit> Handle(RejectPoCommand request, CancellationToken ct)
@@ -35,23 +39,17 @@ public class RejectPoCommandHandler : IRequestHandler<RejectPoCommand, Unit>
         var po = await _db.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == request.PurchaseOrderId, ct)
                  ?? throw new NotFoundException("PurchaseOrder", request.PurchaseOrderId);
 
+        var mode = await _db.Suppliers.Where(s => s.Id == po.SupplierId)
+            .Select(s => s.PoResponseMode).FirstOrDefaultAsync(ct);
+        if (mode == PoResponseMode.Auto)
+            throw new ConflictException("This supplier is in Auto PO-response mode; PO responses are handled automatically at release.");
+
         po.PoStatus = PoStatus.Rejected;
         po.RejectionReason = request.Body.Reason;
 
-        var sync = await _infor.RejectPurchaseOrderAsync(po.Id, request.Body.Reason, ct);
-        _db.InforSyncLogs.Add(new InforSyncLog
-        {
-            Id = Guid.NewGuid(),
-            EntityName = "PurchaseOrder",
-            EntityId = po.Id.ToString(),
-            Direction = SyncDirection.Outbound,
-            Status = sync.Success ? SyncStatus.Success : SyncStatus.Failed,
-            IdempotencyKey = sync.IdempotencyKey,
-            SyncedAt = DateTime.UtcNow,
-            ErrorMessage = sync.Success ? null : sync.Message,
-            CreatedBy = _user.UserCode,
-            CreatedOn = DateTime.UtcNow,
-        });
+        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.PoNumber, "reject");
+        var payload = JsonSerializer.Serialize(new { reason = request.Body.Reason });
+        await _outbox.EnqueueAsync(OutboxTransactionType.PoReject, OutboxEntity.PurchaseOrder, po.Id, key, payload, ct);
 
         await _db.SaveChangesAsync(ct);
         return Unit.Value;

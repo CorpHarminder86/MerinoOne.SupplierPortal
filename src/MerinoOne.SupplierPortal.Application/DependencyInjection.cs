@@ -2,6 +2,7 @@ using System.Reflection;
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Behaviours;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Application.Integration.Inbound;
 using MerinoOne.SupplierPortal.Application.Users.Commands;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,6 +28,9 @@ public static class DependencyInjection
         // Shared user↔supplier mapping primitives reused by MapSupplier / UnmapSupplier / the bulk
         // SetCompanySupplierMaps command. Scoped — ctor-injects the per-request IAppDbContext.
         services.AddScoped<SupplierMapService>();
+
+        // SecRight.canWrite enforcement for supplier-originated aggregates (bank/license). Scoped.
+        services.AddScoped<SupplierWriteGuard>();
         return services;
     }
 }
