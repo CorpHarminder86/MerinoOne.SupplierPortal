@@ -205,14 +205,34 @@ public class GoodsReceiptConfiguration : IEntityTypeConfiguration<GoodsReceipt>
         b.Property(x => x.GrnDate).HasColumnName("grnDate").HasColumnType("datetime2");
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
 
+        // R4 (2026-06-22) — Module 5 / Increment D (Q5). GRN status state machine + deterministic invoice link
+        // + Payment-Summary "Issue Reported" + ERP ack write-back. Status persisted as the enum name (string),
+        // NO DB CHECK; default 'GrnNotApproved' (EF-auto-named DEFAULT, not an explicit DF_ constraint).
+        b.Property(x => x.GrnStatus).HasColumnName("grnStatus").HasConversion<string>().HasMaxLength(20)
+            .HasDefaultValue(Domain.Enums.GrnStatus.GrnNotApproved);
+        b.Property(x => x.GrnApprovedAt).HasColumnName("grnApprovedAt").HasColumnType("datetime2");
+        b.Property(x => x.InvoiceId).HasColumnName("invoiceId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.IssueReported).HasColumnName("issueReported").HasMaxLength(500);
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
         b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)
             .HasConstraintName("FK_GoodsReceipt_PurchaseOrderLine_PurchaseOrderLineId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Asn).WithMany().HasForeignKey(x => x.AsnId)
             .HasConstraintName("FK_GoodsReceipt_Asn_AsnId").OnDelete(DeleteBehavior.Restrict);
+        // Deterministic GRN→Invoice link (replaces the brittle Invoice.GrnReference string). Cross-aggregate → RESTRICT.
+        b.HasOne(x => x.Invoice).WithMany().HasForeignKey(x => x.InvoiceId)
+            .HasConstraintName("FK_GoodsReceipt_Invoice_InvoiceId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_GoodsReceipt_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => x.GrnNumber).HasDatabaseName("IX_GoodsReceipt_grnNumber");
+        // Auto-post candidate scan — filtered on the live (non-deleted) rows.
+        b.HasIndex(x => x.GrnStatus).HasDatabaseName("IX_GoodsReceipt_grnStatus")
+            .HasFilter("[isDeleted] = 0");
+        b.HasIndex(x => x.InvoiceId).HasDatabaseName("IX_GoodsReceipt_invoiceId");
+        // Composite scope index — the always-on tenant + company business-data filter scans this path
+        // (the missing sibling index — schema finding 15).
+        b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_GoodsReceipt_tenant_company");
     }
 }
 
@@ -336,12 +356,18 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         b.Property(x => x.RemittancePdfUrl).HasColumnName("remittancePdfUrl").HasMaxLength(500);
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
 
+        // R4 (2026-06-22) — Module 5 / Increment D (H1: inbound Payment sync). ERP ack write-back code.
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
         b.HasOne(x => x.Invoice).WithMany().HasForeignKey(x => x.InvoiceId)
             .HasConstraintName("FK_Payment_Invoice_InvoiceId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_Payment_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_Payment_supplierId");
+        // R4 (2026-06-22) — Module 5 / Increment D (H1): the inbound writer correlates payments to invoices via
+        // invoiceId; name the FK's covering index so it's deterministic (replaces EF's unnamed shadow index).
+        b.HasIndex(x => x.InvoiceId).HasDatabaseName("IX_Payment_invoiceId");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Payment_tenant_company");
     }

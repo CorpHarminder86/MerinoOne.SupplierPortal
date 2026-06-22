@@ -4656,10 +4656,19 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("deletedOn");
 
+                    b.Property<string>("ErpCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("erpCode");
+
                     b.Property<string>("ErpSyncId")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("erpSyncId");
+
+                    b.Property<DateTime?>("GrnApprovedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("grnApprovedAt");
 
                     b.Property<DateTime>("GrnDate")
                         .HasColumnType("datetime2")
@@ -4671,11 +4680,28 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("grnNumber");
 
+                    b.Property<string>("GrnStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("GrnNotApproved")
+                        .HasColumnName("grnStatus");
+
+                    b.Property<Guid?>("InvoiceId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("invoiceId");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false)
                         .HasColumnName("isDeleted");
+
+                    b.Property<string>("IssueReported")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("issueReported");
 
                     b.Property<Guid>("PurchaseOrderLineId")
                         .HasColumnType("uniqueidentifier")
@@ -4738,6 +4764,13 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.HasIndex("GrnNumber")
                         .HasDatabaseName("IX_GoodsReceipt_grnNumber");
 
+                    b.HasIndex("GrnStatus")
+                        .HasDatabaseName("IX_GoodsReceipt_grnStatus")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("IX_GoodsReceipt_invoiceId");
+
                     b.HasIndex("PurchaseOrderLineId");
 
                     b.HasIndex("SeccodeId");
@@ -4747,6 +4780,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UX_GoodsReceipt_goodsReceiptSeq");
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_GoodsReceipt_tenant_company");
 
                     b.ToTable("GoodsReceipt", "proc");
                 });
@@ -5136,6 +5172,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("deletedOn");
 
+                    b.Property<string>("ErpCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("erpCode");
+
                     b.Property<string>("ErpSyncId")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
@@ -5237,7 +5278,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
-                    b.HasIndex("InvoiceId");
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("IX_Payment_invoiceId");
 
                     b.HasIndex("SeccodeId");
 
@@ -7583,6 +7625,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_GoodsReceipt_Asn_AsnId");
 
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.Invoice", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_GoodsReceipt_Invoice_InvoiceId");
+
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderLine", "PurchaseOrderLine")
                         .WithMany()
                         .HasForeignKey("PurchaseOrderLineId")
@@ -7598,6 +7646,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_GoodsReceipt_Seccode_SeccodeId");
 
                     b.Navigation("Asn");
+
+                    b.Navigation("Invoice");
 
                     b.Navigation("Owner");
 

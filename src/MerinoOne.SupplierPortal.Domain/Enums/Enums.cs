@@ -57,6 +57,13 @@ public enum InvoiceStatus
 public enum NoteType { CN, DN }
 public enum NoteStatus { Draft, Submitted, Approved, Rejected }
 
+/// <summary>
+/// R4 (2026-06-22) — Module 5 / Increment D (Q5). Goods-receipt approval state, ERP-owned (LN pushes it via
+/// /inbound/grn-status). An invoice posts only when ALL covering GRN lines reach <c>GrnApproved</c>. Persisted
+/// as the enum name (string), no DB CHECK — the C# enum is the guard. APPEND-ONLY.
+/// </summary>
+public enum GrnStatus { GrnNotApproved, GrnApproved, Rejected }
+
 public enum AiValidationStatus { Pending, Valid, Flagged, Skipped }
 
 public enum DocumentType
@@ -135,6 +142,16 @@ public enum SharedEndpoint { PaymentTerm, DeliveryTerm, Unit, ItemGroup, Item, T
 /// inbound endpoint-gate EntityName for the tenant inbound path. Persisted as the enum name. APPEND-ONLY.
 /// </summary>
 public enum TenantInboundEntity { Currency, Country, State, City, PostalCode }
+
+/// <summary>
+/// R4 (2026-06-22) — Module 5 / Increment D. Transactional inbound entities fed by Infor LN that are neither
+/// company-shared masters (<see cref="SharedEndpoint"/>) nor tenant reference masters
+/// (<see cref="TenantInboundEntity"/>) — they hang off live transactions (GRN status, Payment, invoice-status,
+/// ERP ack). Drives the inbound endpoint-gate <c>InforEndpointMap.EntityName</c> for the transactional inbound
+/// path (/inbound/grn-status, /inbound/payments, /inbound/invoice-status, /inbound/erp-ack). Backend extends the
+/// executor's EntityName resolution to recognise this set. Persisted as the enum name. APPEND-ONLY.
+/// </summary>
+public enum TransactionalInboundEntity { Grn, Payment, InvoiceStatus, ErpAck }
 
 /// <summary>Unit dimension / quantity type (INFOR LN unit type).</summary>
 public enum UnitType { Quantity, Length, Area, Volume, Mass, Time, Other }
