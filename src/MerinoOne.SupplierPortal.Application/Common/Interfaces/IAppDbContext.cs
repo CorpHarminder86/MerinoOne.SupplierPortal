@@ -13,6 +13,8 @@ using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplie
 using SupplierVerificationEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierVerification;
 using SupplierAddressEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierAddress;
 using SupplierContactEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact;
+using SupplierBankDetailEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierBankDetail;
+using SupplierLicenseEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierLicense;
 
 namespace MerinoOne.SupplierPortal.Application.Common.Interfaces;
 
@@ -51,6 +53,10 @@ public interface IAppDbContext
     DbSet<SupplierVerificationEntity> SupplierVerifications { get; }
     DbSet<SupplierAddressEntity> SupplierAddresses { get; }
     DbSet<SupplierContactEntity> SupplierContacts { get; }
+    DbSet<SupplierBankDetailEntity> SupplierBankDetails { get; }
+    DbSet<SupplierLicenseEntity> SupplierLicenses { get; }
+
+    DbSet<Tax> Taxes { get; }
 
     DbSet<PurchaseOrder> PurchaseOrders { get; }
     DbSet<PurchaseOrderLine> PurchaseOrderLines { get; }
@@ -74,6 +80,7 @@ public interface IAppDbContext
     DbSet<ApiKey> ApiKeys { get; }
     DbSet<ApiKeyCompany> ApiKeyCompanies { get; }
     DbSet<InforConnectionSetting> InforConnectionSettings { get; }
+    DbSet<OutboxMessage> OutboxMessages { get; }
 
     DbSet<AuditEntry> AuditEntries { get; }
 

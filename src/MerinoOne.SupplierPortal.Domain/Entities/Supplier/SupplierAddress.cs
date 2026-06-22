@@ -27,4 +27,7 @@ public class SupplierAddress : AuditableEntity
     public City? CityRef { get; set; }
     public Guid? PostalCodeId { get; set; }
     public PostalCode? PostalCodeRef { get; set; }
+
+    // R4 (2026-06-22) — Module 1e: ERP handle, populated via the /inbound/erp-ack channel.
+    public string? ErpCode { get; set; }
 }

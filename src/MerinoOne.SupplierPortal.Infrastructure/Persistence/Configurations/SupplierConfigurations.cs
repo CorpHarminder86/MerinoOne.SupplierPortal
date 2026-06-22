@@ -6,6 +6,8 @@ using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplie
 using SupplierVerificationEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierVerification;
 using SupplierAddressEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierAddress;
 using SupplierContactEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact;
+using SupplierBankDetailEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierBankDetail;
+using SupplierLicenseEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierLicense;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Configurations;
 
@@ -36,12 +38,28 @@ public class SupplierConfiguration : IEntityTypeConfiguration<SupplierEntity>
         b.Property(x => x.Website).HasColumnName("website").HasMaxLength(300);
         b.Property(x => x.IsActiveSupplier).HasColumnName("isActiveSupplier").HasDefaultValue(false);
 
+        // R4 (2026-06-22) — Module 1: term/currency FKs + denormalized snapshots, PO-response mode, ERP code.
+        b.Property(x => x.CurrencyId).HasColumnName("currencyId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.PaymentTermId).HasColumnName("paymentTermId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.DeliveryTermId).HasColumnName("deliveryTermId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.PaymentTermCode).HasColumnName("paymentTermCode").HasMaxLength(40);
+        b.Property(x => x.DeliveryTermCode).HasColumnName("deliveryTermCode").HasMaxLength(40);
+        b.Property(x => x.PoResponseMode).HasColumnName("poResponseMode").HasConversion<string>()
+            .HasMaxLength(20).HasDefaultValue(PoResponseMode.Manual).IsRequired();
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_Supplier_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
         // Company the supplier belongs to (TenantEntityId carried by BaseAggregateRoot). No nav prop
         // on Supplier so configure the FK against the principal type directly.
         b.HasOne<TenantEntity>().WithMany().HasForeignKey("TenantEntityId")
             .HasConstraintName("FK_Supplier_TenantEntity_TenantEntityId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Currency).WithMany().HasForeignKey(x => x.CurrencyId)
+            .HasConstraintName("FK_Supplier_Currency_CurrencyId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.PaymentTerm).WithMany().HasForeignKey(x => x.PaymentTermId)
+            .HasConstraintName("FK_Supplier_PaymentTerm_PaymentTermId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.DeliveryTerm).WithMany().HasForeignKey(x => x.DeliveryTermId)
+            .HasConstraintName("FK_Supplier_DeliveryTerm_DeliveryTermId").OnDelete(DeleteBehavior.Restrict);
 
         // supplierCode + legalName are PER-TENANT unique now (was global). Filtered (soft-delete-aware).
         b.HasIndex("TenantId", "LegalName")
@@ -54,6 +72,10 @@ public class SupplierConfiguration : IEntityTypeConfiguration<SupplierEntity>
         // Composite scope index for the tenant + company business-data filter on the hot supplier path.
         b.HasIndex("TenantId", "TenantEntityId")
             .HasDatabaseName("IX_Supplier_tenant_company");
+        // R4 (2026-06-22) — FK lookup indexes for the new term/currency references.
+        b.HasIndex(x => x.CurrencyId).HasDatabaseName("IX_Supplier_currencyId");
+        b.HasIndex(x => x.PaymentTermId).HasDatabaseName("IX_Supplier_paymentTermId");
+        b.HasIndex(x => x.DeliveryTermId).HasDatabaseName("IX_Supplier_deliveryTermId");
     }
 }
 
@@ -107,6 +129,9 @@ public class SupplierAddressConfiguration : IEntityTypeConfiguration<SupplierAdd
         b.Property(x => x.CityId).HasColumnName("cityId").HasColumnType("uniqueidentifier");
         b.Property(x => x.PostalCodeId).HasColumnName("postalCodeId").HasColumnType("uniqueidentifier");
 
+        // R4 (2026-06-22) — Module 1e: ERP handle.
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
         b.HasOne(x => x.Supplier).WithMany(s => s.Addresses).HasForeignKey(x => x.SupplierId)
             .HasConstraintName("FK_SupplierAddress_Supplier_SupplierId").OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.CountryRef).WithMany().HasForeignKey(x => x.CountryId)
@@ -137,9 +162,67 @@ public class SupplierContactConfiguration : IEntityTypeConfiguration<SupplierCon
         b.Property(x => x.Phone).HasColumnName("phone").HasMaxLength(20);
         b.Property(x => x.IsPrimary).HasColumnName("isPrimary").HasDefaultValue(false);
 
+        // R4 (2026-06-22) — Module 1e: ERP handle.
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
         b.HasOne(x => x.Supplier).WithMany(s => s.Contacts).HasForeignKey(x => x.SupplierId)
             .HasConstraintName("FK_SupplierContact_Supplier_SupplierId").OnDelete(DeleteBehavior.Cascade);
         b.HasIndex(x => new { x.SupplierId, x.Email })
             .HasDatabaseName("UQ_SupplierContact_supplier_email").IsUnique();
+    }
+}
+
+public class SupplierBankDetailConfiguration : IEntityTypeConfiguration<SupplierBankDetailEntity>
+{
+    public void Configure(EntityTypeBuilder<SupplierBankDetailEntity> b)
+    {
+        b.ApplyBaseEntityConvention("SupplierBankDetail", "supplier", "supplierBankDetail");
+        b.Property(x => x.SupplierId).HasColumnName("supplierId");
+        b.Property(x => x.BankName).HasColumnName("bankName").HasMaxLength(200).IsRequired();
+        b.Property(x => x.BankAddress).HasColumnName("bankAddress").HasMaxLength(500).IsRequired();
+        b.Property(x => x.AccountName).HasColumnName("accountName").HasMaxLength(200).IsRequired();
+        b.Property(x => x.AccountNumber).HasColumnName("accountNumber").HasMaxLength(64).IsRequired();
+        b.Property(x => x.CurrencyId).HasColumnName("currencyId").HasColumnType("uniqueidentifier").IsRequired();
+        b.Property(x => x.IfscCode).HasColumnName("ifscCode").HasMaxLength(20).IsRequired();
+        b.Property(x => x.SwiftCode).HasColumnName("swiftCode").HasMaxLength(20);
+        b.Property(x => x.IsPrimary).HasColumnName("isPrimary").HasDefaultValue(false);
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
+        b.HasOne(x => x.Supplier).WithMany(s => s.BankDetails).HasForeignKey(x => x.SupplierId)
+            .HasConstraintName("FK_SupplierBankDetail_Supplier_SupplierId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Currency).WithMany().HasForeignKey(x => x.CurrencyId)
+            .HasConstraintName("FK_SupplierBankDetail_Currency_CurrencyId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_SupplierBankDetail_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_SupplierBankDetail_supplierId");
+        b.HasIndex(x => x.CurrencyId).HasDatabaseName("IX_SupplierBankDetail_currencyId");
+        b.HasIndex(x => new { x.SupplierId, x.AccountNumber })
+            .HasDatabaseName("UQ_SupplierBankDetail_supplier_account").IsUnique()
+            .HasFilter("[isDeleted] = 0");
+    }
+}
+
+public class SupplierLicenseConfiguration : IEntityTypeConfiguration<SupplierLicenseEntity>
+{
+    public void Configure(EntityTypeBuilder<SupplierLicenseEntity> b)
+    {
+        b.ApplyBaseEntityConvention("SupplierLicense", "supplier", "supplierLicense");
+        b.Property(x => x.SupplierId).HasColumnName("supplierId");
+        b.Property(x => x.LicenseNumber).HasColumnName("licenseNumber").HasMaxLength(100).IsRequired();
+        b.Property(x => x.LicenseType).HasColumnName("licenseType").HasMaxLength(100).IsRequired();
+        b.Property(x => x.Remarks).HasColumnName("remarks").HasMaxLength(1000);
+        b.Property(x => x.IssueDate).HasColumnName("issueDate").HasColumnType("date");
+        b.Property(x => x.ExpiryDate).HasColumnName("expiryDate").HasColumnType("date");
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
+        b.HasOne(x => x.Supplier).WithMany(s => s.Licenses).HasForeignKey(x => x.SupplierId)
+            .HasConstraintName("FK_SupplierLicense_Supplier_SupplierId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_SupplierLicense_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_SupplierLicense_supplierId");
+        b.HasIndex(x => x.ExpiryDate).HasDatabaseName("IX_SupplierLicense_expiry")
+            .HasFilter("[isDeleted] = 0");
     }
 }

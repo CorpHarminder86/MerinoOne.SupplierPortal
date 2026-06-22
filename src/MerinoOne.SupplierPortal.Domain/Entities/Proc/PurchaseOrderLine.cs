@@ -22,4 +22,10 @@ public class PurchaseOrderLine : AuditableEntity
     public DateTime? DeliveryDate { get; set; }
     public string? TaxCode { get; set; }
     public string? TaxDescription { get; set; }
+
+    // R4 (2026-06-22) — Addendum A2: link the free-string taxCode to the proc.Tax master. Keep taxCode /
+    // taxDescription as the denormalized snapshot (PO-line is ERP-fed; the FK may point at a Tax row from an
+    // unshared source company). FK → proc.Tax RESTRICT.
+    public Guid? TaxId { get; set; }
+    public Tax? Tax { get; set; }
 }

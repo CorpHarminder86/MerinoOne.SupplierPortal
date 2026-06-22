@@ -24,4 +24,9 @@ public class Item : AuditableEntity, ICompanyScoped
     public Unit? Unit { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    // R4 (2026-06-22) — Addendum A3: LN-fed control flags. ASN line capture reads these (serial / lot
+    // capture). NOT NULL with a named default in the migration so existing rows are safe.
+    public bool IsSerialized { get; set; }
+    public bool IsLotControlled { get; set; }
 }

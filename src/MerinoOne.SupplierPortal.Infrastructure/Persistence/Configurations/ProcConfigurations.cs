@@ -27,6 +27,10 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
 
+        // R4 (2026-06-22) — Addendum A1: PO header currency FK + denormalized snapshot. ERP-owned.
+        b.Property(x => x.CurrencyId).HasColumnName("currencyId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.CurrencyCode).HasColumnName("currencyCode").HasMaxLength(10);
+
         b.ToTable(t => t.HasCheckConstraint("CK_PurchaseOrder_poType", "[poType] IN ('Material','Service')"));
 
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
@@ -35,12 +39,15 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
             .HasConstraintName("FK_PurchaseOrder_DeliveryTerm_DeliveryTermId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.PaymentTerm).WithMany().HasForeignKey(x => x.PaymentTermId)
             .HasConstraintName("FK_PurchaseOrder_PaymentTerm_PaymentTermId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Currency).WithMany().HasForeignKey(x => x.CurrencyId)
+            .HasConstraintName("FK_PurchaseOrder_Currency_CurrencyId").OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => x.PoNumber).HasDatabaseName("UQ_PurchaseOrder_poNumber").IsUnique();
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_PurchaseOrder_supplierId");
         b.HasIndex(x => x.PoStatus).HasDatabaseName("IX_PurchaseOrder_poStatus");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_PurchaseOrder_tenant_company");
+        b.HasIndex(x => x.CurrencyId).HasDatabaseName("IX_PurchaseOrder_currencyId");
     }
 }
 
@@ -65,10 +72,17 @@ public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseO
         b.Property(x => x.TaxCode).HasColumnName("taxCode").HasMaxLength(20);
         b.Property(x => x.TaxDescription).HasColumnName("taxDescription").HasMaxLength(200);
 
+        // R4 (2026-06-22) — Addendum A2: link taxCode to the proc.Tax master (keep the snapshot strings).
+        b.Property(x => x.TaxId).HasColumnName("taxId").HasColumnType("uniqueidentifier");
+
         b.HasOne(x => x.PurchaseOrder).WithMany(p => p.Lines).HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_PurchaseOrderLine_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId)
             .HasConstraintName("FK_PurchaseOrderLine_Item_ItemId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Tax).WithMany().HasForeignKey(x => x.TaxId)
+            .HasConstraintName("FK_PurchaseOrderLine_Tax_TaxId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.TaxId).HasDatabaseName("IX_PurchaseOrderLine_taxId");
     }
 }
 

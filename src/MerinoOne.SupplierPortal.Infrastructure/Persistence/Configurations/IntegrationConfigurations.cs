@@ -6,6 +6,36 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Configurations;
 
+public class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage>
+{
+    public void Configure(EntityTypeBuilder<OutboxMessage> b)
+    {
+        b.ApplyBaseEntityConvention("OutboxMessage", "integration", "outboxMessage");
+        // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
+        b.Property(x => x.TransactionType).HasColumnName("transactionType").HasMaxLength(60).IsRequired();
+        b.Property(x => x.EntityName).HasColumnName("entityName").HasMaxLength(60).IsRequired();
+        b.Property(x => x.EntityId).HasColumnName("entityId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.DeterministicKey).HasColumnName("deterministicKey").HasMaxLength(200).IsRequired();
+        b.Property(x => x.PayloadJson).HasColumnName("payloadJson").HasColumnType("nvarchar(max)");
+        // Status is a string enum with NO CHECK constraint (the dominant convention; the C# enum is the guard).
+        b.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20)
+            .HasDefaultValue(OutboxStatus.Pending).IsRequired();
+        b.Property(x => x.AttemptCount).HasColumnName("attemptCount").HasColumnType("int").HasDefaultValue(0);
+        b.Property(x => x.DispatchedAt).HasColumnName("dispatchedAt").HasColumnType("datetime2");
+        b.Property(x => x.AckedAt).HasColumnName("ackedAt").HasColumnType("datetime2");
+        b.Property(x => x.LastError).HasColumnName("lastError").HasMaxLength(2000);
+
+        // Enqueue idempotency: at most one live row per deterministic key.
+        b.HasIndex(x => x.DeterministicKey)
+            .HasDatabaseName("UQ_OutboxMessage_deterministicKey").IsUnique()
+            .HasFilter("[isDeleted] = 0");
+        // Dispatcher scan: pick live rows by status.
+        b.HasIndex(x => x.Status)
+            .HasDatabaseName("IX_OutboxMessage_status")
+            .HasFilter("[isDeleted] = 0");
+    }
+}
+
 public class CompanyShareGroupConfiguration : IEntityTypeConfiguration<CompanyShareGroup>
 {
     public void Configure(EntityTypeBuilder<CompanyShareGroup> b)

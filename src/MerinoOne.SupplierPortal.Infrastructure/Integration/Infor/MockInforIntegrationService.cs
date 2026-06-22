@@ -12,4 +12,6 @@ public class MockInforIntegrationService : IInforIntegrationService
     public Task<InforSyncResult> RejectPurchaseOrderAsync(Guid id, string reason, CancellationToken ct = default) => Task.FromResult(Ok("RejectPO", id));
     public Task<InforSyncResult> SubmitInvoiceAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("SubmitInvoice", id));
     public Task<InforSyncResult> SubmitAsnAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("SubmitAsn", id));
+    // R4 (2026-06-22) — Module 2 stub. Backend-developer owns the real mock behaviour (Increment C).
+    public Task<InforSyncResult> SubmitSupplierChangeAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("SubmitSupplierChange", id));
 }

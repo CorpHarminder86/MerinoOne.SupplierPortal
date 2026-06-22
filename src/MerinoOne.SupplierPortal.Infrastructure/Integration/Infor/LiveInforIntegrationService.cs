@@ -161,6 +161,11 @@ public class LiveInforIntegrationService : IInforIntegrationService
         return await SendAsync("Asn", EndpointPaths.Asn, payload, ct);
     }
 
+    // R4 (2026-06-22) — Module 2. Stubbed to keep the build green; the SupplierChangeRequest entity ships in
+    // Increment C (migration 0018) and the backend-developer owns the real payload map + SendAsync wiring then.
+    public Task<InforSyncResult> SubmitSupplierChangeAsync(Guid changeRequestId, CancellationToken ct = default)
+        => throw new NotImplementedException("SubmitSupplierChangeAsync — backend-developer hand-off (Increment C, after migration 0018).");
+
     // ── plumbing ──────────────────────────────────────────────────────────────────────────────
 
     private async Task<InforSyncResult> SendAsync(string entity, string relativePath, object payload, CancellationToken ct)

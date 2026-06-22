@@ -17,6 +17,8 @@ using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplie
 using SupplierVerificationEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierVerification;
 using SupplierAddressEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierAddress;
 using SupplierContactEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact;
+using SupplierBankDetailEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierBankDetail;
+using SupplierLicenseEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierLicense;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence;
 
@@ -77,6 +79,10 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<SupplierVerificationEntity> SupplierVerifications => Set<SupplierVerificationEntity>();
     public DbSet<SupplierAddressEntity> SupplierAddresses => Set<SupplierAddressEntity>();
     public DbSet<SupplierContactEntity> SupplierContacts => Set<SupplierContactEntity>();
+    public DbSet<SupplierBankDetailEntity> SupplierBankDetails => Set<SupplierBankDetailEntity>();
+    public DbSet<SupplierLicenseEntity> SupplierLicenses => Set<SupplierLicenseEntity>();
+
+    public DbSet<Tax> Taxes => Set<Tax>();
 
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
@@ -100,6 +106,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<ApiKeyCompany> ApiKeyCompanies => Set<ApiKeyCompany>();
     public DbSet<InforConnectionSetting> InforConnectionSettings => Set<InforConnectionSetting>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
@@ -210,6 +217,9 @@ public class AppDbContext : DbContext, IAppDbContext
     public Guid? ItemSourceCompanyId =>
         _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.Item, _currentCompany.ActiveCompanyId);
 
+    public Guid? TaxSourceCompanyId =>
+        _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.Tax, _currentCompany.ActiveCompanyId);
+
     /// <summary>
     /// Company-scoped (sharing-aware) types → the DbContext source-company member used in the company
     /// filter. Replaces a hand-maintained if/else chain so a new company-scoped master can't be silently
@@ -223,6 +233,7 @@ public class AppDbContext : DbContext, IAppDbContext
         [typeof(Unit)]         = nameof(UnitSourceCompanyId),
         [typeof(ItemGroup)]    = nameof(ItemGroupSourceCompanyId),
         [typeof(Item)]         = nameof(ItemSourceCompanyId),
+        [typeof(Tax)]          = nameof(TaxSourceCompanyId),
     };
 
     /// <summary>
