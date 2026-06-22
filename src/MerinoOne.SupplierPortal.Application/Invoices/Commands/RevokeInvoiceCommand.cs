@@ -1,5 +1,6 @@
 using FluentValidation;
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Invoices.Queries;
 using MerinoOne.SupplierPortal.Contracts.Invoices;
@@ -21,6 +22,16 @@ namespace MerinoOne.SupplierPortal.Application.Invoices.Commands;
 ///   <item>optimistic concurrency: the client's RowVersion is applied as the EF concurrency token; a stale token
 ///         (someone else changed the row) yields 409, never a silent overwrite.</item>
 /// </list>
+///
+/// <para><b>Review R3 — clear the auto-post latch so a re-submit can re-post.</b> Revoke is allowed when the post
+/// was merely <i>initiated</i> (<c>erpPostInitiatedAt</c> set, <c>erpPostedAt</c> still null — e.g. a dispatch
+/// failed/in-flight). <c>erpPostInitiatedAt</c> is a one-way latch that the GRN auto-post claim
+/// (<c>WHERE erpPostInitiatedAt IS NULL</c>) tests — so leaving it set would make a revoke→re-submit→re-approve
+/// invoice the claim can NEVER win again (silently never auto-posts). This handler therefore CLEARS
+/// <c>erpPostInitiatedAt</c> and the stale <c>erpSyncId</c> (the post-key correlation handle) on revoke, AND
+/// soft-deletes any non-<c>Acked</c> <c>InvoicePost</c> outbox row for this invoice — otherwise the deterministic-key
+/// idempotency probe / composite UQ would block the re-enqueue on re-approval. After a revoke, the clean Draft can
+/// be re-submitted and re-approved, and the GRN cascade re-claims and re-posts it.</para>
 /// </summary>
 public record RevokeInvoiceCommand(Guid Id, RevokeInvoiceRequest Body) : IRequest<InvoiceDetailDto>;
 
@@ -70,8 +81,36 @@ public class RevokeInvoiceCommandHandler : IRequestHandler<RevokeInvoiceCommand,
         // Clear the prior submit stamp so the Draft is clean for re-submit.
         invoice.SubmittedAt = null;
         invoice.SubmittedBy = null;
+
+        // Review R3 — CLEAR the auto-post latch. erpPostInitiatedAt is a one-way latch the GRN cascade's claim
+        // (WHERE erpPostInitiatedAt IS NULL) tests; leaving it set would make a re-submitted, re-approved invoice
+        // un-claimable forever (never auto-posts). Pre-post revoke means erpPostedAt is null (guarded above), so the
+        // post never landed — it is safe to clear the initiated marker and the stale erpSyncId post-key handle.
+        invoice.ErpPostInitiatedAt = null;
+        invoice.ErpSyncId = null;
         invoice.UpdatedBy = _user.UserCode;
         invoice.UpdatedOn = now;
+
+        // Review R3 — soft-delete any non-Acked InvoicePost outbox row for THIS invoice. The enqueue idempotency
+        // probe (OutboxDispatcher) and the composite UQ_OutboxMessage_tenant_deterministicKey are both filtered on
+        // [isDeleted] = 0, so a live Pending/Sending/Dispatched/Failed row would block the re-enqueue on the next
+        // GRN re-approval. An already-Acked row is left intact (it represents a genuine prior post that this
+        // pre-post revoke is NOT undoing; in practice erpPostedAt would be set in that case and revoke is blocked
+        // above). Mutated as tracked rows so they soft-delete in the SAME SaveChanges as the invoice revoke.
+        var outboxRows = await _db.OutboxMessages
+            .IgnoreQueryFilters()
+            .Where(m => !m.IsDeleted
+                        && m.EntityId == invoice.Id
+                        && m.TransactionType == OutboxTransactionType.InvoicePost
+                        && m.Status != OutboxStatus.Acked)
+            .ToListAsync(ct);
+        foreach (var row in outboxRows)
+        {
+            row.IsDeleted = true;
+            row.LastError = $"Soft-deleted: invoice revoked (pre-post) at {now:O} by {_user.UserCode}.";
+            row.UpdatedBy = _user.UserCode;
+            row.UpdatedOn = now;
+        }
 
         try
         {

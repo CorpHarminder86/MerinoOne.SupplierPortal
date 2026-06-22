@@ -125,8 +125,15 @@ public enum LinePushStatus { Pending, Pushed, PushFailed }
 /// Transactional-outbox row lifecycle for the post-commit ERP dispatch helper (Increment 0). Persisted as the
 /// enum name (string), no CHECK — the C# enum is the guard (matches the dominant status-enum convention).
 /// APPEND-ONLY.
+///
+/// <para>Flow: <c>Pending</c> (enqueued) → <c>Sending</c> (the dispatcher won the atomic per-row claim and is
+/// about to POST — the claim commits BEFORE the ERP call so a restart/scale-out loses the optimistic-concurrency
+/// race rather than double-POSTing) → <c>Dispatched</c> (POST succeeded) → <c>Acked</c> (ERP echoed the ack on
+/// <c>/inbound/erp-ack</c>). A POST failure rolls the row <c>Sending → Failed</c> (retryable). A crash mid-POST
+/// strands the row in <c>Sending</c>; the worker's stale-<c>Sending</c> sweep resets it to <c>Pending</c> by age
+/// so it auto-recovers (the deterministic key is reused, so LN dedupes the re-POST).</para>
 /// </summary>
-public enum OutboxStatus { Pending, Dispatched, Acked, Failed }
+public enum OutboxStatus { Pending, Dispatched, Acked, Failed, Sending }
 
 public enum SyncDirection { Inbound, Outbound, Bidirectional }
 public enum SyncStatus { Pending, Success, Failed, Retrying, Reconciled }

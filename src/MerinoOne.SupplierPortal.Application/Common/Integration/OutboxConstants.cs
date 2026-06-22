@@ -57,9 +57,20 @@ public static class OutboxKey
     /// tenant-unique. <paramref name="businessKey"/> carries the per-entity discriminator: for invoices it MUST be
     /// supplier-qualified (e.g. <c>$"{supplierId:N}|{invoiceNumber}"</c>); for PO/ASN/SupplierChange the
     /// entity-local business key (PoNumber/AsnNumber/changeRequestId) is already unique within the tenant.
+    ///
+    /// <para><b>Review D2 — null tenant is a hard error.</b> A null <paramref name="tenantId"/> previously folded to
+    /// <c>Guid.Empty</c>, which would re-create the B2 cross-tenant key collision for ANY future system-principal
+    /// enqueue (every null-tenant caller collapsing onto the same <c>00000000…|entity|key|op</c> material). Throw
+    /// instead — a tenant context is mandatory for an outbound idempotency key, because the key doubles as the
+    /// erp-ack <c>portalRef</c> correlation id and MUST be tenant-unique.</para>
     /// </summary>
     public static string For(string entity, Guid? tenantId, string businessKey, string op)
-        => Hash($"{tenantId.GetValueOrDefault():N}|{entity}|{businessKey}|{op}");
+    {
+        if (tenantId is null)
+            throw new ArgumentNullException(nameof(tenantId),
+                "An outbound idempotency key requires a tenant context (review D2 — a null tenant would re-open the B2 cross-tenant key collision).");
+        return Hash($"{tenantId.Value:N}|{entity}|{businessKey}|{op}");
+    }
 
     private static string Hash(string raw)
     {

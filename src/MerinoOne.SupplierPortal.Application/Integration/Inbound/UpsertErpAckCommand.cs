@@ -158,10 +158,18 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
         var id = entityId.Value;
 
         // Review S3 — the ack may only touch a record whose company is in the key's bound set. A company-scoped
-        // record (TenantEntityId set) MUST be bound; a tenant-level record (TenantEntityId null — e.g. a
-        // tenant-wide supplier) has no company to spoof and is governed by the tenant scope (S4) alone.
-        static bool CompanyBound(IReadOnlySet<Guid> bound, Guid? companyId)
-            => companyId is not Guid c || (bound is { Count: > 0 } && bound.Contains(c));
+        // record (TenantEntityId set) MUST be bound.
+        //
+        // Review D4 — a TRANSACTIONAL target (Invoice/Asn/PurchaseOrder/GoodsReceipt/Payment) MUST carry a company:
+        // a null TenantEntityId on such a target is treated as a FAILED row, not silently always-bound (which would
+        // bypass the company gate entirely). Tenant-level MASTERS (Supplier, SupplierChangeRequest) are legitimately
+        // tenant-wide with no company and keep passing on a null company (governed by the tenant scope, S4, alone).
+        static bool CompanyBound(IReadOnlySet<Guid> bound, Guid? companyId, bool transactional)
+        {
+            if (companyId is not Guid c)
+                return !transactional;   // null company: ok for masters, FAIL for transactional targets (D4).
+            return bound is { Count: > 0 } && bound.Contains(c);
+        }
 
         switch (transactionType)
         {
@@ -170,7 +178,8 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
                 var e = await db.Suppliers.IgnoreQueryFilters()
                     .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId && !x.IsDeleted, ct);
                 if (e is null) return (false, $"Supplier {id} not found for ack in this tenant.");
-                if (!CompanyBound(boundCompanyIds, e.TenantEntityId))
+                // Supplier is a tenant-level master — null company is legitimate (D4 transactional=false).
+                if (!CompanyBound(boundCompanyIds, e.TenantEntityId, transactional: false))
                     return (false, $"Supplier {id} company is not in the API key's bound set (review S3 — no write).");
                 e.ErpCode = erpCode; e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
                 return (true, null);
@@ -180,8 +189,9 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
                 var e = await db.Asns.IgnoreQueryFilters()
                     .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId && !x.IsDeleted, ct);
                 if (e is null) return (false, $"Asn {id} not found for ack in this tenant.");
-                if (!CompanyBound(boundCompanyIds, e.TenantEntityId))
-                    return (false, $"Asn {id} company is not in the API key's bound set (review S3 — no write).");
+                // ASN is transactional — a null company is a corrupt target; fail the row (D4 transactional=true).
+                if (!CompanyBound(boundCompanyIds, e.TenantEntityId, transactional: true))
+                    return (false, $"Asn {id} company is missing or not in the API key's bound set (review S3/D4 — no write).");
                 e.ErpCode = erpCode; e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
                 return (true, null);
             }
@@ -190,8 +200,9 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
                 var e = await db.Invoices.IgnoreQueryFilters()
                     .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId && !x.IsDeleted, ct);
                 if (e is null) return (false, $"Invoice {id} not found for ack in this tenant.");
-                if (!CompanyBound(boundCompanyIds, e.TenantEntityId))
-                    return (false, $"Invoice {id} company is not in the API key's bound set (review S3 — no write).");
+                // Invoice is transactional — a null company is a corrupt target; fail the row (D4 transactional=true).
+                if (!CompanyBound(boundCompanyIds, e.TenantEntityId, transactional: true))
+                    return (false, $"Invoice {id} company is missing or not in the API key's bound set (review S3/D4 — no write).");
                 e.ErpCode = erpCode; e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
                 // S2 — the erp-ack for an InvoicePost is also a "post genuinely landed" signal; promote
                 // initiated→posted if the dispatcher has not already done so (idempotent).
@@ -210,8 +221,9 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
                     .Select(x => new { x.TenantEntityId })
                     .FirstOrDefaultAsync(ct);
                 if (po is null) return (false, $"PurchaseOrder {id} not found for ack in this tenant.");
-                if (!CompanyBound(boundCompanyIds, po.TenantEntityId))
-                    return (false, $"PurchaseOrder {id} company is not in the API key's bound set (review S3 — no write).");
+                // PO is transactional — a null company is a corrupt target; fail the row (D4 transactional=true).
+                if (!CompanyBound(boundCompanyIds, po.TenantEntityId, transactional: true))
+                    return (false, $"PurchaseOrder {id} company is missing or not in the API key's bound set (review S3/D4 — no write).");
                 return (true, null);
             }
             case OutboxTransactionType.SupplierChange:
@@ -225,7 +237,8 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
                     .Select(r => new { r.TenantEntityId })
                     .FirstOrDefaultAsync(ct);
                 if (req is null) return (false, $"SupplierChangeRequest {id} not found for ack in this tenant.");
-                if (!CompanyBound(boundCompanyIds, req.TenantEntityId))
+                // Change request is a tenant-level master — null company is legitimate (D4 transactional=false).
+                if (!CompanyBound(boundCompanyIds, req.TenantEntityId, transactional: false))
                     return (false, $"SupplierChangeRequest {id} company is not in the API key's bound set (review S3 — no write).");
 
                 var lines = await db.SupplierChangeRequestLines.IgnoreQueryFilters()
