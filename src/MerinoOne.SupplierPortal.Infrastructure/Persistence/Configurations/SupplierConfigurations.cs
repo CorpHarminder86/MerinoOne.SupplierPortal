@@ -8,6 +8,8 @@ using SupplierAddressEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.
 using SupplierContactEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact;
 using SupplierBankDetailEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierBankDetail;
 using SupplierLicenseEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierLicense;
+using SupplierChangeRequestEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierChangeRequest;
+using SupplierChangeRequestLineEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierChangeRequestLine;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Configurations;
 
@@ -224,5 +226,59 @@ public class SupplierLicenseConfiguration : IEntityTypeConfiguration<SupplierLic
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_SupplierLicense_supplierId");
         b.HasIndex(x => x.ExpiryDate).HasDatabaseName("IX_SupplierLicense_expiry")
             .HasFilter("[isDeleted] = 0");
+    }
+}
+
+// R4 (2026-06-22) — Module 2 (Supplier Change Management).
+
+public class SupplierChangeRequestConfiguration : IEntityTypeConfiguration<SupplierChangeRequestEntity>
+{
+    public void Configure(EntityTypeBuilder<SupplierChangeRequestEntity> b)
+    {
+        b.ApplyBaseEntityConvention("SupplierChangeRequest", "supplier", "supplierChangeRequest");
+        b.Property(x => x.SupplierId).HasColumnName("supplierId");
+        b.Property(x => x.ChangeStatus).HasColumnName("changeStatus").HasConversion<string>()
+            .HasMaxLength(20).HasDefaultValue(ChangeRequestStatus.Draft).IsRequired();
+        b.Property(x => x.RequestedBy).HasColumnName("requestedBy").HasMaxLength(100).IsRequired();
+        b.Property(x => x.RequestedAt).HasColumnName("requestedAt").HasColumnType("datetime2")
+            .HasDefaultValueSql("SYSUTCDATETIME()");
+        b.Property(x => x.ReviewedBy).HasColumnName("reviewedBy").HasMaxLength(100);
+        b.Property(x => x.ReviewedAt).HasColumnName("reviewedAt").HasColumnType("datetime2");
+        b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
+        b.Property(x => x.Summary).HasColumnName("summary").HasMaxLength(500);
+
+        b.HasOne(x => x.Supplier).WithMany().HasForeignKey(x => x.SupplierId)
+            .HasConstraintName("FK_SupplierChangeRequest_Supplier_SupplierId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_SupplierChangeRequest_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => new { x.SupplierId, x.ChangeStatus })
+            .HasDatabaseName("IX_SupplierChangeRequest_supplier_status");
+    }
+}
+
+public class SupplierChangeRequestLineConfiguration : IEntityTypeConfiguration<SupplierChangeRequestLineEntity>
+{
+    public void Configure(EntityTypeBuilder<SupplierChangeRequestLineEntity> b)
+    {
+        b.ApplyBaseEntityConvention("SupplierChangeRequestLine", "supplier", "supplierChangeRequestLine");
+        b.Property(x => x.SupplierChangeRequestId).HasColumnName("supplierChangeRequestId");
+        b.Property(x => x.TargetEntity).HasColumnName("targetEntity").HasConversion<string>().HasMaxLength(40).IsRequired();
+        b.Property(x => x.TargetEntityId).HasColumnName("targetEntityId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.Operation).HasColumnName("operation").HasConversion<string>().HasMaxLength(10).IsRequired();
+        b.Property(x => x.FieldName).HasColumnName("fieldName").HasMaxLength(100);
+        b.Property(x => x.OldValue).HasColumnName("oldValue").HasMaxLength(1000);
+        b.Property(x => x.NewValue).HasColumnName("newValue").HasMaxLength(1000);
+        b.Property(x => x.PayloadJson).HasColumnName("payloadJson").HasColumnType("nvarchar(max)");
+        b.Property(x => x.PushStatus).HasColumnName("pushStatus").HasConversion<string>()
+            .HasMaxLength(20).HasDefaultValue(LinePushStatus.Pending).IsRequired();
+        b.Property(x => x.PushedAt).HasColumnName("pushedAt").HasColumnType("datetime2");
+        b.Property(x => x.ErpRef).HasColumnName("erpRef").HasMaxLength(100);
+
+        b.HasOne(x => x.SupplierChangeRequest).WithMany(r => r.Lines).HasForeignKey(x => x.SupplierChangeRequestId)
+            .HasConstraintName("FK_SupplierChangeRequestLine_SupplierChangeRequest_SupplierChangeRequestId")
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.HasIndex(x => x.SupplierChangeRequestId).HasDatabaseName("IX_SupplierChangeRequestLine_request");
     }
 }

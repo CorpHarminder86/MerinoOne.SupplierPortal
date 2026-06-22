@@ -84,6 +84,36 @@ public enum DocumentType
 /// </summary>
 public enum PoResponseMode { Manual, Auto }
 
+// R4 (2026-06-22) — Module 2 (Supplier Change Management). All persisted as the enum name (string), no DB CHECK
+// — the C# enum is the guard (matches the dominant status-enum convention). APPEND-ONLY.
+
+/// <summary>
+/// Supplier change-request lifecycle. Draft/ChangesRequested are supplier-editable; Submitted→UnderReview→
+/// Approved/Rejected is the review path; Approved applies the deltas then the per-line push rolls the request
+/// up to Pushed (all) / PartiallyPushed (some) / PushFailed (none).
+/// </summary>
+public enum ChangeRequestStatus
+{
+    Draft,
+    Submitted,
+    UnderReview,
+    ChangesRequested,
+    Approved,
+    Rejected,
+    Pushed,
+    PartiallyPushed,
+    PushFailed
+}
+
+/// <summary>Which supplier sub-entity a change-request line targets.</summary>
+public enum ChangeTargetEntity { Supplier, Address, Contact, Bank, License }
+
+/// <summary>The kind of mutation a change-request line describes.</summary>
+public enum ChangeOperation { Add, Edit, Delete }
+
+/// <summary>Per-line ERP push state within an approved change request.</summary>
+public enum LinePushStatus { Pending, Pushed, PushFailed }
+
 /// <summary>
 /// Transactional-outbox row lifecycle for the post-commit ERP dispatch helper (Increment 0). Persisted as the
 /// enum name (string), no CHECK — the C# enum is the guard (matches the dominant status-enum convention).

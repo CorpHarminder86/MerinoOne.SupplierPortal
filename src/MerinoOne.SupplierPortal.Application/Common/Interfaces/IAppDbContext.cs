@@ -15,6 +15,8 @@ using SupplierAddressEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.
 using SupplierContactEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact;
 using SupplierBankDetailEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierBankDetail;
 using SupplierLicenseEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierLicense;
+using SupplierChangeRequestEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierChangeRequest;
+using SupplierChangeRequestLineEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierChangeRequestLine;
 
 namespace MerinoOne.SupplierPortal.Application.Common.Interfaces;
 
@@ -55,6 +57,8 @@ public interface IAppDbContext
     DbSet<SupplierContactEntity> SupplierContacts { get; }
     DbSet<SupplierBankDetailEntity> SupplierBankDetails { get; }
     DbSet<SupplierLicenseEntity> SupplierLicenses { get; }
+    DbSet<SupplierChangeRequestEntity> SupplierChangeRequests { get; }
+    DbSet<SupplierChangeRequestLineEntity> SupplierChangeRequestLines { get; }
 
     DbSet<Tax> Taxes { get; }
 
