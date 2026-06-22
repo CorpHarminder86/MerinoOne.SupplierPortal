@@ -154,13 +154,14 @@ else
                 }
                 else
                 {
-                    <div class="tl-grid-wrapper" style="--tl-cols: 1.2fr 1fr 1.4fr 120px 120px 110px; --tl-min-width: 940px;">
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.2fr 1fr 1.4fr 110px 110px 1fr 110px; --tl-min-width: 1080px;">
                         <div class="tlg-header">
                             <div class="tlg-col">License no.</div>
                             <div class="tlg-col">Type</div>
                             <div class="tlg-col">Remarks</div>
                             <div class="tlg-col">Issued</div>
                             <div class="tlg-col">Expires</div>
+                            <div class="tlg-col">Attachments</div>
                             <div class="tlg-col tlg-col--actions">Actions</div>
                         </div>
                         @foreach (var l in detail.Licenses)
@@ -179,6 +180,26 @@ else
                                     }
                                     else { <span>—</span> }
                                 </div>
+                                <div class="tlg-col">
+                                    @if (lic.Attachments is { Count: > 0 } atts)
+                                    {
+                                        <div style="display:flex;flex-direction:column;gap:4px;">
+                                            @foreach (var a in atts)
+                                            {
+                                                var att = a;
+                                                <button type="button" @onclick="() => PreviewAttachment(att)" title="@att.FileName"
+                                                        style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:0;padding:0;cursor:pointer;color:var(--mer-blue);font-size:11.5px;text-align:left;max-width:100%;">
+                                                    <span class="material-symbols-outlined" style="font-size:15px;">@AttachIcon(att.ContentType)</span>
+                                                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@att.FileName</span>
+                                                </button>
+                                            }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span style="color:var(--mer-ink-400);">—</span>
+                                    }
+                                </div>
                                 <div class="tlg-col tlg-col--actions">
                                     @if (CanWriteMaster)
                                     {
@@ -190,11 +211,6 @@ else
                         }
                     </div>
                 }
-
-                <div style="margin-top:14px;background:var(--mer-ink-50);border:1px dashed var(--mer-line);border-radius:6px;padding:10px 14px;font-size:11.5px;color:var(--mer-ink-500);display:flex;gap:8px;align-items:flex-start;">
-                    <span class="material-symbols-outlined" style="font-size:15px;">attach_file</span>
-                    <span>License document attachments are not yet available — the backend has no authenticated upload / rebind path for <code>ownerEntityType='SupplierLicense'</code> (see report). License rows save without files for now.</span>
-                </div>
             </div>
         }
         else if (tab == "users")
@@ -562,6 +578,45 @@ else
                         <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Expiry date</label><input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="licenseExpiry" /></div>
                         <div style="grid-column:1 / span 2;"><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Remarks</label><textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="licenseForm.Remarks"></textarea></div>
                     </div>
+
+                    @* ---------------- License attachments ---------------- *@
+                    <div style="margin-top:14px;border-top:1px solid var(--mer-line-soft);padding-top:14px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachments</label>
+                            <label class="doc-uploader__choose" style="position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;">
+                                <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
+                                @(attachUploading ? "Uploading…" : "Add file")
+                                <InputFile OnChange="OnLicenseFileSelectedAsync" accept=".pdf,.jpg,.jpeg,.png" disabled="@attachUploading"
+                                           style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
+                            </label>
+                        </div>
+                        <p style="font-size:11px;color:var(--mer-ink-500);margin-bottom:8px;">PDF or image, up to 5 MB. Files are saved as you add them@(editingLicenseId.HasValue ? "." : " and attached to the license when you click Save.")</p>
+
+                        @if (licenseAttachments.Count == 0)
+                        {
+                            <div style="font-size:12px;color:var(--mer-ink-400);padding:8px 0;">No attachments yet.</div>
+                        }
+                        else
+                        {
+                            <div style="display:flex;flex-direction:column;gap:6px;">
+                                @foreach (var a in licenseAttachments)
+                                {
+                                    var att = a;
+                                    <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 10px;background:var(--mer-surface);">
+                                        <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-blue);">@AttachIcon(att.ContentType)</span>
+                                        <div style="flex:1;min-width:0;">
+                                            <div style="font-size:12px;font-weight:600;color:var(--mer-ink-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@att.FileName">@att.FileName</div>
+                                            <div style="font-size:10.5px;color:var(--mer-ink-500);font-family:Inter,monospace;">@($"{att.SizeBytes / 1024d:0.#}") KB</div>
+                                        </div>
+                                        <button type="button" @onclick="() => PreviewAttachment(att)" title="Preview" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>
+                                        <button type="button" @onclick="() => DeleteAttachment(att)" title="Remove" disabled="@attachUploading" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">delete</span></button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(attachError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@attachError</div> }
+                    </div>
+
                     @if (!string.IsNullOrEmpty(licenseError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@licenseError</div> }
                 </div>
                 <footer class="merino-dialog__footer">
@@ -642,6 +697,15 @@ else
     private DateTime? licenseIssue;
     private DateTime? licenseExpiry;
     private string licenseError = string.Empty;
+
+    // License attachment state. For a NEW license we generate a client draft GUID (staging key); files are
+    // uploaded immediately under ownerEntityType="Staging" and rebound onto the saved license via StagingKey
+    // on create. For an EDIT we attach directly under ownerEntityType="SupplierLicense"/ownerEntityId=licenseId.
+    private Guid licenseStagingKey;
+    private readonly List<DocumentAttachmentDto> licenseAttachments = new();
+    private bool attachUploading;
+    private string attachError = string.Empty;
+    private const long MaxAttachBytes = 5L * 1024 * 1024;
 
     private bool showPoMode;
     private string poModeValue = "Manual";
@@ -758,6 +822,11 @@ else
         licenseIssue = null;
         licenseExpiry = null;
         licenseError = string.Empty;
+        // New license has no id yet — stage attachments under a fresh client-generated draft GUID.
+        licenseStagingKey = Guid.NewGuid();
+        licenseAttachments.Clear();
+        attachError = string.Empty;
+        attachUploading = false;
         showLicense = true;
     }
 
@@ -768,8 +837,90 @@ else
         licenseIssue = l.IssueDate?.ToDateTime(TimeOnly.MinValue);
         licenseExpiry = l.ExpiryDate?.ToDateTime(TimeOnly.MinValue);
         licenseError = string.Empty;
+        // Editing an existing license — attach directly against the license id; seed the list from the
+        // attachments already loaded by GET /api/suppliers/{id}.
+        licenseStagingKey = Guid.Empty;
+        licenseAttachments.Clear();
+        if (l.Attachments is { Count: > 0 } existing) licenseAttachments.AddRange(existing);
+        attachError = string.Empty;
+        attachUploading = false;
         showLicense = true;
     }
+
+    // ---- License attachment upload / delete / preview ----
+    private async Task OnLicenseFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        attachError = string.Empty;
+        var file = e.File;
+        if (file is null) return;
+        if (file.Size > MaxAttachBytes)
+        {
+            attachError = $"File exceeds 5 MB ({(file.Size / 1024d / 1024d):0.0} MB).";
+            return;
+        }
+
+        attachUploading = true;
+        StateHasChanged();
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            var streamContent = new StreamContent(file.OpenReadStream(MaxAttachBytes));
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
+            content.Add(streamContent, "file", file.Name);
+
+            // Existing license → attach onto the license row; new license → stage under the draft GUID.
+            var isEdit = editingLicenseId.HasValue;
+            content.Add(new StringContent(isEdit ? "SupplierLicense" : "Staging"), "ownerEntityType");
+            content.Add(new StringContent((isEdit ? editingLicenseId!.Value : licenseStagingKey).ToString()), "ownerEntityId");
+            content.Add(new StringContent(Id.ToString()), "supplierId");
+
+            var resp = await Api.PostMultipartAsync<DocumentAttachmentDto>("api/document-uploads/attach", content);
+            if (resp?.Success == true && resp.Data is not null)
+            {
+                licenseAttachments.Add(resp.Data);
+            }
+            else
+            {
+                attachError = resp?.Errors?.FirstOrDefault() ?? "Upload failed.";
+            }
+        }
+        catch (Exception ex)
+        {
+            attachError = $"Upload failed: {ex.Message}";
+        }
+        finally
+        {
+            attachUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeleteAttachment(DocumentAttachmentDto att)
+    {
+        attachError = string.Empty;
+        var resp = await Api.DeleteAsync($"api/document-uploads/{att.Id}");
+        if (resp?.Success == true)
+        {
+            licenseAttachments.Remove(att);
+        }
+        else
+        {
+            attachError = resp?.Errors?.FirstOrDefault() ?? "Failed to remove attachment.";
+        }
+    }
+
+    private void PreviewAttachment(DocumentAttachmentDto att)
+    {
+        // DocumentAttachmentDto.PreviewUrl == "files/proxy/{id}" (base-href-relative, bearer-injected by the Web proxy).
+        _previewDoc = new DocumentPreviewer.DocumentDescriptor(
+            att.Id, att.FileName, att.ContentType, att.SizeBytes / 1024, att.PreviewUrl);
+    }
+
+    private static string AttachIcon(string contentType) =>
+        contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? "image"
+        : string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase) ? "picture_as_pdf"
+        : "description";
 
     private async Task SaveLicense()
     {
@@ -785,12 +936,17 @@ else
         ApiResult<SupplierLicenseDto>? resp;
         if (editingLicenseId.HasValue)
         {
+            // Edit: attachments were already bound directly to the license id as they were uploaded —
+            // no staging rebind needed.
             var req = new UpdateSupplierLicenseRequest(licenseForm.LicenseNumber.Trim(), licenseForm.LicenseType.Trim(), remarks, issue, expiry);
             resp = await Api.PutAsync<SupplierLicenseDto, UpdateSupplierLicenseRequest>($"api/suppliers/{Id}/licenses/{editingLicenseId}", req);
         }
         else
         {
-            var req = new AddSupplierLicenseRequest(licenseForm.LicenseNumber.Trim(), licenseForm.LicenseType.Trim(), remarks, issue, expiry);
+            // Create: pass the staging key so the backend atomically re-points the staged rows onto the new
+            // license. (AttachmentIds left null → ALL rows under the key owned by the caller are rebound.)
+            var req = new AddSupplierLicenseRequest(licenseForm.LicenseNumber.Trim(), licenseForm.LicenseType.Trim(), remarks, issue, expiry,
+                StagingKey: licenseAttachments.Count > 0 ? licenseStagingKey : null);
             resp = await Api.PostAsync<SupplierLicenseDto, AddSupplierLicenseRequest>($"api/suppliers/{Id}/licenses", req);
         }
         if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" }); showLicense = false; await Load(); }

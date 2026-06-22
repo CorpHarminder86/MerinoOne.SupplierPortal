@@ -48,24 +48,53 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 150px 1.5fr 120px 130px 140px 80px; --tl-min-width: 1000px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 150px 1.4fr 110px 120px 130px 120px 70px 110px; --tl-min-width: 1120px;">
             <div class="tlg-header">
                 <div class="tlg-col">PO #</div>
                 <div class="tlg-col">Supplier</div>
                 <div class="tlg-col">Type</div>
                 <div class="tlg-col">PO Date</div>
                 <div class="tlg-col">Status</div>
+                <div class="tlg-col">Response</div>
                 <div class="tlg-col tlg-col--num">Version</div>
+                <div class="tlg-col tlg-col--actions"></div>
             </div>
             @foreach (var po in paged.Items)
             {
-                <div class="tlg-row" @onclick="() => OpenDetail(po.Id)" style="cursor:pointer">
-                    <div class="tlg-col tlg-code">@po.PoNumber</div>
-                    <div class="tlg-col tlg-name">@po.SupplierName</div>
-                    <div class="tlg-col">@po.PoType</div>
-                    <div class="tlg-col tlg-code">@po.PoDate.ToString("yyyy-MM-dd")</div>
-                    <div class="tlg-col"><span class="tlg-status @StatusClass(po.PoStatus)">@po.PoStatus</span></div>
-                    <div class="tlg-col tlg-col--num">@po.Version</div>
+                var item = po;
+                var isAuto = string.Equals(item.PoResponseMode, "Auto", StringComparison.OrdinalIgnoreCase);
+                // Manual + actionable status → surface a quick "Respond" deep-link to the detail page where the
+                // permission-gated Acknowledge / Accept / Reject dialogs live. Auto rows are acknowledged + accepted
+                // automatically at release, so they only carry the mode badge.
+                var canRespond = !isAuto && (item.PoStatus == "Released" || item.PoStatus == "Acknowledged");
+                <div class="tlg-row" @onclick="() => OpenDetail(item.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">@item.PoNumber</div>
+                    <div class="tlg-col tlg-name">@item.SupplierName</div>
+                    <div class="tlg-col">@item.PoType</div>
+                    <div class="tlg-col tlg-code">@item.PoDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(item.PoStatus)">@item.PoStatus</span></div>
+                    <div class="tlg-col">
+                        @if (isAuto)
+                        {
+                            <span class="tlg-status tlg-status--info" title="POs are acknowledged + accepted automatically at release">
+                                <span class="material-symbols-outlined" style="font-size:13px;vertical-align:middle;">bolt</span> Auto
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="tlg-status tlg-status--active" title="Supplier acknowledges / accepts / rejects each PO">Manual</span>
+                        }
+                    </div>
+                    <div class="tlg-col tlg-col--num">@item.Version</div>
+                    <div class="tlg-col tlg-col--actions" @onclick:stopPropagation="true">
+                        @if (canRespond)
+                        {
+                            <button @onclick="() => OpenDetail(item.Id)" title="Respond to this PO"
+                                    style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--mer-ink-300);border-radius:6px;padding:4px 10px;color:var(--mer-blue);cursor:pointer;font-size:11.5px;">
+                                <span class="material-symbols-outlined" style="font-size:15px;">reply</span> Respond
+                            </button>
+                        }
+                    </div>
                 </div>
             }
         </div>

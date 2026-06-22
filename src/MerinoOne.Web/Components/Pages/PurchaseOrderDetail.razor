@@ -286,10 +286,10 @@ else
     private bool busy = false;
     private string tab = "overview";
 
-    // Supplier's PO-response mode, resolved from the supplier master (PO DTO does not carry it).
-    // Defaults to Manual so a failed/empty lookup never hides the manual actions.
-    private string poResponseMode = "Manual";
-    private bool ManualResponse => !string.Equals(poResponseMode, "Auto", StringComparison.OrdinalIgnoreCase);
+    // Supplier's PO-response mode now travels on PurchaseOrderDetailDto.PoResponseMode (joined from
+    // Supplier.PoResponseMode by the API) — no second GET /api/suppliers/{id} needed. Defaults to Manual
+    // (the DTO's own default) so a missing/empty value never hides the manual actions.
+    private bool ManualResponse => !string.Equals(detail?.PoResponseMode, "Auto", StringComparison.OrdinalIgnoreCase);
 
     private void TabOverview() => tab = "overview";
     private void TabHistory() => tab = "history";
@@ -312,15 +312,7 @@ else
         var resp = await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{Id}");
         detail = resp?.Data;
         loading = false;
-
-        // Resolve the supplier's PO-response mode (Manual/Auto) to gate the response actions.
-        // Best-effort: any failure leaves the safe Manual default.
-        if (detail is not null)
-        {
-            var sup = await Api.GetAsync<SupplierDetailDto>($"api/suppliers/{detail.SupplierId}");
-            if (sup?.Success == true && sup.Data is not null && !string.IsNullOrWhiteSpace(sup.Data.PoResponseMode))
-                poResponseMode = sup.Data.PoResponseMode;
-        }
+        // PoResponseMode is read straight off `detail` (see ManualResponse) — no supplier round-trip.
     }
 
     private void OpenAcknowledge() { dialogNotes = string.Empty; dialogError = string.Empty; showAcknowledge = true; }
