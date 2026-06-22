@@ -132,6 +132,9 @@ public record UpdateAsnRequest(
     string? Notes,
     List<CreateAsnLineRequest> Lines);
 
+// R4 (2026-06-22) — Migration 0021 exposed: GrnStatus (ERP-owned receipt status), GrnApprovedAt, IssueReported
+// (ERP remark), and the deterministic GRN→Invoice link (InvoiceId + denormalised InvoiceNumber). Added as
+// trailing defaulted params so existing positional callers stay source-compatible.
 public record GoodsReceiptDto(
     Guid Id,
     int Seq,
@@ -146,7 +149,12 @@ public record GoodsReceiptDto(
     decimal ShortQty,
     decimal RejectedQty,
     DateTime GrnDate,
-    string? ErpSyncId);
+    string? ErpSyncId,
+    string GrnStatus = "",
+    DateTime? GrnApprovedAt = null,
+    string? IssueReported = null,
+    Guid? InvoiceId = null,
+    string? InvoiceNumber = null);
 
 public record GoodsReceiptListItemDto(
     Guid Id,
@@ -161,7 +169,12 @@ public record GoodsReceiptListItemDto(
     decimal ShortQty,
     decimal RejectedQty,
     DateTime GrnDate,
-    string? ErpSyncId);
+    string? ErpSyncId,
+    string GrnStatus = "",
+    DateTime? GrnApprovedAt = null,
+    string? IssueReported = null,
+    Guid? InvoiceId = null,
+    string? InvoiceNumber = null);
 
 // Integration admin DTOs (consumed by /integrations/sync-log + /integrations/errors)
 public record InforSyncLogDto(
