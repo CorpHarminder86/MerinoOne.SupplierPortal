@@ -29,7 +29,7 @@ public class TenantInboundUpsertExecutor
         _logger = logger;
     }
 
-    public async Task<UpsertResultDto> ExecuteAsync(
+    public Task<UpsertResultDto> ExecuteAsync(
         TenantInboundEntity endpoint,
         string? idempotencyKey,
         int received,
@@ -38,8 +38,35 @@ public class TenantInboundUpsertExecutor
         object requestPayload,
         Func<IAppDbContext, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
         CancellationToken ct)
+        => RunAsync(InboundUpsertSupport.EntityName(endpoint), idempotencyKey, received, canonicalRows, codes, requestPayload, upsertAsync, ct);
+
+    /// <summary>
+    /// R4 (2026-06-22) — Module 5 / Increment D. Tenant-scoped sibling for the transactional ErpAck endpoint
+    /// (/inbound/erp-ack has no CompanyCode — it resolves <c>portalRef</c> → an outbox row in the key's tenant).
+    /// Mirrors the <see cref="TenantInboundEntity"/> overload (endpoint gate, idempotency, transactional
+    /// SyncLog/IntegrationError + endpoint-session telemetry) keyed on the transactional EntityName.
+    /// </summary>
+    public Task<UpsertResultDto> ExecuteAsync(
+        TransactionalInboundEntity endpoint,
+        string? idempotencyKey,
+        int received,
+        IEnumerable<string> canonicalRows,
+        IEnumerable<string> codes,
+        object requestPayload,
+        Func<IAppDbContext, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
+        CancellationToken ct)
+        => RunAsync(InboundUpsertSupport.EntityName(endpoint), idempotencyKey, received, canonicalRows, codes, requestPayload, upsertAsync, ct);
+
+    private async Task<UpsertResultDto> RunAsync(
+        string entityName,
+        string? idempotencyKey,
+        int received,
+        IEnumerable<string> canonicalRows,
+        IEnumerable<string> codes,
+        object requestPayload,
+        Func<IAppDbContext, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
+        CancellationToken ct)
     {
-        var entityName = InboundUpsertSupport.EntityName(endpoint);
         var entityId = InboundUpsertSupport.JoinCodes(codes);
         var payloadJson = InboundUpsertSupport.SerializePayloadCapped(requestPayload);
         var tenantId = _user.TenantId ?? throw new ForbiddenException("API key has no tenant context.");

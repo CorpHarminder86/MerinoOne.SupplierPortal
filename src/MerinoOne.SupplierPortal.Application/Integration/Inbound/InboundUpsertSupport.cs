@@ -31,6 +31,15 @@ public static class InboundUpsertSupport
     public static string EntityName(TenantInboundEntity endpoint) => endpoint.ToString();
 
     /// <summary>
+    /// R4 (2026-06-22) — Module 5 / Increment D. EntityName for the transactional inbound entities
+    /// (Grn/Payment/InvoiceStatus/ErpAck). Drives the <c>InforEndpointMap.EntityName</c> endpoint-gate +
+    /// session telemetry on the /inbound/grn-status, /inbound/payments, /inbound/invoice-status and
+    /// /inbound/erp-ack endpoints. Mirrors the existing <see cref="SharedEndpoint"/>/<see cref="TenantInboundEntity"/>
+    /// overloads.
+    /// </summary>
+    public static string EntityName(TransactionalInboundEntity endpoint) => endpoint.ToString();
+
+    /// <summary>
     /// SHA-256 (hex) of a stable canonical projection of the batch, keyed on an arbitrary scope string
     /// (e.g. "Country|&lt;tenantGuid&gt;"). Tenant-path equivalent of the company-scoped <see cref="CanonicalHash(SharedEndpoint, Guid, IEnumerable{string})"/>.
     /// </summary>

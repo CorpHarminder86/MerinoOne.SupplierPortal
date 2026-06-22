@@ -49,6 +49,12 @@ public static class TenantSeeder
         (nameof(TenantInboundEntity.State),        "states"),
         (nameof(TenantInboundEntity.City),         "cities"),
         (nameof(TenantInboundEntity.PostalCode),   "postal-codes"),
+        // R4 Module 5 / Increment D — the transactional ERP inbound loop. Direction=Inbound, IsEnabled=true
+        // (kill-switch). Idempotent — re-running skips entity names already present for the tenant.
+        (nameof(TransactionalInboundEntity.Grn),           "grn-status"),
+        (nameof(TransactionalInboundEntity.Payment),       "payments"),
+        (nameof(TransactionalInboundEntity.InvoiceStatus), "invoice-status"),
+        (nameof(TransactionalInboundEntity.ErpAck),        "erp-ack"),
     };
 
     public static Guid TenantId => DeterministicId.From("Tenant", TenantName);
