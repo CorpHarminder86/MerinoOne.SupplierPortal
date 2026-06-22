@@ -1,6 +1,5 @@
 using FluentValidation;
 using MediatR;
-using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Invoices;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
@@ -11,6 +10,12 @@ using ValidationException = MerinoOne.SupplierPortal.Application.Common.Exceptio
 
 namespace MerinoOne.SupplierPortal.Application.Invoices.Commands;
 
+/// <summary>
+/// R4 (2026-06-22) — Module 4. REFACTORED off auto-post-on-create: a manually-created invoice is now a <b>Draft</b>
+/// (was Submitted) and there is NO create-time outbox/ERP post (the Increment-0 enqueue is removed). Posting is a
+/// separate, GRN-gated step (Module 5); the supplier submits via <c>SubmitInvoiceCommand</c> first. The ASN-driven
+/// path uses <c>CreateInvoiceFromAsnCommand</c> instead.
+/// </summary>
 public record CreateInvoiceCommand(CreateInvoiceRequest Body) : IRequest<InvoiceDetailDto>;
 
 public class CreateInvoiceCommandValidator : AbstractValidator<CreateInvoiceCommand>
@@ -44,11 +49,11 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
-    private readonly IOutboxDispatcher _outbox;
+    private readonly IMediator _mediator;
 
-    public CreateInvoiceCommandHandler(IAppDbContext db, ICurrentUser user, IOutboxDispatcher outbox)
+    public CreateInvoiceCommandHandler(IAppDbContext db, ICurrentUser user, IMediator mediator)
     {
-        _db = db; _user = user; _outbox = outbox;
+        _db = db; _user = user; _mediator = mediator;
     }
 
     public async Task<InvoiceDetailDto> Handle(CreateInvoiceCommand request, CancellationToken ct)
@@ -77,19 +82,19 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
             });
         }
 
-        // Validate ASN, if supplied, points to same PO
+        // Validate ASN, if supplied, covers the supplied PO (header scalar OR junction — multi-PO aware).
         if (body.AsnId.HasValue)
         {
-            var asnPoId = await _db.Asns
-                .Where(a => a.Id == body.AsnId.Value)
-                .Select(a => (Guid?)a.PurchaseOrderId)
-                .FirstOrDefaultAsync(ct);
-            if (asnPoId == null)
+            var asnExists = await _db.Asns.AnyAsync(a => a.Id == body.AsnId.Value, ct);
+            if (!asnExists)
                 throw new NotFoundException("Asn", body.AsnId.Value);
-            if (asnPoId != po.Id)
+
+            var coversPo = await _db.Asns.AnyAsync(a => a.Id == body.AsnId.Value && a.PurchaseOrderId == po.Id, ct)
+                || await _db.AsnPurchaseOrders.AnyAsync(j => j.AsnId == body.AsnId.Value && j.PurchaseOrderId == po.Id && !j.IsDeleted, ct);
+            if (!coversPo)
                 throw new ValidationException(new Dictionary<string, string[]>
                 {
-                    ["asnId"] = new[] { "ASN does not belong to the supplied PurchaseOrderId." }
+                    ["asnId"] = new[] { "ASN does not cover the supplied PurchaseOrderId." }
                 });
         }
 
@@ -131,11 +136,13 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
             NetAmount = body.NetAmount,
             CurrencyCode = body.CurrencyCode,
             MatchingType = matchingType,
-            InvoiceStatus = InvoiceStatus.Submitted,
+            // R4: REFACTORED — created as Draft (was Submitted). The supplier submits via SubmitInvoiceCommand;
+            // posting is GRN-gated (Module 5). No create-time ERP post.
+            InvoiceStatus = InvoiceStatus.Draft,
             EInvoiceIrn = body.EInvoiceIrn,
             EInvoiceAckNo = body.EInvoiceAckNo,
             EWayBillNumber = body.EWayBillNumber,
-            SubmittedBy = _user.UserCode,
+            // SubmittedBy/SubmittedAt are stamped by SubmitInvoiceCommand — a freshly-created invoice is a Draft.
             Notes = body.Notes,
             SeccodeId = supplier.SeccodeId,
             CreatedBy = _user.UserCode,
@@ -163,65 +170,10 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
 
         _db.Invoices.Add(invoice);
 
-        // MIGRATED onto the Increment 0 outbox: invoice rows + a Pending OutboxMessage (deterministic key)
-        // commit in ONE transaction; the post-commit dispatcher posts to LN. No LN HTTP call inside this unit
-        // of work (fixes D1), key reused across retries (D2), failures become retryable IntegrationErrors (D3).
-        var key = OutboxKey.For(OutboxEntity.Invoice, body.InvoiceNumber, "post");
-        await _outbox.EnqueueAsync(OutboxTransactionType.InvoicePost, OutboxEntity.Invoice, invoiceId, key, null, ct);
-
+        // R4: NO create-time ERP post. The invoice is a Draft; posting is a later GRN-gated step (Module 5).
         await _db.SaveChangesAsync(ct);
 
-        var lineDtos = invoice.Lines
-            .Select(l => new InvoiceLineDto(
-                l.Id,
-                l.PurchaseOrderLineId,
-                l.ItemCode,
-                l.ItemDescription,
-                l.BilledQty,
-                l.UnitPrice,
-                l.LineAmount,
-                l.TaxCode,
-                l.TaxAmount))
-            .ToList();
-
-        string? asnNumber = null;
-        if (invoice.AsnId.HasValue)
-        {
-            asnNumber = await _db.Asns
-                .Where(a => a.Id == invoice.AsnId.Value)
-                .Select(a => a.AsnNumber)
-                .FirstOrDefaultAsync(ct);
-        }
-
-        return new InvoiceDetailDto(
-            invoice.Id,
-            invoice.Seq,
-            invoice.InvoiceNumber,
-            // R4 0020: PurchaseOrderId now nullable (Q1b) — compile shim, reshaped in Increment B.
-            invoice.PurchaseOrderId ?? Guid.Empty,
-            po.PoNumber,
-            invoice.AsnId,
-            asnNumber,
-            invoice.SupplierId,
-            supplier.LegalName,
-            supplier.SupplierCode,
-            invoice.InvoiceDate,
-            invoice.InvoiceAmount,
-            invoice.TaxAmount,
-            invoice.NetAmount,
-            invoice.CurrencyCode,
-            invoice.MatchingType.ToString(),
-            invoice.GrnReference,
-            invoice.InvoiceStatus.ToString(),
-            invoice.RejectionReason,
-            invoice.EInvoiceIrn,
-            invoice.EInvoiceAckNo,
-            invoice.EWayBillNumber,
-            invoice.SubmittedBy,
-            invoice.ApprovedBy,
-            invoice.ApprovedAt,
-            invoice.Notes,
-            invoice.CreatedOn,
-            lineDtos);
+        // Single source of truth for the reshaped (nullable-PO, multi-PO, lifecycle, rowVersion) detail shape.
+        return await _mediator.Send(new Queries.GetInvoiceByIdQuery(invoice.Id), ct);
     }
 }

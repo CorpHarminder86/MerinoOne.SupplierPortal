@@ -11,6 +11,12 @@ public static class DocumentOwnerTypes
     /// <summary>A supplier license / certification (1:N attachments). ownerEntityId = SupplierLicense.Id.</summary>
     public const string SupplierLicense = "SupplierLicense";
 
+    /// <summary>
+    /// R4 (2026-06-22) — Module 3: an ASN's multi-attachments (1:N). ownerEntityId = Asn.Id, DocumentType =
+    /// AsnAttachment. Attachable while the ASN is Draft; locked (attach/delete rejected) once Submitted.
+    /// </summary>
+    public const string Asn = "Asn";
+
     /// <summary>Self-registration onboarding documents bound to a pending invite. ownerEntityId = SupplierInvite.Id.</summary>
     public const string PendingInvite = "PendingInvite";
 

@@ -37,6 +37,14 @@ public static class DependencyInjection
         // saved SupplierLicense inside the license command's transaction. Scoped (per-request IAppDbContext).
         services.AddScoped<LicenseAttachmentRebinder>();
 
+        // R4 Module 3 — deferred-upload rebind for ASN attachments (staging -> Asn / AsnAttachment) inside the
+        // Create/Update ASN command's transaction. Scoped (per-request IAppDbContext).
+        services.AddScoped<AsnAttachmentRebinder>();
+
+        // R4 Module 4 — single source of truth for the ONE draft invoice spanning an ASN's POs (Q1b). Used by
+        // SubmitAsnCommand (auto) and CreateInvoiceFromAsnCommand (manual). Scoped (per-request IAppDbContext).
+        services.AddScoped<Invoices.DraftInvoiceFromAsnFactory>();
+
         // R4 Module 2 — supplier change-management. Typed per-target appliers (Add/Edit/Delete onto the live
         // supplier rows inside the approve transaction) + the post-commit per-line ERP push (Increment-0 outbox).
         // Scoped — ctor-inject the per-request IAppDbContext / ICurrentUser / IOutboxDispatcher.

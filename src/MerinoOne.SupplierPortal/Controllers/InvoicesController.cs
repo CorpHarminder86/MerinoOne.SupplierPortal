@@ -59,17 +59,73 @@ Returns: InvoiceDetailDto on success; 404 if not found; 403 if seccode mismatch.
 
     [HttpPost]
     [Authorize(Policy = "Invoice.Submit")]
-    [EndpointSummary("Submit invoice")]
-    [EndpointDescription(@"Supplier submits a new invoice against one or more POs.
+    [EndpointSummary("Create invoice (Draft)")]
+    [EndpointDescription(@"Supplier creates a DRAFT invoice against a PO. REFACTORED: created as Draft (was
+Submitted) — NO ERP post on create. The supplier edits it (PUT) and submits it (/submit) separately; posting is
+GRN-gated (Module 5).
 Body:
-- **body**: CreateInvoiceRequest with PO references, line items, tax breakdown, attachments.
-Side effects:
-- Creates the invoice in Submitted status and queues it for buyer review.
-- Triggers MockDocumentValidationService to extract / validate fields asynchronously.
-Returns: InvoiceDetailDto on success; 400 on validation; 403 if seccode mismatch. Requires permission **Invoice.Submit**.")]
+- **body**: CreateInvoiceRequest with PO reference, line items, tax breakdown.
+Returns: InvoiceDetailDto (Draft) on success; 400 on validation; 403 if seccode mismatch. Requires **Invoice.Submit**.")]
     public async Task<Result<InvoiceDetailDto>> Create([FromBody] CreateInvoiceRequest body, CancellationToken ct)
     {
         var data = await _mediator.Send(new CreateInvoiceCommand(body), ct);
+        return Result<InvoiceDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("from-asn")]
+    [Authorize(Policy = "Invoice.Submit")]
+    [EndpointSummary("Create draft invoice from an ASN")]
+    [EndpointDescription(@"Manually creates the ONE draft invoice spanning a Submitted ASN's POs (the same draft
+the ASN submit auto-creates). Idempotent: returns the existing draft if one already exists (UQ_Invoice_asnId).
+Body:
+- **body**: CreateInvoiceFromAsnRequest with the AsnId.
+Returns: InvoiceDetailDto (Draft) on success; 404 if ASN not found; 409 if ASN not Submitted; 400 on mixed
+currency. Requires **Invoice.Submit**.")]
+    public async Task<Result<InvoiceDetailDto>> CreateFromAsn([FromBody] CreateInvoiceFromAsnRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new CreateInvoiceFromAsnCommand(body), ct);
+        return Result<InvoiceDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("{id:guid}")]
+    [Authorize(Policy = "Invoice.Submit")]
+    [EndpointSummary("Update invoice (Draft only)")]
+    [EndpointDescription(@"Edits a DRAFT invoice (409 once Submitted). Editable: invoiceNumber, invoiceDate,
+eInvoiceIrn, eInvoiceAckNo, eWayBillNumber, notes. Amounts/lines are inherited from the ASN.
+Returns: InvoiceDetailDto on success; 404 if not found; 409 if not Draft; 400 on duplicate number. Requires **Invoice.Submit**.")]
+    public async Task<Result<InvoiceDetailDto>> Update(Guid id, [FromBody] UpdateInvoiceRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpdateInvoiceCommand(id, body), ct);
+        return Result<InvoiceDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("{id:guid}/submit")]
+    [Authorize(Policy = "Invoice.Submit")]
+    [EndpointSummary("Submit invoice (Draft -> Submitted)")]
+    [EndpointDescription(@"Submits a DRAFT invoice. Validates the mandatory fields (invoiceNumber + invoiceDate;
+the draft placeholder number must be replaced). Marks it ELIGIBLE for LN posting but does NOT post (posting is
+GRN-gated, Module 5).
+Returns: InvoiceDetailDto (Submitted) on success; 404 if not found; 409 if not Draft; 400 on missing mandatory
+fields. Requires **Invoice.Submit**.")]
+    public async Task<Result<InvoiceDetailDto>> Submit(Guid id, [FromBody] SubmitInvoiceRequest? body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new SubmitInvoiceCommand(id, body ?? new SubmitInvoiceRequest()), ct);
+        return Result<InvoiceDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("{id:guid}/revoke")]
+    [Authorize(Policy = "Invoice.Revoke")]
+    [EndpointSummary("Revoke invoice (admin, pre-post)")]
+    [EndpointDescription(@"Admin PRE-POST revoke: Submitted -> Draft (pure status flip, NO LN reversal). Guards:
+state (Submitted AND not yet posted) and optimistic concurrency via RowVersion (a stale token yields 409 against
+a racing auto-post).
+Body:
+- **body**: RevokeInvoiceRequest with an optional reason + the RowVersion (base64, from the detail DTO).
+Returns: InvoiceDetailDto (Draft) on success; 404 if not found; 409 if not Submitted/already posted/stale
+RowVersion. Requires **Invoice.Revoke** (admin/Finance).")]
+    public async Task<Result<InvoiceDetailDto>> Revoke(Guid id, [FromBody] RevokeInvoiceRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new RevokeInvoiceCommand(id, body), ct);
         return Result<InvoiceDetailDto>.Ok(data, HttpContext.TraceIdentifier);
     }
 
