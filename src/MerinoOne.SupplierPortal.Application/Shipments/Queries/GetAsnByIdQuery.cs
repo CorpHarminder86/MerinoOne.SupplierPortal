@@ -35,7 +35,9 @@ public class GetAsnByIdQueryHandler : IRequestHandler<GetAsnByIdQuery, AsnDetail
 
         return new AsnDetailDto(
             row.a.Id, row.a.Seq, row.a.AsnNumber,
-            row.a.PurchaseOrderId, row.po.PoNumber,
+            // R4 0019: PurchaseOrderId is now nullable (multi-PO). Compile shim only — existing single-PO
+            // ASNs always have a value; backend reshapes the DTO for multi-PO in Increment B.
+            row.a.PurchaseOrderId ?? Guid.Empty, row.po.PoNumber,
             row.a.SupplierId, row.s.LegalName,
             row.a.ExpectedDeliveryDate, row.a.TimeWindow,
             row.a.CarrierName, row.a.TrackingNumber,

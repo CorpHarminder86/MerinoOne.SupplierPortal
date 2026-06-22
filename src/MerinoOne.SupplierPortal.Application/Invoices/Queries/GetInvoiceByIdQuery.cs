@@ -55,7 +55,9 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
             row.inv.Id,
             row.inv.Seq,
             row.inv.InvoiceNumber,
-            row.inv.PurchaseOrderId,
+            // R4 0020: PurchaseOrderId now nullable (Q1b single invoice spans POs) — compile shim only;
+            // existing single-PO invoices always have a value. Backend reshapes the DTO in Increment B.
+            row.inv.PurchaseOrderId ?? Guid.Empty,
             row.PoNumber,
             row.inv.AsnId,
             asnNumber,

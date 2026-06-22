@@ -3972,6 +3972,16 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(20)")
                         .HasColumnName("driverPhone");
 
+                    b.Property<string>("ErpCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("erpCode");
+
+                    b.Property<string>("ErpSyncId")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("erpSyncId");
+
                     b.Property<DateTime>("ExpectedDeliveryDate")
                         .HasColumnType("datetime2")
                         .HasColumnName("expectedDeliveryDate");
@@ -3987,7 +3997,7 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(2000)")
                         .HasColumnName("notes");
 
-                    b.Property<Guid>("PurchaseOrderId")
+                    b.Property<Guid?>("PurchaseOrderId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("purchaseOrderId");
 
@@ -4008,6 +4018,15 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnName("asnSeq");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<DateTime?>("SubmittedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("submittedAt");
+
+                    b.Property<string>("SubmittedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("submittedBy");
 
                     b.Property<Guid>("SupplierId")
                         .HasColumnType("uniqueidentifier")
@@ -4125,6 +4144,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("itemId");
 
+                    b.Property<int?>("PositionNo")
+                        .HasColumnType("int")
+                        .HasColumnName("positionNo");
+
                     b.Property<Guid>("PurchaseOrderLineId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("purchaseOrderLineId");
@@ -4135,6 +4158,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnName("asnLineSeq");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<int?>("SequenceNo")
+                        .HasColumnType("int")
+                        .HasColumnName("sequenceNo");
 
                     b.Property<decimal>("ShippedQty")
                         .HasColumnType("decimal(18,4)")
@@ -4167,6 +4194,90 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
 
                     b.ToTable("AsnLine", "proc");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnPurchaseOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("asnPurchaseOrderId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<Guid>("AsnId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("asnId");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<Guid>("PurchaseOrderId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("purchaseOrderId");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("asnPurchaseOrderSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_AsnPurchaseOrder");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("AsnId")
+                        .HasDatabaseName("IX_AsnPurchaseOrder_asnId");
+
+                    b.HasIndex("PurchaseOrderId")
+                        .HasDatabaseName("IX_AsnPurchaseOrder_purchaseOrderId");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AsnPurchaseOrder_asnPurchaseOrderSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("AsnId", "PurchaseOrderId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_AsnPurchaseOrder_asn_po")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.ToTable("AsnPurchaseOrder", "proc");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.CreditDebitNote", b =>
@@ -4703,6 +4814,20 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("eWayBillNumber");
 
+                    b.Property<string>("ErpCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("erpCode");
+
+                    b.Property<DateTime?>("ErpPostedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("erpPostedAt");
+
+                    b.Property<string>("ErpSyncId")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("erpSyncId");
+
                     b.Property<string>("GrnReference")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)")
@@ -4749,7 +4874,7 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(2000)")
                         .HasColumnName("notes");
 
-                    b.Property<Guid>("PurchaseOrderId")
+                    b.Property<Guid?>("PurchaseOrderId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("purchaseOrderId");
 
@@ -4757,6 +4882,20 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)")
                         .HasColumnName("rejectionReason");
+
+                    b.Property<string>("RevokeReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("revokeReason");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("revokedAt");
+
+                    b.Property<string>("RevokedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("revokedBy");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -4775,6 +4914,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnName("invoiceSeq");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<DateTime?>("SubmittedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("submittedAt");
 
                     b.Property<string>("SubmittedBy")
                         .HasMaxLength(100)
@@ -4811,7 +4954,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
-                    b.HasIndex("AsnId");
+                    b.HasIndex("AsnId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_Invoice_asnId")
+                        .HasFilter("[asnId] IS NOT NULL AND [isDeleted] = 0");
 
                     b.HasIndex("InvoiceStatus")
                         .HasDatabaseName("IX_Invoice_invoiceStatus");
@@ -7323,7 +7469,6 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("PurchaseOrderId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
                         .HasConstraintName("FK_Asn_PurchaseOrder_PurchaseOrderId");
 
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Seccode", "Owner")
@@ -7365,6 +7510,27 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Navigation("Item");
 
                     b.Navigation("PurchaseOrderLine");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnPurchaseOrder", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.Asn", "Asn")
+                        .WithMany("PurchaseOrders")
+                        .HasForeignKey("AsnId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_AsnPurchaseOrder_Asn_AsnId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrder", "PurchaseOrder")
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_AsnPurchaseOrder_PurchaseOrder_PurchaseOrderId");
+
+                    b.Navigation("Asn");
+
+                    b.Navigation("PurchaseOrder");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.CreditDebitNote", b =>
@@ -7450,7 +7616,6 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("PurchaseOrderId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
                         .HasConstraintName("FK_Invoice_PurchaseOrder_PurchaseOrderId");
 
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Seccode", "Owner")
@@ -7823,6 +7988,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.Asn", b =>
                 {
                     b.Navigation("Lines");
+
+                    b.Navigation("PurchaseOrders");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.Invoice", b =>

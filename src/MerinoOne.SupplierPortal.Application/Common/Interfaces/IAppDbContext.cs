@@ -67,6 +67,7 @@ public interface IAppDbContext
     DbSet<DeliverySchedule> DeliverySchedules { get; }
     DbSet<Asn> Asns { get; }
     DbSet<AsnLine> AsnLines { get; }
+    DbSet<AsnPurchaseOrder> AsnPurchaseOrders { get; }
     DbSet<GoodsReceipt> GoodsReceipts { get; }
     DbSet<Invoice> Invoices { get; }
     DbSet<InvoiceLine> InvoiceLines { get; }

@@ -124,6 +124,13 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.AsnStatus).HasColumnName("asnStatus").HasConversion<string>().HasMaxLength(30);
         b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
 
+        // R4 (2026-06-22) — Module 3: draft/submit lifecycle + ERP ack write-back. erpCode populated via
+        // /inbound/erp-ack (the ASNNo). PurchaseOrderId is now NULLABLE (multi-PO via the junction below).
+        b.Property(x => x.SubmittedAt).HasColumnName("submittedAt").HasColumnType("datetime2");
+        b.Property(x => x.SubmittedBy).HasColumnName("submittedBy").HasMaxLength(100);
+        b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
         b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_Asn_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
@@ -133,6 +140,29 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_Asn_supplierId");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Asn_tenant_company");
+    }
+}
+
+// R4 (2026-06-22) — Module 3 (Q1): ASN↔PO junction. Child of the ASN aggregate (AuditableEntity, two-key +
+// audit only, no seccode of its own — the ASN root carries it). CASCADE from ASN, RESTRICT to PO.
+public class AsnPurchaseOrderConfiguration : IEntityTypeConfiguration<AsnPurchaseOrder>
+{
+    public void Configure(EntityTypeBuilder<AsnPurchaseOrder> b)
+    {
+        b.ApplyBaseEntityConvention("AsnPurchaseOrder", "proc", "asnPurchaseOrder");
+        b.Property(x => x.AsnId).HasColumnName("asnId");
+        b.Property(x => x.PurchaseOrderId).HasColumnName("purchaseOrderId");
+
+        b.HasOne(x => x.Asn).WithMany(a => a.PurchaseOrders).HasForeignKey(x => x.AsnId)
+            .HasConstraintName("FK_AsnPurchaseOrder_Asn_AsnId").OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
+            .HasConstraintName("FK_AsnPurchaseOrder_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.AsnId).HasDatabaseName("IX_AsnPurchaseOrder_asnId");
+        b.HasIndex(x => x.PurchaseOrderId).HasDatabaseName("IX_AsnPurchaseOrder_purchaseOrderId");
+        b.HasIndex(x => new { x.AsnId, x.PurchaseOrderId })
+            .HasDatabaseName("UQ_AsnPurchaseOrder_asn_po").IsUnique()
+            .HasFilter("[isDeleted] = 0");
     }
 }
 
@@ -147,6 +177,10 @@ public class AsnLineConfiguration : IEntityTypeConfiguration<AsnLine>
         b.Property(x => x.ShippedQty).HasColumnName("shippedQty").HasColumnType("decimal(18,4)");
         b.Property(x => x.BatchNumber).HasColumnName("batchNumber").HasMaxLength(50);
         b.Property(x => x.ExpiryDate).HasColumnName("expiryDate").HasColumnType("datetime2");
+
+        // R4 (2026-06-22) — Addendum A4: snapshot from the source PO line (backfilled in migration 0019).
+        b.Property(x => x.PositionNo).HasColumnName("positionNo");
+        b.Property(x => x.SequenceNo).HasColumnName("sequenceNo");
 
         b.HasOne(x => x.Asn).WithMany(a => a.Lines).HasForeignKey(x => x.AsnId)
             .HasConstraintName("FK_AsnLine_Asn_AsnId").OnDelete(DeleteBehavior.Cascade);
@@ -208,6 +242,15 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         b.Property(x => x.ApprovedAt).HasColumnName("approvedAt").HasColumnType("datetime2");
         b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
 
+        // R4 (2026-06-22) — Module 4: posting lifecycle + admin pre-post revoke + ERP ack write-back.
+        b.Property(x => x.SubmittedAt).HasColumnName("submittedAt").HasColumnType("datetime2");
+        b.Property(x => x.RevokedBy).HasColumnName("revokedBy").HasMaxLength(100);
+        b.Property(x => x.RevokedAt).HasColumnName("revokedAt").HasColumnType("datetime2");
+        b.Property(x => x.RevokeReason).HasColumnName("revokeReason").HasMaxLength(1000);
+        b.Property(x => x.ErpPostedAt).HasColumnName("erpPostedAt").HasColumnType("datetime2");
+        b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
         b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_Invoice_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Asn).WithMany().HasForeignKey(x => x.AsnId)
@@ -220,6 +263,10 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         b.HasIndex(x => x.InvoiceStatus).HasDatabaseName("IX_Invoice_invoiceStatus");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Invoice_tenant_company");
+        // R4 (2026-06-22) — Module 4 (Q1b): exactly one (non-deleted) invoice per ASN. Filtered so the
+        // legacy non-ASN invoices (asnId NULL) and soft-deleted rows are excluded from the uniqueness.
+        b.HasIndex(x => x.AsnId).HasDatabaseName("UQ_Invoice_asnId").IsUnique()
+            .HasFilter("[asnId] IS NOT NULL AND [isDeleted] = 0");
     }
 }
 

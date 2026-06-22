@@ -46,7 +46,8 @@ public class GetAsnListQueryHandler : IRequestHandler<GetAsnListQuery, PagedResu
             .OrderByDescending(x => x.a.ExpectedDeliveryDate)
             .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new AsnListItemDto(
-                x.a.Id, x.a.Seq, x.a.AsnNumber, x.a.PurchaseOrderId, x.po.PoNumber,
+                // R4 0019: PurchaseOrderId now nullable (multi-PO) — compile shim, reshaped in Increment B.
+                x.a.Id, x.a.Seq, x.a.AsnNumber, x.a.PurchaseOrderId ?? Guid.Empty, x.po.PoNumber,
                 x.a.SupplierId, x.s.LegalName,
                 x.a.ExpectedDeliveryDate, x.a.CarrierName, x.a.TrackingNumber,
                 x.a.AsnStatus.ToString(), x.a.CreatedOn))

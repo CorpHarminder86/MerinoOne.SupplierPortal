@@ -51,7 +51,8 @@ public class GetInvoiceListQueryHandler : IRequestHandler<GetInvoiceListQuery, P
                 x.inv.Id,
                 x.inv.Seq,
                 x.inv.InvoiceNumber,
-                x.inv.PurchaseOrderId,
+                // R4 0020: PurchaseOrderId now nullable (Q1b) — compile shim, reshaped in Increment B.
+                x.inv.PurchaseOrderId ?? Guid.Empty,
                 x.po.PoNumber,
                 x.inv.SupplierId,
                 x.s.LegalName,

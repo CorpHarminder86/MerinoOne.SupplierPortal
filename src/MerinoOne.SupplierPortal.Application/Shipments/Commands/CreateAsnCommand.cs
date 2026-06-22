@@ -127,7 +127,8 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
             }).ToList();
 
         return new AsnDetailDto(
-            asn.Id, asn.Seq, asn.AsnNumber, asn.PurchaseOrderId, po.PoNumber,
+            // R4 0019: PurchaseOrderId now nullable (multi-PO) — compile shim, reshaped in Increment B.
+            asn.Id, asn.Seq, asn.AsnNumber, asn.PurchaseOrderId ?? Guid.Empty, po.PoNumber,
             asn.SupplierId, supplier.LegalName,
             asn.ExpectedDeliveryDate, asn.TimeWindow,
             asn.CarrierName, asn.TrackingNumber,
