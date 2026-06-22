@@ -1,6 +1,9 @@
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Models;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.SupplierRegistration;
+using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Doc;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -111,6 +114,192 @@ public class DocumentUploadsController : ControllerBase
             // app's <base href> — works both at root ("/") and at sub-path ("/sup-dev/").
             $"files/proxy/{docId}/by-token/{token}");
         return Result<UploadedDocumentDto>.Ok(dto, HttpContext.TraceIdentifier);
+    }
+
+    // ============================================================================================
+    // R4 (2026-06-22) — Authenticated attachment endpoints. Used by logged-in staff/suppliers to
+    // attach files to a saved SupplierLicense (or stage files before first save, then rebind via
+    // AddSupplierLicenseCommand/UpdateSupplierLicenseCommand). Permission: Supplier.Write; row access
+    // enforced with SupplierWriteGuard against the supplier's G-seccode. The anonymous invite-upload
+    // flow above is untouched.
+    // ============================================================================================
+
+    /// <summary>
+    /// Authenticated attachment upload. Stores the file via <see cref="IFileStorageService"/> (same 5 MB cap
+    /// as the anonymous path) and persists a <see cref="DocumentUpload"/> stamped with the supplier's
+    /// G-seccode + <c>DocumentType.License</c>. Two owner modes:
+    /// <list type="bullet">
+    ///   <item><c>ownerEntityType="SupplierLicense"</c>, <c>ownerEntityId=&lt;licenseId&gt;</c> — direct attach to a
+    ///         saved license (the license must belong to <c>supplierId</c>).</item>
+    ///   <item><c>ownerEntityType="Staging"</c>, <c>ownerEntityId=&lt;clientDraftGuid&gt;</c> — deferred upload before
+    ///         the license is first saved; the Add/Update license command re-points the row to the license.</item>
+    /// </list>
+    /// Write access is enforced via <see cref="SupplierWriteGuard"/> on <paramref name="supplierId"/>'s seccode.
+    /// </summary>
+    [HttpPost("attach")]
+    [Authorize(Policy = "Supplier.Write")]
+    [RequestSizeLimit(MaxBytes + 4096)]
+    [EndpointSummary("Attach a document to a supplier license (authenticated)")]
+    [EndpointDescription(@"Uploads a file and binds it to a SupplierLicense (ownerEntityType='SupplierLicense') or a
+deferred-upload staging slot (ownerEntityType='Staging' + a client-generated draft GUID). 5 MB cap. canWrite-gated
+against the supplier's seccode (403 on mismatch). Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
+    public async Task<Result<DocumentAttachmentDto>> Attach(
+        [FromForm] IFormFile file,
+        [FromForm] string ownerEntityType,
+        [FromForm] Guid ownerEntityId,
+        [FromForm] Guid supplierId,
+        [FromServices] ICurrentUser user,
+        [FromServices] SupplierWriteGuard guard,
+        [FromServices] IDocumentValidationService docValidator,
+        CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return Result<DocumentAttachmentDto>.Fail("File is required.");
+        if (file.Length > MaxBytes)
+            return Result<DocumentAttachmentDto>.Fail($"File exceeds {MaxBytes / 1024 / 1024} MB.");
+
+        var isStaging = string.Equals(ownerEntityType, DocumentOwnerTypes.Staging, StringComparison.OrdinalIgnoreCase);
+        var isLicense = string.Equals(ownerEntityType, DocumentOwnerTypes.SupplierLicense, StringComparison.OrdinalIgnoreCase);
+        if (!isStaging && !isLicense)
+            return Result<DocumentAttachmentDto>.Fail($"ownerEntityType must be '{DocumentOwnerTypes.SupplierLicense}' or '{DocumentOwnerTypes.Staging}'.");
+        if (ownerEntityId == Guid.Empty)
+            return Result<DocumentAttachmentDto>.Fail("ownerEntityId is required.");
+
+        var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == supplierId, ct);
+        if (supplier is null)
+            return Result<DocumentAttachmentDto>.Fail("Supplier not found.");
+
+        // SecRight.canWrite gate against the supplier's G-seccode — throws ForbiddenException (403) on mismatch.
+        await guard.EnsureCanWriteAsync(supplier.Id, supplier.SeccodeId, ct);
+
+        // Direct attach: the license must exist and belong to this supplier (so the owner pointer is valid).
+        if (isLicense)
+        {
+            var owns = await _db.SupplierLicenses
+                .AnyAsync(l => l.Id == ownerEntityId && l.SupplierId == supplier.Id, ct);
+            if (!owns)
+                return Result<DocumentAttachmentDto>.Fail("License not found for this supplier.");
+        }
+
+        var now = DateTime.UtcNow;
+        var mime = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType;
+
+        await using var read = file.OpenReadStream();
+        // Scope the storage path by the supplier's seccode (same shape the invite path uses with invite.Id).
+        var stored = await _storage.StoreAsync(read, file.FileName, mime, supplier.SeccodeId, ct);
+        var sizeKb = (int)Math.Ceiling(stored.SizeBytes / 1024d);
+
+        var docId = Guid.NewGuid();
+        var doc = new DocumentUpload
+        {
+            Id = docId,
+            OwnerEntityType = isLicense ? DocumentOwnerTypes.SupplierLicense : DocumentOwnerTypes.Staging,
+            OwnerEntityId = ownerEntityId,
+            DocumentType = DocumentType.License,
+            FileName = file.FileName,
+            FileUrl = stored.StorageKey,
+            FileSizeKb = sizeKb,
+            MimeType = mime,
+            UploadedBy = user.UserCode,
+            // Stamp the supplier's G-seccode so RLS picks the row up immediately AND so the rebinder can verify
+            // ownership. Copy the supplier's tenant/company explicitly (deterministic — the row lands in the
+            // supplier's company regardless of the request's active-company header; mirrors RegisterSupplierCommand's
+            // doc rebind). The ScopeStampInterceptor only fills these when unset, so explicit values win.
+            SeccodeId = supplier.SeccodeId,
+            TenantId = supplier.TenantId,
+            TenantEntityId = supplier.TenantEntityId,
+            AiValidationStatus = AiValidationStatus.Pending,
+            CreatedBy = user.UserCode,
+            CreatedOn = now,
+        };
+        _db.DocumentUploads.Add(doc);
+        await _db.SaveChangesAsync(ct);
+
+        // Best-effort AI validation (mock today) — mirrors the registration flow's intent so the attachment
+        // carries a validation status. Failures here must not fail the upload (the file is already persisted).
+        try
+        {
+            var outcome = await docValidator.ValidateAsync(docId, ct);
+            doc.AiValidationStatus = outcome.Status;
+            doc.AiValidationConfidence = outcome.Confidence;
+            doc.AiValidationPayload = outcome.Payload;
+            doc.AiValidatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+        catch { /* leave AiValidationStatus = Pending; status is advisory, not gating */ }
+
+        return Result<DocumentAttachmentDto>.Ok(
+            new DocumentAttachmentDto(docId, file.FileName, mime, stored.SizeBytes, now,
+                $"files/proxy/{docId}", $"files/proxy/{docId}"),
+            HttpContext.TraceIdentifier);
+    }
+
+    /// <summary>
+    /// Lists the attachments bound to a single supplier license (<c>ownerEntityType='SupplierLicense'</c>).
+    /// Seccode-scoped by the always-on RLS filter, so callers only ever see their own supplier's rows.
+    /// </summary>
+    [HttpGet("by-license/{licenseId:guid}")]
+    [Authorize(Policy = "Supplier.Write")]
+    [EndpointSummary("List a license's attachments (authenticated)")]
+    [EndpointDescription(@"Returns the documents attached to a SupplierLicense. Seccode-scoped (RLS). Returns
+List<DocumentAttachmentDto> ordered by upload time. Requires **Supplier.Write**.")]
+    public async Task<Result<List<DocumentAttachmentDto>>> ListByLicense(Guid licenseId, CancellationToken ct)
+    {
+        var items = await _db.DocumentUploads
+            .Where(d => d.OwnerEntityType == DocumentOwnerTypes.SupplierLicense && d.OwnerEntityId == licenseId)
+            .OrderBy(d => d.CreatedOn)
+            .Select(d => new DocumentAttachmentDto(
+                d.Id, d.FileName, d.MimeType, d.FileSizeKb * 1024L, d.CreatedOn,
+                $"files/proxy/{d.Id}", $"files/proxy/{d.Id}"))
+            .ToListAsync(ct);
+        return Result<List<DocumentAttachmentDto>>.Ok(items, HttpContext.TraceIdentifier);
+    }
+
+    /// <summary>
+    /// Soft-deletes an attachment (the AuditableEntityInterceptor flips IsDeleted). canWrite-gated against the
+    /// owning license's supplier seccode. Works for both <c>SupplierLicense</c>- and <c>Staging</c>-owned rows
+    /// (a user discarding a draft upload).
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    [Authorize(Policy = "Supplier.Write")]
+    [EndpointSummary("Delete a document attachment (authenticated, soft-delete)")]
+    [EndpointDescription(@"Soft-deletes a DocumentUpload (SupplierLicense or Staging owned). canWrite-gated against
+the owning supplier's seccode (403). Returns empty success; 404 if not found. Requires **Supplier.Write**.")]
+    public async Task<Result> Delete(
+        Guid id,
+        [FromServices] SupplierWriteGuard guard,
+        CancellationToken ct)
+    {
+        var doc = await _db.DocumentUploads.FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (doc is null)
+            return Result.Fail("Attachment not found.");
+        if (doc.OwnerEntityType != DocumentOwnerTypes.SupplierLicense && doc.OwnerEntityType != DocumentOwnerTypes.Staging)
+            return Result.Fail("Attachment is not a supplier-license attachment.");
+
+        // Resolve the supplier that owns this attachment so we can canWrite-gate. SupplierLicense rows resolve
+        // via the license -> supplier; Staging rows carry the supplier's seccode directly (set at upload).
+        Guid supplierId, seccodeId;
+        if (doc.OwnerEntityType == DocumentOwnerTypes.SupplierLicense)
+        {
+            var lic = await _db.SupplierLicenses.FirstOrDefaultAsync(l => l.Id == doc.OwnerEntityId, ct);
+            if (lic is null) return Result.Fail("Owning license not found.");
+            supplierId = lic.SupplierId;
+            seccodeId = lic.SeccodeId;
+        }
+        else
+        {
+            // Staging: the seccode on the doc IS the supplier's G-seccode (stamped at upload). Map back to supplier.
+            var sup = await _db.Suppliers.FirstOrDefaultAsync(s => s.SeccodeId == doc.SeccodeId, ct);
+            if (sup is null) return Result.Fail("Owning supplier not found.");
+            supplierId = sup.Id;
+            seccodeId = sup.SeccodeId;
+        }
+
+        await guard.EnsureCanWriteAsync(supplierId, seccodeId, ct);
+
+        _db.DocumentUploads.Remove(doc); // soft-delete: interceptor flips IsDeleted
+        await _db.SaveChangesAsync(ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
     }
 
     /// <summary>

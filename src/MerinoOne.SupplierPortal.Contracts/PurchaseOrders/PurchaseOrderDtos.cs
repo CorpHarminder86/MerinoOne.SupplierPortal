@@ -11,7 +11,11 @@ public record PurchaseOrderListItemDto(
     DateTime PoDate,
     string PoStatus,
     int Version,
-    DateTime CreatedOn);
+    DateTime CreatedOn,
+    // R4 (2026-06-22): the owning supplier's PO-response behaviour ("Manual" | "Auto"), joined from
+    // Supplier.PoResponseMode. Lets the PO list gate accept/reject affordances per-row without a second
+    // GET /api/suppliers/{id} per PO. Trailing optional positional — defaults to "Manual".
+    string PoResponseMode = "Manual");
 
 public record PagedResult<T>(
     List<T> Items,
@@ -41,7 +45,11 @@ public record PurchaseOrderDetailDto(
     string? BuyerName,
     string? ErpSyncId,
     string? Notes,
-    List<PurchaseOrderLineDto> Lines);
+    List<PurchaseOrderLineDto> Lines,
+    // R4 (2026-06-22): the owning supplier's PO-response behaviour ("Manual" | "Auto"), joined from
+    // Supplier.PoResponseMode — replaces the UI's second GET /api/suppliers/{supplierId} per PO detail.
+    // Trailing optional positional — defaults to "Manual".
+    string PoResponseMode = "Manual");
 
 public record PurchaseOrderLineDto(
     Guid Id,

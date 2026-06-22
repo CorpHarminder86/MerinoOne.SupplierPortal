@@ -1,5 +1,6 @@
 using FluentValidation;
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Security;
@@ -30,10 +31,11 @@ public class UpdateSupplierLicenseCommandHandler : IRequestHandler<UpdateSupplie
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly SupplierWriteGuard _guard;
+    private readonly LicenseAttachmentRebinder _rebinder;
 
-    public UpdateSupplierLicenseCommandHandler(IAppDbContext db, ICurrentUser user, SupplierWriteGuard guard)
+    public UpdateSupplierLicenseCommandHandler(IAppDbContext db, ICurrentUser user, SupplierWriteGuard guard, LicenseAttachmentRebinder rebinder)
     {
-        _db = db; _user = user; _guard = guard;
+        _db = db; _user = user; _guard = guard; _rebinder = rebinder;
     }
 
     public async Task<SupplierLicenseDto> Handle(UpdateSupplierLicenseCommand request, CancellationToken ct)
@@ -47,13 +49,21 @@ public class UpdateSupplierLicenseCommandHandler : IRequestHandler<UpdateSupplie
             .FirstOrDefaultAsync(l => l.Id == request.LicenseId && l.SupplierId == supplier.Id, ct)
             ?? throw new NotFoundException("SupplierLicense", request.LicenseId);
 
+        var now = DateTime.UtcNow;
         entity.LicenseNumber = request.Body.LicenseNumber.Trim();
         entity.LicenseType = request.Body.LicenseType.Trim();
         entity.Remarks = string.IsNullOrWhiteSpace(request.Body.Remarks) ? null : request.Body.Remarks.Trim();
         entity.IssueDate = request.Body.IssueDate;
         entity.ExpiryDate = request.Body.ExpiryDate;
         entity.UpdatedBy = _user.UserCode;
-        entity.UpdatedOn = DateTime.UtcNow;
+        entity.UpdatedOn = now;
+
+        // Deferred-upload rebind: re-point files staged during this edit onto the license. Marks the
+        // DocumentUpload rows Modified in the SAME change tracker; the single SaveChangesAsync below commits
+        // the license update + the attachment rebind atomically. Existing attachments are untouched.
+        await _rebinder.RebindAsync(
+            request.Body.StagingKey, request.Body.AttachmentIds, entity.Id, supplier.SeccodeId, now, ct);
+
         await _db.SaveChangesAsync(ct);
 
         return new SupplierLicenseDto(

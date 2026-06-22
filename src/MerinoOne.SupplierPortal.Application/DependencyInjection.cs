@@ -2,6 +2,7 @@ using System.Reflection;
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Behaviours;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Application.Integration.Inbound;
 using MerinoOne.SupplierPortal.Application.Users.Commands;
@@ -31,6 +32,10 @@ public static class DependencyInjection
 
         // SecRight.canWrite enforcement for supplier-originated aggregates (bank/license). Scoped.
         services.AddScoped<SupplierWriteGuard>();
+
+        // Deferred-upload rebind for license attachments — re-points staged doc.DocumentUpload rows onto a
+        // saved SupplierLicense inside the license command's transaction. Scoped (per-request IAppDbContext).
+        services.AddScoped<LicenseAttachmentRebinder>();
         return services;
     }
 }

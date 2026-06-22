@@ -1,5 +1,6 @@
 using FluentValidation;
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Security;
@@ -35,10 +36,11 @@ public class AddSupplierLicenseCommandHandler : IRequestHandler<AddSupplierLicen
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly SupplierWriteGuard _guard;
+    private readonly LicenseAttachmentRebinder _rebinder;
 
-    public AddSupplierLicenseCommandHandler(IAppDbContext db, ICurrentUser user, SupplierWriteGuard guard)
+    public AddSupplierLicenseCommandHandler(IAppDbContext db, ICurrentUser user, SupplierWriteGuard guard, LicenseAttachmentRebinder rebinder)
     {
-        _db = db; _user = user; _guard = guard;
+        _db = db; _user = user; _guard = guard; _rebinder = rebinder;
     }
 
     public async Task<SupplierLicenseDto> Handle(AddSupplierLicenseCommand request, CancellationToken ct)
@@ -48,6 +50,7 @@ public class AddSupplierLicenseCommandHandler : IRequestHandler<AddSupplierLicen
 
         await _guard.EnsureCanWriteAsync(supplier.Id, supplier.SeccodeId, ct);
 
+        var now = DateTime.UtcNow;
         var entity = new SupplierLicense
         {
             Id = Guid.NewGuid(),
@@ -59,9 +62,16 @@ public class AddSupplierLicenseCommandHandler : IRequestHandler<AddSupplierLicen
             ExpiryDate = request.Body.ExpiryDate,
             SeccodeId = supplier.SeccodeId,
             CreatedBy = _user.UserCode,
-            CreatedOn = DateTime.UtcNow,
+            CreatedOn = now,
         };
         _db.SupplierLicenses.Add(entity);
+
+        // Deferred-upload rebind: re-point any files staged under request.Body.StagingKey onto this new
+        // license. Marks the DocumentUpload rows Modified in the SAME change tracker; the single
+        // SaveChangesAsync below commits the license insert + the attachment rebind atomically.
+        await _rebinder.RebindAsync(
+            request.Body.StagingKey, request.Body.AttachmentIds, entity.Id, supplier.SeccodeId, now, ct);
+
         await _db.SaveChangesAsync(ct);
 
         return new SupplierLicenseDto(
