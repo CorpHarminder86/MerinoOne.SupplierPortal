@@ -1,8 +1,8 @@
 using FluentValidation;
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Invoices;
-using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -44,11 +44,11 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
-    private readonly IInforIntegrationService _infor;
+    private readonly IOutboxDispatcher _outbox;
 
-    public CreateInvoiceCommandHandler(IAppDbContext db, ICurrentUser user, IInforIntegrationService infor)
+    public CreateInvoiceCommandHandler(IAppDbContext db, ICurrentUser user, IOutboxDispatcher outbox)
     {
-        _db = db; _user = user; _infor = infor;
+        _db = db; _user = user; _outbox = outbox;
     }
 
     public async Task<InvoiceDetailDto> Handle(CreateInvoiceCommand request, CancellationToken ct)
@@ -163,20 +163,11 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
 
         _db.Invoices.Add(invoice);
 
-        var sync = await _infor.SubmitInvoiceAsync(invoiceId, ct);
-        _db.InforSyncLogs.Add(new InforSyncLog
-        {
-            Id = Guid.NewGuid(),
-            EntityName = "Invoice",
-            EntityId = invoiceId.ToString(),
-            Direction = SyncDirection.Outbound,
-            Status = sync.Success ? SyncStatus.Success : SyncStatus.Failed,
-            IdempotencyKey = sync.IdempotencyKey,
-            SyncedAt = DateTime.UtcNow,
-            ErrorMessage = sync.Success ? null : sync.Message,
-            CreatedBy = _user.UserCode,
-            CreatedOn = DateTime.UtcNow,
-        });
+        // MIGRATED onto the Increment 0 outbox: invoice rows + a Pending OutboxMessage (deterministic key)
+        // commit in ONE transaction; the post-commit dispatcher posts to LN. No LN HTTP call inside this unit
+        // of work (fixes D1), key reused across retries (D2), failures become retryable IntegrationErrors (D3).
+        var key = OutboxKey.For(OutboxEntity.Invoice, body.InvoiceNumber, "post");
+        await _outbox.EnqueueAsync(OutboxTransactionType.InvoicePost, OutboxEntity.Invoice, invoiceId, key, null, ct);
 
         await _db.SaveChangesAsync(ct);
 

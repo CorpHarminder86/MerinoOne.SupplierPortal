@@ -128,4 +128,95 @@ Returns: empty success; 404 if not found; 409 if not in rejectable state.")]
         await _mediator.Send(new RejectSupplierCommand(id, body), ct);
         return Result.Ok(HttpContext.TraceIdentifier);
     }
+
+    // ---------------- Bank details (R4 Module 1) ----------------
+
+    [HttpPost("{id:guid}/bank-details")]
+    [Authorize(Policy = "Supplier.Write")]
+    [EndpointSummary("Add supplier bank detail")]
+    [EndpointDescription(@"Adds a bank account to a supplier. Seccode.canWrite is enforced in the handler (403 on mismatch).
+Body: AddSupplierBankDetailRequest — all six fields required (bankName, bankAddress, accountName, accountNumber, currencyId, ifscCode);
+IFSC must match ^[A-Z]{4}0[A-Z0-9]{6}$ and is required for INR. Returns SupplierBankDetailDto. Requires **Supplier.Write**.")]
+    public async Task<Result<SupplierBankDetailDto>> AddBankDetail(Guid id, [FromBody] AddSupplierBankDetailRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new AddSupplierBankDetailCommand(id, body), ct);
+        return Result<SupplierBankDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("{id:guid}/bank-details/{bankDetailId:guid}")]
+    [Authorize(Policy = "Supplier.Write")]
+    [EndpointSummary("Update supplier bank detail")]
+    [EndpointDescription(@"Updates a supplier bank account. canWrite-gated (403). Returns SupplierBankDetailDto; 404 if not found. Requires **Supplier.Write**.")]
+    public async Task<Result<SupplierBankDetailDto>> UpdateBankDetail(Guid id, Guid bankDetailId, [FromBody] UpdateSupplierBankDetailRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpdateSupplierBankDetailCommand(id, bankDetailId, body), ct);
+        return Result<SupplierBankDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpDelete("{id:guid}/bank-details/{bankDetailId:guid}")]
+    [Authorize(Policy = "Supplier.Write")]
+    [EndpointSummary("Delete supplier bank detail")]
+    [EndpointDescription(@"Soft-deletes a supplier bank account. canWrite-gated (403). Returns empty success; 404 if not found. Requires **Supplier.Write**.")]
+    public async Task<Result> DeleteBankDetail(Guid id, Guid bankDetailId, CancellationToken ct)
+    {
+        await _mediator.Send(new DeleteSupplierBankDetailCommand(id, bankDetailId), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
+
+    // ---------------- Licenses (R4 Module 1) ----------------
+
+    [HttpPost("{id:guid}/licenses")]
+    [Authorize(Policy = "Supplier.Write")]
+    [EndpointSummary("Add supplier license")]
+    [EndpointDescription(@"Adds a license / certification to a supplier. canWrite-gated (403). ExpiryDate must be >= IssueDate.
+Body: AddSupplierLicenseRequest. Returns SupplierLicenseDto. Requires **Supplier.Write**.")]
+    public async Task<Result<SupplierLicenseDto>> AddLicense(Guid id, [FromBody] AddSupplierLicenseRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new AddSupplierLicenseCommand(id, body), ct);
+        return Result<SupplierLicenseDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("{id:guid}/licenses/{licenseId:guid}")]
+    [Authorize(Policy = "Supplier.Write")]
+    [EndpointSummary("Update supplier license")]
+    [EndpointDescription(@"Updates a supplier license. canWrite-gated (403). ExpiryDate must be >= IssueDate. Returns SupplierLicenseDto; 404 if not found. Requires **Supplier.Write**.")]
+    public async Task<Result<SupplierLicenseDto>> UpdateLicense(Guid id, Guid licenseId, [FromBody] UpdateSupplierLicenseRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpdateSupplierLicenseCommand(id, licenseId, body), ct);
+        return Result<SupplierLicenseDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpDelete("{id:guid}/licenses/{licenseId:guid}")]
+    [Authorize(Policy = "Supplier.Write")]
+    [EndpointSummary("Delete supplier license")]
+    [EndpointDescription(@"Soft-deletes a supplier license. canWrite-gated (403). Returns empty success; 404 if not found. Requires **Supplier.Write**.")]
+    public async Task<Result> DeleteLicense(Guid id, Guid licenseId, CancellationToken ct)
+    {
+        await _mediator.Send(new DeleteSupplierLicenseCommand(id, licenseId), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
+
+    [HttpGet("licenses/expiring")]
+    [Authorize(Policy = "Supplier.Read")]
+    [EndpointSummary("Expiring supplier licenses")]
+    [EndpointDescription(@"Licenses expiring within N days (default 90) for the expiry-reminder dashboard. Seccode-scoped:
+suppliers see only their own. Filters / params: **withinDays** (optional). Returns List<SupplierLicenseExpiringDto>. Requires **Supplier.Read**.")]
+    public async Task<Result<List<SupplierLicenseExpiringDto>>> ExpiringLicenses([FromQuery] int withinDays = 90, CancellationToken ct = default)
+    {
+        var data = await _mediator.Send(new GetSupplierLicensesExpiringQuery(withinDays), ct);
+        return Result<List<SupplierLicenseExpiringDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    // ---------------- PO-response mode (R4 Module 1, admin) ----------------
+
+    [HttpPost("{id:guid}/po-response-mode")]
+    [Authorize(Policy = "Supplier.Approve")]
+    [EndpointSummary("Set supplier PO-response mode")]
+    [EndpointDescription(@"Admin sets a supplier's PO-response behaviour (Manual / Auto). Editable post-approval.
+Body: SetPoResponseModeRequest. Returns empty success; 404 if not found; 400 on invalid mode. Requires **Supplier.Approve**.")]
+    public async Task<Result> SetPoResponseMode(Guid id, [FromBody] SetPoResponseModeRequest body, CancellationToken ct)
+    {
+        await _mediator.Send(new SetSupplierPoResponseModeCommand(id, body), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
 }

@@ -1,8 +1,8 @@
 using FluentValidation;
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
-using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -33,11 +33,11 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
-    private readonly IInforIntegrationService _infor;
+    private readonly IOutboxDispatcher _outbox;
 
-    public CreateAsnCommandHandler(IAppDbContext db, ICurrentUser user, IInforIntegrationService infor)
+    public CreateAsnCommandHandler(IAppDbContext db, ICurrentUser user, IOutboxDispatcher outbox)
     {
-        _db = db; _user = user; _infor = infor;
+        _db = db; _user = user; _outbox = outbox;
     }
 
     public async Task<AsnDetailDto> Handle(CreateAsnCommand request, CancellationToken ct)
@@ -102,20 +102,11 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
 
         _db.Asns.Add(asn);
 
-        var sync = await _infor.SubmitAsnAsync(asnId, ct);
-        _db.InforSyncLogs.Add(new InforSyncLog
-        {
-            Id = Guid.NewGuid(),
-            EntityName = "Asn",
-            EntityId = asnId.ToString(),
-            Direction = SyncDirection.Outbound,
-            Status = sync.Success ? SyncStatus.Success : SyncStatus.Failed,
-            IdempotencyKey = sync.IdempotencyKey,
-            SyncedAt = DateTime.UtcNow,
-            ErrorMessage = sync.Success ? null : sync.Message,
-            CreatedBy = _user.UserCode,
-            CreatedOn = DateTime.UtcNow,
-        });
+        // MIGRATED onto the Increment 0 outbox: the ASN rows + a Pending OutboxMessage (deterministic key)
+        // commit in ONE transaction; the post-commit dispatcher posts to LN. No LN HTTP call inside this unit
+        // of work (fixes D1), key reused across retries (D2), failures become retryable IntegrationErrors (D3).
+        var key = OutboxKey.For(OutboxEntity.Asn, asnNumber, "submit");
+        await _outbox.EnqueueAsync(OutboxTransactionType.AsnPost, OutboxEntity.Asn, asnId, key, null, ct);
 
         await _db.SaveChangesAsync(ct);
 

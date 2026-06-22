@@ -19,8 +19,20 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
             .Include(x => x.Verifications)
             .Include(x => x.Addresses)
             .Include(x => x.Contacts)
+            .Include(x => x.BankDetails)
+            .Include(x => x.Licenses)
+            .Include(x => x.Currency)
             .FirstOrDefaultAsync(x => x.Id == request.Id, ct)
             ?? throw new NotFoundException("Supplier", request.Id);
+
+        // Resolve bank-detail currency codes (Currency is ITenantOwned; IgnoreQueryFilters bypasses the company
+        // filter — currencies are tenant-wide reference data, never company-scoped).
+        var bankCurrencyIds = s.BankDetails.Select(b => b.CurrencyId).Distinct().ToList();
+        var currencyCodes = bankCurrencyIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.Currencies.IgnoreQueryFilters()
+                .Where(c => bankCurrencyIds.Contains(c.Id))
+                .ToDictionaryAsync(c => c.Id, c => c.Code, ct);
 
         // Documents — DocumentUpload has no nav back to Supplier (polymorphic owner), query directly.
         var docs = await _db.DocumentUploads
@@ -96,7 +108,24 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
                 new SupplierContactDto(c.Id, c.ContactName, c.Designation, c.Email, c.Phone, c.IsPrimary)).ToList(),
             docs,
             inviteSummary,
-            linkedUsers
+            linkedUsers,
+            s.BankDetails.OrderByDescending(b => b.IsPrimary).ThenBy(b => b.BankName).Select(b =>
+                new SupplierBankDetailDto(
+                    b.Id, b.Seq, b.SupplierId, b.BankName, b.BankAddress, b.AccountName, b.AccountNumber,
+                    b.CurrencyId, currencyCodes.GetValueOrDefault(b.CurrencyId),
+                    b.IfscCode, b.SwiftCode, b.IsPrimary, b.ErpCode, b.CreatedOn)).ToList(),
+            s.Licenses.OrderBy(l => l.ExpiryDate).Select(l =>
+                new SupplierLicenseDto(
+                    l.Id, l.Seq, l.SupplierId, l.LicenseNumber, l.LicenseType, l.Remarks,
+                    l.IssueDate, l.ExpiryDate, l.ErpCode, l.CreatedOn)).ToList(),
+            s.CurrencyId,
+            s.Currency?.Code,
+            s.PaymentTermId,
+            s.PaymentTermCode,
+            s.DeliveryTermId,
+            s.DeliveryTermCode,
+            s.PoResponseMode.ToString(),
+            s.ErpCode
         );
     }
 }

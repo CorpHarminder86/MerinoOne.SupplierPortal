@@ -40,7 +40,18 @@ public record SupplierDetailDto(
     List<SupplierContactDto> Contacts,
     List<SupplierDocumentDto> Documents,
     SupplierInviteSummaryDto? InviteSummary,
-    List<SupplierUserDto> LinkedUsers);
+    List<SupplierUserDto> LinkedUsers,
+    // R4 Module 1 — bank/license collections + term/currency snapshots + PO-response mode + ERP code.
+    List<SupplierBankDetailDto> BankDetails,
+    List<SupplierLicenseDto> Licenses,
+    Guid? CurrencyId,
+    string? CurrencyCode,
+    Guid? PaymentTermId,
+    string? PaymentTermCode,
+    Guid? DeliveryTermId,
+    string? DeliveryTermCode,
+    string PoResponseMode,
+    string? ErpCode);
 
 /// <summary>
 /// A portal user mapped to this supplier (via SupplierUserMap → SecRight). Resolved cross-company /
@@ -113,3 +124,83 @@ public record InviteSupplierRequest(string LegalName, string Email, string Suppl
 public record ApproveSupplierRequest(string? OverrideComment);
 public record RejectSupplierRequest(string Reason);
 public record VerifyNicRequest(string[] Types);
+
+// ============================================================================================
+// R4 Module 1 — Supplier bank details + licenses (BaseAggregateRoot, seccode-protected).
+// ============================================================================================
+
+public record SupplierBankDetailDto(
+    Guid Id,
+    int Seq,
+    Guid SupplierId,
+    string BankName,
+    string BankAddress,
+    string AccountName,
+    string AccountNumber,
+    Guid CurrencyId,
+    string? CurrencyCode,
+    string IfscCode,
+    string? SwiftCode,
+    bool IsPrimary,
+    string? ErpCode,
+    DateTime CreatedOn);
+
+public record AddSupplierBankDetailRequest(
+    string BankName,
+    string BankAddress,
+    string AccountName,
+    string AccountNumber,
+    Guid CurrencyId,
+    string IfscCode,
+    string? SwiftCode = null,
+    bool IsPrimary = false);
+
+public record UpdateSupplierBankDetailRequest(
+    string BankName,
+    string BankAddress,
+    string AccountName,
+    string AccountNumber,
+    Guid CurrencyId,
+    string IfscCode,
+    string? SwiftCode,
+    bool IsPrimary);
+
+public record SupplierLicenseDto(
+    Guid Id,
+    int Seq,
+    Guid SupplierId,
+    string LicenseNumber,
+    string LicenseType,
+    string? Remarks,
+    DateOnly? IssueDate,
+    DateOnly? ExpiryDate,
+    string? ErpCode,
+    DateTime CreatedOn);
+
+public record AddSupplierLicenseRequest(
+    string LicenseNumber,
+    string LicenseType,
+    string? Remarks = null,
+    DateOnly? IssueDate = null,
+    DateOnly? ExpiryDate = null);
+
+public record UpdateSupplierLicenseRequest(
+    string LicenseNumber,
+    string LicenseType,
+    string? Remarks,
+    DateOnly? IssueDate,
+    DateOnly? ExpiryDate);
+
+/// <summary>Expiring-license projection for the dashboard reminder query (carries supplier identity).</summary>
+public record SupplierLicenseExpiringDto(
+    Guid Id,
+    Guid SupplierId,
+    string SupplierCode,
+    string SupplierLegalName,
+    string LicenseNumber,
+    string LicenseType,
+    DateOnly? ExpiryDate,
+    int? DaysToExpiry);
+
+/// <summary>Admin sets the supplier's PO-response behaviour (Manual / Auto).</summary>
+public record SetPoResponseModeRequest(string PoResponseMode);

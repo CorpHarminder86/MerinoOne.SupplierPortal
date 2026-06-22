@@ -24,12 +24,18 @@ public class RetryIntegrationErrorCommandHandler : IRequestHandler<RetryIntegrat
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly IInforIntegrationService _infor;
+    private readonly IOutboundIdempotencyContext _idempotency;
 
-    public RetryIntegrationErrorCommandHandler(IAppDbContext db, ICurrentUser user, IInforIntegrationService infor)
+    public RetryIntegrationErrorCommandHandler(
+        IAppDbContext db,
+        ICurrentUser user,
+        IInforIntegrationService infor,
+        IOutboundIdempotencyContext idempotency)
     {
         _db = db;
         _user = user;
         _infor = infor;
+        _idempotency = idempotency;
     }
 
     public async Task<Unit> Handle(RetryIntegrationErrorCommand request, CancellationToken ct)
@@ -49,17 +55,26 @@ public class RetryIntegrationErrorCommandHandler : IRequestHandler<RetryIntegrat
         var direction = originating?.Direction ?? SyncDirection.Outbound;
         var payloadRef = originating?.PayloadRef; // e.g. "supplier:<guid>" — used to pick the target row
 
+        // Deterministic key (D2 fix): replay the ORIGINATING idempotency key verbatim — NEVER mint a fresh GUID
+        // — so the ERP dedupes the retry. The outbox dispatcher stamps this key on the Failed SyncLog it writes.
+        var deterministicKey = originating?.IdempotencyKey;
+
         err.RetryCount += 1;
         err.LastRetriedAt = DateTime.UtcNow;
 
         InforSyncResult result;
         try
         {
+            if (!string.IsNullOrEmpty(deterministicKey)) _idempotency.Set(deterministicKey);
             result = await DispatchAsync(entityName, payloadRef, ct);
         }
         catch (Exception ex)
         {
-            result = new InforSyncResult(false, null, ex.Message);
+            result = new InforSyncResult(false, deterministicKey, ex.Message);
+        }
+        finally
+        {
+            _idempotency.Clear();
         }
 
         // EntityId: the single entity GUID encoded in the payloadRef ("<target>:<guid>"), when present.
@@ -73,7 +88,8 @@ public class RetryIntegrationErrorCommandHandler : IRequestHandler<RetryIntegrat
             Status        = result.Success ? SyncStatus.Success : SyncStatus.Failed,
             PayloadRef    = payloadRef,
             RetryCount    = err.RetryCount,
-            IdempotencyKey = result.IdempotencyKey ?? Guid.NewGuid().ToString("N"),
+            // Reuse the deterministic key on the retry log row too, so retry history stays correlatable.
+            IdempotencyKey = result.IdempotencyKey ?? deterministicKey ?? Guid.NewGuid().ToString("N"),
             SyncedAt      = DateTime.UtcNow,
             ErrorMessage  = result.Success ? null : result.Message
         };
@@ -114,6 +130,7 @@ public class RetryIntegrationErrorCommandHandler : IRequestHandler<RetryIntegrat
             ("PurchaseOrder", Guid id)   => await _infor.AcknowledgePurchaseOrderAsync(id, ct),
             ("Invoice", Guid id)         => await _infor.SubmitInvoiceAsync(id, ct),
             ("Asn", Guid id)             => await _infor.SubmitAsnAsync(id, ct),
+            ("SupplierChange", Guid id)  => await _infor.SubmitSupplierChangeAsync(id, ct),
             _                            => new InforSyncResult(false, null,
                                               $"No retry handler for entity '{entityName}'" +
                                               (payloadRef is null ? " (no payloadRef)." : "."))

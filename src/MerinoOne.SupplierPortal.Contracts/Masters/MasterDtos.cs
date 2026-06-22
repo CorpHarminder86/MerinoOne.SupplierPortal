@@ -29,6 +29,19 @@ public record PaymentTermDto(
     bool IsActive,
     DateTime CreatedOn);
 
+// ---- Tax (R4 Module 6) — company-shared (ICompanyScoped) master, cloned from DeliveryTerm. ----
+public record TaxDto(
+    Guid Id,
+    int Seq,
+    string Code,
+    string Description,
+    decimal? TaxRate,
+    bool IsActive,
+    DateTime CreatedOn);
+
+public record CreateTaxRequest(string Code, string Description, decimal? TaxRate = null, bool IsActive = true);
+public record UpdateTaxRequest(string Description, decimal? TaxRate, bool IsActive);
+
 public record ItemDto(
     Guid Id,
     int Seq,
