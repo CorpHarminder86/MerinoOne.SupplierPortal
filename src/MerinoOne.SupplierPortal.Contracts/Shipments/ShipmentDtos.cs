@@ -68,8 +68,16 @@ public record AsnPurchaseOrderDto(
     string PoNumber,
     string? CurrencyCode);
 
+// R4 (2026-06-23) — Serial/Lot capture. One lot captured against a lot-controlled ASN line (input shape).
+public record AsnLineLotInput(string LotNo, decimal Qty, DateOnly? ExpiryDate = null);
+
+// R4 (2026-06-23) — Serial/Lot capture. One lot read back from a lot-controlled ASN line (carries ErpCode).
+public record AsnLineLotDto(string LotNo, decimal Qty, DateOnly? ExpiryDate, string? ErpCode);
+
 // R4 (2026-06-22) — Addendum A4: PositionNo + SequenceNo (snapshot from the source PO line) shown while
 // building the ASN. PoPositionNo retained for back-compat (= PositionNo). PoNumber added (multi-PO lines).
+// R4 (2026-06-23) — Serial/Lot capture: SerialNumbers (serialized items) + Lots (lot-controlled items), at
+// most one populated per line (serialized XOR lot-controlled). Trailing optional so existing callers stay valid.
 public record AsnLineDto(
     Guid Id,
     Guid PurchaseOrderLineId,
@@ -84,7 +92,9 @@ public record AsnLineDto(
     decimal OrderQty,
     decimal ShippedQty,
     string? BatchNumber,
-    DateTime? ExpiryDate);
+    DateTime? ExpiryDate,
+    IReadOnlyList<string>? SerialNumbers = null,
+    IReadOnlyList<AsnLineLotDto>? Lots = null);
 
 // R4 (2026-06-22) — Module 3: ASN attachments reuse the existing Contracts.Suppliers.DocumentAttachmentDto
 // (structurally identical; ownerEntityType='Asn', DocumentType.AsnAttachment). No duplicate type introduced
@@ -115,11 +125,16 @@ public record CreateAsnRequest(
     string? Notes,
     List<CreateAsnLineRequest> Lines);
 
+// R4 (2026-06-23) — Serial/Lot capture: Serials (serialized item) + Lots (lot-controlled item) — at most one
+// populated per line. The other is ignored by the handler based on the line's Item flag. Used by BOTH Create
+// and Update (UpdateAsnRequest.Lines is List<CreateAsnLineRequest>). Trailing optional → source-compatible.
 public record CreateAsnLineRequest(
     Guid PurchaseOrderLineId,
     decimal ShippedQty,
     string? BatchNumber,
-    DateTime? ExpiryDate);
+    DateTime? ExpiryDate,
+    List<string>? Serials = null,
+    List<AsnLineLotInput>? Lots = null);
 
 public record UpdateAsnRequest(
     DateTime ExpectedDeliveryDate,

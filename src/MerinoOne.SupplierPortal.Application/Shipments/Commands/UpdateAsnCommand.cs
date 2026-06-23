@@ -29,6 +29,9 @@ public class UpdateAsnCommandValidator : AbstractValidator<UpdateAsnCommand>
         {
             line.RuleFor(l => l.PurchaseOrderLineId).NotEmpty();
             line.RuleFor(l => l.ShippedQty).GreaterThan(0).WithMessage("ShippedQty must be greater than 0.");
+            // R4 (2026-06-23) — reject duplicate serials / lot numbers within a line at the input layer (see CreateAsn).
+            line.RuleFor(l => l.Serials).Must(AsnLineRules.SerialsDistinct).WithMessage("Serial numbers must be unique within a line.");
+            line.RuleFor(l => l.Lots).Must(AsnLineRules.LotNosDistinct).WithMessage("Lot numbers must be unique within a line.");
         });
     }
 }
@@ -68,6 +71,18 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
                 ["lines"] = new[] { $"PurchaseOrderLineId(s) not on a PO for this supplier: {string.Join(", ", invalid)}" }
             });
 
+        // R4 (2026-06-23) — Serial/Lot capture: the Item control flags (serialized XOR lot-controlled) decide which
+        // child rows to persist per replaced line. Resolve by **ItemCode within the ASN's company** (NOT ItemId —
+        // the PO line is ERP-fed and routinely has a null ItemId; Item natural key = (TenantEntityId, Code)).
+        // IgnoreQueryFilters — Item is company-scoped.
+        var itemCompany = asn.TenantEntityId;
+        var lineItemCodes = poLines.Values.Select(l => l.ItemCode).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
+        var itemFlagRows = await _db.Items.IgnoreQueryFilters()
+            .Where(i => i.TenantEntityId == itemCompany && !i.IsDeleted && lineItemCodes.Contains(i.Code))
+            .Select(i => new { i.Code, i.Id, i.IsSerialized, i.IsLotControlled })
+            .ToListAsync(ct);
+        var itemFlags = itemFlagRows.ToDictionary(i => i.Code, i => i, StringComparer.OrdinalIgnoreCase);
+
         // Header fields.
         asn.ExpectedDeliveryDate = body.ExpectedDeliveryDate;
         asn.TimeWindow = body.TimeWindow;
@@ -82,17 +97,31 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
 
         // Replace lines (soft-delete the old, insert the new — re-snapshotting position/sequence).
         var existingLines = await _db.AsnLines.Where(l => l.AsnId == asn.Id).ToListAsync(ct);
+
+        // R4 (2026-06-23) — Serial/Lot capture: also replace the children of the lines being removed. Soft-delete
+        // the existing serial/lot rows for the old lines so the new capture set fully supersedes the old one.
+        var existingLineIds = existingLines.Select(l => l.Id).ToList();
+        if (existingLineIds.Count > 0)
+        {
+            var oldSerials = await _db.AsnLineSerials.Where(s => existingLineIds.Contains(s.AsnLineId)).ToListAsync(ct);
+            _db.AsnLineSerials.RemoveRange(oldSerials);   // soft-delete via interceptor
+            var oldLots = await _db.AsnLineLots.Where(l => existingLineIds.Contains(l.AsnLineId)).ToListAsync(ct);
+            _db.AsnLineLots.RemoveRange(oldLots);         // soft-delete via interceptor
+        }
+
         _db.AsnLines.RemoveRange(existingLines);   // soft-delete via interceptor
 
         foreach (var line in body.Lines)
         {
             var pol = poLines[line.PurchaseOrderLineId];
-            _db.AsnLines.Add(new AsnLine
+            // Resolve the Item by code (the PO line's ItemId is often null) — also backfills AsnLine.ItemId.
+            var flags = !string.IsNullOrWhiteSpace(pol.ItemCode) && itemFlags.TryGetValue(pol.ItemCode, out var f) ? f : null;
+            var asnLine = new AsnLine
             {
                 Id = Guid.NewGuid(),
                 AsnId = asn.Id,
                 PurchaseOrderLineId = line.PurchaseOrderLineId,
-                ItemId = pol.ItemId,
+                ItemId = pol.ItemId ?? flags?.Id,
                 ShippedQty = line.ShippedQty,
                 BatchNumber = line.BatchNumber,
                 ExpiryDate = line.ExpiryDate,
@@ -100,7 +129,38 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
                 SequenceNo = pol.SequenceNo,
                 CreatedBy = _user.UserCode,
                 CreatedOn = now,
-            });
+            };
+
+            // R4 (2026-06-23) — Serial/Lot children for the new line. Serials only for a serialized item, lots
+            // only for a lot-controlled item (Item XOR guard); the other side is ignored. Submit re-validates.
+            if (flags?.IsSerialized == true && line.Serials is { Count: > 0 })
+            {
+                foreach (var serial in line.Serials.Where(s => !string.IsNullOrWhiteSpace(s)))
+                    asnLine.Serials.Add(new AsnLineSerial
+                    {
+                        Id = Guid.NewGuid(),
+                        AsnLineId = asnLine.Id,
+                        SerialNumber = serial.Trim(),
+                        CreatedBy = _user.UserCode,
+                        CreatedOn = now,
+                    });
+            }
+            else if (flags?.IsLotControlled == true && line.Lots is { Count: > 0 })
+            {
+                foreach (var lot in line.Lots.Where(l => !string.IsNullOrWhiteSpace(l.LotNo)))
+                    asnLine.Lots.Add(new AsnLineLot
+                    {
+                        Id = Guid.NewGuid(),
+                        AsnLineId = asnLine.Id,
+                        LotNo = lot.LotNo.Trim(),
+                        Qty = lot.Qty,
+                        ExpiryDate = lot.ExpiryDate,
+                        CreatedBy = _user.UserCode,
+                        CreatedOn = now,
+                    });
+            }
+
+            _db.AsnLines.Add(asnLine);
         }
 
         // Rebuild the junction from the new lines' distinct POs.

@@ -11,18 +11,27 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Infor;
 public class MockInforIntegrationService : IInforIntegrationService
 {
     private readonly IOutboundIdempotencyContext _idempotency;
+    private readonly IAppDbContext _db;
 
-    public MockInforIntegrationService(IOutboundIdempotencyContext idempotency) => _idempotency = idempotency;
+    public MockInforIntegrationService(IOutboundIdempotencyContext idempotency, IAppDbContext db)
+    {
+        _idempotency = idempotency;
+        _db = db;
+    }
 
-    private InforSyncResult Ok(string action, Guid id)
-        => new(true, _idempotency.CurrentKey ?? Guid.NewGuid().ToString("N"), $"[mock] {action} for {id}");
+    private InforSyncResult Ok(string action, Guid id, string? payloadJson = null)
+        => new(true, _idempotency.CurrentKey ?? Guid.NewGuid().ToString("N"), $"[mock] {action} for {id}", payloadJson);
 
     public Task<InforSyncResult> SyncSupplierAsync(Guid supplierId, CancellationToken ct = default) => Task.FromResult(Ok("SyncSupplier", supplierId));
     public Task<InforSyncResult> AcknowledgePurchaseOrderAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("AckPO", id));
     public Task<InforSyncResult> AcceptPurchaseOrderAsync(Guid id, DateTime? proposed, CancellationToken ct = default) => Task.FromResult(Ok("AcceptPO", id));
     public Task<InforSyncResult> RejectPurchaseOrderAsync(Guid id, string reason, CancellationToken ct = default) => Task.FromResult(Ok("RejectPO", id));
     public Task<InforSyncResult> SubmitInvoiceAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("SubmitInvoice", id));
-    public Task<InforSyncResult> SubmitAsnAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("SubmitAsn", id));
+
+    // R4 (2026-06-23) — build the SAME ASN payload Live posts (via the shared builder) so dev/Mock submits land a
+    // viewable InforSyncLog.PayloadJson the user can open and share with the LN team for Q-LN-serial confirmation.
+    public async Task<InforSyncResult> SubmitAsnAsync(Guid id, CancellationToken ct = default)
+        => Ok("SubmitAsn", id, await AsnOutboundPayloadBuilder.BuildJsonAsync(_db, id, ct));
 
     // R4 Module 2 — supplier change-request push. Deterministic OK; the dispatcher's per-line PushStatus rollup
     // and the InforSyncLog (EntityName='SupplierChange', PayloadRef='SupplierChange:<guid>') are written by the

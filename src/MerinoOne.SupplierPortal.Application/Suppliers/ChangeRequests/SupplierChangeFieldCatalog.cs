@@ -30,7 +30,7 @@ public static class SupplierChangeFieldCatalog
             },
             [ChangeTargetEntity.Contact] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                "ContactName", "Designation", "Email", "Phone", "IsPrimary",
+                "ContactName", "Designation", "Email", "Phone", "IsPrimary", "AddressId",
             },
             [ChangeTargetEntity.Bank] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {

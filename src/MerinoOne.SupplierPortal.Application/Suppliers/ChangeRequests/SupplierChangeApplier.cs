@@ -132,6 +132,18 @@ public sealed class SupplierChangeApplier
             {
                 var a = await _db.SupplierAddresses.FirstOrDefaultAsync(x => x.Id == line.TargetEntityId && x.SupplierId == s.Id, ct)
                         ?? throw new NotFoundException("SupplierAddress", line.TargetEntityId ?? Guid.Empty);
+
+                // R4 (2026-06-23) — the DB FK SupplierContact.AddressId is NoAction (no cascade), so null out any
+                // of this supplier's contacts that reference the address being removed — avoids a dangling link.
+                var linkedContacts = await _db.SupplierContacts
+                    .Where(x => x.SupplierId == s.Id && x.AddressId == a.Id)
+                    .ToListAsync(ct);
+                foreach (var lc in linkedContacts)
+                {
+                    lc.AddressId = null;
+                    Touch(lc, now);
+                }
+
                 _db.SupplierAddresses.Remove(a);   // soft-delete via the audit interceptor (stamps IsDeleted/DeletedBy/On).
                 break;
             }
@@ -146,6 +158,9 @@ public sealed class SupplierChangeApplier
             case ChangeOperation.Add:
             {
                 var p = Payload(line);
+                // R4 (2026-06-23) — optional address link. Accept the addressId only when it resolves to an
+                // existing non-deleted address of THIS supplier; otherwise leave null (safe, no dangling FK).
+                var addressId = await ResolveSupplierAddressIdAsync(s.Id, GetGuid(p, "addressId"), ct);
                 var entity = new SupplierContact
                 {
                     Id = Guid.NewGuid(),
@@ -155,6 +170,7 @@ public sealed class SupplierChangeApplier
                     Email = (Get(p, "email") ?? string.Empty).ToLowerInvariant(),
                     Phone = Get(p, "phone"),
                     IsPrimary = GetBool(p, "isPrimary"),
+                    AddressId = addressId,
                     CreatedBy = Actor(),
                     CreatedOn = now,
                 };
@@ -175,6 +191,12 @@ public sealed class SupplierChangeApplier
                     case "email":       c.Email = (v ?? c.Email).ToLowerInvariant(); break;
                     case "phone":       c.Phone = v; break;
                     case "isprimary":   c.IsPrimary = ParseBool(v); break;
+                    case "addressid":
+                        // R4 (2026-06-23) — null clears the link; a GUID is accepted only when it resolves to an
+                        // existing non-deleted address of this supplier (else cleared to avoid a dangling FK).
+                        c.AddressId = v is null ? null
+                            : await ResolveSupplierAddressIdAsync(s.Id, Guid.TryParse(v, out var aid) ? aid : null, ct);
+                        break;
                     default: throw new ValidationException(Error($"'{field}' is not an editable Contact field."));
                 }
                 Touch(c, now);
@@ -332,6 +354,18 @@ public sealed class SupplierChangeApplier
     }
 
     // ── helpers ────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// R4 (2026-06-23) — returns <paramref name="addressId"/> only when it names an existing, non-deleted address
+    /// of this supplier; otherwise null. Keeps the contact↔address link valid (the DB FK is NoAction).
+    /// </summary>
+    private async Task<Guid?> ResolveSupplierAddressIdAsync(Guid supplierId, Guid? addressId, CancellationToken ct)
+    {
+        if (addressId is not { } id || id == Guid.Empty) return null;
+        var exists = await _db.SupplierAddresses.AnyAsync(a => a.Id == id && a.SupplierId == supplierId, ct);
+        return exists ? id : null;
+    }
+
     private async Task DemoteOtherPrimaryBanksAsync(Guid supplierId, Guid keepId, CancellationToken ct)
     {
         var others = await _db.SupplierBankDetails

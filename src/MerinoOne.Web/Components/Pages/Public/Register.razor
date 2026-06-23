@@ -263,6 +263,21 @@ else
                             <input class="rz-textbox @(InvalidClass(kPhone))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="Phone" @bind="c.Phone" @bind:after="() => Clear(kPhone)" />
                             @ErrChip(kPhone)
                         </div>
+                        @* R4 (2026-06-23) — optionally link this contact to one of the addresses captured in step 3
+                           (value = the 0-based index; resolved server-side against the registration request's addresses). *@
+                        <div style="grid-column:1 / span 2;">
+                            <label style="font-size:11px;color:var(--mer-ink-500);">Linked address</label>
+                            <select class="rz-dropdown" style="width:100%;padding:6px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);font-size:12px;"
+                                    @onchange='@(e => c.AddressIndex = int.TryParse(e.Value?.ToString(), out var ai) ? ai : (int?)null)'>
+                                <option value="" selected="@(c.AddressIndex is null)">— none —</option>
+                                @for (int ai = 0; ai < addresses.Count; ai++)
+                                {
+                                    var aIdx = ai;
+                                    var addr = addresses[aIdx];
+                                    <option value="@aIdx" selected="@(c.AddressIndex == aIdx)">@AddressLabel(aIdx, addr)</option>
+                                }
+                            </select>
+                        </div>
                         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
                             <input type="checkbox" checked="@c.IsPrimary" @onchange='@((ChangeEventArgs e) => { SetPrimary(idx, (bool)(e.Value ?? false)); Clear("con.primary"); })' />
                             Primary contact
@@ -725,6 +740,14 @@ else
     private void AddContact() => contacts.Add(new ContactRow());
     private void AddLicense() => licenseRows.Add(new LicenseRow());
 
+    // Label an address for the contact→address-link dropdown: "AddressType — City" (falls back to its index).
+    private static string AddressLabel(int idx, AddressRow a)
+    {
+        var type = string.IsNullOrWhiteSpace(a.AddressType) ? "Address" : a.AddressType;
+        var city = string.IsNullOrWhiteSpace(a.City) ? $"#{idx + 1}" : a.City;
+        return $"{type} — {city}";
+    }
+
     // Upload a license attachment anonymously (owner=PendingInvite, DocumentType=License); the register
     // handler rebinds it onto the created SupplierLicense via the doc-id carried in the submit payload.
     private async Task OnLicenseFile(LicenseRow row, InputFileChangeEventArgs e)
@@ -797,7 +820,9 @@ else
                 designation = string.IsNullOrWhiteSpace(c.Designation) ? null : c.Designation.Trim(),
                 email = c.Email.Trim(),
                 phone = string.IsNullOrWhiteSpace(c.Phone) ? null : c.Phone.Trim(),
-                isPrimary = c.IsPrimary
+                isPrimary = c.IsPrimary,
+                // R4 (2026-06-23) — contact→address link (0-based index into addresses); drop if out of range.
+                addressIndex = (c.AddressIndex is int ai && ai >= 0 && ai < addresses.Count) ? ai : (int?)null
             }).ToList(),
             documents = DocSlots.Where(s => s.File != null).Select(s => new
             {
@@ -957,6 +982,8 @@ else
         public string? Phone { get; set; }
         public string? Designation { get; set; }
         public bool IsPrimary { get; set; }
+        // R4 (2026-06-23) — 0-based index into `addresses` for the optional contact→address link; null = none.
+        public int? AddressIndex { get; set; }
     }
 
     private class LicenseRow

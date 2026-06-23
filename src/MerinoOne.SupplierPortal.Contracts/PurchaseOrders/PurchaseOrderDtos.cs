@@ -67,7 +67,13 @@ public record PurchaseOrderLineDto(
     DateTime? DeliveryDate,
     string? TaxCode,
     string? TaxDescription = null,
-    Guid? TaxId = null);
+    Guid? TaxId = null,
+    // R4 (2026-06-23) — Serial/Lot capture support. ItemId links the PO line to the inv.Item master; the two
+    // flags (left-joined from that Item) tell the ASN wizard which capture tab to show. serialized XOR
+    // lot-controlled per item — at most one is true. Default false when the line has no resolvable Item.
+    Guid? ItemId = null,
+    bool IsSerialized = false,
+    bool IsLotControlled = false);
 
 public record AcknowledgePoRequest(string? Notes = null);
 public record AcceptPoRequest(DateTime? ProposedDate, string? Notes = null);

@@ -70,13 +70,16 @@ public class LiveInforIntegrationService : IInforIntegrationService
     public async Task<InforSyncResult> SyncSupplierAsync(Guid supplierId, CancellationToken ct = default)
     {
         var supplier = await _db.Suppliers
+            .Include(s => s.Addresses)
+            .Include(s => s.Contacts)
             .Include(s => s.BankDetails)
             .Include(s => s.Licenses)
             .FirstOrDefaultAsync(s => s.Id == supplierId, ct);
         if (supplier is null) return Fail("Supplier", $"Supplier {supplierId} not found.");
 
-        // R4 Module 1 — extended supplier payload: carries bank details, licenses, term/currency codes,
-        // poResponseMode and erpCode. TODO: confirm the real LN supplier (business partner) field map.
+        // R4 Module 1 — extended supplier payload: carries addresses, contacts, bank details, licenses,
+        // term/currency codes, poResponseMode and erpCode. TODO: confirm the real LN supplier (business partner)
+        // field map — including the addresses[] / contacts[] child field names.
         var payload = new
         {
             SupplierCode = supplier.SupplierCode,
@@ -89,6 +92,28 @@ public class LiveInforIntegrationService : IInforIntegrationService
             PaymentTermCode = supplier.PaymentTermCode,
             DeliveryTermCode = supplier.DeliveryTermCode,
             PoResponseMode = supplier.PoResponseMode.ToString(),
+            Addresses = supplier.Addresses.Select(a => new
+            {
+                a.AddressType,
+                Line1 = a.AddressLine1,
+                Line2 = a.AddressLine2,
+                a.Area,
+                a.City,
+                a.State,
+                Pincode = a.Pincode,
+                a.Country,
+                a.ErpCode,
+            }).ToList(),
+            Contacts = supplier.Contacts.Select(c => new
+            {
+                c.ContactName,
+                c.Designation,
+                c.Email,
+                c.Phone,
+                c.IsPrimary,
+                c.AddressId,
+                c.ErpCode,
+            }).ToList(),
             BankDetails = supplier.BankDetails.Select(b => new
             {
                 b.BankName,
@@ -178,18 +203,11 @@ public class LiveInforIntegrationService : IInforIntegrationService
 
     public async Task<InforSyncResult> SubmitAsnAsync(Guid asnId, CancellationToken ct = default)
     {
-        var asn = await _db.Asns.FindAsync(new object?[] { asnId }, ct);
-        if (asn is null) return Fail("Asn", $"ASN {asnId} not found.");
-
-        // TODO: confirm the real LN advance-shipment-notice field map (incl. lines if required).
-        var payload = new
-        {
-            AsnNumber = asn.AsnNumber,
-            ExpectedDeliveryDate = asn.ExpectedDeliveryDate.ToString("o"),
-            CarrierName = asn.CarrierName,
-            TrackingNumber = asn.TrackingNumber,
-            VehicleNumber = asn.VehicleNumber,
-        };
+        // R4 (2026-06-23) — the ASN body (header + lines[] with serials[]/lots[]) is built by the shared
+        // AsnOutboundPayloadBuilder so Mock and Live POST/log the identical canonical payload. The serialized
+        // JSON SendAsync sends is surfaced on the result so the dispatcher persists it to InforSyncLog.PayloadJson.
+        var payload = await AsnOutboundPayloadBuilder.BuildPayloadAsync(_db, asnId, ct);
+        if (payload is null) return Fail("Asn", $"ASN {asnId} not found.");
         return await SendAsync("Asn", EndpointPaths.Asn, payload, ct);
     }
 
@@ -323,18 +341,23 @@ public class LiveInforIntegrationService : IInforIntegrationService
 
     private async Task<InforSyncResult> SendAsync(string entity, string relativePath, object payload, CancellationToken ct)
     {
+        // Serialize once, up front, so the canonical "what we sent" body is captured on EVERY outcome (success,
+        // ERP-reject, transport error, and even pre-flight config failures) and the dispatcher can persist it to
+        // InforSyncLog.PayloadJson regardless of whether the POST actually left the building.
+        var bodyJson = JsonSerializer.Serialize(payload, JsonOpts);
+
         var conn = await _connections.GetCurrentAsync(ct);
         if (conn is null || !conn.IsActive)
-            return Fail(entity, "Infor connection is not configured (or is disabled) for this tenant.");
+            return Fail(entity, "Infor connection is not configured (or is disabled) for this tenant.", bodyJson);
         if (!conn.IsConfigured)
-            return Fail(entity, "Infor connection is incomplete — set Access Token URL, ION API Base URL and Company in Settings.");
+            return Fail(entity, "Infor connection is incomplete — set Access Token URL, ION API Base URL and Company in Settings.", bodyJson);
 
         var token = await _tokens.GetAccessTokenAsync(ct);
         if (string.IsNullOrEmpty(token))
-            return Fail(entity, "Could not obtain an Infor access token — re-test the connection in Settings.");
+            return Fail(entity, "Could not obtain an Infor access token — re-test the connection in Settings.", bodyJson);
 
         if (!TryBuildUrl(conn.ApiBaseUrl, relativePath, out var url))
-            return Fail(entity, $"Could not build a valid endpoint URL from ION API Base URL '{conn.ApiBaseUrl}'.");
+            return Fail(entity, $"Could not build a valid endpoint URL from ION API Base URL '{conn.ApiBaseUrl}'.", bodyJson);
 
         // Replay the deterministic outbox key (reused verbatim across retries so LN dedupes — fixes D2). Only
         // legacy direct calls with no ambient key fall back to a fresh GUID.
@@ -348,28 +371,28 @@ public class LiveInforIntegrationService : IInforIntegrationService
             if (!string.IsNullOrWhiteSpace(conn.PrimaryCompany))
                 req.Headers.TryAddWithoutValidation("X-Infor-LnCompany", conn.PrimaryCompany);
             req.Headers.TryAddWithoutValidation("X-Idempotency-Key", idempotencyKey);
-            req.Content = new StringContent(JsonSerializer.Serialize(payload, JsonOpts), Encoding.UTF8, "application/json");
+            req.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
 
             using var resp = await Http.SendAsync(req, ct);
             if (resp.IsSuccessStatusCode)
-                return new InforSyncResult(true, idempotencyKey, $"{entity} accepted by Infor (HTTP {(int)resp.StatusCode}).");
+                return new InforSyncResult(true, idempotencyKey, $"{entity} accepted by Infor (HTTP {(int)resp.StatusCode}).", bodyJson);
 
             var body = await resp.Content.ReadAsStringAsync(ct);
-            return Fail(entity, $"Infor rejected the request (HTTP {(int)resp.StatusCode}): {Truncate(body, 300)}");
+            return Fail(entity, $"Infor rejected the request (HTTP {(int)resp.StatusCode}): {Truncate(body, 300)}", bodyJson);
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            return Fail(entity, "Infor request timed out.");
+            return Fail(entity, "Infor request timed out.", bodyJson);
         }
         catch (HttpRequestException ex)
         {
             _logger.LogWarning(ex, "Infor {Entity} request failed (transport).", entity);
-            return Fail(entity, $"Could not reach Infor: {ex.Message}");
+            return Fail(entity, $"Could not reach Infor: {ex.Message}", bodyJson);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Infor {Entity} request failed.", entity);
-            return Fail(entity, ex.Message);
+            return Fail(entity, ex.Message, bodyJson);
         }
     }
 
@@ -384,7 +407,7 @@ public class LiveInforIntegrationService : IInforIntegrationService
         return Uri.TryCreate(url, UriKind.Absolute, out _);
     }
 
-    private static InforSyncResult Fail(string entity, string message) => new(false, null, $"[{entity}] {message}");
+    private static InforSyncResult Fail(string entity, string message, string? payloadJson = null) => new(false, null, $"[{entity}] {message}", payloadJson);
 
     private static string Truncate(string s, int max) => string.IsNullOrEmpty(s) || s.Length <= max ? s ?? string.Empty : s[..max];
 }

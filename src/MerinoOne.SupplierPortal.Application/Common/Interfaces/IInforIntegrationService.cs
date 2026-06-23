@@ -36,4 +36,10 @@ public interface IOutboxDispatcher
         CancellationToken ct = default);
 }
 
-public record InforSyncResult(bool Success, string? IdempotencyKey, string? Message);
+/// <summary>
+/// Outcome of an outbound ERP call. <paramref name="RequestPayloadJson"/> (additive, optional) carries the
+/// canonical "what we sent" body the service built for the POST — both Mock and Live populate it so the
+/// <see cref="OutboxDispatcherWorker"/> can persist it to <c>InforSyncLog.PayloadJson</c> and the SyncLog
+/// payload viewer can render it. Null for routes that do not build a payload.
+/// </summary>
+public record InforSyncResult(bool Success, string? IdempotencyKey, string? Message, string? RequestPayloadJson = null);

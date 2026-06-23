@@ -133,16 +133,47 @@
                 <tbody>
                 @foreach (var ln in detail.Lines)
                 {
+                    var line = ln;
+                    var hasSerials = line.SerialNumbers is { Count: > 0 };
+                    var hasLots = line.Lots is { Count: > 0 };
                     <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                        <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PoNumber</td>
-                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.PositionNo ?? ln.PoPositionNo)</td>
-                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.SequenceNo?.ToString() ?? "—")</td>
-                        <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
-                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
-                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.ShippedQty.ToString("0.###")</td>
-                        <td style="padding:6px 4px;">@(string.IsNullOrEmpty(ln.BatchNumber) ? "—" : ln.BatchNumber)</td>
-                        <td style="padding:6px 4px;font-family:Inter,monospace;">@(ln.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                        <td style="padding:6px 4px;font-family:Inter,monospace;">@line.PoNumber</td>
+                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.PositionNo ?? line.PoPositionNo)</td>
+                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.SequenceNo?.ToString() ?? "—")</td>
+                        <td style="padding:6px 4px;font-family:Inter,monospace;">@line.ItemCode</td>
+                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.OrderQty.ToString("0.###")</td>
+                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQty.ToString("0.###")</td>
+                        <td style="padding:6px 4px;">@(string.IsNullOrEmpty(line.BatchNumber) ? "—" : line.BatchNumber)</td>
+                        <td style="padding:6px 4px;font-family:Inter,monospace;">@(line.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                     </tr>
+                    @if (hasSerials)
+                    {
+                        <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                            <td colspan="8" style="padding:4px 4px 10px 16px;">
+                                <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:4px;">Serials (@line.SerialNumbers!.Count)</div>
+                                <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                                    @foreach (var s in line.SerialNumbers!)
+                                    {
+                                        <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-ink-50);border:1px solid var(--mer-line);border-radius:4px;padding:2px 6px;">@s</span>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                    @if (hasLots)
+                    {
+                        <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                            <td colspan="8" style="padding:4px 4px 10px 16px;">
+                                <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:4px;">Lots (@line.Lots!.Count)</div>
+                                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                                    @foreach (var lot in line.Lots!)
+                                    {
+                                        <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-green-soft);border:1px solid var(--mer-green);border-radius:4px;padding:2px 6px;">@lot.LotNo · @lot.Qty.ToString("0.###")@(lot.ExpiryDate.HasValue ? $" · exp {lot.ExpiryDate:yyyy-MM-dd}" : "")@(string.IsNullOrEmpty(lot.ErpCode) ? "" : $" · {lot.ErpCode}")</span>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
                 }
                 </tbody>
             </table>
@@ -291,6 +322,116 @@
                         </tbody>
                     </table>
                     <p style="font-size:11px;color:var(--mer-ink-500);margin-top:8px;">Position &amp; sequence are snapshot from the PO line and cannot be edited.</p>
+
+                    @* ---------------- Serial capture (serialized items) ---------------- *@
+                    @if (SerialLines.Count > 0)
+                    {
+                        <div style="margin-top:22px;border-top:1px solid var(--mer-line);padding-top:16px;">
+                            <h3 style="font-size:14px;font-weight:700;margin-bottom:4px;color:var(--mer-blue-darker);">Serial numbers</h3>
+                            <p style="font-size:12px;color:var(--mer-ink-500);margin-bottom:14px;">Each serialized item needs exactly one serial per shipped unit. Serials must be unique across the whole ASN.</p>
+                            @foreach (var sl in SerialLines)
+                            {
+                                var line = sl;
+                                var need = (int)line.ShippedQty;
+                                var filled = line.Serials.Count(s => !string.IsNullOrWhiteSpace(s));
+                                var ok = SerialLineValid(line, out var serMsg);
+                                <div style="border:1px solid var(--mer-line);border-radius:8px;padding:14px;margin-bottom:12px;background:var(--mer-surface);">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+                                        <span style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);font-family:Inter,monospace;">@line.ItemCode <span style="font-weight:400;color:var(--mer-ink-500);">· PO @line.PoNumber · pos @line.PositionNo</span></span>
+                                        <span class="tlg-status @(ok ? "tlg-status--active" : "tlg-status--danger")" style="font-family:Inter,monospace;">@filled / @need captured</span>
+                                    </div>
+
+                                    @* Paste affordance — split on newline/comma, fill the N boxes, ignore extras (warn). *@
+                                    <details style="margin-bottom:10px;">
+                                        <summary style="font-size:12px;color:var(--mer-blue);cursor:pointer;">Paste serials</summary>
+                                        <div style="margin-top:8px;">
+                                            <textarea class="rz-textbox" rows="3" placeholder="Paste serials separated by new lines or commas" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12px;" @bind="line._pasteBuffer"></textarea>
+                                            <button class="rz-button" style="margin-top:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="() => ApplyPaste(line)">
+                                                <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">content_paste</span> Fill @need boxes
+                                            </button>
+                                            @if (!string.IsNullOrEmpty(line._pasteWarn))
+                                            {
+                                                <span style="font-size:11px;color:var(--mer-amber-800);margin-left:8px;">@line._pasteWarn</span>
+                                            }
+                                        </div>
+                                    </details>
+
+                                    @if (need > SerialBoxCap)
+                                    {
+                                        <div style="background:var(--mer-amber-50);color:var(--mer-amber-800);padding:8px 12px;border-radius:6px;font-size:11.5px;margin-bottom:10px;">
+                                            Large quantity (@need units). Use <b>Paste serials</b> above. Only the first @SerialBoxCap boxes are rendered for editing; pasted serials beyond that are still captured.
+                                        </div>
+                                    }
+                                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;@(need > SerialBoxCap ? "max-height:320px;overflow:auto;" : "")">
+                                        @{ var renderCount = Math.Min(need, SerialBoxCap); EnsureSerialSlots(line, need); }
+                                        @for (int si = 0; si < renderCount; si++)
+                                        {
+                                            var sIdx = si;
+                                            <div style="display:flex;align-items:center;gap:6px;">
+                                                <span style="font-size:10.5px;color:var(--mer-ink-400);font-family:Inter,monospace;width:26px;text-align:right;">@(sIdx + 1)</span>
+                                                <input class="rz-textbox" style="flex:1;padding:5px 8px;font-family:Inter,monospace;font-size:12px;@(DuplicateSerial(line, sIdx) ? "border:1px solid var(--mer-red);" : "")" placeholder="Serial" @bind="line.Serials[sIdx]" @bind:event="oninput" />
+                                            </div>
+                                        }
+                                    </div>
+                                    @if (!ok)
+                                    {
+                                        <div style="font-size:11.5px;color:var(--mer-red);margin-top:8px;">@serMsg</div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @* ---------------- Lot capture (lot-controlled items) ---------------- *@
+                    @if (LotLines.Count > 0)
+                    {
+                        <div style="margin-top:22px;border-top:1px solid var(--mer-line);padding-top:16px;">
+                            <h3 style="font-size:14px;font-weight:700;margin-bottom:4px;color:var(--mer-blue-darker);">Lots / batches</h3>
+                            <p style="font-size:12px;color:var(--mer-ink-500);margin-bottom:14px;">Split each lot-controlled item into lots whose quantities sum to the shipped quantity. Lot numbers must be unique within the line.</p>
+                            @foreach (var ll in LotLines)
+                            {
+                                var line = ll;
+                                var sum = line.Lots.Sum(x => x.Qty ?? 0);
+                                var ok = LotLineValid(line, out var lotMsg);
+                                <div style="border:1px solid var(--mer-line);border-radius:8px;padding:14px;margin-bottom:12px;background:var(--mer-surface);">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+                                        <span style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);font-family:Inter,monospace;">@line.ItemCode <span style="font-weight:400;color:var(--mer-ink-500);">· PO @line.PoNumber · pos @line.PositionNo</span></span>
+                                        <span class="tlg-status @(ok ? "tlg-status--active" : "tlg-status--danger")" style="font-family:Inter,monospace;">Σ @sum.ToString("0.###") / @line.ShippedQty.ToString("0.###")</span>
+                                    </div>
+                                    <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                                        <thead>
+                                            <tr style="border-bottom:1px solid var(--mer-line);">
+                                                <th style="text-align:left;padding:4px;color:var(--mer-ink-700);">Lot no.</th>
+                                                <th style="text-align:right;padding:4px;color:var(--mer-ink-700);width:120px;">Qty</th>
+                                                <th style="text-align:left;padding:4px;color:var(--mer-ink-700);width:150px;">Expiry</th>
+                                                <th style="width:36px;"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                        @foreach (var lot in line.Lots)
+                                        {
+                                            var lr = lot;
+                                            var dupLot = DuplicateLot(line, lr);
+                                            <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                                                <td style="padding:4px;"><input class="rz-textbox" style="width:100%;padding:5px 8px;font-family:Inter,monospace;font-size:12px;@(dupLot ? "border:1px solid var(--mer-red);" : "")" placeholder="Lot / batch" @bind="lr.LotNo" @bind:event="oninput" /></td>
+                                                <td style="padding:4px;"><input type="number" step="0.001" class="rz-textbox" style="width:100%;padding:5px 8px;font-family:Inter,monospace;font-size:12px;text-align:right;" @bind="lr.Qty" /></td>
+                                                <td style="padding:4px;"><input type="date" class="rz-textbox" style="width:100%;padding:5px 8px;font-size:12px;" @bind="lr.ExpiryDate" /></td>
+                                                <td style="padding:4px;text-align:center;"><button type="button" title="Remove lot" @onclick="() => line.Lots.Remove(lr)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:16px;">delete</span></button></td>
+                                            </tr>
+                                        }
+                                        </tbody>
+                                    </table>
+                                    <button class="rz-button" style="margin-top:8px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="() => line.Lots.Add(new LotRow())">
+                                        <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">add</span> Add lot
+                                    </button>
+                                    @if (!ok)
+                                    {
+                                        <div style="font-size:11.5px;color:var(--mer-red);margin-top:8px;">@lotMsg</div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
                 }
             }
             else if (currentStep == 3)
@@ -524,7 +665,9 @@
     private bool CanProceed => currentStep switch
     {
         1 => selectedPoIds.Count > 0,
-        2 => lines.Any(l => l.ShippedQty > 0),
+        // Step 2 also gates on serial/lot capture: every serialized line must have N serials and every lot line
+        // must have Σqty == ShippedQty (no dupes). The backend SubmitAsnCommand re-enforces; this blocks early.
+        2 => lines.Any(l => l.ShippedQty > 0) && SerialLotCaptureValid,
         3 => expectedDeliveryDate.HasValue,
         _ => true
     };
@@ -589,11 +732,20 @@
                     OrderQty = l.OrderQty,
                     ShippedQty = l.ShippedQty,
                     BatchNumber = l.BatchNumber,
-                    ExpiryDate = l.ExpiryDate
+                    ExpiryDate = l.ExpiryDate,
+                    // AsnLineDto carries no Item flag — infer the line type from which capture collection is
+                    // populated (serialized XOR lot-controlled). Re-merged with PO flags below for empty lines.
+                    IsSerialized = l.SerialNumbers is { Count: > 0 },
+                    IsLotControlled = l.Lots is { Count: > 0 },
+                    Serials = l.SerialNumbers?.ToList() ?? new(),
+                    Lots = l.Lots?.Select(x => new LotRow { LotNo = x.LotNo, Qty = x.Qty, ExpiryDate = x.ExpiryDate }).ToList() ?? new()
                 }).ToList();
 
                 // For an editable (Draft) ASN prime the PO search so the picker can add/remove POs (same supplier).
-                if (!IsLocked) await SearchPos();
+                // ReloadLines re-fetches the PO lines and merges authoritative Item flags onto these rows (so a
+                // serialized/lot line with NOTHING captured yet still gets its capture section), preserving the
+                // serials/lots just read back from the ASN.
+                if (!IsLocked) { await SearchPos(); await ReloadLines(); }
             }
             loading = false;
         }
@@ -698,7 +850,13 @@
                     OrderQty = l.OrderQty,
                     ShippedQty = prev?.ShippedQty ?? 0,
                     BatchNumber = prev?.BatchNumber,
-                    ExpiryDate = prev?.ExpiryDate
+                    ExpiryDate = prev?.ExpiryDate,
+                    // Serial/lot capture flags snapshot from the PO line's Item (serialized XOR lot-controlled).
+                    IsSerialized = l.IsSerialized,
+                    IsLotControlled = l.IsLotControlled,
+                    // Preserve already-captured serials/lots across a PO add/remove re-merge.
+                    Serials = prev?.Serials ?? new(),
+                    Lots = prev?.Lots ?? new()
                 });
             }
         }
@@ -718,9 +876,7 @@
         if (selectedPoIds.Count == 0 || !expectedDeliveryDate.HasValue) { submitError = "Select at least one PO and an expected delivery date."; currentStep = 1; return; }
         busy = true; savingDraft = true; submitError = string.Empty;
 
-        var lineReqs = lines.Where(l => l.ShippedQty > 0)
-            .Select(l => new CreateAsnLineRequest(l.PurchaseOrderLineId, l.ShippedQty, l.BatchNumber, l.ExpiryDate))
-            .ToList();
+        var lineReqs = BuildLineRequests();
         if (lineReqs.Count == 0) { submitError = "Enter a ship quantity on at least one line."; busy = false; savingDraft = false; currentStep = 2; return; }
 
         if (IsNew)
@@ -756,10 +912,15 @@
         if (IsNew) { await SaveDraft(); return; }
         busy = true; savingDraft = false; submitError = string.Empty;
 
+        // Block the obvious serial/lot failures before the round-trip (the backend re-enforces on submit).
+        if (!SerialLotCaptureValid)
+        {
+            submitError = "Fix the serial/lot capture before submitting: every serialized line needs one serial per unit, and every lot line's quantities must sum to the shipped quantity (no duplicates).";
+            busy = false; currentStep = 2; return;
+        }
+
         // Persist any pending header/line edits first (submit validates the stored ASN).
-        var lineReqs = lines.Where(l => l.ShippedQty > 0)
-            .Select(l => new CreateAsnLineRequest(l.PurchaseOrderLineId, l.ShippedQty, l.BatchNumber, l.ExpiryDate))
-            .ToList();
+        var lineReqs = BuildLineRequests();
         var upd = new UpdateAsnRequest(expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
         var saveResp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", upd);
         if (saveResp?.Success != true)
@@ -849,6 +1010,95 @@
         _ => "tlg-status--info"
     };
 
+    // Build the line request set from the grid, mapping captured serials/lots onto each line. Only the
+    // collection matching the line's type is populated (serialized XOR lot-controlled); the other stays null.
+    private List<CreateAsnLineRequest> BuildLineRequests() =>
+        lines.Where(l => l.ShippedQty > 0).Select(l =>
+        {
+            List<string>? serials = null;
+            List<AsnLineLotInput>? lots = null;
+            if (l.IsSerialized)
+                serials = l.Serials.Select(s => s?.Trim() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s)).ToList();
+            else if (l.IsLotControlled)
+                lots = l.Lots.Where(x => !string.IsNullOrWhiteSpace(x.LotNo) && (x.Qty ?? 0) > 0)
+                    .Select(x => new AsnLineLotInput(x.LotNo.Trim(), x.Qty ?? 0, x.ExpiryDate)).ToList();
+            return new CreateAsnLineRequest(l.PurchaseOrderLineId, l.ShippedQty, l.BatchNumber, l.ExpiryDate, serials, lots);
+        }).ToList();
+
+    // ---- Serial / lot capture helpers (R4 2026-06-23) ----
+    // Don't render thousands of textboxes for huge qty: render up to this many; the paste box still fills the rest.
+    private const int SerialBoxCap = 200;
+
+    // The step-2 capture sections render only for shipped lines of the matching Item type.
+    private List<LineRow> SerialLines => lines.Where(l => l.IsSerialized && l.ShippedQty > 0).ToList();
+    private List<LineRow> LotLines => lines.Where(l => l.IsLotControlled && l.ShippedQty > 0).ToList();
+
+    // Grow the per-line serial slot list to N so the indexed @bind targets exist (boxes start empty).
+    private static void EnsureSerialSlots(LineRow line, int need)
+    {
+        while (line.Serials.Count < need) line.Serials.Add(string.Empty);
+        // Trim trailing extras only if the user reduced ShippedQty (keep what fits N).
+        if (line.Serials.Count > need) line.Serials.RemoveRange(need, line.Serials.Count - need);
+    }
+
+    private static bool DuplicateSerial(LineRow line, int idx)
+    {
+        var v = line.Serials[idx]?.Trim();
+        if (string.IsNullOrEmpty(v)) return false;
+        for (int j = 0; j < line.Serials.Count; j++)
+            if (j != idx && string.Equals(line.Serials[j]?.Trim(), v, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    private static bool DuplicateLot(LineRow line, LotRow lot)
+    {
+        var v = lot.LotNo?.Trim();
+        if (string.IsNullOrEmpty(v)) return false;
+        return line.Lots.Count(x => string.Equals(x.LotNo?.Trim(), v, StringComparison.OrdinalIgnoreCase)) > 1;
+    }
+
+    // Paste → split on newline/comma → fill exactly N boxes; extras are ignored (warned). Cleaned non-empty.
+    private static void ApplyPaste(LineRow line)
+    {
+        var need = (int)line.ShippedQty;
+        var tokens = (line._pasteBuffer ?? string.Empty)
+            .Split(new[] { '\n', '\r', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        EnsureSerialSlots(line, need);
+        var take = Math.Min(tokens.Count, need);
+        for (int i = 0; i < take; i++) line.Serials[i] = tokens[i];
+        line._pasteWarn = tokens.Count > need ? $"{tokens.Count - need} extra serial(s) ignored (need {need})." : null;
+        line._pasteBuffer = string.Empty;
+    }
+
+    // A serialized line is valid when exactly N non-empty serials are captured with no case-insensitive dupes.
+    private static bool SerialLineValid(LineRow line, out string message)
+    {
+        var need = (int)line.ShippedQty;
+        var vals = line.Serials.Select(s => s?.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        if (vals.Count != need) { message = $"Captured {vals.Count} of {need} required serial(s)."; return false; }
+        var distinct = vals.Select(s => s!.ToLowerInvariant()).Distinct().Count();
+        if (distinct != vals.Count) { message = "Duplicate serial numbers on this line."; return false; }
+        message = string.Empty; return true;
+    }
+
+    // A lot line is valid when Σqty == ShippedQty, every lot has a non-empty unique lotNo and a qty > 0.
+    private static bool LotLineValid(LineRow line, out string message)
+    {
+        if (line.Lots.Count == 0) { message = "Add at least one lot."; return false; }
+        if (line.Lots.Any(l => string.IsNullOrWhiteSpace(l.LotNo))) { message = "Every lot needs a lot number."; return false; }
+        if (line.Lots.Any(l => (l.Qty ?? 0) <= 0)) { message = "Every lot needs a quantity greater than zero."; return false; }
+        var dupes = line.Lots.GroupBy(l => l.LotNo!.Trim().ToLowerInvariant()).Any(g => g.Count() > 1);
+        if (dupes) { message = "Duplicate lot numbers on this line."; return false; }
+        if (line.Lots.Sum(l => l.Qty ?? 0) != line.ShippedQty) { message = $"Lot quantities must sum to {line.ShippedQty:0.###}."; return false; }
+        message = string.Empty; return true;
+    }
+
+    // True only if EVERY serialized/lot line currently passes — gates Next on step 2 and the final submit.
+    private bool SerialLotCaptureValid =>
+        lines.Where(l => l.IsSerialized && l.ShippedQty > 0).All(l => SerialLineValid(l, out _))
+        && lines.Where(l => l.IsLotControlled && l.ShippedQty > 0).All(l => LotLineValid(l, out _));
+
     private class LineRow
     {
         public Guid PurchaseOrderLineId { get; set; }
@@ -861,5 +1111,24 @@
         public decimal ShippedQty { get; set; }
         public string? BatchNumber { get; set; }
         public DateTime? ExpiryDate { get; set; }
+
+        // R4 (2026-06-23) — Serial/Lot capture. Item flags (serialized XOR lot-controlled) drive which capture
+        // section the line gets; Serials/Lots hold the captured values. ShippedQty is the required count/Σ.
+        public bool IsSerialized { get; set; }
+        public bool IsLotControlled { get; set; }
+        public List<string> Serials { get; set; } = new();
+        public List<LotRow> Lots { get; set; } = new();
+
+        // Transient UI state (not persisted): the paste textarea buffer + the last paste warning for this line.
+        public string? _pasteBuffer { get; set; }
+        public string? _pasteWarn { get; set; }
+    }
+
+    // One captured lot row (lot-controlled line): lotNo + qty + optional expiry.
+    private class LotRow
+    {
+        public string LotNo { get; set; } = string.Empty;
+        public decimal? Qty { get; set; }
+        public DateOnly? ExpiryDate { get; set; }
     }
 }

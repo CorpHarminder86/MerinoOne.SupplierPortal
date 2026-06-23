@@ -50,18 +50,56 @@ public static class AsnDtoBuilder
         string? headerPoNumber = a.PurchaseOrderId.HasValue && poById.TryGetValue(a.PurchaseOrderId.Value, out var hp)
             ? hp.PoNumber : null;
 
-        // Lines join their PO line for item/qty + owning PO number.
-        var lines = await (from al in db.AsnLines
-                           join pol in db.PurchaseOrderLines on al.PurchaseOrderLineId equals pol.Id
-                           join po in db.PurchaseOrders on pol.PurchaseOrderId equals po.Id
-                           where al.AsnId == asnId
-                           orderby po.PoNumber, pol.PositionNo
-                           select new AsnLineDto(
-                               al.Id, al.PurchaseOrderLineId, pol.PurchaseOrderId, po.PoNumber,
-                               pol.PositionNo, al.PositionNo, al.SequenceNo,
-                               pol.ItemCode, pol.ItemDescription, pol.OrderUnit, pol.OrderQty,
-                               al.ShippedQty, al.BatchNumber, al.ExpiryDate))
-                          .ToListAsync(ct);
+        // Lines join their PO line for item/qty + owning PO number. Projected to an intermediate row first so the
+        // serial/lot children (loaded separately below) can be merged in by line id without an N+1 per line.
+        var lineRows = await (from al in db.AsnLines
+                              join pol in db.PurchaseOrderLines on al.PurchaseOrderLineId equals pol.Id
+                              join po in db.PurchaseOrders on pol.PurchaseOrderId equals po.Id
+                              where al.AsnId == asnId
+                              orderby po.PoNumber, pol.PositionNo
+                              select new
+                              {
+                                  al.Id,
+                                  al.PurchaseOrderLineId,
+                                  pol.PurchaseOrderId,
+                                  po.PoNumber,
+                                  PoPositionNo = pol.PositionNo,
+                                  al.PositionNo,
+                                  al.SequenceNo,
+                                  pol.ItemCode,
+                                  pol.ItemDescription,
+                                  pol.OrderUnit,
+                                  pol.OrderQty,
+                                  al.ShippedQty,
+                                  al.BatchNumber,
+                                  al.ExpiryDate,
+                              }).ToListAsync(ct);
+
+        // R4 (2026-06-23) — Serial/Lot capture children for these lines (so read/lock view + wizard reload show them).
+        var asnLineIds = lineRows.Select(r => r.Id).ToList();
+        var serialsByLine = (await db.AsnLineSerials.AsNoTracking()
+                .Where(s => asnLineIds.Contains(s.AsnLineId))
+                .OrderBy(s => s.SerialNumber)
+                .Select(s => new { s.AsnLineId, s.SerialNumber })
+                .ToListAsync(ct))
+            .GroupBy(s => s.AsnLineId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(x => x.SerialNumber).ToList());
+        var lotsGrouped = (await db.AsnLineLots.AsNoTracking()
+                .Where(l => asnLineIds.Contains(l.AsnLineId))
+                .OrderBy(l => l.LotNo)
+                .Select(l => new { l.AsnLineId, Dto = new AsnLineLotDto(l.LotNo, l.Qty, l.ExpiryDate, l.ErpCode) })
+                .ToListAsync(ct))
+            .GroupBy(l => l.AsnLineId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<AsnLineLotDto>)g.Select(x => x.Dto).ToList());
+
+        var lines = lineRows.Select(r => new AsnLineDto(
+                r.Id, r.PurchaseOrderLineId, r.PurchaseOrderId, r.PoNumber,
+                r.PoPositionNo, r.PositionNo, r.SequenceNo,
+                r.ItemCode, r.ItemDescription, r.OrderUnit, r.OrderQty,
+                r.ShippedQty, r.BatchNumber, r.ExpiryDate,
+                serialsByLine.TryGetValue(r.Id, out var sl) ? sl : null,
+                lotsGrouped.TryGetValue(r.Id, out var ll) ? ll : null))
+            .ToList();
 
         // The auto-created draft invoice (1:1 with the ASN via asnId).
         var draftInvoiceId = await db.Invoices

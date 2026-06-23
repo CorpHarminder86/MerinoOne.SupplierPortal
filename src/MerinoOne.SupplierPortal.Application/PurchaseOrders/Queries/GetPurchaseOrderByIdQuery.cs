@@ -22,15 +22,29 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
                         .FirstOrDefaultAsync(ct)
                 ?? throw new NotFoundException("PurchaseOrder", request.Id);
 
-        var lines = await _db.PurchaseOrderLines
-            .Where(l => l.PurchaseOrderId == request.Id)
-            .OrderBy(l => l.PositionNo)
-            .Select(l => new PurchaseOrderLineDto(
-                l.Id, l.PositionNo, l.SequenceNo, l.ItemCode, l.ItemDescription,
-                l.OrderUnit, l.OrderQty, l.PriceUnit, l.Price,
-                l.DiscountPct, l.DiscountAmount, l.DeliveryDate, l.TaxCode,
-                l.TaxDescription, l.TaxId))
-            .ToListAsync(ct);
+        // R4 (2026-06-23) — Serial/Lot capture: resolve inv.Item by **ItemCode within the PO's company** to surface
+        // the control flags the ASN wizard reads. PO lines are ERP-fed and frequently carry a NULL ItemId (the
+        // inbound upsert only backfills ItemId when the item already existed at push time — a late item push, or a
+        // bulk-seeded PO, leaves it null), but ItemCode is always present. Item's natural key is (TenantEntityId,
+        // Code), so scoping the code match to the PO's TenantEntityId keeps it unambiguous and reader-agnostic
+        // (IgnoreQueryFilters so an internal viewer on a different active company still resolves the flags). Flags
+        // default false when no matching Item exists.
+        var poCompany = row.po.TenantEntityId;
+        var lines = await (from l in _db.PurchaseOrderLines
+                           where l.PurchaseOrderId == request.Id
+                           join itm in _db.Items.IgnoreQueryFilters().Where(i => i.TenantEntityId == poCompany && !i.IsDeleted)
+                               on l.ItemCode equals itm.Code into itemGroup
+                           from item in itemGroup.DefaultIfEmpty()
+                           orderby l.PositionNo
+                           select new PurchaseOrderLineDto(
+                               l.Id, l.PositionNo, l.SequenceNo, l.ItemCode, l.ItemDescription,
+                               l.OrderUnit, l.OrderQty, l.PriceUnit, l.Price,
+                               l.DiscountPct, l.DiscountAmount, l.DeliveryDate, l.TaxCode,
+                               l.TaxDescription, l.TaxId,
+                               l.ItemId ?? (item != null ? (Guid?)item.Id : null),
+                               item != null && item.IsSerialized,
+                               item != null && item.IsLotControlled))
+                          .ToListAsync(ct);
 
         return new PurchaseOrderDetailDto(
             row.po.Id, row.po.Seq, row.po.PoNumber,

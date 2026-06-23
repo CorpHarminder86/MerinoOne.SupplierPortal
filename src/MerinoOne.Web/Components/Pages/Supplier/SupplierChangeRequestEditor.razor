@@ -185,6 +185,24 @@ else
                             <div><label style="font-size:12px;color:var(--mer-ink-700);">Designation</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.Designation" /></div>
                             <div><label style="font-size:12px;color:var(--mer-ink-700);">Email</label><input class="rz-textbox" style="width:100%;padding:7px 9px;font-family:Inter,monospace;" @bind="row.Email" /></div>
                             <div><label style="font-size:12px;color:var(--mer-ink-700);">Phone</label><input class="rz-textbox" style="width:100%;padding:7px 9px;font-family:Inter,monospace;" @bind="row.Phone" /></div>
+                            @* R4 (2026-06-23) — link this contact to one of the supplier's EXISTING saved addresses.
+                               New addresses added in this editor have no Id yet, so they aren't selectable for v1. *@
+                            <div style="grid-column:1 / span 2;">
+                                <label style="font-size:12px;color:var(--mer-ink-700);">Linked address</label>
+                                <select class="rz-textbox" style="width:100%;padding:7px 9px;"
+                                        @onchange='@(e => row.AddressId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : (Guid?)null)'>
+                                    <option value="" selected="@(row.AddressId is null)">— none —</option>
+                                    @foreach (var sa in LinkableAddresses)
+                                    {
+                                        var said = sa.Id!.Value;
+                                        <option value="@said" selected="@(row.AddressId == said)">@AddressOptionLabel(sa)</option>
+                                    }
+                                </select>
+                                @if (row.AddressId is { } cur && LinkableAddresses.All(x => x.Id != cur))
+                                {
+                                    <div style="font-size:11px;color:var(--mer-ink-500);margin-top:3px;">Currently linked to an address that is no longer listed.</div>
+                                }
+                            </div>
                             <label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" @bind="row.IsPrimary" /> Primary contact</label>
                         </div>
                     </div>
@@ -523,6 +541,17 @@ else
     private void RemoveBank(BankRow r) { if (r.IsNew) banks.Remove(r); else r.Removed = true; }
     private void RemoveLicense(LicenseRow r) { if (r.IsNew) licenses.Remove(r); else r.Removed = true; }
 
+    // Existing saved addresses (have a real Id, not new, not removed) — the only addresses a contact can link to
+    // in v1 (a NEW address added in this editor has no Id until it is approved). Drives the contact dropdown.
+    private IEnumerable<AddressRow> LinkableAddresses => addresses.Where(a => !a.IsNew && a.Id.HasValue && !a.Removed);
+
+    private static string AddressOptionLabel(AddressRow a)
+    {
+        var type = string.IsNullOrWhiteSpace(a.AddressType) ? "Address" : a.AddressType;
+        var city = string.IsNullOrWhiteSpace(a.City) ? (a.AddressLine1 ?? "—") : a.City;
+        return $"{type} — {city}";
+    }
+
     private int TabCount(string key) => key switch
     {
         "info" => BuildInfoLines().Count,
@@ -586,6 +615,9 @@ else
             EditCmp(lines, "Contact", c.Id, "Email", c.Email, c.Seed.Email);
             EditCmp(lines, "Contact", c.Id, "Phone", c.Phone, c.Seed.Phone);
             EditBool(lines, "Contact", c.Id, "IsPrimary", c.IsPrimary, c.Seed.IsPrimary);
+            // AddressId: empty NewValue clears the link (backend reads empty → null). Seed has no AddressId
+            // (SupplierContactDto exposes none) so this only fires when the supplier sets/changes the link.
+            EditCmp(lines, "Contact", c.Id, "AddressId", c.AddressIdStr, c.Seed.AddressIdStr);
         }
 
         // Bank
@@ -800,6 +832,11 @@ else
     {
         public Guid? Id; public bool IsNew; public bool Removed; public ContactRow? Seed;
         public string? ContactName, Designation, Email, Phone; public bool IsPrimary;
+        // R4 (2026-06-23) — optional link to an EXISTING supplier address (by Id). The backend field-catalog
+        // accepts a Contact field "AddressId"; the applier reads addressId from an Add payload and an Edit line
+        // (GUID string, or empty to clear). Diffed as its string form for the Edit line.
+        public Guid? AddressId;
+        public string? AddressIdStr => AddressId?.ToString();
         public void Set(string? field, string? value)
         {
             switch (field)
@@ -809,11 +846,13 @@ else
                 case "Email": Email = value; break;
                 case "Phone": Phone = value; break;
                 case "IsPrimary": IsPrimary = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase); break;
+                case "AddressId": AddressId = Guid.TryParse(value, out var g) ? g : (Guid?)null; break;
             }
         }
         public string ToPayload() => JsonSerializer.Serialize(new
         {
             contactName = ContactName, designation = Designation, email = Email, phone = Phone, isPrimary = IsPrimary,
+            addressId = AddressId?.ToString(),
         });
         public static ContactRow FromPayload(string? json)
         {
@@ -821,6 +860,7 @@ else
             var d = Parse(json);
             r.ContactName = Get(d, "contactName"); r.Designation = Get(d, "designation"); r.Email = Get(d, "email"); r.Phone = Get(d, "phone");
             r.IsPrimary = string.Equals(Get(d, "isPrimary"), "true", StringComparison.OrdinalIgnoreCase);
+            if (Guid.TryParse(Get(d, "addressId"), out var aid)) r.AddressId = aid;
             return r;
         }
     }

@@ -226,11 +226,18 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
             CreatedOn = now,
         };
 
-        foreach (var a in request.Body.Addresses ?? new List<SupplierAddressInput>())
+        // R4 (2026-06-23) — Contact↔Address link: capture the created address Ids in the SAME order as the
+        // request's Addresses list, so a contact's AddressIndex can be resolved to the address row created
+        // in this registration (the address has no client-supplied id — only its list position is known).
+        var addressInputs = request.Body.Addresses ?? new List<SupplierAddressInput>();
+        var createdAddressIds = new List<Guid>(addressInputs.Count);
+        foreach (var a in addressInputs)
         {
+            var addressId = Guid.NewGuid();
+            createdAddressIds.Add(addressId);
             supplier.Addresses.Add(new SupplierAddressEntity
             {
-                Id = Guid.NewGuid(),
+                Id = addressId,
                 SupplierId = supplierId,
                 AddressType = a.AddressType.Trim(),
                 AddressLine1 = a.Line1.Trim(),
@@ -251,6 +258,12 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
 
         foreach (var c in request.Body.Contacts ?? new List<SupplierContactInput>())
         {
+            // R4 (2026-06-23) — resolve the optional AddressIndex against the addresses just created (same order).
+            // Out-of-range / null → leave the link null (safe, no validation error).
+            Guid? linkedAddressId = c.AddressIndex is { } idx && idx >= 0 && idx < createdAddressIds.Count
+                ? createdAddressIds[idx]
+                : null;
+
             supplier.Contacts.Add(new SupplierContactEntity
             {
                 Id = Guid.NewGuid(),
@@ -260,6 +273,7 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
                 Email = c.Email.Trim().ToLowerInvariant(),
                 Phone = string.IsNullOrWhiteSpace(c.Phone) ? null : c.Phone.Trim(),
                 IsPrimary = c.IsPrimary,
+                AddressId = linkedAddressId,
                 CreatedBy = "self-register",
                 CreatedOn = now,
             });

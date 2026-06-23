@@ -57,7 +57,7 @@ public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, AsnDeta
 
         var now = DateTime.UtcNow;
 
-        // ---- Validation: lines + over-ship + lot/serial -------------------------------------------------
+        // ---- Validation: lines + serial/lot + over-ship -------------------------------------------------
         var lineCtx = await (from al in _db.AsnLines
                              join pol in _db.PurchaseOrderLines on al.PurchaseOrderLineId equals pol.Id
                              where al.AsnId == asn.Id
@@ -78,12 +78,41 @@ public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, AsnDeta
                 ["lines"] = new[] { "Cannot submit an ASN with no lines." }
             });
 
-        // Item control flags (Addendum A3) for lot/serial validation.
-        var itemIds = lineCtx.Where(l => l.ItemId.HasValue).Select(l => l.ItemId!.Value).Distinct().ToList();
-        var itemFlags = await _db.Items
-            .Where(i => itemIds.Contains(i.Id))
-            .Select(i => new { i.Id, i.IsLotControlled, i.IsSerialized })
-            .ToDictionaryAsync(i => i.Id, ct);
+        // Item control flags (Addendum A3) for lot/serial validation. Resolve by **ItemCode within the ASN's
+        // company** (NOT ItemId — PO lines are ERP-fed and routinely carry a null ItemId; ItemCode is always set,
+        // and Item's natural key is (TenantEntityId, Code)). IgnoreQueryFilters — Item is company-scoped.
+        var asnCompany = asn.TenantEntityId;
+        var itemCodes = lineCtx.Select(l => l.ItemCode).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
+        var itemRows = await _db.Items.IgnoreQueryFilters()
+            .Where(i => i.TenantEntityId == asnCompany && !i.IsDeleted && itemCodes.Contains(i.Code))
+            .Select(i => new { i.Code, i.IsLotControlled, i.IsSerialized })
+            .ToListAsync(ct);
+        var itemFlags = itemRows.ToDictionary(
+            i => i.Code, i => (i.IsLotControlled, i.IsSerialized), StringComparer.OrdinalIgnoreCase);
+
+        // R4 (2026-06-23) — Serial/Lot capture children for this ASN's lines (grouped by line id).
+        var thisLineIds = lineCtx.Select(l => l.Id).ToList();
+        var serialsByLine = (await _db.AsnLineSerials
+                .Where(s => thisLineIds.Contains(s.AsnLineId))
+                .Select(s => new { s.AsnLineId, s.SerialNumber })
+                .ToListAsync(ct))
+            .GroupBy(s => s.AsnLineId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.SerialNumber).ToList());
+        var lotsByLine = (await _db.AsnLineLots
+                .Where(l => thisLineIds.Contains(l.AsnLineId))
+                .Select(l => new { l.AsnLineId, l.LotNo, l.Qty })
+                .ToListAsync(ct))
+            .GroupBy(l => l.AsnLineId)
+            .ToDictionary(g => g.Key, g => g.Select(x => (x.LotNo, x.Qty)).ToList());
+
+        // Covered PO id(s) for the cross-ASN uniqueness scope: the junction rows + the legacy scalar header PO.
+        var coveredPoIds = await _db.AsnPurchaseOrders
+            .Where(j => j.AsnId == asn.Id && !j.IsDeleted)
+            .Select(j => j.PurchaseOrderId)
+            .ToListAsync(ct);
+        var coveredPoSet = coveredPoIds.ToHashSet();
+        if (asn.PurchaseOrderId.HasValue) coveredPoSet.Add(asn.PurchaseOrderId.Value);
+        var poIdList = coveredPoSet.ToList();
 
         var errors = new Dictionary<string, List<string>>();
         void AddErr(string key, string msg)
@@ -92,25 +121,102 @@ public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, AsnDeta
             list.Add(msg);
         }
 
+        // Collect this ASN's serials / lotNos across all lines for the intra-ASN duplicate check.
+        var allSerials = new List<string>();
+        var allLotNos = new List<string>();
+
+        // ── Serial / Lot count + content validation (per line) ──────────────────────────────────────────
         foreach (var l in lineCtx)
         {
-            // Over-ship: block submit when shipped exceeds ordered (the draft invoice would otherwise be capped,
-            // but the supplier should reconcile the ASN first — plan default treats this as a blocking error).
+            if (string.IsNullOrWhiteSpace(l.ItemCode) || !itemFlags.TryGetValue(l.ItemCode, out var flags)) continue;
+
+            if (flags.IsSerialized)
+            {
+                var serials = serialsByLine.TryGetValue(l.Id, out var sl) ? sl : new List<string>();
+
+                // ShippedQty must be a whole number and the serial count must match it exactly.
+                if (l.ShippedQty != Math.Truncate(l.ShippedQty))
+                    AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) is serialized; ShippedQty must be a whole number.");
+                else if (serials.Count != (int)l.ShippedQty)
+                    AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) is serialized; expected {(int)l.ShippedQty} serial(s) but got {serials.Count}.");
+
+                if (serials.Any(string.IsNullOrWhiteSpace))
+                    AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) has an empty serial number.");
+
+                allSerials.AddRange(serials.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()));
+            }
+            else if (flags.IsLotControlled)
+            {
+                var lots = lotsByLine.TryGetValue(l.Id, out var ll) ? ll : new List<(string LotNo, decimal Qty)>();
+
+                if (lots.Count == 0)
+                    AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) is lot-controlled; at least one lot is required.");
+
+                if (lots.Any(x => string.IsNullOrWhiteSpace(x.LotNo)))
+                    AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) has a lot with an empty lot number.");
+                if (lots.Any(x => x.Qty <= 0))
+                    AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) has a lot with a non-positive quantity.");
+
+                var lotSum = lots.Sum(x => x.Qty);
+                if (lotSum != l.ShippedQty)
+                    AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) is lot-controlled; Σ(lot qty) {lotSum} must equal ShippedQty {l.ShippedQty}.");
+
+                allLotNos.AddRange(lots.Where(x => !string.IsNullOrWhiteSpace(x.LotNo)).Select(x => x.LotNo.Trim()));
+            }
+        }
+
+        // ── Intra-ASN uniqueness: a serial / lotNo may appear only once across this ASN's lines ──────────
+        foreach (var dup in allSerials.GroupBy(s => s, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1).Select(g => g.Key))
+            AddErr("lines", $"Serial number '{dup}' appears more than once on this ASN.");
+        foreach (var dup in allLotNos.GroupBy(s => s, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1).Select(g => g.Key))
+            AddErr("lines", $"Lot number '{dup}' appears more than once on this ASN.");
+
+        // ── Cross-ASN uniqueness within the same PO(s): reject a serial / lotNo already captured on any other
+        //    non-deleted ASN line whose ASN covers one of this ASN's PO(s). The PO scope is resolved via the
+        //    AsnPurchaseOrder junction OR the legacy scalar Asn.PurchaseOrderId (single-PO back-compat). ──────
+        if (poIdList.Count > 0)
+        {
+            // Other ASN-line ids that cover the same PO(s) (excluding THIS ASN). Union of junction-covered and
+            // legacy-scalar-covered ASNs, then their non-deleted lines.
+            var otherAsnIdsViaJunction = _db.AsnPurchaseOrders
+                .Where(j => !j.IsDeleted && j.AsnId != asn.Id && poIdList.Contains(j.PurchaseOrderId))
+                .Select(j => j.AsnId);
+            var otherAsnIdsViaScalar = _db.Asns
+                .Where(a => a.Id != asn.Id && !a.IsDeleted && a.PurchaseOrderId != null && poIdList.Contains(a.PurchaseOrderId.Value))
+                .Select(a => a.Id);
+            var otherLineIds = _db.AsnLines
+                .Where(al => !al.IsDeleted
+                             && (otherAsnIdsViaJunction.Contains(al.AsnId) || otherAsnIdsViaScalar.Contains(al.AsnId)))
+                .Select(al => al.Id);
+
+            if (allSerials.Count > 0)
+            {
+                var clash = await _db.AsnLineSerials
+                    .Where(s => otherLineIds.Contains(s.AsnLineId) && allSerials.Contains(s.SerialNumber))
+                    .Select(s => s.SerialNumber)
+                    .Distinct()
+                    .ToListAsync(ct);
+                foreach (var s in clash)
+                    AddErr("lines", $"Serial number '{s}' is already used on another ASN for the same PO.");
+            }
+
+            if (allLotNos.Count > 0)
+            {
+                var clash = await _db.AsnLineLots
+                    .Where(l => otherLineIds.Contains(l.AsnLineId) && allLotNos.Contains(l.LotNo))
+                    .Select(l => l.LotNo)
+                    .Distinct()
+                    .ToListAsync(ct);
+                foreach (var l in clash)
+                    AddErr("lines", $"Lot number '{l}' is already used on another ASN for the same PO.");
+            }
+        }
+
+        // ── Over-ship (run AFTER serial/lot so a count mismatch surfaces first) ──────────────────────────
+        foreach (var l in lineCtx)
+        {
             if (l.OrderQty > 0 && l.ShippedQty > l.OrderQty)
                 AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) ships {l.ShippedQty} > ordered {l.OrderQty} (over-ship).");
-
-            if (l.ItemId.HasValue && itemFlags.TryGetValue(l.ItemId.Value, out var flags))
-            {
-                if (flags.IsLotControlled && string.IsNullOrWhiteSpace(l.BatchNumber))
-                    AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) is lot-controlled; BatchNumber is required.");
-
-                // Q-SERIAL: serialized items require serial numbers, but there is NO serial child table on AsnLine
-                // today. Per the plan's Phase-1 note we validate PRESENCE only (the BatchNumber field is reused to
-                // carry a serial marker for serialized items) and FLAG Q-Serial for solution-architect to decide
-                // whether a dedicated AsnLineSerial child table is needed. We do NOT invent the table here.
-                if (flags.IsSerialized && string.IsNullOrWhiteSpace(l.BatchNumber))
-                    AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) is serialized; serial number(s) are required (Q-Serial: no serial child table yet — supply in BatchNumber for Phase 1).");
-            }
         }
 
         if (errors.Count > 0)

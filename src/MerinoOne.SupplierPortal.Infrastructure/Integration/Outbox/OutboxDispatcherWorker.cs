@@ -250,6 +250,9 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
                 Direction = SyncDirection.Outbound,
                 Status = SyncStatus.Success,
                 PayloadRef = payloadRef,
+                // R4 (2026-06-23) — persist the canonical "what we sent" body (built by the service, Mock + Live) so
+                // the SyncLog payload viewer can render it. Capped to guard the SQL-Express size budget.
+                PayloadJson = result.RequestPayloadJson is null ? null : Truncate(result.RequestPayloadJson, 1_000_000),
                 IdempotencyKey = result.IdempotencyKey ?? row.DeterministicKey,
                 SyncedAt = now,
                 CreatedBy = "outbox-dispatcher",
@@ -292,6 +295,8 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
                 Direction = SyncDirection.Outbound,
                 Status = SyncStatus.Failed,
                 PayloadRef = payloadRef,                // D3 fix — outbound retry resolves the target from here.
+                // R4 (2026-06-23) — keep the attempted payload on failures too, so a rejected ASN is still inspectable.
+                PayloadJson = result.RequestPayloadJson is null ? null : Truncate(result.RequestPayloadJson, 1_000_000),
                 IdempotencyKey = row.DeterministicKey,
                 SyncedAt = now,
                 ErrorMessage = Truncate(detail, 2000),

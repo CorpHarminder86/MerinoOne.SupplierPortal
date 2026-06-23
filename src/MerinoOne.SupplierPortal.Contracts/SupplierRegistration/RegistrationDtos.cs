@@ -59,12 +59,16 @@ public record SupplierAddressInput(
     Guid? CityId = null,
     Guid? PostalCodeId = null);
 
+// R4 (2026-06-23) — AddressIndex optionally links this contact to one of the addresses created in the SAME
+// registration request — it is the 0-based index into SupplierRegistrationRequest.Addresses (resolved by list
+// order). Out-of-range / null → contact has no address link. Trailing optional → existing callers stay valid.
 public record SupplierContactInput(
     string Name,
     string? Designation,
     string Email,
     string? Phone,
-    bool IsPrimary);
+    bool IsPrimary,
+    int? AddressIndex = null);
 
 /// <summary>
 /// One license / certification the supplier self-declares at onboarding (R4 #1). Attachments are added later
