@@ -394,9 +394,16 @@ success; 404 if not found; 409 if the owning ASN is locked. Requires **Supplier.
     /// <summary>Authenticated download — internal users browsing supplier-owned documents.</summary>
     [HttpGet("{id:guid}")]
     [Authorize]
-    public async Task<IActionResult> Download(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Download(Guid id, [FromServices] ICurrentUser user, CancellationToken ct)
     {
-        var doc = await _db.DocumentUploads.FirstOrDefaultAsync(d => d.Id == id, ct);
+        // Internal staff (non-supplier role) may stream any supplier-owned document — the supplier detail page
+        // already surfaces the metadata, and internal users hold no SecRight on supplier G-seccodes (so the
+        // seccode/company filters would 404 the file → broken thumbnails). A supplier principal stays
+        // seccode-scoped (its own docs only). Re-apply !IsDeleted since IgnoreQueryFilters drops soft-delete too.
+        var internalViewer = !user.Roles.Contains("Supplier");
+        var doc = internalViewer
+            ? await _db.DocumentUploads.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, ct)
+            : await _db.DocumentUploads.FirstOrDefaultAsync(d => d.Id == id, ct);
         if (doc is null) return NotFound();
         var stream = await _storage.OpenReadAsync(doc.FileUrl, ct);
         if (stream is null) return NotFound();

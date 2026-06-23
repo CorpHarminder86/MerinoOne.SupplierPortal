@@ -128,6 +128,17 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
     public async Task<Result<UpsertResultDto>> Items([FromBody] PushItemsRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertItemsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
+    [HttpPost("taxes")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Tax")]
+    [EndpointSummary("Push tax codes (Infor LN)")]
+    [EndpointDescription(@"Upserts company-shared Tax master rows pushed by Infor LN (Q6: ICompanyScoped, ERP-fed). CompanyCode is resolved + normalized to the share-group source; upsert keyed on (sourceId, Code). PO/invoice lines resolve taxId by code.
+Auth: X-APIKey scheme; key must carry `Integration.Inbound.Tax` and be bound to the source company the body resolves to.
+Body: { companyCode, taxes:[{ code, description, taxRate?, isActive }] }.
+Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertResultDto>> Taxes([FromBody] PushTaxesRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertTaxesCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
     // ---------------- Transactional inbound (R4 Module 5 / Increment D) — the ERP inbound loop ----------------
 
     [HttpPost("grn-status")]
@@ -188,6 +199,41 @@ Behaviour: on success resolves portalRef to exactly one outbox row of transactio
         // Review S3 — pass the key's bound companies (anti-spoof), as the other three transactional endpoints do:
         // an ack may only stamp/erp-code a record whose company is in the key's bound set.
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertErpAckCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    // ---------------- Transactional document ingestion (R4 2026-06-23) — create/upsert live documents ----------------
+
+    [HttpPost("purchase-orders")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Po")]
+    [EndpointSummary("Push purchase orders (Infor LN)")]
+    [EndpointDescription(@"Creates/updates Purchase Orders (+ lines) pushed by Infor LN. PoNumber is the natural key within the resolved company; supplier/currency/payment-term/delivery-term/item/tax resolve by code (resolve-or-keep-snapshot). The PO's seccode is the owning supplier's, so supplier users see it via RLS.
+Auth: X-APIKey scheme; key must carry `Integration.Inbound.Po` and be bound to the resolved company.
+Body: { companyCode, orders:[{ poNumber, supplierCode, poDate, poType?, poStatus?, currencyCode?, paymentTerms?, deliveryTerms?, notes?, erpSyncId?, lines:[{ positionNo, sequenceNo, itemCode, orderUnit, orderQty, priceUnit, price, discountPct, discountAmount, deliveryDate?, taxCode?, taxDescription? }] }] }.
+Behaviour: 200 + UpsertResultDto; 400 unknown company / unknown supplier (per-row) / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertResultDto>> PurchaseOrders([FromBody] PushPurchaseOrdersRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertPurchaseOrdersCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("delivery-schedules")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.DeliverySchedule")]
+    [EndpointSummary("Push delivery schedules (Infor LN)")]
+    [EndpointDescription(@"Creates/updates PO delivery schedules (proposed dates) pushed by Infor LN. PO resolved by poNumber within the resolved company; upsert key = (PurchaseOrderId, ProposedDate).
+Auth: X-APIKey scheme; key must carry `Integration.Inbound.DeliverySchedule` and be bound to the resolved company.
+Body: { companyCode, schedules:[{ poNumber, proposedDate, timeWindow?, vehicleInfo?, scheduleStatus? }] }.
+Behaviour: 200 + UpsertResultDto; 400 unknown company / unknown PO (per-row) / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertResultDto>> DeliverySchedules([FromBody] PushDeliverySchedulesRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertDeliverySchedulesCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("goods-receipts")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.GrnReceipt")]
+    [EndpointSummary("Push goods receipts / GRN rows (Infor LN)")]
+    [EndpointDescription(@"Creates/updates goods-receipt (GRN) rows pushed by Infor LN, against a PO line resolved by (poNumber, poPositionNo). New GRNs land GrnNotApproved; the separate /grn-status endpoint then advances them (and triggers the invoice auto-post). GrnNumber is the natural key within the resolved company.
+Auth: X-APIKey scheme; key must carry `Integration.Inbound.GrnReceipt` and be bound to the resolved company.
+Body: { companyCode, receipts:[{ grnNumber, poNumber, poPositionNo, receivedQty, shortQty?, rejectedQty?, grnDate?, asnNumber?, erpSyncId? }] }.
+Behaviour: 200 + UpsertResultDto; 400 unknown company / unknown PO line (per-row) / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertResultDto>> GoodsReceipts([FromBody] PushGoodsReceiptsRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertGoodsReceiptsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
     /// <summary>
     /// The key's bound source companies — every "tenantEntityId" claim minted by the API-key auth handler

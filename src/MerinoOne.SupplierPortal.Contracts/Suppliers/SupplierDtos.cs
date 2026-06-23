@@ -235,3 +235,10 @@ public record SupplierLicenseExpiringDto(
 
 /// <summary>Admin sets the supplier's PO-response behaviour (Manual / Auto).</summary>
 public record SetPoResponseModeRequest(string PoResponseMode);
+
+/// <summary>
+/// Internal user sets the supplier's commercial terms (R4 #1) — Currency + Payment/Delivery term FKs. The
+/// handler snapshots the term codes (PaymentTermCode/DeliveryTermCode) from the master rows. Any field may be
+/// null to clear it.
+/// </summary>
+public record UpdateCommercialTermsRequest(Guid? CurrencyId, Guid? PaymentTermId, Guid? DeliveryTermId);

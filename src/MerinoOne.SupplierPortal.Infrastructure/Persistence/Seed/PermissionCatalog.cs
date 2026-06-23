@@ -53,6 +53,10 @@ public static class PermissionCatalog
         new PermissionSeed("Integration.Inbound.Grn",          "Inbound: GRN status",       "Integration", "Inbound /grn-status: ERP pushes goods-receipt status"),
         new PermissionSeed("Integration.Inbound.Payment",      "Inbound: payments",         "Integration", "Inbound /payments: ERP pushes payment / remittance data"),
         new PermissionSeed("Integration.Inbound.InvoiceStatus","Inbound: invoice status",   "Integration", "Inbound /invoice-status: ERP advances invoice to Matched/Approved/Paid"),
+        new PermissionSeed("Integration.Inbound.Po",           "Inbound: purchase orders",  "Integration", "Inbound /purchase-orders: ERP pushes/creates Purchase Orders + lines"),
+        new PermissionSeed("Integration.Inbound.DeliverySchedule","Inbound: delivery schedules","Integration","Inbound /delivery-schedules: ERP pushes PO delivery schedules"),
+        new PermissionSeed("Integration.Inbound.GrnReceipt",   "Inbound: goods receipts",   "Integration", "Inbound /goods-receipts: ERP creates GRN rows against PO lines"),
+        new PermissionSeed("Integration.Inbound.Tax",          "Inbound: tax codes",        "Integration", "Inbound /taxes: ERP pushes company-shared tax-code master"),
         // Platform-tier permissions — held ONLY by the cross-tenant PlatformAdmin (separation of duties:
         // a Platform Admin onboards tenants/companies/first-admins but reads NO business data).
         new PermissionSeed("Platform.Tenants",             "Manage tenants",            "Platform",       "View and manage tenants and their companies (cross-tenant)"),

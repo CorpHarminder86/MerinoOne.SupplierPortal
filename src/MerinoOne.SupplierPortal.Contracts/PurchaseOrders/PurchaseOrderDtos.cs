@@ -36,6 +36,7 @@ public record PurchaseOrderDetailDto(
     DateTime PoDate,
     string? PaymentTerms,
     string? DeliveryTerms,
+    string? CurrencyCode,
     string PoStatus,
     DateTime? AcknowledgmentAt,
     DateTime? AcceptedAt,
@@ -64,7 +65,9 @@ public record PurchaseOrderLineDto(
     decimal DiscountPct,
     decimal DiscountAmount,
     DateTime? DeliveryDate,
-    string? TaxCode);
+    string? TaxCode,
+    string? TaxDescription = null,
+    Guid? TaxId = null);
 
 public record AcknowledgePoRequest(string? Notes = null);
 public record AcceptPoRequest(DateTime? ProposedDate, string? Notes = null);

@@ -265,11 +265,18 @@ else
 }
 
 @code {
-    // SharedEndpoint names — must match what the API parses ("PaymentTerm" / "DeliveryTerm").
+    // SharedEndpoint names — must match what the API parses. ALL company-shared (ICompanyScoped) masters are
+    // listed so a share group can be created for any of them by default. Tenant-scoped reference masters
+    // (Currency/Country/…) and transactional documents (PO/GRN/Payment) are NOT share-aware (ResolveSource is
+    // identity for them), so they are intentionally excluded.
     private static readonly (string Key, string Value)[] KnownEndpoints =
     {
         ("PaymentTerm", "Payment Terms"),
-        ("DeliveryTerm", "Delivery Terms")
+        ("DeliveryTerm", "Delivery Terms"),
+        ("Unit", "Units"),
+        ("ItemGroup", "Item Groups"),
+        ("Item", "Items"),
+        ("Tax", "Tax Codes")
     };
 
     private List<ShareGroupDto>? rows;
@@ -423,6 +430,10 @@ else
     {
         "PaymentTerm" => "savings",
         "DeliveryTerm" => "local_shipping",
+        "Unit" => "straighten",
+        "ItemGroup" => "category",
+        "Item" => "inventory_2",
+        "Tax" => "receipt_long",
         _ => "hub"
     };
 }

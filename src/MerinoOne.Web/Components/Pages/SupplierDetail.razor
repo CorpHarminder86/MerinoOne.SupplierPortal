@@ -364,7 +364,15 @@ else
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
             <div class="rz-card" style="padding:20px;">
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Commercial terms</h3>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                    <h3 style="font-size:14px;font-weight:700;margin:0;color:var(--mer-blue-darker);">Commercial terms</h3>
+                    @if (Token.HasPermission("Supplier.Approve"))
+                    {
+                        <button class="rz-button" style="padding:5px 11px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-blue);cursor:pointer;font-size:12px;" @onclick="OpenTerms" disabled="@busy">
+                            <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">edit</span> Edit terms
+                        </button>
+                    }
+                </div>
                 <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
                     <dt style="color:var(--mer-ink-500);">Currency</dt><dd style="font-family:Inter,monospace;">@(detail.CurrencyCode ?? "—")</dd>
                     <dt style="color:var(--mer-ink-500);">Payment term</dt><dd>@(detail.PaymentTermCode ?? "—")</dd>
@@ -690,6 +698,66 @@ else
             </div>
         </div>
     }
+
+    @* ---------------- Commercial-terms dialog (R4 #1, internal) ---------------- *@
+    @if (showTerms)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">handshake</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Supplier</div>
+                        <h2 class="merino-dialog__title">Commercial terms</h2>
+                        <p class="merino-dialog__subtitle">Currency + payment / delivery terms used on this supplier's POs.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showTerms = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <div style="display:grid;grid-template-columns:1fr;gap:12px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Currency</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="termCurrencyId">
+                                <option value="">— none —</option>
+                                @foreach (var c in currencies)
+                                {
+                                    <option value="@c.Id">@c.Code — @c.Description</option>
+                                }
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Payment term</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="termPaymentTermId">
+                                <option value="">— none —</option>
+                                @foreach (var p in paymentTerms)
+                                {
+                                    <option value="@p.Id">@p.Code — @p.Description</option>
+                                }
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Delivery term</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="termDeliveryTermId">
+                                <option value="">— none —</option>
+                                @foreach (var d in deliveryTerms)
+                                {
+                                    <option value="@d.Id">@d.Code — @d.Description</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(termError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@termError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showTerms = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="SaveTerms" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
 }
 
 @* Reusable preview overlay — rendered once, driven by _previewDoc state. *@
@@ -738,6 +806,15 @@ else
     private bool showPoMode;
     private string poModeValue = "Manual";
     private string poModeError = string.Empty;
+
+    // Commercial terms (R4 #1, internal edit)
+    private bool showTerms;
+    private string termCurrencyId = string.Empty;
+    private string termPaymentTermId = string.Empty;
+    private string termDeliveryTermId = string.Empty;
+    private string termError = string.Empty;
+    private List<PaymentTermDto> paymentTerms = new();
+    private List<MasterItemDto> deliveryTerms = new();
 
     private static readonly System.Text.RegularExpressions.Regex IfscRegex =
         new("^[A-Z]{4}0[A-Z0-9]{6}$", System.Text.RegularExpressions.RegexOptions.Compiled);
@@ -1009,6 +1086,28 @@ else
         busy = false;
     }
 
+    // ---- Commercial terms (R4 #1) ----
+    private void OpenTerms()
+    {
+        termCurrencyId = detail?.CurrencyId?.ToString() ?? string.Empty;
+        termPaymentTermId = detail?.PaymentTermId?.ToString() ?? string.Empty;
+        termDeliveryTermId = detail?.DeliveryTermId?.ToString() ?? string.Empty;
+        termError = string.Empty;
+        showTerms = true;
+    }
+
+    private async Task SaveTerms()
+    {
+        busy = true; termError = string.Empty;
+        Guid? cur = Guid.TryParse(termCurrencyId, out var cg) ? cg : null;
+        Guid? pt = Guid.TryParse(termPaymentTermId, out var pg) ? pg : null;
+        Guid? dt = Guid.TryParse(termDeliveryTermId, out var dg) ? dg : null;
+        var resp = await Api.PutAsync<UpdateCommercialTermsRequest>($"api/suppliers/{Id}/commercial-terms", new UpdateCommercialTermsRequest(cur, pt, dt));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Commercial terms updated" }); showTerms = false; await Load(); }
+        else { termError = resp?.Errors?.FirstOrDefault() ?? "Failed to update terms."; }
+        busy = false;
+    }
+
     private bool RequireOverride => detail?.Verifications
         .GroupBy(v => v.VerificationType)
         .Select(g => g.OrderByDescending(v => v.AttemptedAt).First())
@@ -1020,6 +1119,11 @@ else
         // Currency dropdown source for the bank dialog. api/masters/currencies returns Id+Code+Description.
         var cur = await Api.GetAsync<List<CurrencyDto>>("api/masters/currencies?isActive=true");
         currencies = cur?.Data ?? new();
+        // Payment / delivery term dropdown sources for the commercial-terms dialog (R4 #1).
+        var pt = await Api.GetAsync<List<PaymentTermDto>>("api/masters/payment-terms?isActive=true");
+        paymentTerms = pt?.Data ?? new();
+        var dt = await Api.GetAsync<List<MasterItemDto>>("api/masters/delivery-terms?isActive=true");
+        deliveryTerms = dt?.Data ?? new();
     }
 
     private async Task Load()

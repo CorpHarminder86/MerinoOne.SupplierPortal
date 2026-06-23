@@ -129,14 +129,35 @@ else
                         </div>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                             <div><label style="font-size:12px;color:var(--mer-ink-700);">Type</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.AddressType" placeholder="Registered / Billing / Shipping" /></div>
-                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Line 1</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.AddressLine1" /></div>
-                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Line 2</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.AddressLine2" /></div>
-                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Area</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.Area" /></div>
-                            <div><label style="font-size:12px;color:var(--mer-ink-700);">City</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.City" /></div>
-                            <div><label style="font-size:12px;color:var(--mer-ink-700);">State</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.State" /></div>
-                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Pincode</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.Pincode" /></div>
-                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Country</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.Country" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">Country</label>
+                                <GeoAutocomplete Placeholder="Country" Value="@row.Country"
+                                    Search="@((q, sk) => SearchCountries(q, sk))"
+                                    ValueChanged="@(v => { row.Country = v; row.CountryId = null; row.StateId = null; row.CityId = null; row.PostalCodeId = null; row.State = string.Empty; row.City = string.Empty; row.Pincode = string.Empty; row.Area = null; })"
+                                    OnSelected="@(g => { row.Country = g.Name; row.CountryId = g.Id; row.StateId = null; row.CityId = null; row.PostalCodeId = null; row.State = string.Empty; row.City = string.Empty; row.Pincode = string.Empty; row.Area = null; })" />
+                            </div>
+                            <div style="grid-column:1 / span 2;"><label style="font-size:12px;color:var(--mer-ink-700);">Line 1</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.AddressLine1" /></div>
+                            <div style="grid-column:1 / span 2;"><label style="font-size:12px;color:var(--mer-ink-700);">Line 2</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.AddressLine2" /></div>
+                            <div style="grid-column:1 / span 2;"><label style="font-size:12px;color:var(--mer-ink-700);">Postal code</label>
+                                <GeoAutocomplete Placeholder="PIN — pick to auto-fill area / city / state" Value="@row.Pincode" UseCode="true" Disabled="@(row.CountryId is null)"
+                                    Search="@((q, sk) => SearchPostals(q, sk, row))"
+                                    ValueChanged="@(v => { row.Pincode = v; row.PostalCodeId = null; row.StateId = null; row.CityId = null; row.State = string.Empty; row.City = string.Empty; row.Area = null; })"
+                                    OnSelected="@(g => OnPostalSelected(row, g))" />
+                            </div>
+                            <div style="grid-column:1 / span 2;"><label style="font-size:12px;color:var(--mer-ink-700);">Area</label><input class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.Area" /></div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">State</label>
+                                <GeoAutocomplete Placeholder="State" Value="@row.State" Disabled="@(row.CountryId is null || row.PostalCodeId is not null)"
+                                    Search="@((q, sk) => SearchStates(q, sk, row))"
+                                    ValueChanged="@(v => { row.State = v; row.StateId = null; })"
+                                    OnSelected="@(g => { row.State = g.Name; row.StateId = g.Id; row.CityId = null; })" />
+                            </div>
+                            <div><label style="font-size:12px;color:var(--mer-ink-700);">City</label>
+                                <GeoAutocomplete Placeholder="City" Value="@row.City" Disabled="@(row.CountryId is null || row.PostalCodeId is not null)"
+                                    Search="@((q, sk) => SearchCities(q, sk, row))"
+                                    ValueChanged="@(v => { row.City = v; row.CityId = null; })"
+                                    OnSelected="@(g => { row.City = g.Name; row.CityId = g.Id; })" />
+                            </div>
                         </div>
+                        <p style="font-size:11px;color:var(--mer-ink-500);margin-top:6px;">@(row.IsNew ? "" : "To change Country/State/City, re-pick Country to enable the lookup.")</p>
                     </div>
                 }
                 @if (!addresses.Any(x => !x.Removed)) { <div class="tl-empty">No addresses. Click "Add address" to propose one.</div> }
@@ -244,6 +265,36 @@ else
                             <div><label style="font-size:12px;color:var(--mer-ink-700);">Expiry date</label><input type="date" class="rz-textbox" style="width:100%;padding:7px 9px;" @bind="row.ExpiryDate" /></div>
                             @* (date inputs bind to DateOnly? on LicenseRow) *@
                             <div style="grid-column:1 / span 2;"><label style="font-size:12px;color:var(--mer-ink-700);">Remarks</label><textarea class="rz-textbox" rows="2" style="width:100%;padding:7px 9px;font-family:inherit;" @bind="row.Remarks"></textarea></div>
+                            @if (row.IsNew)
+                            {
+                                <div style="grid-column:1 / span 2;border-top:1px solid var(--mer-line-soft);padding-top:10px;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachments</label>
+                                        <label style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;position:relative;overflow:hidden;">
+                                            <span class="material-symbols-outlined" style="font-size:14px;">upload</span> Add file
+                                            <InputFile OnChange="@(e => OnLicenseFile(row, e))" accept=".pdf,.jpg,.jpeg,.png" style="position:absolute;inset:0;opacity:0;cursor:pointer;" />
+                                        </label>
+                                    </div>
+                                    @if (row.Attachments.Count > 0)
+                                    {
+                                        <div style="display:flex;flex-direction:column;gap:4px;">
+                                            @foreach (var f in row.Attachments)
+                                            {
+                                                var att = f;
+                                                <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--mer-line);border-radius:6px;padding:6px 10px;background:var(--mer-surface);">
+                                                    <span class="material-symbols-outlined" style="font-size:16px;color:var(--mer-blue);">description</span>
+                                                    <span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@att.FileName</span>
+                                                    <button type="button" @onclick="() => row.Attachments.Remove(att)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:16px;">close</span></button>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <div style="grid-column:1 / span 2;font-size:11px;color:var(--mer-ink-500);">Attachments for an existing license are managed on the supplier's License tab.</div>
+                            }
                         </div>
                     </div>
                 }
@@ -441,6 +492,30 @@ else
     private void AddContact() => contacts.Add(new ContactRow { IsNew = true });
     private void AddBank() => banks.Add(new BankRow { IsNew = true });
     private void AddLicense() => licenses.Add(new LicenseRow { IsNew = true });
+
+    private const long MaxFileBytes = 5L * 1024 * 1024;
+    // Upload a license attachment to the deferred-upload staging slot (ownerEntityType='Staging' + the row's
+    // StagingKey). On Approve the applier rebinds staged docs onto the created SupplierLicense.
+    private async Task OnLicenseFile(LicenseRow row, InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null || file.Size == 0 || file.Size > MaxFileBytes) return;
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            var streamContent = new StreamContent(file.OpenReadStream(MaxFileBytes));
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
+            content.Add(streamContent, "file", file.Name);
+            content.Add(new StringContent("Staging"), "ownerEntityType");
+            content.Add(new StringContent(row.StagingKey.ToString()), "ownerEntityId");
+            content.Add(new StringContent(SupplierId.ToString()), "supplierId");
+            var resp = await Api.PostMultipartAsync<DocumentAttachmentDto>("api/document-uploads/attach", content);
+            if (resp?.Success == true && resp.Data is not null)
+                row.Attachments.Add(new LicenseFile { Id = resp.Data.Id, FileName = resp.Data.FileName });
+        }
+        catch { /* best-effort; the user can retry */ }
+    }
 
     // New rows are dropped entirely; existing rows are flagged Removed (→ Delete line).
     private void RemoveAddress(AddressRow r) { if (r.IsNew) addresses.Remove(r); else r.Removed = true; }
@@ -654,10 +729,44 @@ else
         }
     }
 
+    // ---------------- Address geo autocomplete (authenticated /api/geo) ----------------
+    private Task<List<GeoLookupDto>> SearchCountries(string q, int skip) => Geo("countries", q, null, skip);
+    private Task<List<GeoLookupDto>> SearchStates(string q, int skip, AddressRow a) => Geo("states", q, $"countryId={a.CountryId}", skip);
+    private Task<List<GeoLookupDto>> SearchCities(string q, int skip, AddressRow a) =>
+        Geo("cities", q, $"countryId={a.CountryId}" + (a.StateId is Guid s ? $"&stateId={s}" : ""), skip);
+    private Task<List<GeoLookupDto>> SearchPostals(string q, int skip, AddressRow a) =>
+        Geo("postal-codes", q, $"countryId={a.CountryId}", skip);
+
+    private async Task<List<GeoLookupDto>> Geo(string seg, string q, string? extra, int skip)
+    {
+        var url = $"api/geo/{seg}?";
+        if (!string.IsNullOrEmpty(extra)) url += extra + "&";
+        if (!string.IsNullOrWhiteSpace(q)) url += "search=" + Uri.EscapeDataString(q.Trim()) + "&";
+        if (skip > 0) url += "skip=" + skip;
+        var resp = await Api.GetAsync<List<GeoLookupDto>>(url);
+        return resp?.Data ?? new();
+    }
+
+    // Reverse-cascade: picking a PIN fills area/city/state/country from the postal-code master.
+    private async Task OnPostalSelected(AddressRow a, GeoLookupDto g)
+    {
+        a.Pincode = g.Code;
+        a.PostalCodeId = g.Id;
+        var detail = (await Api.GetAsync<PostalCodeDetailDto>($"api/geo/postal-codes/{g.Id}/detail"))?.Data;
+        if (detail is null) return;
+        if (!string.IsNullOrWhiteSpace(detail.Area)) a.Area = detail.Area;
+        if (detail.CountryId is Guid cid) { a.CountryId = cid; if (!string.IsNullOrWhiteSpace(detail.CountryName)) a.Country = detail.CountryName!; }
+        if (detail.StateId is Guid sid) { a.StateId = sid; if (!string.IsNullOrWhiteSpace(detail.StateName)) a.State = detail.StateName!; }
+        if (detail.CityId is Guid ctid) { a.CityId = ctid; if (!string.IsNullOrWhiteSpace(detail.CityName)) a.City = detail.CityName!; }
+        StateHasChanged();
+    }
+
     private sealed class AddressRow : IFieldSettable
     {
         public Guid? Id; public bool IsNew; public bool Removed; public AddressRow? Seed;
         public string? AddressType, AddressLine1, AddressLine2, Area, City, State, Pincode, Country;
+        // Transient geo-cascade ids (drive the autocomplete only — the payload persists the string names/code).
+        public Guid? CountryId, StateId, CityId, PostalCodeId;
         public void Set(string? field, string? value)
         {
             switch (field)
@@ -756,6 +865,9 @@ else
         public Guid? Id; public bool IsNew; public bool Removed; public LicenseRow? Seed;
         public string? LicenseNumber, LicenseType, Remarks;
         public DateOnly? IssueDate, ExpiryDate;   // bound to <input type="date">; serialised to yyyy-MM-dd
+        // Deferred-upload staging key for new-license attachments (rebound onto the license at approve time).
+        public Guid StagingKey = Guid.NewGuid();
+        public List<LicenseFile> Attachments = new();
 
         // yyyy-MM-dd round-trips for diff / payload / draft-resume.
         public string? IssueStr => IssueDate?.ToString("yyyy-MM-dd");
@@ -776,6 +888,7 @@ else
         {
             licenseNumber = LicenseNumber, licenseType = LicenseType, remarks = Remarks,
             issueDate = IssueStr, expiryDate = ExpiryStr,
+            stagingKey = StagingKey.ToString(),
         });
         public static LicenseRow FromPayload(string? json)
         {
@@ -783,10 +896,13 @@ else
             var d = Parse(json);
             r.LicenseNumber = Get(d, "licenseNumber"); r.LicenseType = Get(d, "licenseType"); r.Remarks = Get(d, "remarks");
             r.IssueDate = ParseDate(Get(d, "issueDate")); r.ExpiryDate = ParseDate(Get(d, "expiryDate"));
+            if (Guid.TryParse(Get(d, "stagingKey"), out var sk)) r.StagingKey = sk;   // keep the same key on draft-resume
             return r;
         }
         private static DateOnly? ParseDate(string? v) => DateOnly.TryParse(v, out var d) ? d : null;
     }
+
+    private sealed class LicenseFile { public Guid Id { get; set; } public string FileName { get; set; } = string.Empty; }
 
     private static Dictionary<string, string?> Parse(string? json)
     {

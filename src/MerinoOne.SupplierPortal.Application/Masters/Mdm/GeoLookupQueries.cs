@@ -135,6 +135,25 @@ public class GetPublicPostalCodeDetailQueryHandler(IAppDbContext db, ISender sen
 }
 
 /// <summary>
+/// Authenticated reverse-cascade postal detail (R4 — change-request editor address autocomplete). Same shape as
+/// <see cref="GetPublicPostalCodeDetailQuery"/> but tenant comes from the ambient query filter (signed-in user),
+/// so no invite token is needed. Returns null when the code is not visible to the caller.
+/// </summary>
+public record GetPostalCodeDetailQuery(Guid Id) : IRequest<PostalCodeDetailDto?>;
+public class GetPostalCodeDetailQueryHandler(IAppDbContext db) : IRequestHandler<GetPostalCodeDetailQuery, PostalCodeDetailDto?>
+{
+    public async Task<PostalCodeDetailDto?> Handle(GetPostalCodeDetailQuery request, CancellationToken ct)
+        => await db.PostalCodes
+            .Where(x => x.Id == request.Id)
+            .Select(x => new PostalCodeDetailDto(
+                x.Id, x.Code, x.Area,
+                x.CityId, x.City != null ? x.City.Description : null,
+                x.StateId, x.State != null ? x.State.Description : null,
+                x.CountryId, x.Country != null ? x.Country.Description : null))
+            .FirstOrDefaultAsync(ct);
+}
+
+/// <summary>
 /// Resolves the tenant behind a registration invite token for the anonymous geo lookups. Rejects an
 /// unknown, expired or already-consumed invite (the same gate the registration page enforces).
 /// </summary>

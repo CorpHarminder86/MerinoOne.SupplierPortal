@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplier;
 using SupplierAddressEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierAddress;
 using SupplierContactEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact;
+using SupplierLicenseEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierLicense;
 
 namespace MerinoOne.SupplierPortal.Application.SupplierRegistration.Commands;
 
@@ -57,6 +58,16 @@ public class RegisterSupplierCommandValidator : AbstractValidator<RegisterSuppli
         {
             c.RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
             c.RuleFor(x => x.Email).NotEmpty().EmailAddress().MaximumLength(256);
+        });
+
+        // R4 #1 — self-declared licenses (optional list; validate each that is present).
+        RuleForEach(x => x.Body.Licenses).ChildRules(l =>
+        {
+            l.RuleFor(x => x.LicenseNumber).NotEmpty().MaximumLength(100);
+            l.RuleFor(x => x.LicenseType).NotEmpty().MaximumLength(100);
+            l.RuleFor(x => x.Remarks).MaximumLength(1000);
+            l.RuleFor(x => x).Must(x => !(x.IssueDate.HasValue && x.ExpiryDate.HasValue) || x.ExpiryDate >= x.IssueDate)
+                .WithMessage("License expiry date must be on or after the issue date.");
         });
 
         // Mandatory document set:
@@ -254,6 +265,32 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
             });
         }
 
+        // R4 #1 — supplier self-declared licenses at onboarding. BaseAggregateRoot → stamp the supplier's
+        // G-seccode + the invite's tenant/company (mirrors the Supplier/Seccode scope set above).
+        // Capture each license's uploaded attachment doc-ids so they can be rebound onto the license below.
+        var licenseAttachMap = new List<(Guid LicenseId, List<Guid> DocIds)>();
+        foreach (var lic in request.Body.Licenses ?? new List<SupplierLicenseInput>())
+        {
+            var licId = Guid.NewGuid();
+            supplier.Licenses.Add(new SupplierLicenseEntity
+            {
+                Id = licId,
+                SupplierId = supplierId,
+                SeccodeId = seccodeId,
+                TenantId = inviteTenantId,
+                TenantEntityId = inviteCompanyId,
+                LicenseNumber = lic.LicenseNumber.Trim(),
+                LicenseType = lic.LicenseType.Trim(),
+                IssueDate = lic.IssueDate,
+                ExpiryDate = lic.ExpiryDate,
+                Remarks = string.IsNullOrWhiteSpace(lic.Remarks) ? null : lic.Remarks.Trim(),
+                CreatedBy = "self-register",
+                CreatedOn = now,
+            });
+            if (lic.AttachmentIds is { Count: > 0 })
+                licenseAttachMap.Add((licId, lic.AttachmentIds.Distinct().ToList()));
+        }
+
         _db.Suppliers.Add(supplier);
 
         // Rewrite ownership of the already-uploaded onboarding documents from the
@@ -302,6 +339,33 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
             doc.TenantEntityId = inviteCompanyId;
             doc.UpdatedBy = "self-register";
             doc.UpdatedOn = now;
+        }
+
+        // R4 #1 — rebind each license's uploaded attachment docs (uploaded anonymously as owner=PendingInvite)
+        // onto the created SupplierLicense, in the same transaction. Token-gated (must belong to this invite);
+        // unknown / cross-invite ids are skipped silently (attachments are optional, unlike the mandatory docs).
+        var allLicenseDocIds = licenseAttachMap.SelectMany(m => m.DocIds).Distinct().ToList();
+        if (allLicenseDocIds.Count > 0)
+        {
+            var licenseDocs = await _db.DocumentUploads.IgnoreQueryFilters()
+                .Where(d => allLicenseDocIds.Contains(d.Id))
+                .ToListAsync(ct);
+            foreach (var (licenseId, docIdList) in licenseAttachMap)
+            {
+                foreach (var did in docIdList)
+                {
+                    var doc = licenseDocs.FirstOrDefault(d => d.Id == did);
+                    if (doc is null || doc.OwnerEntityType != "PendingInvite" || doc.OwnerEntityId != invite.Id) continue;
+                    doc.OwnerEntityType = "SupplierLicense";
+                    doc.OwnerEntityId = licenseId;
+                    doc.DocumentType = DocumentType.License;
+                    doc.SeccodeId = seccodeId;
+                    doc.TenantId = inviteTenantId;
+                    doc.TenantEntityId = inviteCompanyId;
+                    doc.UpdatedBy = "self-register";
+                    doc.UpdatedOn = now;
+                }
+            }
         }
 
         // Consume the invite atomically (single SaveChanges = single EF transaction)

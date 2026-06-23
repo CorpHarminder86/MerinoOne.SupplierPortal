@@ -93,6 +93,8 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<DeliverySchedule> DeliverySchedules => Set<DeliverySchedule>();
     public DbSet<Asn> Asns => Set<Asn>();
     public DbSet<AsnLine> AsnLines => Set<AsnLine>();
+    public DbSet<AsnLineSerial> AsnLineSerials => Set<AsnLineSerial>();
+    public DbSet<AsnLineLot> AsnLineLots => Set<AsnLineLot>();
     public DbSet<AsnPurchaseOrder> AsnPurchaseOrders => Set<AsnPurchaseOrder>();
     public DbSet<GoodsReceipt> GoodsReceipts => Set<GoodsReceipt>();
     public DbSet<Invoice> Invoices => Set<Invoice>();

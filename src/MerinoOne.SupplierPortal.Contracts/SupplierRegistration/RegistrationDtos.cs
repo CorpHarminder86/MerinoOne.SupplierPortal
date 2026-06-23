@@ -67,6 +67,20 @@ public record SupplierContactInput(
     bool IsPrimary);
 
 /// <summary>
+/// One license / certification the supplier self-declares at onboarding (R4 #1). Attachments are added later
+/// on the supplier's License tab (post-approval); here we capture the declaration fields only.
+/// </summary>
+public record SupplierLicenseInput(
+    string LicenseNumber,
+    string LicenseType,
+    DateOnly? IssueDate = null,
+    DateOnly? ExpiryDate = null,
+    string? Remarks = null,
+    // Doc ids uploaded anonymously (POST api/document-uploads, DocumentType=License) for THIS license; the
+    // register handler rebinds them from the PendingInvite owner onto the created SupplierLicense.
+    List<Guid>? AttachmentIds = null);
+
+/// <summary>
 /// One uploaded document referenced from a registration submission. The document row is
 /// created by <c>POST api/document-uploads</c> ahead of time; only its <c>Id</c> is sent
 /// here so the registration handler can rewrite ownership to the new supplier. DocumentType
@@ -100,7 +114,10 @@ public record SupplierRegistrationRequest(
     string? Website,
     List<SupplierAddressInput> Addresses,
     List<SupplierContactInput> Contacts,
-    List<UploadedDocumentInput> Documents);
+    List<UploadedDocumentInput> Documents,
+    // R4 #1 — supplier self-declared licenses at onboarding (optional). Trailing optional so existing callers
+    // stay valid. Commercial terms (currency/payment/delivery) are set internally on SupplierDetail, not here.
+    List<SupplierLicenseInput>? Licenses = null);
 
 public record SupplierRegistrationResponse(
     Guid SupplierId,

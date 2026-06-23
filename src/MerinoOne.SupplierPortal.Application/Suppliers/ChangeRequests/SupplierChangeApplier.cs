@@ -28,11 +28,13 @@ public sealed class SupplierChangeApplier
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
+    private readonly Common.Documents.LicenseAttachmentRebinder _rebinder;
 
-    public SupplierChangeApplier(IAppDbContext db, ICurrentUser user)
+    public SupplierChangeApplier(IAppDbContext db, ICurrentUser user, Common.Documents.LicenseAttachmentRebinder rebinder)
     {
         _db = db;
         _user = user;
+        _rebinder = rebinder;
     }
 
     /// <summary>Routes a line to the matching typed applier. <paramref name="supplier"/> is already loaded + tracked.</summary>
@@ -293,6 +295,9 @@ public sealed class SupplierChangeApplier
                     CreatedOn = now,
                 };
                 _db.SupplierLicenses.Add(entity);
+                // R4 — rebind any staged attachments the supplier uploaded for this license (ownerEntityType=
+                // 'Staging' + the stagingKey in the line payload) onto the just-created license, same transaction.
+                await _rebinder.RebindAsync(GetGuid(p, "stagingKey"), null, entity.Id, s.SeccodeId, now, ct);
                 break;
             }
             case ChangeOperation.Edit:

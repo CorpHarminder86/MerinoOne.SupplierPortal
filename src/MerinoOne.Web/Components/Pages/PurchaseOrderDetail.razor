@@ -82,6 +82,7 @@ else
                     <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
                     <dt style="color:var(--mer-ink-500);">Buyer</dt><dd>@(detail.BuyerName ?? "—")</dd>
                     <dt style="color:var(--mer-ink-500);">PO Date</dt><dd style="font-family:Inter,monospace;">@detail.PoDate.ToString("yyyy-MM-dd")</dd>
+                    <dt style="color:var(--mer-ink-500);">Currency</dt><dd>@(string.IsNullOrEmpty(detail.CurrencyCode) ? "—" : detail.CurrencyCode)</dd>
                     <dt style="color:var(--mer-ink-500);">Payment terms</dt><dd>@(detail.PaymentTerms ?? "—")</dd>
                     <dt style="color:var(--mer-ink-500);">Delivery terms</dt><dd>@(detail.DeliveryTerms ?? "—")</dd>
                     @if (detail.AcknowledgmentAt.HasValue)
@@ -121,24 +122,34 @@ else
                     <thead>
                         <tr style="border-bottom:1px solid var(--mer-line);">
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Seq</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Description</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Qty</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Unit</th>
-                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Price</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Price Unit</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Net Amount</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Disc %</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Disc Amt</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Tax</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Delivery</th>
                         </tr>
                     </thead>
                     <tbody>
-                    @foreach (var ln in detail.Lines.OrderBy(l => l.PositionNo))
+                    @foreach (var ln in detail.Lines.OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo))
                     {
                         <tr style="border-bottom:1px solid var(--mer-line-soft);">
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PositionNo</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.SequenceNo</td>
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
                             <td style="padding:6px 4px;">@ln.ItemDescription</td>
                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
                             <td style="padding:6px 4px;">@ln.OrderUnit</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.PriceUnit.ToString("0.00")</td>
                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.Price.ToString("0.00")</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.DiscountPct == 0 ? "—" : ln.DiscountPct.ToString("0.##"))</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.DiscountAmount == 0 ? "—" : ln.DiscountAmount.ToString("0.00"))</td>
+                            <td style="padding:6px 4px;" title="@ln.TaxDescription">@(string.IsNullOrEmpty(ln.TaxCode) ? "—" : ln.TaxCode)</td>
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@(ln.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                         </tr>
                     }

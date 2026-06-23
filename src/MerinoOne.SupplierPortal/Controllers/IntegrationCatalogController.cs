@@ -52,6 +52,9 @@ public static class IntegrationCatalog
         new IntegrationEndpointDocDto("Items", "Integration.Inbound.Item", "POST", $"{Base}/items", true,
             "Upsert item master rows (unit + group referenced by code) for the resolved source company.",
             Json(new { companyCode = "3000", items = new[] { new { code = "ITM-00001", description = "Sample item", unitCode = "KG", itemGroupCode = "RAW", hsnCode = "39021000", isActive = true } } })),
+        new IntegrationEndpointDocDto("Taxes", "Integration.Inbound.Tax", "POST", $"{Base}/taxes", true,
+            "Upsert tax-code master rows (company-shared) for the resolved source company. PO/invoice lines resolve taxId by code.",
+            Json(new { companyCode = "3000", taxes = new[] { new { code = "GST18", description = "GST 18%", taxRate = 18.0, isActive = true } } })),
 
         // ── Tenant-scoped (no CompanyCode; bound to the key's tenant) ──
         new IntegrationEndpointDocDto("Currencies", "Integration.Inbound.Currency", "POST", $"{Base}/currencies", false,
@@ -83,5 +86,16 @@ public static class IntegrationCatalog
         new IntegrationEndpointDocDto("ERP ack", "Integration.Inbound.ErpAck", "POST", $"{Base}/erp-ack", false,
             "ERP acknowledgement + erpCode write-back for a Portal->ERP transaction (tenant-scoped; resolves portalRef -> outbox row).",
             Json(new { acks = new[] { new { transactionType = "AsnPost", portalRef = "<deterministic-outbox-key>", success = true, erpCode = "ASN-LN-0001", message = (string?)null } } })),
+
+        // ── Transactional document ingestion (R4 2026-06-23) — create/upsert the live PO / delivery schedule / GRN ──
+        new IntegrationEndpointDocDto("Purchase orders", "Integration.Inbound.Po", "POST", $"{Base}/purchase-orders", true,
+            "Create/upsert Purchase Orders (+ lines) for the resolved company. Supplier/currency/term/item/tax resolved by code.",
+            Json(new { companyCode = "3000", orders = new[] { new { poNumber = "PO-3000-000001", supplierCode = "S0001", poDate = "2026-06-23", poType = "Material", poStatus = "Released", currencyCode = "INR", paymentTerms = "Net 30", deliveryTerms = "FOB", lines = new[] { new { positionNo = 10, sequenceNo = 1, itemCode = "ITM-00001", itemDescription = "Sample item", orderUnit = "KG", orderQty = 100.0, priceUnit = 50.0, price = 5000.0, discountPct = 0.0, discountAmount = 0.0, deliveryDate = "2026-07-15", taxCode = "GST18", taxDescription = "GST 18%" } } } } })),
+        new IntegrationEndpointDocDto("Delivery schedules", "Integration.Inbound.DeliverySchedule", "POST", $"{Base}/delivery-schedules", true,
+            "Create/upsert PO delivery schedules (proposed dates) for the resolved company. PO resolved by poNumber.",
+            Json(new { companyCode = "3000", schedules = new[] { new { poNumber = "PO-3000-000001", proposedDate = "2026-07-15", timeWindow = "09:00-12:00", vehicleInfo = (string?)null, scheduleStatus = "Proposed" } } })),
+        new IntegrationEndpointDocDto("Goods receipts", "Integration.Inbound.GrnReceipt", "POST", $"{Base}/goods-receipts", true,
+            "Create/upsert goods-receipt (GRN) rows against PO lines (resolved by poNumber + poPositionNo). New rows land GrnNotApproved; /grn-status then advances them.",
+            Json(new { companyCode = "3000", receipts = new[] { new { grnNumber = "GRN-3000-000001", poNumber = "PO-3000-000001", poPositionNo = 10, receivedQty = 100.0, shortQty = 0.0, rejectedQty = 0.0, grnDate = "2026-07-16", asnNumber = (string?)null, erpSyncId = "LN-GRN-1" } } })),
     };
 }

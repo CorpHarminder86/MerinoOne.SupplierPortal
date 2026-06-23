@@ -219,4 +219,17 @@ Body: SetPoResponseModeRequest. Returns empty success; 404 if not found; 400 on 
         await _mediator.Send(new SetSupplierPoResponseModeCommand(id, body), ct);
         return Result.Ok(HttpContext.TraceIdentifier);
     }
+
+    // ---------------- Commercial terms (R4 #1, internal) ----------------
+
+    [HttpPut("{id:guid}/commercial-terms")]
+    [Authorize(Policy = "Supplier.Approve")]
+    [EndpointSummary("Set supplier commercial terms")]
+    [EndpointDescription(@"Internal user sets a supplier's Currency + Payment/Delivery term FKs (R4 #1); the handler snapshots the term codes. Any field may be null to clear it.
+Body: UpdateCommercialTermsRequest. Returns empty success; 404 if not found. Requires **Supplier.Approve**.")]
+    public async Task<Result> SetCommercialTerms(Guid id, [FromBody] UpdateCommercialTermsRequest body, CancellationToken ct)
+    {
+        await _mediator.Send(new UpdateSupplierCommercialTermsCommand(id, body), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
 }

@@ -28,7 +28,8 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
             .Select(l => new PurchaseOrderLineDto(
                 l.Id, l.PositionNo, l.SequenceNo, l.ItemCode, l.ItemDescription,
                 l.OrderUnit, l.OrderQty, l.PriceUnit, l.Price,
-                l.DiscountPct, l.DiscountAmount, l.DeliveryDate, l.TaxCode))
+                l.DiscountPct, l.DiscountAmount, l.DeliveryDate, l.TaxCode,
+                l.TaxDescription, l.TaxId))
             .ToListAsync(ct);
 
         return new PurchaseOrderDetailDto(
@@ -37,6 +38,7 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
             row.po.BuyerUserId,
             row.po.PoType.ToString(), row.po.PoDate,
             row.po.PaymentTerms, row.po.DeliveryTerms,
+            row.po.CurrencyCode,
             row.po.PoStatus.ToString(),
             row.po.AcknowledgmentAt, row.po.AcceptedAt,
             row.po.RejectionReason, row.po.ProposedDeliveryDate,

@@ -53,7 +53,11 @@ public record ItemDto(
     Guid? UnitId,
     string? UnitCode,
     bool IsActive,
-    DateTime CreatedOn);
+    DateTime CreatedOn,
+    // R4 A3: LN-fed control flags. ERP is the authority; surfaced read-only in the admin grid and they
+    // drive ASN lot/serial capture. Trailing optional so existing positional constructions stay valid.
+    bool IsSerialized = false,
+    bool IsLotControlled = false);
 
 // Create requests
 public record CreateDeliveryTermRequest(string Code, string Description, bool IsActive = true);

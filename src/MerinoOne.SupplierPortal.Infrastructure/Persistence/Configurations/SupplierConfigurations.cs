@@ -167,10 +167,21 @@ public class SupplierContactConfiguration : IEntityTypeConfiguration<SupplierCon
         // R4 (2026-06-22) — Module 1e: ERP handle.
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
 
+        // R4 (2026-06-23) — optional link to one of the supplier's addresses. Logical semantics are SetNull
+        // (nulling addressId when its address goes away), but the DB FK is NoAction: SupplierContact and
+        // SupplierAddress BOTH already cascade-delete from Supplier, so a DB-level SetNull here introduces a
+        // multiple-cascade-path / cycle (SQL error 1785). The portal is soft-delete only (rows are never
+        // physically deleted) so no DB cascade ever fires anyway — the app nulls addressId on address removal.
+        b.Property(x => x.AddressId).HasColumnName("addressId").HasColumnType("uniqueidentifier");
+
         b.HasOne(x => x.Supplier).WithMany(s => s.Contacts).HasForeignKey(x => x.SupplierId)
             .HasConstraintName("FK_SupplierContact_Supplier_SupplierId").OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.Address).WithMany().HasForeignKey(x => x.AddressId)
+            .HasConstraintName("FK_SupplierContact_SupplierAddress_addressId").OnDelete(DeleteBehavior.NoAction);
+
         b.HasIndex(x => new { x.SupplierId, x.Email })
             .HasDatabaseName("UQ_SupplierContact_supplier_email").IsUnique();
+        b.HasIndex(x => x.AddressId).HasDatabaseName("IX_SupplierContact_addressId");
     }
 }
 

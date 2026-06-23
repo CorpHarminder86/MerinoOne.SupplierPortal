@@ -271,6 +271,70 @@ else
                 </div>
             }
             @ErrChip("con.primary")
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 12px;border-top:1px solid var(--mer-line);padding-top:16px;">
+                <h3 style="font-size:14px;font-weight:700;color:var(--mer-blue-darker);">Licenses (@licenseRows.Count) <span style="font-weight:400;color:var(--mer-ink-500);font-size:12px;">— optional</span></h3>
+                <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="AddLicense">
+                    <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">add</span> Add license
+                </button>
+            </div>
+            @for (int i = 0; i < licenseRows.Count; i++)
+            {
+                var lidx = i;
+                var l = licenseRows[lidx];
+                var kLicNum = $"lic.{lidx}.number";
+                var kLicType = $"lic.{lidx}.type";
+                <div style="border:1px solid var(--mer-line);border-radius:8px;padding:16px;margin-bottom:12px;background:var(--mer-ink-50);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:12px;font-weight:700;color:var(--mer-blue-darker);">License #@(lidx + 1)</span>
+                        <button @onclick="() => licenseRows.RemoveAt(lidx)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;">
+                            <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
+                        </button>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                        <div>
+                            <input class="rz-textbox @(InvalidClass(kLicNum))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="License number *" @bind="l.LicenseNumber" @bind:after="() => Clear(kLicNum)" />
+                            @ErrChip(kLicNum)
+                        </div>
+                        <div>
+                            <input class="rz-textbox @(InvalidClass(kLicType))" style="padding:6px 10px;font-size:12px;width:100%;" placeholder="License type *" @bind="l.LicenseType" @bind:after="() => Clear(kLicType)" />
+                            @ErrChip(kLicType)
+                        </div>
+                        <div>
+                            <label style="font-size:11px;color:var(--mer-ink-500);">Issue date</label>
+                            <input type="date" class="rz-textbox" style="padding:6px 10px;font-size:12px;width:100%;" @bind="l.IssueDate" />
+                        </div>
+                        <div>
+                            <label style="font-size:11px;color:var(--mer-ink-500);">Expiry date</label>
+                            <input type="date" class="rz-textbox" style="padding:6px 10px;font-size:12px;width:100%;" @bind="l.ExpiryDate" />
+                        </div>
+                        <input class="rz-textbox" style="padding:6px 10px;font-size:12px;grid-column:1 / span 2;" placeholder="Remarks" @bind="l.Remarks" />
+                        <div style="grid-column:1 / span 2;border-top:1px solid var(--mer-line-soft);padding-top:10px;margin-top:2px;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachments</label>
+                                <label style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;position:relative;overflow:hidden;">
+                                    <span class="material-symbols-outlined" style="font-size:14px;">upload</span> Add file
+                                    <InputFile OnChange="@(e => OnLicenseFile(l, e))" accept=".pdf,.jpg,.jpeg,.png" style="position:absolute;inset:0;opacity:0;cursor:pointer;" />
+                                </label>
+                            </div>
+                            @if (l.Attachments.Count > 0)
+                            {
+                                <div style="display:flex;flex-direction:column;gap:4px;">
+                                    @foreach (var f in l.Attachments)
+                                    {
+                                        var att = f;
+                                        <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--mer-line);border-radius:6px;padding:6px 10px;background:var(--mer-surface);">
+                                            <span class="material-symbols-outlined" style="font-size:16px;color:var(--mer-blue);">description</span>
+                                            <span style="flex:1;font-size:12px;color:var(--mer-ink-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@att.FileName</span>
+                                            <button type="button" @onclick="() => l.Attachments.Remove(att)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:16px;">close</span></button>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
         }
         else if (currentStep == 5)
         {
@@ -351,6 +415,7 @@ else
 
     private List<AddressRow> addresses = new();
     private List<ContactRow> contacts = new();
+    private List<LicenseRow> licenseRows = new();   // R4 #1 — optional self-declared licenses at onboarding
     private GeoLookupDto? _defaultCountry;   // tenant's "India" row, resolved once for the address cascade default
     // DocSlot type lives in the shared DocumentUploader component; we reuse it via the type alias below.
     private List<DocumentUploader.DocSlot> DocSlots = new();
@@ -451,6 +516,13 @@ else
                         _err[$"con.{i}.phone"] = "Phone must be 8–15 digits (optional leading +).";
                 }
                 if (!contacts.Any(c => c.IsPrimary)) _err["con.primary"] = "Mark exactly one contact as primary.";
+                // Licenses are optional, but any row that was ADDED must carry a number + type.
+                for (int i = 0; i < licenseRows.Count; i++)
+                {
+                    var l = licenseRows[i];
+                    if (string.IsNullOrWhiteSpace(l.LicenseNumber)) _err[$"lic.{i}.number"] = "License number required.";
+                    if (string.IsNullOrWhiteSpace(l.LicenseType)) _err[$"lic.{i}.type"] = "License type required.";
+                }
                 break;
 
             case 5:
@@ -651,6 +723,29 @@ else
         addresses.Add(row);
     }
     private void AddContact() => contacts.Add(new ContactRow());
+    private void AddLicense() => licenseRows.Add(new LicenseRow());
+
+    // Upload a license attachment anonymously (owner=PendingInvite, DocumentType=License); the register
+    // handler rebinds it onto the created SupplierLicense via the doc-id carried in the submit payload.
+    private async Task OnLicenseFile(LicenseRow row, InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null || file.Size == 0 || file.Size > MaxFileBytes) return;
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            var streamContent = new StreamContent(file.OpenReadStream(MaxFileBytes));
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
+            content.Add(streamContent, "file", file.Name);
+            content.Add(new StringContent("License"), "documentType");
+            content.Add(new StringContent(Token), "token");
+            var resp = await Api.PostMultipartAsync<UploadedDocumentDto>("api/document-uploads", content);
+            if (resp?.Success == true && resp.Data is not null)
+                row.Attachments.Add(new LicenseFile { Id = resp.Data.Id, FileName = resp.Data.FileName });
+        }
+        catch { /* best-effort; the user can retry */ }
+    }
 
     private void SetPrimary(int idx, bool on)
     {
@@ -712,7 +807,19 @@ else
                 fileUrl = s.File.FileUrl,
                 fileSizeKb = s.File.FileSizeKb,
                 mimeType = s.File.MimeType
-            }).ToList()
+            }).ToList(),
+            // R4 #1 — self-declared licenses (optional). DateOnly? serializes as "yyyy-MM-dd" → DateOnly? on the DTO.
+            licenses = licenseRows
+                .Where(l => !string.IsNullOrWhiteSpace(l.LicenseNumber) && !string.IsNullOrWhiteSpace(l.LicenseType))
+                .Select(l => new
+                {
+                    licenseNumber = l.LicenseNumber.Trim(),
+                    licenseType = l.LicenseType.Trim(),
+                    issueDate = l.IssueDate,
+                    expiryDate = l.ExpiryDate,
+                    remarks = string.IsNullOrWhiteSpace(l.Remarks) ? null : l.Remarks.Trim(),
+                    attachmentIds = l.Attachments.Select(a => a.Id).ToList()
+                }).ToList()
         };
 
         try
@@ -851,5 +958,17 @@ else
         public string? Designation { get; set; }
         public bool IsPrimary { get; set; }
     }
+
+    private class LicenseRow
+    {
+        public string LicenseNumber { get; set; } = string.Empty;
+        public string LicenseType { get; set; } = string.Empty;
+        public DateOnly? IssueDate { get; set; }
+        public DateOnly? ExpiryDate { get; set; }
+        public string? Remarks { get; set; }
+        public List<LicenseFile> Attachments { get; } = new();
+    }
+
+    private class LicenseFile { public Guid Id { get; set; } public string FileName { get; set; } = string.Empty; }
 
 }

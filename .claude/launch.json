@@ -5,13 +5,15 @@
       "name": "web",
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "src/MerinoOne.Web", "--launch-profile", "https", "--no-build"],
-      "port": 5114
+      "port": 5114,
+      "autoPort": false
     },
     {
       "name": "api",
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "src/MerinoOne.SupplierPortal", "--launch-profile", "https", "--no-build"],
-      "port": 5186
+      "port": 5186,
+      "autoPort": false
     }
   ]
 }

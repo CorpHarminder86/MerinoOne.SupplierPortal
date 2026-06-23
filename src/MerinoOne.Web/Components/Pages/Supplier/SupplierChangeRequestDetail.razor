@@ -57,6 +57,16 @@ else
                     </button>
                 </div>
             }
+            else if (CanReview)
+            {
+                @* Reviewer is present but the request is not in a reviewable state — explain WHY there are no
+                   actions (a Draft awaiting supplier submit, a bounced request, or an already-actioned one). *@
+                <div class="tl-header__actions">
+                    <span class="tlg-status tlg-status--info" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;max-width:420px;line-height:1.3;white-space:normal;">
+                        <span class="material-symbols-outlined" style="font-size:16px;">info</span> @ReviewHint(detail.ChangeStatus)
+                    </span>
+                </div>
+            }
         </header>
 
         @* ---------------- Header meta ---------------- *@
@@ -217,6 +227,16 @@ else
     private string actionError = string.Empty;
 
     private bool CanReview => Token.HasPermission("Supplier.ApproveChange");
+
+    // Why a reviewer sees no Approve/Reject buttons for a non-reviewable request (only Submitted/UnderReview act).
+    private static string ReviewHint(string status) => status switch
+    {
+        "Draft"            => "Still a draft — the supplier must submit it before you can review.",
+        "ChangesRequested" => "Sent back to the supplier — awaiting their resubmission.",
+        "Approved" or "Pushed" or "PartiallyPushed" or "PushFailed" => "Already approved — no further review actions.",
+        "Rejected"         => "Already rejected — no further review actions.",
+        _                  => "No review actions available for this status.",
+    };
 
     protected override Task OnInitializedAsync() => Load();
 

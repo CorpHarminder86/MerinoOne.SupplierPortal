@@ -18,21 +18,32 @@ public class GetSupplierChangeRequestListQueryHandler
     : IRequestHandler<GetSupplierChangeRequestListQuery, List<SupplierChangeRequestListItemDto>>
 {
     private readonly IAppDbContext _db;
-    public GetSupplierChangeRequestListQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetSupplierChangeRequestListQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<List<SupplierChangeRequestListItemDto>> Handle(GetSupplierChangeRequestListQuery request, CancellationToken ct)
     {
-        var q = _db.SupplierChangeRequests.AsQueryable();
+        // A reviewer's queue spans ALL suppliers/companies in the tenant — the seccode + active-company filters
+        // would otherwise show an admin an empty queue (they hold no SecRight on supplier G-seccodes, and the
+        // requests live under the supplier's company, not the reviewer's active one). Bypass the filters but
+        // re-apply the tenant predicate so it never crosses tenants. Suppliers stay seccode-scoped to their own.
+        var reviewer = _user.IsAdmin || _user.IsManager || _user.HasPermission("Supplier.ApproveChange");
+        var q = reviewer
+            ? _db.SupplierChangeRequests.IgnoreQueryFilters().Where(r => !r.IsDeleted && r.TenantId == _user.TenantId)
+            : _db.SupplierChangeRequests.AsQueryable();
+        var sups = reviewer
+            ? _db.Suppliers.IgnoreQueryFilters().Where(s => !s.IsDeleted && s.TenantId == _user.TenantId)
+            : _db.Suppliers.AsQueryable();
 
         if (request.SupplierId.HasValue)
             q = q.Where(r => r.SupplierId == request.SupplierId.Value);
         if (!string.IsNullOrEmpty(request.Status))
             q = q.Where(r => r.ChangeStatus.ToString() == request.Status);
 
-        // Join Supplier for the display code/name (Supplier is also seccode-scoped — same supplier visibility).
+        // Join Supplier for the display code/name.
         return await (
             from r in q
-            join s in _db.Suppliers on r.SupplierId equals s.Id
+            join s in sups on r.SupplierId equals s.Id
             orderby r.RequestedAt descending
             select new SupplierChangeRequestListItemDto(
                 r.Id,

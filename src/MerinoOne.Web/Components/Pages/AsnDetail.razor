@@ -168,44 +168,84 @@
             @if (currentStep == 1)
             {
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Select purchase order(s)</h3>
-                <p style="font-size:12px;color:var(--mer-ink-500);margin-bottom:12px;">Pick one or more open POs from the same supplier. Lines from every selected PO are merged on the next step.</p>
-                @if (posLoading)
+                <p style="font-size:12px;color:var(--mer-ink-500);margin-bottom:12px;">Choose the supplier, then search and add one or more of its open POs. Lines from every selected PO merge on the next step.</p>
+
+                @* Supplier-first chooser — shown when the signed-in user can act for more than one supplier. *@
+                @if (suppliers.Count > 1)
                 {
-                    <p style="color:var(--mer-ink-500);font-size:13px;">Loading POs…</p>
-                }
-                else if (availablePos == null || availablePos.Count == 0)
-                {
-                    <div class="tl-empty" style="padding:24px;text-align:left;">
-                        <span class="material-symbols-outlined" style="font-size:28px;color:var(--mer-ink-400);">inbox</span>
-                        <div style="font-size:13px;color:var(--mer-ink-600);margin-top:6px;">No open POs available for ASN creation.</div>
+                    <div style="margin-bottom:14px;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:4px;">Supplier *</label>
+                        <select class="rz-dropdown" style="width:100%;max-width:420px;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" value="@selectedSupplierId" @onchange="OnSupplierSelect">
+                            <option value="">— Select supplier —</option>
+                            @foreach (var s in suppliers)
+                            {
+                                <option value="@s.Id" selected="@(selectedSupplierId == s.Id)">@s.LegalName (@s.SupplierCode)</option>
+                            }
+                        </select>
                     </div>
+                }
+                else if (suppliers.Count == 1)
+                {
+                    <div style="font-size:12.5px;color:var(--mer-ink-700);margin-bottom:12px;">Supplier: <b>@selectedSupplierName</b></div>
                 }
                 else
                 {
-                    @foreach (var sg in availablePos.GroupBy(p => p.SupplierName).OrderBy(g => g.Key))
+                    <div class="tl-empty" style="padding:24px;text-align:left;"><div style="font-size:13px;color:var(--mer-ink-600);">No suppliers available to you.</div></div>
+                }
+
+                @if (selectedSupplierId.HasValue)
+                {
+                    <div style="margin-bottom:10px;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:4px;">Find PO</label>
+                        <div style="display:flex;gap:8px;">
+                            <input class="rz-textbox" placeholder="Search PO number…" style="flex:1;max-width:340px;padding:8px 10px;" @bind="poSearch" @bind:event="oninput" @onkeyup="OnPoSearchKey" />
+                            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="SearchPos">Search</button>
+                        </div>
+                    </div>
+                    @if (searching)
                     {
-                        var supplierLocked = selectedSupplierName != null && selectedSupplierName != sg.Key;
-                        <div style="margin-bottom:14px;@(supplierLocked ? "opacity:.45;" : "")">
-                            <div style="font-size:11px;font-weight:700;color:var(--mer-ink-500);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">@sg.Key</div>
-                            <div style="display:flex;flex-direction:column;gap:6px;">
-                                @foreach (var po in sg.OrderByDescending(x => x.PoDate))
-                                {
-                                    var p = po;
-                                    var picked = selectedPoIds.Contains(p.Id);
-                                    <label style="display:flex;align-items:center;gap:10px;border:1px solid @(picked ? "var(--mer-blue)" : "var(--mer-line)");border-radius:6px;padding:8px 12px;cursor:@(supplierLocked ? "not-allowed" : "pointer");background:@(picked ? "var(--mer-blue-50)" : "var(--mer-surface)");">
-                                        <input type="checkbox" checked="@picked" disabled="@supplierLocked" @onchange="@(e => TogglePo(p, (bool)e.Value!))" />
-                                        <span style="font-family:Inter,monospace;font-weight:600;font-size:13px;color:var(--mer-blue-darker);">@p.PoNumber</span>
-                                        <span style="font-size:12px;color:var(--mer-ink-500);">@p.PoDate.ToString("yyyy-MM-dd")</span>
-                                        <span class="tlg-status tlg-status--info" style="margin-left:auto;">@p.PoStatus</span>
-                                    </label>
-                                }
-                            </div>
+                        <p style="color:var(--mer-ink-500);font-size:13px;">Searching…</p>
+                    }
+                    else if (searchResults.Count > 0)
+                    {
+                        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;max-height:260px;overflow:auto;">
+                            @foreach (var po in searchResults)
+                            {
+                                var p = po;
+                                <button @onclick="() => AddPo(p)" style="display:flex;align-items:center;gap:10px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 12px;cursor:pointer;background:var(--mer-surface);text-align:left;">
+                                    <span style="font-family:Inter,monospace;font-weight:600;font-size:13px;color:var(--mer-blue-darker);">@p.PoNumber</span>
+                                    <span style="font-size:12px;color:var(--mer-ink-500);">@p.PoDate.ToString("yyyy-MM-dd")</span>
+                                    <span class="tlg-status tlg-status--info">@p.PoStatus</span>
+                                    <span style="margin-left:auto;color:var(--mer-blue);font-size:12px;font-weight:600;"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">add</span> Add</span>
+                                </button>
+                            }
                         </div>
                     }
-                    @if (selectedPoIds.Count > 0)
+                    else
                     {
-                        <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;"><b>@selectedPoIds.Count</b> PO(s) selected · supplier <b>@selectedSupplierName</b></div>
+                        <p style="color:var(--mer-ink-500);font-size:13px;margin-bottom:14px;">No matching open POs@(string.IsNullOrWhiteSpace(poSearch) ? "" : $" for \"{poSearch}\"").</p>
                     }
+
+                    <div style="border-top:1px solid var(--mer-line-soft);padding-top:12px;">
+                        <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:8px;">Selected POs (@selectedPoMap.Count) · <span style="font-weight:400;color:var(--mer-ink-500);">@selectedSupplierName</span></div>
+                        @if (selectedPoMap.Count == 0)
+                        {
+                            <p style="font-size:12px;color:var(--mer-ink-500);">None yet — search and add POs above.</p>
+                        }
+                        else
+                        {
+                            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                @foreach (var p in selectedPoMap.Values.OrderBy(x => x.PoNumber))
+                                {
+                                    var pid = p.Id;
+                                    <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--mer-blue);background:var(--mer-blue-50);border-radius:16px;padding:4px 6px 4px 12px;font-size:12.5px;font-family:Inter,monospace;color:var(--mer-blue-darker);">
+                                        @p.PoNumber
+                                        <button @onclick="() => RemovePo(pid)" title="Remove" style="background:transparent;border:0;color:var(--mer-ink-500);cursor:pointer;line-height:1;display:flex;"><span class="material-symbols-outlined" style="font-size:16px;">close</span></button>
+                                    </span>
+                                }
+                            </div>
+                        }
+                    </div>
                 }
             }
             else if (currentStep == 2)
@@ -419,6 +459,8 @@
 
 @code {
     [Parameter] public Guid? Id { get; set; }
+    // R4 #6 — "Create ASN from selected POs" on the PO list deep-links here with ?pos=id1,id2 (comma-separated).
+    [SupplyParameterFromQuery(Name = "pos")] public string? PreselectPos { get; set; }
     private AsnDetailDto? detail;
     private bool loading = true;
     private bool busy = false;
@@ -427,11 +469,16 @@
     private string submitError = string.Empty;
     private const long MaxAttachBytes = 5L * 1024 * 1024;
 
-    // PO selection (multi). selectedSupplierName locks the picker to one supplier (an ASN ships from one supplier).
-    private List<PurchaseOrderListItemDto>? availablePos;
-    private bool posLoading = false;
-    private readonly HashSet<Guid> selectedPoIds = new();
+    // PO selection (multi). R4 #6 — supplier-first + server-side PO autocomplete (no load-all): a single supplier
+    // can own thousands of POs, so we pick the supplier first, then SEARCH that supplier's open POs by number.
+    private List<SupplierListItemDto> suppliers = new();
+    private Guid? selectedSupplierId;
     private string? selectedSupplierName;
+    private string poSearch = string.Empty;
+    private List<PurchaseOrderListItemDto> searchResults = new();
+    private bool searching = false;
+    private readonly HashSet<Guid> selectedPoIds = new();
+    private readonly Dictionary<Guid, PurchaseOrderListItemDto> selectedPoMap = new();
 
     private List<LineRow> lines = new();
     private bool linesLoading = false;
@@ -462,8 +509,7 @@
     private bool CanWrite => Token.IsSupplier || Token.HasPermission("Asn.Write");
 
     private IEnumerable<string> SelectedPoNumbers =>
-        availablePos?.Where(p => selectedPoIds.Contains(p.Id)).Select(p => p.PoNumber)
-        ?? Enumerable.Empty<string>();
+        selectedPoMap.Values.Select(p => p.PoNumber);
 
     private string PoSummaryText =>
         detail == null ? "" :
@@ -490,7 +536,13 @@
         loading = true;
         if (IsNew)
         {
-            await LoadAvailablePos();
+            // Suppliers the signed-in user can act for (seccode-scoped). Supplier-first picker when >1.
+            var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+            suppliers = sup?.Data ?? new();
+            if (!string.IsNullOrWhiteSpace(PreselectPos))
+                await ApplyPreselectAsync();
+            else if (suppliers.Count == 1)
+                await ChooseSupplierAsync(suppliers[0].Id);
             loading = false;
         }
         else
@@ -514,9 +566,17 @@
 
                 // Selected PO set from the covered-PO list (falls back to the scalar header for single-PO).
                 selectedPoIds.Clear();
-                foreach (var po in detail.PurchaseOrders) selectedPoIds.Add(po.PurchaseOrderId);
-                if (selectedPoIds.Count == 0 && detail.PurchaseOrderId is { } pid) selectedPoIds.Add(pid);
+                selectedPoMap.Clear();
+                selectedSupplierId = detail.SupplierId;
                 selectedSupplierName = detail.SupplierName;
+                // The picker on an edited Draft is fixed to the ASN's supplier (single-entry list → no chooser).
+                suppliers = new List<SupplierListItemDto> { new(detail.SupplierId, 0, "", detail.SupplierName, null, null, null, "", false, DateTime.UtcNow) };
+                foreach (var po in detail.PurchaseOrders)
+                {
+                    selectedPoIds.Add(po.PurchaseOrderId);
+                    selectedPoMap[po.PurchaseOrderId] = new PurchaseOrderListItemDto(po.PurchaseOrderId, 0, po.PoNumber, detail.SupplierId, detail.SupplierName, "", "", DateTime.UtcNow, "", 0, DateTime.UtcNow);
+                }
+                if (selectedPoIds.Count == 0 && detail.PurchaseOrderId is { } pid) selectedPoIds.Add(pid);
 
                 lines = detail.Lines.Select(l => new LineRow
                 {
@@ -532,44 +592,84 @@
                     ExpiryDate = l.ExpiryDate
                 }).ToList();
 
-                // For an editable (Draft) ASN load the available POs too so the picker can add/remove POs.
-                if (!IsLocked) await LoadAvailablePos();
+                // For an editable (Draft) ASN prime the PO search so the picker can add/remove POs (same supplier).
+                if (!IsLocked) await SearchPos();
             }
             loading = false;
         }
     }
 
-    private async Task LoadAvailablePos()
+    private async Task OnSupplierSelect(ChangeEventArgs e)
     {
-        posLoading = true;
-        // The backend status filter is single-valued — query each eligible status and merge. Seccode scoping on
-        // the backend already restricts supplier users to their own POs.
-        var eligibleStatuses = new[] { "Released", "Acknowledged", "Accepted", "PartiallyDelivered" };
-        var merged = new Dictionary<Guid, PurchaseOrderListItemDto>();
-        foreach (var st in eligibleStatuses)
-        {
-            var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>($"api/purchase-orders?page=1&pageSize=200&status={st}");
-            if (resp?.Data?.Items != null)
-                foreach (var p in resp.Data.Items) merged[p.Id] = p;
-        }
-        availablePos = merged.Values.OrderByDescending(p => p.PoDate).ToList();
-        posLoading = false;
-    }
-
-    private async Task TogglePo(PurchaseOrderListItemDto po, bool isChecked)
-    {
-        if (isChecked)
-        {
-            if (selectedPoIds.Count == 0) selectedSupplierName = po.SupplierName;
-            if (selectedSupplierName != po.SupplierName) return; // single-supplier guard (UI-disabled already)
-            selectedPoIds.Add(po.Id);
-        }
+        if (Guid.TryParse(e.Value?.ToString(), out var id)) { await ChooseSupplierAsync(id); }
         else
         {
-            selectedPoIds.Remove(po.Id);
-            if (selectedPoIds.Count == 0) selectedSupplierName = null;
+            selectedSupplierId = null; selectedSupplierName = null;
+            selectedPoIds.Clear(); selectedPoMap.Clear(); searchResults = new(); lines.Clear();
         }
-        await ReloadLines();
+    }
+
+    private async Task ChooseSupplierAsync(Guid supplierId)
+    {
+        selectedSupplierId = supplierId;
+        selectedSupplierName = suppliers.FirstOrDefault(s => s.Id == supplierId)?.LegalName;
+        // Switching supplier resets the PO picker (an ASN ships from a single supplier).
+        selectedPoIds.Clear(); selectedPoMap.Clear(); lines.Clear();
+        poSearch = string.Empty;
+        await SearchPos();
+    }
+
+    private async Task OnPoSearchKey(KeyboardEventArgs e) { if (e.Key == "Enter") await SearchPos(); }
+
+    // Server-side PO autocomplete — scoped to the chosen supplier + eligible statuses, searched by PO number.
+    private async Task SearchPos()
+    {
+        if (!selectedSupplierId.HasValue) { searchResults = new(); return; }
+        searching = true; StateHasChanged();
+        var url = $"api/purchase-orders?page=1&pageSize=25&supplierId={selectedSupplierId}&status=Released,Acknowledged,Accepted,PartiallyDelivered";
+        if (!string.IsNullOrWhiteSpace(poSearch)) url += $"&search={Uri.EscapeDataString(poSearch.Trim())}";
+        var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>(url);
+        searchResults = (resp?.Data?.Items ?? new()).Where(p => !selectedPoIds.Contains(p.Id)).ToList();
+        searching = false;
+    }
+
+    private async Task AddPo(PurchaseOrderListItemDto po)
+    {
+        if (selectedPoIds.Add(po.Id))
+        {
+            selectedPoMap[po.Id] = po;
+            searchResults = searchResults.Where(p => p.Id != po.Id).ToList();
+            await ReloadLines();
+        }
+    }
+
+    private async Task RemovePo(Guid poId)
+    {
+        if (selectedPoIds.Remove(poId))
+        {
+            selectedPoMap.Remove(poId);
+            await ReloadLines();
+        }
+    }
+
+    // ?pos=id1,id2 from the PO list "Create ASN from selected". Resolve the supplier from the first PO, then add
+    // every preselected PO that belongs to that supplier (cross-supplier ids are skipped — one ASN, one supplier).
+    private async Task ApplyPreselectAsync()
+    {
+        var ids = (PreselectPos ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).Distinct().ToList();
+        if (ids.Count == 0) return;
+        foreach (var id in ids)
+        {
+            var po = (await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{id}"))?.Data;
+            if (po == null) continue;
+            if (!selectedSupplierId.HasValue) { selectedSupplierId = po.SupplierId; selectedSupplierName = po.SupplierName; }
+            if (po.SupplierId != selectedSupplierId) continue;
+            selectedPoIds.Add(po.Id);
+            selectedPoMap[po.Id] = new PurchaseOrderListItemDto(po.Id, po.Seq, po.PoNumber, po.SupplierId, po.SupplierName, po.SupplierCode, po.PoType, po.PoDate, po.PoStatus, po.Version, DateTime.UtcNow);
+        }
+        if (selectedSupplierId.HasValue) await SearchPos();
+        if (selectedPoIds.Count > 0) await ReloadLines();
     }
 
     // Merge PO lines for every selected PO; preserve already-entered ship qty/batch/expiry by line id.

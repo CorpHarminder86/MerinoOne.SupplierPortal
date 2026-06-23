@@ -42,12 +42,14 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 150px 1.4fr 110px 110px 90px 100px; --tl-min-width: 900px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 150px 1.4fr 110px 110px 80px 80px 90px 100px; --tl-min-width: 1000px;">
             <div class="tlg-header">
                 <div class="tlg-col">Code</div>
                 <div class="tlg-col">Description</div>
                 <div class="tlg-col">Unit</div>
                 <div class="tlg-col">Group</div>
+                <div class="tlg-col">Serial</div>
+                <div class="tlg-col">Lot</div>
                 <div class="tlg-col">Active</div>
                 <div class="tlg-col tlg-col--actions">Actions</div>
             </div>
@@ -58,6 +60,8 @@
                     <div class="tlg-col tlg-desc">@r.Description</div>
                     <div class="tlg-col tlg-code">@r.UnitCode</div>
                     <div class="tlg-col tlg-code">@r.ItemGroupCode</div>
+                    <div class="tlg-col"><span class="tlg-status @(r.IsSerialized ? "tlg-status--active" : "tlg-status--info")">@(r.IsSerialized ? "Yes" : "No")</span></div>
+                    <div class="tlg-col"><span class="tlg-status @(r.IsLotControlled ? "tlg-status--active" : "tlg-status--info")">@(r.IsLotControlled ? "Yes" : "No")</span></div>
                     <div class="tlg-col"><span class="tlg-status @(r.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(r.IsActive ? "Yes" : "No")</span></div>
                     <div class="tlg-col tlg-col--actions">
                         @if (Token.HasPermission("Settings.Write"))
@@ -126,6 +130,17 @@
                             }
                         </select>
                     </div>
+                    <div style="grid-column:1 / span 2;display:flex;gap:20px;padding:8px 10px;background:var(--mer-surface-2,#f6f7f9);border-radius:6px;">
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mer-ink-600);">
+                            <input type="checkbox" checked="@formIsSerialized" disabled />
+                            Serialized
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mer-ink-600);">
+                            <input type="checkbox" checked="@formIsLotControlled" disabled />
+                            Lot controlled
+                        </label>
+                        <span style="font-size:11px;color:var(--mer-ink-400);align-self:center;">ERP-fed (read-only)</span>
+                    </div>
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;grid-column:1 / span 2;">
                         <input type="checkbox" @bind="formIsActive" />
                         Active
@@ -161,6 +176,8 @@
     private string formUnitId = string.Empty;
     private string formItemGroupId = string.Empty;
     private bool formIsActive = true;
+    private bool formIsSerialized;
+    private bool formIsLotControlled;
     private string formError = string.Empty;
     private string search = string.Empty;
 
@@ -204,6 +221,8 @@
         formUnitId = string.Empty;
         formItemGroupId = string.Empty;
         formIsActive = true;
+        formIsSerialized = false;
+        formIsLotControlled = false;
         formError = string.Empty;
         showDialog = true;
     }
@@ -217,6 +236,8 @@
         formUnitId = r.UnitId?.ToString() ?? string.Empty;
         formItemGroupId = r.ItemGroupId?.ToString() ?? string.Empty;
         formIsActive = r.IsActive;
+        formIsSerialized = r.IsSerialized;
+        formIsLotControlled = r.IsLotControlled;
         formError = string.Empty;
         showDialog = true;
     }

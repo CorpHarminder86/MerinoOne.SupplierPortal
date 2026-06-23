@@ -191,6 +191,52 @@ public class AsnLineConfiguration : IEntityTypeConfiguration<AsnLine>
     }
 }
 
+// R4 (2026-06-23) — serial capture for a serialized ASN line. Child of the ASN aggregate (AuditableEntity,
+// two-key + audit only, no seccode of its own — the ASN root carries it; reached via AsnLine). CASCADE from
+// the line so deleting the line/ASN clears its serials. Serialized XOR lot-controlled enforced on inv.Item.
+public class AsnLineSerialConfiguration : IEntityTypeConfiguration<AsnLineSerial>
+{
+    public void Configure(EntityTypeBuilder<AsnLineSerial> b)
+    {
+        b.ApplyBaseEntityConvention("AsnLineSerial", "proc", "asnLineSerial");
+        b.Property(x => x.AsnLineId).HasColumnName("asnLineId");
+        b.Property(x => x.SerialNumber).HasColumnName("serialNumber").HasMaxLength(100).IsRequired();
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
+        b.HasOne(x => x.AsnLine).WithMany(l => l.Serials).HasForeignKey(x => x.AsnLineId)
+            .HasConstraintName("FK_AsnLineSerial_AsnLine_AsnLineId").OnDelete(DeleteBehavior.Cascade);
+
+        b.HasIndex(x => x.AsnLineId).HasDatabaseName("IX_AsnLineSerial_asnLineId");
+        b.HasIndex(x => new { x.AsnLineId, x.SerialNumber })
+            .HasDatabaseName("UQ_AsnLineSerial_asnLine_serial").IsUnique()
+            .HasFilter("[isDeleted] = 0");
+    }
+}
+
+// R4 (2026-06-23) — lot capture for a lot-controlled ASN line. Child of the ASN aggregate (AuditableEntity,
+// two-key + audit only, no seccode of its own — reached via AsnLine). CASCADE from the line. Serialized XOR
+// lot-controlled enforced on inv.Item.
+public class AsnLineLotConfiguration : IEntityTypeConfiguration<AsnLineLot>
+{
+    public void Configure(EntityTypeBuilder<AsnLineLot> b)
+    {
+        b.ApplyBaseEntityConvention("AsnLineLot", "proc", "asnLineLot");
+        b.Property(x => x.AsnLineId).HasColumnName("asnLineId");
+        b.Property(x => x.LotNo).HasColumnName("lotNo").HasMaxLength(100).IsRequired();
+        b.Property(x => x.Qty).HasColumnName("qty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.ExpiryDate).HasColumnName("expiryDate").HasColumnType("date");
+        b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
+        b.HasOne(x => x.AsnLine).WithMany(l => l.Lots).HasForeignKey(x => x.AsnLineId)
+            .HasConstraintName("FK_AsnLineLot_AsnLine_AsnLineId").OnDelete(DeleteBehavior.Cascade);
+
+        b.HasIndex(x => x.AsnLineId).HasDatabaseName("IX_AsnLineLot_asnLineId");
+        b.HasIndex(x => new { x.AsnLineId, x.LotNo })
+            .HasDatabaseName("UQ_AsnLineLot_asnLine_lot").IsUnique()
+            .HasFilter("[isDeleted] = 0");
+    }
+}
+
 public class GoodsReceiptConfiguration : IEntityTypeConfiguration<GoodsReceipt>
 {
     public void Configure(EntityTypeBuilder<GoodsReceipt> b)

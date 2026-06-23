@@ -13,6 +13,15 @@
             </div>
             <p class="tl-sub">Released and in-progress purchase orders</p>
         </div>
+        <div class="tl-header__actions">
+            @* R4 #6 — pick eligible POs from one supplier, then create an ASN covering them. *@
+            @if (asnSel.Count > 0)
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="CreateAsnFromSelected">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">local_shipping</span> Create ASN (@asnSel.Count)
+                </button>
+            }
+        </div>
     </header>
 
     <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -33,6 +42,18 @@
             <option value="Material">Material</option>
             <option value="Service">Service</option>
         </select>
+        @* Supplier filter — only when the signed-in user can act for more than one supplier (multi-mapped
+           supplier login). Single-supplier users don't need it; the list is already seccode-scoped. *@
+        @if (suppliers.Count > 1)
+        {
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:220px;" @bind="supplierFilter" @bind:after="OnSupplierChanged">
+                <option value="">All suppliers</option>
+                @foreach (var s in suppliers)
+                {
+                    <option value="@s.Id">@s.LegalName (@s.SupplierCode)</option>
+                }
+            </select>
+        }
     </div>
 
     @if (loading)
@@ -48,8 +69,9 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 150px 1.4fr 110px 120px 130px 120px 70px 110px; --tl-min-width: 1120px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 40px 150px 1.4fr 110px 120px 130px 120px 70px 110px; --tl-min-width: 1160px;">
             <div class="tlg-header">
+                <div class="tlg-col" title="Select for ASN"></div>
                 <div class="tlg-col">PO #</div>
                 <div class="tlg-col">Supplier</div>
                 <div class="tlg-col">Type</div>
@@ -67,7 +89,17 @@
                 // permission-gated Acknowledge / Accept / Reject dialogs live. Auto rows are acknowledged + accepted
                 // automatically at release, so they only carry the mode badge.
                 var canRespond = !isAuto && (item.PoStatus == "Released" || item.PoStatus == "Acknowledged");
+                var asnEligible = item.PoStatus is "Released" or "Acknowledged" or "Accepted" or "PartiallyDelivered";
+                var asnLocked = asnSelSupplier.HasValue && asnSelSupplier != item.SupplierId;
                 <div class="tlg-row" @onclick="() => OpenDetail(item.Id)" style="cursor:pointer">
+                    <div class="tlg-col" @onclick:stopPropagation="true">
+                        @if (asnEligible)
+                        {
+                            <input type="checkbox" checked="@asnSel.Contains(item.Id)" disabled="@asnLocked"
+                                   title="@(asnLocked ? "An ASN covers one supplier — clear the selection to switch" : "Select for ASN")"
+                                   @onchange="@(e => ToggleAsnSel(item, (bool)e.Value!))" />
+                        }
+                    </div>
                     <div class="tlg-col tlg-code">@item.PoNumber</div>
                     <div class="tlg-col tlg-name">@item.SupplierName</div>
                     <div class="tlg-col">@item.PoType</div>
@@ -105,14 +137,29 @@
 
 @code {
     private PagedResult<PurchaseOrderListItemDto>? paged;
+    private List<SupplierListItemDto> suppliers = new();
     private bool loading = true;
     private string search = string.Empty;
     private string statusFilter = string.Empty;
     private string typeFilter = string.Empty;
+    private string supplierFilter = string.Empty;
     private int page = 1;
     private const int PageSize = 50;
 
-    protected override async Task OnInitializedAsync() => await Reload();
+    // R4 #6 — "Create ASN from selected POs". An ASN ships from one supplier, so selection locks to it.
+    private readonly HashSet<Guid> asnSel = new();
+    private Guid? asnSelSupplier;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Seccode-scoped: a supplier login mapped to several suppliers gets them all here; an
+        // internal user gets the visible set. Drives the optional supplier filter (rendered only when >1).
+        var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+        suppliers = sup?.Data ?? new();
+        await Reload();
+    }
+
+    private async Task OnSupplierChanged() { page = 1; await Reload(); }
 
     private async Task Reload()
     {
@@ -120,6 +167,7 @@
         var url = $"api/purchase-orders?page={page}&pageSize={PageSize}";
         if (!string.IsNullOrWhiteSpace(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
         if (!string.IsNullOrWhiteSpace(typeFilter)) url += $"&type={Uri.EscapeDataString(typeFilter)}";
+        if (!string.IsNullOrWhiteSpace(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
         if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search.Trim())}";
         var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>(url);
         paged = resp?.Data;
@@ -134,6 +182,27 @@
     private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
 
     private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/purchase-orders/{id}");
+
+    private void ToggleAsnSel(PurchaseOrderListItemDto po, bool on)
+    {
+        if (on)
+        {
+            if (asnSel.Count == 0) asnSelSupplier = po.SupplierId;
+            if (asnSelSupplier != po.SupplierId) return; // one supplier per ASN
+            asnSel.Add(po.Id);
+        }
+        else
+        {
+            asnSel.Remove(po.Id);
+            if (asnSel.Count == 0) asnSelSupplier = null;
+        }
+    }
+
+    private void CreateAsnFromSelected()
+    {
+        if (asnSel.Count == 0) return;
+        Nav.NavigateTo($"/asns/new?pos={string.Join(",", asnSel)}");
+    }
 
     private string StatusClass(string status) => status switch
     {

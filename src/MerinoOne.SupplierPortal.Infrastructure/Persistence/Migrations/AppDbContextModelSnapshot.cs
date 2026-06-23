@@ -4203,6 +4203,190 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.ToTable("AsnLine", "proc");
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnLineLot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("asnLineLotId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<Guid>("AsnLineId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("asnLineId");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<string>("ErpCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("erpCode");
+
+                    b.Property<DateOnly?>("ExpiryDate")
+                        .HasColumnType("date")
+                        .HasColumnName("expiryDate");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<string>("LotNo")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("lotNo");
+
+                    b.Property<decimal>("Qty")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("qty");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("asnLineLotSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_AsnLineLot");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("AsnLineId")
+                        .HasDatabaseName("IX_AsnLineLot_asnLineId");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AsnLineLot_asnLineLotSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("AsnLineId", "LotNo")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_AsnLineLot_asnLine_lot")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.ToTable("AsnLineLot", "proc");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnLineSerial", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("asnLineSerialId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<Guid>("AsnLineId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("asnLineId");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<string>("ErpCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("erpCode");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("asnLineSerialSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<string>("SerialNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("serialNumber");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_AsnLineSerial");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("AsnLineId")
+                        .HasDatabaseName("IX_AsnLineSerial_asnLineId");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AsnLineSerial_asnLineSerialSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("AsnLineId", "SerialNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_AsnLineSerial_asnLine_serial")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.ToTable("AsnLineSerial", "proc");
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnPurchaseOrder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6774,6 +6958,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnName("supplierContactId")
                         .HasDefaultValueSql("NEWID()");
 
+                    b.Property<Guid?>("AddressId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("addressId");
+
                     b.Property<string>("ContactName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -6858,6 +7046,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasName("PK_SupplierContact");
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("AddressId")
+                        .HasDatabaseName("IX_SupplierContact_addressId");
 
                     b.HasIndex("Seq")
                         .IsUnique()
@@ -7565,6 +7756,30 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Navigation("PurchaseOrderLine");
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnLineLot", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnLine", "AsnLine")
+                        .WithMany("Lots")
+                        .HasForeignKey("AsnLineId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_AsnLineLot_AsnLine_AsnLineId");
+
+                    b.Navigation("AsnLine");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnLineSerial", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnLine", "AsnLine")
+                        .WithMany("Serials")
+                        .HasForeignKey("AsnLineId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_AsnLineSerial_AsnLine_AsnLineId");
+
+                    b.Navigation("AsnLine");
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnPurchaseOrder", b =>
                 {
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.Asn", "Asn")
@@ -7958,12 +8173,20 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact", b =>
                 {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierAddress", "Address")
+                        .WithMany()
+                        .HasForeignKey("AddressId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .HasConstraintName("FK_SupplierContact_SupplierAddress_addressId");
+
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplier", "Supplier")
                         .WithMany("Contacts")
                         .HasForeignKey("SupplierId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("FK_SupplierContact_Supplier_SupplierId");
+
+                    b.Navigation("Address");
 
                     b.Navigation("Supplier");
                 });
@@ -8051,6 +8274,13 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Navigation("Lines");
 
                     b.Navigation("PurchaseOrders");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnLine", b =>
+                {
+                    b.Navigation("Lots");
+
+                    b.Navigation("Serials");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.Invoice", b =>

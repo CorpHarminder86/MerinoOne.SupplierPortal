@@ -158,7 +158,10 @@ public enum TenantInboundEntity { Currency, Country, State, City, PostalCode }
 /// path (/inbound/grn-status, /inbound/payments, /inbound/invoice-status, /inbound/erp-ack). Backend extends the
 /// executor's EntityName resolution to recognise this set. Persisted as the enum name. APPEND-ONLY.
 /// </summary>
-public enum TransactionalInboundEntity { Grn, Payment, InvoiceStatus, ErpAck }
+// R4 (2026-06-23) — APPENDED: Po / DeliverySchedule / GrnReceipt are the transactional DOCUMENT-ingestion
+// entities (CREATE/UPSERT the live PO + delivery schedule + goods-receipt rows; the existing Grn entry is the
+// status-UPDATE path). Each drives its own InforEndpointMap gate + Integration.Inbound.* scope.
+public enum TransactionalInboundEntity { Grn, Payment, InvoiceStatus, ErpAck, Po, DeliverySchedule, GrnReceipt }
 
 /// <summary>Unit dimension / quantity type (INFOR LN unit type).</summary>
 public enum UnitType { Quantity, Length, Area, Volume, Mass, Time, Other }

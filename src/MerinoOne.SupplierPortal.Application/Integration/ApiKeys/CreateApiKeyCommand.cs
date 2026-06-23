@@ -134,6 +134,7 @@ public static class ApiKeyScopes
         "Integration.Inbound." + nameof(SharedEndpoint.Unit),
         "Integration.Inbound." + nameof(SharedEndpoint.ItemGroup),
         "Integration.Inbound." + nameof(SharedEndpoint.Item),
+        "Integration.Inbound." + nameof(SharedEndpoint.Tax),
         "Integration.Inbound." + nameof(TenantInboundEntity.Currency),
         "Integration.Inbound." + nameof(TenantInboundEntity.Country),
         "Integration.Inbound." + nameof(TenantInboundEntity.State),
@@ -144,6 +145,10 @@ public static class ApiKeyScopes
         "Integration.Inbound." + nameof(TransactionalInboundEntity.Payment),
         "Integration.Inbound." + nameof(TransactionalInboundEntity.InvoiceStatus),
         "Integration.Inbound." + nameof(TransactionalInboundEntity.ErpAck),
+        // R4 (2026-06-23) — transactional document ingestion (create/upsert live PO / delivery schedule / GRN).
+        "Integration.Inbound." + nameof(TransactionalInboundEntity.Po),
+        "Integration.Inbound." + nameof(TransactionalInboundEntity.DeliverySchedule),
+        "Integration.Inbound." + nameof(TransactionalInboundEntity.GrnReceipt),
     };
 
     public static List<string> Normalize(IEnumerable<string>? scopes) =>

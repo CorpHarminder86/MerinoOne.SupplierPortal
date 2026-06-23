@@ -18,16 +18,27 @@ public class GetSupplierChangeRequestByIdQueryHandler
     : IRequestHandler<GetSupplierChangeRequestByIdQuery, SupplierChangeRequestDto>
 {
     private readonly IAppDbContext _db;
-    public GetSupplierChangeRequestByIdQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetSupplierChangeRequestByIdQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<SupplierChangeRequestDto> Handle(GetSupplierChangeRequestByIdQuery request, CancellationToken ct)
     {
-        var r = await _db.SupplierChangeRequests
+        // Reviewers open any request in their tenant (the queue spans companies); bypass seccode/company but
+        // re-apply the tenant predicate. Suppliers stay seccode-scoped (404 on someone else's request).
+        var reviewer = _user.IsAdmin || _user.IsManager || _user.HasPermission("Supplier.ApproveChange");
+        var reqs = reviewer
+            ? _db.SupplierChangeRequests.IgnoreQueryFilters().Where(x => !x.IsDeleted && x.TenantId == _user.TenantId)
+            : _db.SupplierChangeRequests.AsQueryable();
+        var supSet = reviewer
+            ? _db.Suppliers.IgnoreQueryFilters().Where(s => !s.IsDeleted && s.TenantId == _user.TenantId)
+            : _db.Suppliers.AsQueryable();
+
+        var r = await reqs
             .Include(x => x.Lines)
             .FirstOrDefaultAsync(x => x.Id == request.Id, ct)
             ?? throw new NotFoundException("SupplierChangeRequest", request.Id);
 
-        var supplier = await _db.Suppliers
+        var supplier = await supSet
             .Select(s => new { s.Id, s.SupplierCode, s.LegalName })
             .FirstOrDefaultAsync(s => s.Id == r.SupplierId, ct);
 

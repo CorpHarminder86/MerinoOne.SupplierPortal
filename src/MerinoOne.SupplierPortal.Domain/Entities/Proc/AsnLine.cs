@@ -19,4 +19,10 @@ public class AsnLine : AuditableEntity
     // building the ASN, and required stable in the LN ASN post payload even if the PO line later changes).
     public int? PositionNo { get; set; }
     public int? SequenceNo { get; set; }
+
+    // R4 (2026-06-23) — Serial/Lot capture. CHILD collections of the ASN aggregate (reached via this line):
+    // populated only for a serialized item (Serials) or a lot-controlled item (Lots) — mutually exclusive
+    // per item, enforced by the Item XOR guard. CASCADE-deleted with the line.
+    public ICollection<AsnLineSerial> Serials { get; set; } = new List<AsnLineSerial>();
+    public ICollection<AsnLineLot> Lots { get; set; } = new List<AsnLineLot>();
 }

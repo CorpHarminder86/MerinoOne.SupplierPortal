@@ -14,4 +14,9 @@ public class SupplierContact : AuditableEntity
 
     // R4 (2026-06-22) — Module 1e: ERP handle, populated via the /inbound/erp-ack channel.
     public string? ErpCode { get; set; }
+
+    // R4 (2026-06-23) — optional link to one of the supplier's addresses (the contact's site/location).
+    // SetNull on address delete so removing an address never cascades the contact away.
+    public Guid? AddressId { get; set; }
+    public SupplierAddress? Address { get; set; }
 }

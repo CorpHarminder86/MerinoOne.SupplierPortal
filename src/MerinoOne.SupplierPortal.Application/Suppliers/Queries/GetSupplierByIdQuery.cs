@@ -36,8 +36,14 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
                 .ToDictionaryAsync(c => c.Id, c => c.Code, ct);
 
         // Documents — DocumentUpload has no nav back to Supplier (polymorphic owner), query directly.
+        // IgnoreQueryFilters + re-apply !IsDeleted: DocumentUpload is ISeccode/ICompanyScoped, so the global
+        // seccode+company filters would hide these from an internal reviewer (whose rights are NOT on the
+        // supplier's G-seccode / whose active company differs) even though the supplier itself is already
+        // access-gated above. Access to the documents follows access to their owning supplier (same as the
+        // linkedUsers + bank-currency reads below).
         var docs = await _db.DocumentUploads
-            .Where(d => d.OwnerEntityType == "Supplier" && d.OwnerEntityId == s.Id)
+            .IgnoreQueryFilters()
+            .Where(d => !d.IsDeleted && d.OwnerEntityType == "Supplier" && d.OwnerEntityId == s.Id)
             .OrderBy(d => d.DocumentType)
             .Select(d => new SupplierDocumentDto(
                 d.Id,
@@ -76,7 +82,8 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
         if (licenseIds.Count > 0)
         {
             var licenseDocs = await _db.DocumentUploads
-                .Where(d => d.OwnerEntityType == DocumentOwnerTypes.SupplierLicense && licenseIds.Contains(d.OwnerEntityId))
+                .IgnoreQueryFilters()
+                .Where(d => !d.IsDeleted && d.OwnerEntityType == DocumentOwnerTypes.SupplierLicense && licenseIds.Contains(d.OwnerEntityId))
                 .OrderBy(d => d.CreatedOn)
                 .Select(d => new { d.OwnerEntityId, Dto = new DocumentAttachmentDto(
                     d.Id,

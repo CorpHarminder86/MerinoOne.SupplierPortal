@@ -44,6 +44,7 @@ public static class TenantSeeder
         (nameof(SharedEndpoint.Unit),              "units"),
         (nameof(SharedEndpoint.ItemGroup),         "item-groups"),
         (nameof(SharedEndpoint.Item),              "items"),
+        (nameof(SharedEndpoint.Tax),               "taxes"),
         (nameof(TenantInboundEntity.Currency),     "currencies"),
         (nameof(TenantInboundEntity.Country),      "countries"),
         (nameof(TenantInboundEntity.State),        "states"),
@@ -55,6 +56,10 @@ public static class TenantSeeder
         (nameof(TransactionalInboundEntity.Payment),       "payments"),
         (nameof(TransactionalInboundEntity.InvoiceStatus), "invoice-status"),
         (nameof(TransactionalInboundEntity.ErpAck),        "erp-ack"),
+        // R4 (2026-06-23) — transactional document ingestion (create/upsert).
+        (nameof(TransactionalInboundEntity.Po),              "purchase-orders"),
+        (nameof(TransactionalInboundEntity.DeliverySchedule),"delivery-schedules"),
+        (nameof(TransactionalInboundEntity.GrnReceipt),      "goods-receipts"),
     };
 
     public static Guid TenantId => DeterministicId.From("Tenant", TenantName);

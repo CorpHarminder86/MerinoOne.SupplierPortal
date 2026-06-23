@@ -17,6 +17,7 @@ public record PostalCodeRecord(string Code, string? Area, string CountryCode, st
 public record UnitRecord(string Code, string Description, string UnitType, string? IsoCode, int DecimalPlaces, decimal ConversionFactor, string? BaseUnitCode, bool IsActive = true);
 public record ItemGroupRecord(string Code, string Description, bool IsActive = true);
 public record ItemRecord(string Code, string Description, string? UnitCode, string? ItemGroupCode, string? HsnCode, bool IsActive = true);
+public record TaxRecord(string Code, string Description, decimal? TaxRate = null, bool IsActive = true);
 
 // ---- Tenant-scoped push bodies (no CompanyCode) ----
 public record PushCurrenciesRequest(IReadOnlyList<CurrencyRecord> Records);
@@ -29,3 +30,4 @@ public record PushPostalCodesRequest(IReadOnlyList<PostalCodeRecord> Records);
 public record PushUnitsRequest(string CompanyCode, IReadOnlyList<UnitRecord> Units);
 public record PushItemGroupsRequest(string CompanyCode, IReadOnlyList<ItemGroupRecord> ItemGroups);
 public record PushItemsRequest(string CompanyCode, IReadOnlyList<ItemRecord> Items);
+public record PushTaxesRequest(string CompanyCode, IReadOnlyList<TaxRecord> Taxes);
