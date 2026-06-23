@@ -1665,6 +1665,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
                     b.HasKey("Id")
                         .HasName("PK_AuditEntry");
 
@@ -1675,6 +1679,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UX_AuditEntry_auditEntrySeq");
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("IX_AuditEntry_tenantId");
 
                     b.HasIndex("EntityName", "EntityId", "ChangedOn")
                         .IsDescending(false, false, true)

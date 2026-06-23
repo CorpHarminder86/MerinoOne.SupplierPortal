@@ -8,9 +8,21 @@ namespace MerinoOne.SupplierPortal.Domain.Entities.Audit;
 /// Insert-only: never updated, never deleted. No FKs to source tables (audit must survive
 /// deletes). Inherits BaseEntity (two-key pattern + clustered Seq) but NOT AuditableEntity
 /// — audit rows are themselves not audited.
+///
+/// Implements <see cref="ITenantOwned"/> purely to declare its <see cref="TenantId"/>; it is NOT
+/// pulled into the always-on tenant-filter loop (that loop keys on <see cref="ISoftDelete"/>, which
+/// AuditEntry deliberately does not implement). A dedicated, soft-delete-free tenant query filter is
+/// attached explicitly in <c>AppDbContext.ApplyGlobalFilters</c> so reads are fail-closed tenant-scoped.
 /// </summary>
-public class AuditEntry : BaseEntity
+public class AuditEntry : BaseEntity, ITenantOwned
 {
+    /// <summary>
+    /// Owning tenant of the audited row. Stamped by <c>AuditableEntityInterceptor</c> from the audited
+    /// entity's own TenantId when it carries one, else the current principal's TenantId, else null.
+    /// Legacy rows written before migration 0025 stay null and are visible only to bypass principals.
+    /// </summary>
+    public Guid? TenantId { get; set; }
+
     /// <summary>CLR type name of the audited entity (e.g. "Supplier", "PurchaseOrder").</summary>
     public string EntityName { get; set; } = string.Empty;
 

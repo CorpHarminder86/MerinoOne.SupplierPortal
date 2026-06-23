@@ -102,6 +102,10 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
             var idProp = entry.Property(nameof(BaseEntity.Id));
             if (idProp.CurrentValue is not Guid entityId) continue;
 
+            // Owning tenant of the audit row. Prefer the audited entity's OWN TenantId (accurate even
+            // for a cross-tenant/bypass principal); fall back to the current principal's tenant; else null.
+            var tenantId = ResolveTenantId(audited);
+
             switch (entry.State)
             {
                 case EntityState.Added:
@@ -115,6 +119,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
                         NewValue = JsonSerializer.Serialize(new { Id = entityId }),
                         ChangedBy = actor,
                         ChangedOn = now,
+                        TenantId = tenantId,
                     });
                     break;
 
@@ -136,6 +141,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
                             NewValue = newStr,
                             ChangedBy = actor,
                             ChangedOn = now,
+                            TenantId = tenantId,
                         });
                     }
                     break;
@@ -153,6 +159,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
                         NewValue = null,
                         ChangedBy = actor,
                         ChangedOn = now,
+                        TenantId = tenantId,
                     });
                     break;
             }
@@ -160,5 +167,22 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
 
         if (auditRows.Count > 0)
             ctx.Set<AuditEntry>().AddRange(auditRows);
+    }
+
+    /// <summary>
+    /// Owning tenant for an audit row. Priority: the audited entity's OWN TenantId (most accurate —
+    /// correct even when written by a cross-tenant/system principal), then the current principal's
+    /// TenantId, then null (legacy/unknown — visible only to bypass principals under the tenant filter).
+    /// </summary>
+    private Guid? ResolveTenantId(AuditableEntity audited)
+    {
+        var ownTenant = audited switch
+        {
+            ITenantOwned o => o.TenantId,
+            ITenantScoped s => s.TenantId,
+            ICompanyScoped c => c.TenantId,
+            _ => null,
+        };
+        return ownTenant ?? _currentUser?.TenantId;
     }
 }

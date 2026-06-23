@@ -168,6 +168,17 @@ public class AppDbContext : DbContext, IAppDbContext
                 var lambda = Expression.Lambda(filter, parameter);
                 modelBuilder.Entity(clrType).HasQueryFilter(lambda);
             }
+            else if (clrType == typeof(AuditEntry))
+            {
+                // AuditEntry is NOT ISoftDelete (insert-only ledger), so it never enters the loop above
+                // and would otherwise be left UNFILTERED → cross-tenant disclosure of OldValue/NewValue.
+                // Attach a standalone, soft-delete-free tenant filter here, sharing the same fail-closed
+                // gate + bypass semantics as BuildTenantPredicate.
+                var parameter = Expression.Parameter(clrType, "e");
+                var auditTenantFilter = BuildAuditEntryTenantPredicate(parameter);
+                var lambda = Expression.Lambda(auditTenantFilter, parameter);
+                modelBuilder.Entity(clrType).HasQueryFilter(lambda);
+            }
 
             if (typeof(IHasRowVersion).IsAssignableFrom(clrType))
             {
@@ -275,6 +286,33 @@ public class AppDbContext : DbContext, IAppDbContext
         // Rollout gate (FAIL-CLOSED): bypass the tenant filter ONLY in the genuine backfill window (gate
         // Disabled, or no gate for tooling). An UNKNOWN gate (transient read failure) is NOT disabled, so the
         // tenant predicate enforces rather than leaking NULL/other-tenant rows.
+        var filtersDisabled = Expression.Property(ctx, nameof(ScopeFiltersDisabled));
+
+        return Expression.OrElse(filtersDisabled, Expression.OrElse(bypass, matches));
+    }
+
+    /// <summary>
+    /// Standalone tenant filter for the insert-only <see cref="AuditEntry"/> ledger. AuditEntry is NOT
+    /// ISoftDelete, so it never enters the always-on filter loop — without this it would be unfiltered
+    /// and leak every tenant's OldValue/NewValue. Mirrors <see cref="BuildTenantPredicate"/> EXACTLY but
+    /// WITHOUT the soft-delete term:
+    ///   ScopeFiltersDisabled OR TenantFilterBypassed OR (e.TenantId != null AND e.TenantId == CurrentTenantId).
+    /// Reads the gate/bypass/current-tenant via the DbContext instance (Expression.Constant(this)) so the
+    /// values are evaluated per request, never baked into the cached compiled model.
+    /// </summary>
+    private Expression BuildAuditEntryTenantPredicate(ParameterExpression parameter)
+    {
+        var ctx = Expression.Constant(this);
+        var bypass = Expression.Property(ctx, nameof(TenantFilterBypassed));
+        var currentTenant = Expression.Property(ctx, nameof(CurrentTenantId));
+
+        var tenantProp = Expression.Property(parameter, nameof(AuditEntry.TenantId));   // Guid?
+        var tenantNotNull = Expression.NotEqual(tenantProp, Expression.Constant(null, typeof(Guid?)));
+        var tenantEquals = Expression.Equal(tenantProp, currentTenant);
+        var matches = Expression.AndAlso(tenantNotNull, tenantEquals);
+
+        // FAIL-CLOSED rollout gate: bypass only in the genuine backfill window (gate Disabled / no gate);
+        // an UNKNOWN gate (transient read failure) enforces rather than leaking NULL/other-tenant rows.
         var filtersDisabled = Expression.Property(ctx, nameof(ScopeFiltersDisabled));
 
         return Expression.OrElse(filtersDisabled, Expression.OrElse(bypass, matches));

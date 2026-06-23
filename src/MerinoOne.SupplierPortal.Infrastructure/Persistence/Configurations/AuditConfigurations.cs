@@ -40,6 +40,13 @@ public class AuditEntryConfiguration : IEntityTypeConfiguration<AuditEntry>
             .HasColumnName("changedOn").HasColumnType("datetime2")
             .HasDefaultValueSql("SYSUTCDATETIME()");
 
+        // Owning tenant — nullable (legacy rows stay null). Stamped by AuditableEntityInterceptor.
+        // The standalone tenant query filter for AuditEntry is attached in AppDbContext.ApplyGlobalFilters
+        // (it needs the DbContext instance for the fail-closed gate properties); it is intentionally not
+        // configured here.
+        b.Property(x => x.TenantId)
+            .HasColumnName("tenantId").HasColumnType("uniqueidentifier");
+
         b.ToTable(t => t.HasCheckConstraint(
             "CK_AuditEntry_operation",
             "[operation] IN ('Insert','Update','Delete')"));
@@ -48,5 +55,9 @@ public class AuditEntryConfiguration : IEntityTypeConfiguration<AuditEntry>
         b.HasIndex(x => new { x.EntityName, x.EntityId, x.ChangedOn })
             .HasDatabaseName("IX_AuditEntry_entity")
             .IsDescending(false, false, true);
+
+        // Tenant-scoping index — backs the always-on AuditEntry tenant query filter.
+        b.HasIndex(x => x.TenantId)
+            .HasDatabaseName("IX_AuditEntry_tenantId");
     }
 }
