@@ -194,7 +194,20 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
                 // supplier (SupplierUserMap + paired SecRight on the supplier's type-G seccode) + ensure company
                 // access, instead of skipping (the old behaviour left the supplier with 0 linked users). Idempotent
                 // create-or-restore. Only link an ACTIVE account; never auto-link a disabled one.
-                if (existingUser.IsActive)
+                //
+                // SECURITY (C7): only auto-link when the primary-contact email EQUALS the OTP-verified invite email.
+                // The invite address is chosen by the inviting admin (not the self-registrant), so this prevents a
+                // registrant from binding an arbitrary existing user (e.g. an admin's account) to their supplier by
+                // putting that user's email as the primary contact.
+                var inviteEmail = await _db.SupplierInvites.IgnoreQueryFilters()
+                    .Where(i => i.SupplierId == supplier.Id && !i.IsDeleted)
+                    .OrderByDescending(i => i.ConsumedAt)
+                    .Select(i => i.Email)
+                    .FirstOrDefaultAsync(ct);
+                var inviteBound = !string.IsNullOrWhiteSpace(inviteEmail)
+                                  && string.Equals(inviteEmail.Trim(), contactEmail, StringComparison.OrdinalIgnoreCase);
+
+                if (existingUser.IsActive && inviteBound)
                 {
                     await _mapService.CreateOrRestoreMapAsync(existingUser, supplier, canWrite: false, actor, now, ct);
                     var company = await _db.TenantEntities.IgnoreQueryFilters()
@@ -208,8 +221,9 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
                 else
                 {
                     _logger.LogWarning(
-                        "Primary contact {Email} for supplier {SupplierCode} maps to an INACTIVE user; not linked.",
-                        contactEmail, supplier.SupplierCode);
+                        "Not auto-linking existing user {Email} to supplier {SupplierCode}: active={Active}, inviteBound={Bound} " +
+                        "(the primary-contact email must match the OTP-verified invite address).",
+                        contactEmail, supplier.SupplierCode, existingUser.IsActive, inviteBound);
                 }
             }
         }

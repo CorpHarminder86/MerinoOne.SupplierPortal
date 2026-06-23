@@ -21,7 +21,7 @@ public sealed class ScopeFilterGate : IScopeFilterGate, ISettingsCacheInvalidato
     private readonly ILogger<ScopeFilterGate> _logger;
 
     private readonly object _loadLock = new();
-    private bool? _enabled;
+    private ScopeFilterState? _state;
 
     public ScopeFilterGate(IServiceScopeFactory scopeFactory, ILogger<ScopeFilterGate> logger)
     {
@@ -29,21 +29,25 @@ public sealed class ScopeFilterGate : IScopeFilterGate, ISettingsCacheInvalidato
         _logger = logger;
     }
 
-    public bool FiltersEnabled
+    public ScopeFilterState State
     {
         get
         {
-            if (_enabled.HasValue) return _enabled.Value;
+            // Cache only a DEFINITIVE result (Disabled/Enabled). Unknown (a transient read failure) is never
+            // cached, so the next access retries instead of pinning the gate open/closed on a one-off blip.
+            var cached = _state;
+            if (cached is ScopeFilterState.Disabled or ScopeFilterState.Enabled) return cached.Value;
             lock (_loadLock)
             {
-                if (_enabled.HasValue) return _enabled.Value;
-                _enabled = Load();
-                return _enabled.Value;
+                if (_state is ScopeFilterState.Disabled or ScopeFilterState.Enabled) return _state.Value;
+                var loaded = Load();
+                if (loaded is ScopeFilterState.Disabled or ScopeFilterState.Enabled) _state = loaded;
+                return loaded;
             }
         }
     }
 
-    private bool Load()
+    private ScopeFilterState Load()
     {
         try
         {
@@ -54,14 +58,18 @@ public sealed class ScopeFilterGate : IScopeFilterGate, ISettingsCacheInvalidato
                 .Where(s => !s.IsDeleted && s.Category == Category && s.SettingKey == Key)
                 .Select(s => s.SettingValue)
                 .FirstOrDefault();
-            return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+            // Read succeeded: "true" => Enabled (enforce); missing/anything-else => Disabled (backfill window).
+            return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+                ? ScopeFilterState.Enabled
+                : ScopeFilterState.Disabled;
         }
         catch (Exception ex)
         {
-            // Pre-migration / design-time / startup race — fail OPEN (filters bypassed) so tooling and
-            // the backfill are never blocked. A real runtime read always succeeds.
-            _logger.LogWarning(ex, "ScopeFilterGate load failed; defaulting Scope.FiltersEnabled = false (filters bypassed).");
-            return false;
+            // Read FAILED — we don't know the rollout state. Return Unknown (NOT cached) so tenant filtering
+            // FAILS CLOSED for tenant-bearing principals until the setting is readable again. (Design-time /
+            // pre-migration tooling has a null gate in AppDbContext, which is treated as Disabled separately.)
+            _logger.LogWarning(ex, "ScopeFilterGate load failed; Scope.FiltersEnabled is UNKNOWN — tenant/company filters will FAIL CLOSED until readable.");
+            return ScopeFilterState.Unknown;
         }
     }
 
@@ -69,7 +77,7 @@ public sealed class ScopeFilterGate : IScopeFilterGate, ISettingsCacheInvalidato
     {
         if (string.Equals(category, Category, StringComparison.Ordinal))
         {
-            lock (_loadLock) { _enabled = null; }
+            lock (_loadLock) { _state = null; }
         }
     }
 }

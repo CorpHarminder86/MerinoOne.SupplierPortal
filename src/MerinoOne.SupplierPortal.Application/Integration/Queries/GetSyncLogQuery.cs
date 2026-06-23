@@ -13,11 +13,14 @@ public record GetSyncLogQuery(
 public class GetSyncLogQueryHandler : IRequestHandler<GetSyncLogQuery, PagedResult<InforSyncLogDto>>
 {
     private readonly IAppDbContext _db;
-    public GetSyncLogQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetSyncLogQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<PagedResult<InforSyncLogDto>> Handle(GetSyncLogQuery request, CancellationToken ct)
     {
-        var q = _db.InforSyncLogs.AsQueryable();
+        // SECURITY: explicit tenant guard — do NOT rely solely on the (fail-open) global query filter.
+        var tid = _user.TenantId;
+        var q = _db.InforSyncLogs.Where(x => x.TenantId == tid);
         if (!string.IsNullOrEmpty(request.Status)) q = q.Where(x => x.Status.ToString() == request.Status);
         if (!string.IsNullOrEmpty(request.EntityName)) q = q.Where(x => x.EntityName == request.EntityName);
         if (!string.IsNullOrEmpty(request.Direction)) q = q.Where(x => x.Direction.ToString() == request.Direction);
@@ -47,12 +50,16 @@ public record GetSyncLogPayloadQuery(Guid Id) : IRequest<string?>;
 public class GetSyncLogPayloadQueryHandler : IRequestHandler<GetSyncLogPayloadQuery, string?>
 {
     private readonly IAppDbContext _db;
-    public GetSyncLogPayloadQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetSyncLogPayloadQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<string?> Handle(GetSyncLogPayloadQuery request, CancellationToken ct)
     {
+        // SECURITY: tenant-scope the by-GUID payload fetch (else IDOR — a caller could read another tenant's
+        // payload by id if the global filter is off). Explicit guard, not relying on the (fail-open) filter.
+        var tid = _user.TenantId;
         return await _db.InforSyncLogs
-            .Where(x => x.Id == request.Id)
+            .Where(x => x.Id == request.Id && x.TenantId == tid)
             .Select(x => x.PayloadJson)
             .FirstOrDefaultAsync(ct);
     }
@@ -63,11 +70,14 @@ public record GetIntegrationErrorsQuery(int Page = 1, int PageSize = 50, bool? I
 public class GetIntegrationErrorsQueryHandler : IRequestHandler<GetIntegrationErrorsQuery, PagedResult<IntegrationErrorDto>>
 {
     private readonly IAppDbContext _db;
-    public GetIntegrationErrorsQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetIntegrationErrorsQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<PagedResult<IntegrationErrorDto>> Handle(GetIntegrationErrorsQuery request, CancellationToken ct)
     {
-        var q = _db.IntegrationErrors.AsQueryable();
+        // SECURITY: explicit tenant guard (not relying on the fail-open global filter).
+        var tid = _user.TenantId;
+        var q = _db.IntegrationErrors.Where(x => x.TenantId == tid);
         if (request.IsResolved.HasValue) q = q.Where(x => x.IsResolved == request.IsResolved.Value);
 
         var total = await q.CountAsync(ct);

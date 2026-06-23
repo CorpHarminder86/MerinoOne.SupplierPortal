@@ -68,6 +68,7 @@ Returns: SupplierDetailDto on success; 404 if not found; 403 if seccode mismatch
     }
 
     [HttpPost("{id:guid}/verify-nic")]
+    [Authorize(Policy = "Supplier.Approve")]
     [EndpointSummary("Verify supplier NIC")]
     [EndpointDescription(@"Runs NIC / national-ID verification against the supplier's registered identifiers.
 Filters / params:
@@ -96,6 +97,7 @@ Returns: List<SupplierVerificationDto> ordered chronologically; 404 if supplier 
     }
 
     [HttpPost("{id:guid}/approve")]
+    [Authorize(Policy = "Supplier.Approve")]
     [EndpointSummary("Approve supplier")]
     [EndpointDescription(@"Buyer-side approval of a supplier's onboarding submission.
 Filters / params:
@@ -113,6 +115,7 @@ Returns: empty success; 404 if not found; 409 if not in approvable state.")]
     }
 
     [HttpPost("{id:guid}/reject")]
+    [Authorize(Policy = "Supplier.Approve")]
     [EndpointSummary("Reject supplier")]
     [EndpointDescription(@"Buyer-side rejection of a supplier onboarding submission.
 Filters / params:

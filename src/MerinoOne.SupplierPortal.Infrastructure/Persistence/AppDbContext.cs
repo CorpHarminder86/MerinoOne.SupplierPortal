@@ -193,11 +193,20 @@ public class AppDbContext : DbContext, IAppDbContext
     // is NEVER gated.
 
     /// <summary>
-    /// True only when the <c>Scope.FiltersEnabled</c> SystemSetting is "true". When false (the default, and
-    /// the state during the backfill window) the tenant + company predicates are bypassed. Reads the cached
-    /// singleton gate — zero DB I/O on this context.
+    /// True only when the gate read returned a definitive "true" (<see cref="ScopeFilterState.Enabled"/>).
+    /// Reads the cached singleton gate — zero DB I/O on this context.
     /// </summary>
-    public bool ScopeFiltersEnabled => _scopeFilterGate?.FiltersEnabled ?? false;
+    public bool ScopeFiltersEnabled => _scopeFilterGate?.State == ScopeFilterState.Enabled;
+
+    /// <summary>
+    /// True ONLY when the scope rollout is genuinely OFF — the gate read SUCCEEDED and returned not-"true"
+    /// (<see cref="ScopeFilterState.Disabled"/>, the backfill window) — OR there is no gate at all
+    /// (design-time / EF migrations tooling). In this state the tenant + company predicates are bypassed so
+    /// legacy NULL-scope rows stay visible. CRITICAL: an <see cref="ScopeFilterState.Unknown"/> gate (a
+    /// transient read failure) is NOT "disabled" → the filters then FAIL CLOSED (enforce) for tenant-bearing
+    /// principals instead of leaking cross-tenant data.
+    /// </summary>
+    public bool ScopeFiltersDisabled => _scopeFilterGate is null || _scopeFilterGate.State == ScopeFilterState.Disabled;
 
     /// <summary>Platform Admin (cross-tenant) and the system principal bypass the tenant filter.</summary>
     public bool TenantFilterBypassed => _currentUser?.IsPlatformAdmin == true || _currentUser is ISystemPrincipal;
@@ -263,9 +272,10 @@ public class AppDbContext : DbContext, IAppDbContext
         var tenantEquals = Expression.Equal(tenantProp, currentTenant);
         var matches = Expression.AndAlso(tenantNotNull, tenantEquals);
 
-        // Feature-flag rollout gate: when Scope.FiltersEnabled is off (backfill window / not yet flipped),
-        // the tenant filter is bypassed so NULL-scope rows remain visible (no dark portal). Read per query.
-        var filtersDisabled = Expression.Not(Expression.Property(ctx, nameof(ScopeFiltersEnabled)));
+        // Rollout gate (FAIL-CLOSED): bypass the tenant filter ONLY in the genuine backfill window (gate
+        // Disabled, or no gate for tooling). An UNKNOWN gate (transient read failure) is NOT disabled, so the
+        // tenant predicate enforces rather than leaking NULL/other-tenant rows.
+        var filtersDisabled = Expression.Property(ctx, nameof(ScopeFiltersDisabled));
 
         return Expression.OrElse(filtersDisabled, Expression.OrElse(bypass, matches));
     }
@@ -295,8 +305,9 @@ public class AppDbContext : DbContext, IAppDbContext
         var companyEquals = Expression.Equal(companyProp, source);
         var matches = Expression.AndAlso(companyNotNull, companyEquals);
 
-        // Same rollout gate as the tenant predicate — bypass the company filter until Scope.FiltersEnabled is on.
-        var filtersDisabled = Expression.Not(Expression.Property(ctx, nameof(ScopeFiltersEnabled)));
+        // Same FAIL-CLOSED rollout gate as the tenant predicate — bypass only in the genuine backfill window
+        // (Disabled / no gate); an UNKNOWN gate enforces the company filter rather than bypassing it.
+        var filtersDisabled = Expression.Property(ctx, nameof(ScopeFiltersDisabled));
 
         return Expression.OrElse(filtersDisabled, Expression.OrElse(bypass, matches));
     }

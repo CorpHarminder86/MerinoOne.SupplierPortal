@@ -106,6 +106,20 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddCors(c => c.AddDefaultPolicy(p => p
     .AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
+// SECURITY: never boot a non-Development host on the committed placeholder / a weak signing key. The
+// appsettings.json value is a DEV-ONLY default; production MUST supply Jwt:SigningKey via env/secret store.
+const string JwtPlaceholderKey = "ChangeThisToAStrongRandomKeyAtLeast32Chars!";
+var configuredJwtKey = builder.Configuration["Jwt:SigningKey"];
+if (!builder.Environment.IsDevelopment() &&
+    (string.IsNullOrWhiteSpace(configuredJwtKey)
+     || configuredJwtKey == JwtPlaceholderKey
+     || Encoding.UTF8.GetByteCount(configuredJwtKey) < 32))
+{
+    throw new InvalidOperationException(
+        "Jwt:SigningKey must be a strong, non-default secret of at least 32 bytes outside Development. " +
+        "Set it via an environment variable or secret store (it must NOT be the committed placeholder).");
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
     {
@@ -234,3 +248,8 @@ app.MapControllers();
 app.Run();
 
 return 0;
+
+// Exposes the top-level-statement Program type as a public partial so the integration test project's
+// WebApplicationFactory<Program> can boot the real host. No behavioural change — this is the documented
+// pattern for testing minimal-hosting apps (https://learn.microsoft.com/aspnet/core/test/integration-tests).
+public partial class Program { }

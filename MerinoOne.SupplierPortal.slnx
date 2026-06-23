@@ -9,4 +9,7 @@
     <Project Path="src/MerinoOne.SupplierPortal/MerinoOne.SupplierPortal.csproj" />
     <Project Path="src/MerinoOne.Web/MerinoOne.Web.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MerinoOne.SupplierPortal.Tests/MerinoOne.SupplierPortal.Tests.csproj" />
+  </Folder>
 </Solution>
