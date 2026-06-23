@@ -22,19 +22,24 @@ public class MockInforIntegrationService : IInforIntegrationService
     private InforSyncResult Ok(string action, Guid id, string? payloadJson = null)
         => new(true, _idempotency.CurrentKey ?? Guid.NewGuid().ToString("N"), $"[mock] {action} for {id}", payloadJson);
 
-    public Task<InforSyncResult> SyncSupplierAsync(Guid supplierId, CancellationToken ct = default) => Task.FromResult(Ok("SyncSupplier", supplierId));
     public Task<InforSyncResult> AcknowledgePurchaseOrderAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("AckPO", id));
     public Task<InforSyncResult> AcceptPurchaseOrderAsync(Guid id, DateTime? proposed, CancellationToken ct = default) => Task.FromResult(Ok("AcceptPO", id));
     public Task<InforSyncResult> RejectPurchaseOrderAsync(Guid id, string reason, CancellationToken ct = default) => Task.FromResult(Ok("RejectPO", id));
-    public Task<InforSyncResult> SubmitInvoiceAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("SubmitInvoice", id));
 
-    // R4 (2026-06-23) — build the SAME ASN payload Live posts (via the shared builder) so dev/Mock submits land a
-    // viewable InforSyncLog.PayloadJson the user can open and share with the LN team for Q-LN-serial confirmation.
+    // R4 (2026-06-23) — build the SAME canonical payload Live posts (via the shared builder) so dev/Mock submits land
+    // a viewable InforSyncLog.PayloadJson the user can open and share with the LN team for field-map confirmation.
+    public async Task<InforSyncResult> SyncSupplierAsync(Guid supplierId, CancellationToken ct = default)
+        => Ok("SyncSupplier", supplierId, await SupplierOutboundPayloadBuilder.BuildJsonAsync(_db, supplierId, ct));
+
+    public async Task<InforSyncResult> SubmitInvoiceAsync(Guid id, CancellationToken ct = default)
+        => Ok("SubmitInvoice", id, await InvoiceOutboundPayloadBuilder.BuildJsonAsync(_db, id, ct));
+
     public async Task<InforSyncResult> SubmitAsnAsync(Guid id, CancellationToken ct = default)
         => Ok("SubmitAsn", id, await AsnOutboundPayloadBuilder.BuildJsonAsync(_db, id, ct));
 
-    // R4 Module 2 — supplier change-request push. Deterministic OK; the dispatcher's per-line PushStatus rollup
-    // and the InforSyncLog (EntityName='SupplierChange', PayloadRef='SupplierChange:<guid>') are written by the
-    // OutboxDispatcherWorker on this success.
-    public Task<InforSyncResult> SubmitSupplierChangeAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("SubmitSupplierChange", id));
+    // R4 Module 2 — supplier change-request push. Builds the SAME end-state payload Live posts (via the shared
+    // builder); the dispatcher's per-line PushStatus rollup and the InforSyncLog (EntityName='SupplierChange',
+    // PayloadRef='SupplierChange:<guid>') are written by the OutboxDispatcherWorker on this success.
+    public async Task<InforSyncResult> SubmitSupplierChangeAsync(Guid id, CancellationToken ct = default)
+        => Ok("SubmitSupplierChange", id, await SupplierChangeOutboundPayloadBuilder.BuildJsonAsync(_db, id, ct));
 }

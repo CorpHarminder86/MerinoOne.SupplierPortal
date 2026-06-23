@@ -2,6 +2,7 @@ using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Users.Commands;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -24,6 +25,7 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
     private readonly IPasswordHasher _hasher;
     private readonly IEmailService _email;
     private readonly IConfiguration _config;
+    private readonly SupplierMapService _mapService;
     private readonly ILogger<ApproveSupplierCommandHandler> _logger;
 
     public ApproveSupplierCommandHandler(
@@ -32,6 +34,7 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
         IPasswordHasher hasher,
         IEmailService email,
         IConfiguration config,
+        SupplierMapService mapService,
         ILogger<ApproveSupplierCommandHandler> logger)
     {
         _db = db;
@@ -39,6 +42,7 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
         _hasher = hasher;
         _email = email;
         _config = config;
+        _mapService = mapService;
         _logger = logger;
     }
 
@@ -90,15 +94,15 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
         if (primaryContact != null)
         {
             var contactEmail = primaryContact.Email.Trim().ToLowerInvariant();
+            var actor = string.IsNullOrEmpty(_user.UserCode) ? "system" : _user.UserCode;
 
-            var emailExists = await _db.AppUsers.IgnoreQueryFilters()
-                .AnyAsync(u => u.Email.ToLower() == contactEmail, ct);
+            var existingUser = await _db.AppUsers.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == contactEmail && !u.IsDeleted, ct);
 
-            if (!emailExists)
+            if (existingUser is null)
             {
                 var baseCode = $"sup-{supplier.SupplierCode}".ToLowerInvariant();
                 var userCode = await ResolveUniqueUserCodeAsync(baseCode, ct);
-                var actor = string.IsNullOrEmpty(_user.UserCode) ? "system" : _user.UserCode;
 
                 oneTimePassword = PasswordGenerator.Generate();
 
@@ -186,9 +190,27 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
             }
             else
             {
-                _logger.LogInformation(
-                    "Skipping auto-user provision for supplier {SupplierCode}: an AppUser already exists for {Email}.",
-                    supplier.SupplierCode, contactEmail);
+                // R4 (2026-06-23) — the primary contact already has a portal user: LINK that existing user to this
+                // supplier (SupplierUserMap + paired SecRight on the supplier's type-G seccode) + ensure company
+                // access, instead of skipping (the old behaviour left the supplier with 0 linked users). Idempotent
+                // create-or-restore. Only link an ACTIVE account; never auto-link a disabled one.
+                if (existingUser.IsActive)
+                {
+                    await _mapService.CreateOrRestoreMapAsync(existingUser, supplier, canWrite: false, actor, now, ct);
+                    var company = await _db.TenantEntities.IgnoreQueryFilters()
+                        .FirstOrDefaultAsync(c => c.Id == supplier.TenantEntityId, ct);
+                    if (company != null)
+                        await _mapService.EnsureCompanyMapAsync(existingUser, company, actor, now, ct);
+                    _logger.LogInformation(
+                        "Linked existing active user {Email} to approved supplier {SupplierCode}.",
+                        contactEmail, supplier.SupplierCode);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Primary contact {Email} for supplier {SupplierCode} maps to an INACTIVE user; not linked.",
+                        contactEmail, supplier.SupplierCode);
+                }
             }
         }
         else

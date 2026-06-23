@@ -25,11 +25,15 @@ Filters / params:
 - **pageSize**: Optional — rows per page (default 50).
 - **status**: Optional — sync run status (Success / Failed / Partial).
 - **entityName**: Optional — filter by entity (e.g. ""Supplier"", ""PurchaseOrder"").
+- **direction**: Optional — Inbound / Outbound / Bidirectional.
+- **fromDate** / **toDate**: Optional — inclusive SyncedAt date range (the UI defaults to the current month).
 Returns: PagedResult<InforSyncLogDto>. Requires permission **Integration.Read**.")]
     public async Task<Result<PagedResult<InforSyncLogDto>>> SyncLog([FromQuery] int page = 1, [FromQuery] int pageSize = 50,
-        [FromQuery] string? status = null, [FromQuery] string? entityName = null, CancellationToken ct = default)
+        [FromQuery] string? status = null, [FromQuery] string? entityName = null,
+        [FromQuery] string? direction = null, [FromQuery] DateTime? fromDate = null, [FromQuery] DateTime? toDate = null,
+        CancellationToken ct = default)
     {
-        var data = await _mediator.Send(new GetSyncLogQuery(page, pageSize, status, entityName), ct);
+        var data = await _mediator.Send(new GetSyncLogQuery(page, pageSize, status, entityName, direction, fromDate, toDate), ct);
         return Result<PagedResult<InforSyncLogDto>>.Ok(data, HttpContext.TraceIdentifier);
     }
 

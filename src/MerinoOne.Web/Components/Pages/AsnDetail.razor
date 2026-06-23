@@ -474,9 +474,9 @@
                 <div style="margin-top:18px;border-top:1px solid var(--mer-line-soft);padding-top:14px;">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachments</label>
-                        @if (IsNew)
+                        @if (IsNew && selectedSupplierId == Guid.Empty)
                         {
-                            <span style="font-size:11px;color:var(--mer-ink-500);">Available after the draft is saved.</span>
+                            <span style="font-size:11px;color:var(--mer-ink-500);">Choose a supplier first.</span>
                         }
                         else
                         {
@@ -639,6 +639,8 @@
     private bool attachUploading;
     private string attachError = string.Empty;
     private Guid attachSupplierId;
+    // R4 (2026-06-23) — deferred-upload staging key for create-mode attachments (rebound onto the ASN by CreateAsn).
+    private Guid _stagingKey = Guid.NewGuid();
 
     private bool showCancel = false;
     private string dialogError = string.Empty;
@@ -672,7 +674,20 @@
         _ => true
     };
 
-    protected override async Task OnInitializedAsync() => await Reload();
+    // Reload whenever the route id changes — Blazor REUSES this component across /asns/new -> /asns/{id}
+    // (the save-draft navigation), so OnInitializedAsync (once-only) would leave detail=null => "ASN not found".
+    private Guid? _loadedId;
+    private bool _loadedNew;
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId != Id || (IsNew && !_loadedNew))
+        {
+            _loadedId = Id;
+            _loadedNew = IsNew;
+            currentStep = 1;
+            await Reload();
+        }
+    }
 
     private async Task Reload()
     {
@@ -764,6 +779,7 @@
     private async Task ChooseSupplierAsync(Guid supplierId)
     {
         selectedSupplierId = supplierId;
+        attachSupplierId = supplierId;   // create-mode staging uploads stamp this supplier's seccode
         selectedSupplierName = suppliers.FirstOrDefault(s => s.Id == supplierId)?.LegalName;
         // Switching supplier resets the PO picker (an ASN ships from a single supplier).
         selectedPoIds.Clear(); selectedPoMap.Clear(); lines.Clear();
@@ -886,7 +902,8 @@
             var req = new CreateAsnRequest(
                 poList.Count == 1 ? poList[0] : (Guid?)null,
                 poList.Count > 1 ? poList : null,
-                expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
+                expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
+                StagingKey: _stagingKey);
             var resp = await Api.PostAsync<AsnDetailDto, CreateAsnRequest>("api/asns", req);
             if (resp?.Success == true && resp.Data != null)
             {
@@ -958,7 +975,8 @@
     private async Task OnAsnFileSelectedAsync(InputFileChangeEventArgs e)
     {
         attachError = string.Empty;
-        if (IsNew || !Id.HasValue) { attachError = "Save the draft first, then add attachments."; return; }
+        if (attachSupplierId == Guid.Empty) { attachError = "Choose a supplier first."; return; }
+        if (!IsNew && !Id.HasValue) { attachError = "Save the draft first, then add attachments."; return; }
         var file = e.File;
         if (file is null) return;
         if (file.Size > MaxAttachBytes) { attachError = $"File exceeds 5 MB ({(file.Size / 1024d / 1024d):0.0} MB)."; return; }
@@ -972,8 +990,9 @@
             streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
                 string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
             content.Add(streamContent, "file", file.Name);
-            content.Add(new StringContent("Asn"), "ownerEntityType");
-            content.Add(new StringContent(Id.Value.ToString()), "ownerEntityId");
+            // Create mode → stage under _stagingKey; CreateAsn rebinds to the new ASN. Draft → attach directly.
+            content.Add(new StringContent(IsNew ? "Staging" : "Asn"), "ownerEntityType");
+            content.Add(new StringContent((IsNew ? _stagingKey : Id!.Value).ToString()), "ownerEntityId");
             content.Add(new StringContent(attachSupplierId.ToString()), "supplierId");
 
             var resp = await Api.PostMultipartAsync<DocumentAttachmentDto>("api/document-uploads/attach", content);

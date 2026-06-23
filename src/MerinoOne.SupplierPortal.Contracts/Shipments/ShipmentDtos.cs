@@ -123,7 +123,10 @@ public record CreateAsnRequest(
     string? DriverName,
     string? DriverPhone,
     string? Notes,
-    List<CreateAsnLineRequest> Lines);
+    List<CreateAsnLineRequest> Lines,
+    // R4 (2026-06-23) — deferred attachments: files uploaded during creation go to ownerEntityType='Staging' under
+    // this client-generated key; CreateAsn rebinds them onto the new ASN (AsnAttachmentRebinder). Trailing optional.
+    Guid? StagingKey = null);
 
 // R4 (2026-06-23) — Serial/Lot capture: Serials (serialized item) + Lots (lot-controlled item) — at most one
 // populated per line. The other is ignored by the handler based on the line's Item flag. Used by BOTH Create

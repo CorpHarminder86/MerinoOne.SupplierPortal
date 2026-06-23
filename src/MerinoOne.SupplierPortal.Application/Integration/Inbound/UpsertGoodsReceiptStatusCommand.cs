@@ -119,7 +119,10 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
             var grns = await db.GoodsReceipts.IgnoreQueryFilters()
                 .Where(g => !g.IsDeleted && g.TenantId == tenantId && g.TenantEntityId == sourceId && grnNumbers.Contains(g.GrnNumber))
                 .ToListAsync(token);
-            var grnByNumber = grns.ToDictionary(g => g.GrnNumber, StringComparer.OrdinalIgnoreCase);
+            // A GRN created via /goods-receipts has ONE row per PO position, so a GrnNumber maps to MANY rows.
+            // Group (not ToDictionary-by-key, which threw "same key already added" on multi-line GRNs).
+            var grnByNumber = grns.GroupBy(g => g.GrnNumber, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
             // ASN resolution for the deterministic GRN→Invoice link (by AsnNumber or AsnErpRef/ErpSyncId).
             var asnKeys = recs
@@ -153,7 +156,7 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                 var code = rec.GrnNumber.Trim();
                 var newStatus = Enum.Parse<GrnStatus>(rec.GrnStatus.Trim(), ignoreCase: true);
 
-                if (!grnByNumber.TryGetValue(code, out var grn))
+                if (!grnByNumber.TryGetValue(code, out var grnRows) || grnRows.Count == 0)
                 {
                     // GRNs originate in the portal (created via the GRN ingest / seed against a PO line). A
                     // status push for an unknown GRN is a hard failure — we do NOT invent a GoodsReceipt with a
@@ -163,61 +166,65 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                     continue;
                 }
 
-                var oldStatus = grn.GrnStatus;
-
-                // Deterministically resolve + stamp the GRN→Invoice link from the GRN's ASN. Prefer the row's own
-                // AsnId; else resolve from the pushed AsnNumber/AsnErpRef. Then map AsnId → the Invoice on that ASN.
-                if (grn.AsnId is null)
-                {
-                    var asnKey = (rec.AsnNumber ?? rec.AsnErpRef)?.Trim();
-                    if (!string.IsNullOrWhiteSpace(asnKey) && asnByKey.TryGetValue(asnKey, out var resolvedAsnId))
-                        grn.AsnId = resolvedAsnId;
-                }
-                if (grn.InvoiceId is null && grn.AsnId is not null)
-                {
-                    var invId = await db.Invoices.IgnoreQueryFilters()
-                        .Where(i => !i.IsDeleted && i.AsnId == grn.AsnId)
-                        .Select(i => (Guid?)i.Id)
-                        .FirstOrDefaultAsync(token);
-                    if (invId is not null) grn.InvoiceId = invId;
-                }
-
-                // Apply the status + ERP-fed remark/code + optional receivedQty.
-                grn.GrnStatus = newStatus;
-                if (rec.ReceivedQty.HasValue) grn.ReceivedQty = rec.ReceivedQty.Value;
-                if (!string.IsNullOrWhiteSpace(rec.IssueReported)) grn.IssueReported = rec.IssueReported.Trim();
-                if (!string.IsNullOrWhiteSpace(rec.ErpCode)) grn.ErpCode = rec.ErpCode.Trim();
-                if (!string.IsNullOrWhiteSpace(rec.ErpSyncId)) grn.ErpSyncId = rec.ErpSyncId.Trim();
-                grn.UpdatedBy = "infor:inbound";
-                grn.UpdatedOn = now;
-
-                // GUARD (a) — transition-tracking. The cascade is considered ONLY on a real transition INTO
-                // GrnApproved; re-seeing an already-approved row (oldStatus == GrnApproved) does nothing.
-                var transitionedIntoApproved = oldStatus != GrnStatus.GrnApproved && newStatus == GrnStatus.GrnApproved;
-                if (transitionedIntoApproved)
-                {
-                    grn.GrnApprovedAt = now;
-                    if (grn.InvoiceId is Guid invForGrn)
-                        candidateInvoiceByGrn[code] = (invForGrn, grn.Id);
-                }
-                else if (newStatus != GrnStatus.GrnApproved)
-                {
-                    // Reverse transition (GrnApproved → NotApproved/Rejected) from an LN correction.
-                    grn.GrnApprovedAt = null;
-                }
-
+                // Apply the status to EVERY row sharing this GrnNumber (one row per PO position). They move together.
                 var reverseAlert = false;
-                // Reverse-transition alert: an already-POSTED invoice (S2: erpPostedAt = the post genuinely landed
-                // in ERP, not merely initiated) whose covering GRN just left GrnApproved. A merely-initiated post
-                // that has not yet landed does NOT alert here — its dispatch can still resolve. Tenant-scoped.
-                if (oldStatus == GrnStatus.GrnApproved && newStatus != GrnStatus.GrnApproved && grn.InvoiceId is Guid revInvId)
+                foreach (var grn in grnRows)
                 {
-                    var posted = await db.Invoices.IgnoreQueryFilters()
-                        .AnyAsync(i => i.Id == revInvId && i.TenantId == tenantId && i.ErpPostedAt != null, token);
-                    if (posted)
+                    var oldStatus = grn.GrnStatus;
+
+                    // Deterministically resolve + stamp the GRN→Invoice link from the GRN's ASN. Prefer the row's own
+                    // AsnId; else resolve from the pushed AsnNumber/AsnErpRef. Then map AsnId → the Invoice on that ASN.
+                    if (grn.AsnId is null)
                     {
-                        reverseAlert = true;
-                        RaiseReverseTransitionAlert(db, tenantId, revInvId, grn, now);
+                        var asnKey = (rec.AsnNumber ?? rec.AsnErpRef)?.Trim();
+                        if (!string.IsNullOrWhiteSpace(asnKey) && asnByKey.TryGetValue(asnKey, out var resolvedAsnId))
+                            grn.AsnId = resolvedAsnId;
+                    }
+                    if (grn.InvoiceId is null && grn.AsnId is not null)
+                    {
+                        var invId = await db.Invoices.IgnoreQueryFilters()
+                            .Where(i => !i.IsDeleted && i.AsnId == grn.AsnId)
+                            .Select(i => (Guid?)i.Id)
+                            .FirstOrDefaultAsync(token);
+                        if (invId is not null) grn.InvoiceId = invId;
+                    }
+
+                    // Apply the status + ERP-fed remark/code + optional receivedQty.
+                    grn.GrnStatus = newStatus;
+                    if (rec.ReceivedQty.HasValue) grn.ReceivedQty = rec.ReceivedQty.Value;
+                    if (!string.IsNullOrWhiteSpace(rec.IssueReported)) grn.IssueReported = rec.IssueReported.Trim();
+                    if (!string.IsNullOrWhiteSpace(rec.ErpCode)) grn.ErpCode = rec.ErpCode.Trim();
+                    if (!string.IsNullOrWhiteSpace(rec.ErpSyncId)) grn.ErpSyncId = rec.ErpSyncId.Trim();
+                    grn.UpdatedBy = "infor:inbound";
+                    grn.UpdatedOn = now;
+
+                    // GUARD (a) — transition-tracking. The cascade is considered ONLY on a real transition INTO
+                    // GrnApproved; re-seeing an already-approved row (oldStatus == GrnApproved) does nothing.
+                    var transitionedIntoApproved = oldStatus != GrnStatus.GrnApproved && newStatus == GrnStatus.GrnApproved;
+                    if (transitionedIntoApproved)
+                    {
+                        grn.GrnApprovedAt = now;
+                        if (grn.InvoiceId is Guid invForGrn)
+                            candidateInvoiceByGrn[code] = (invForGrn, grn.Id);
+                    }
+                    else if (newStatus != GrnStatus.GrnApproved)
+                    {
+                        // Reverse transition (GrnApproved → NotApproved/Rejected) from an LN correction.
+                        grn.GrnApprovedAt = null;
+                    }
+
+                    // Reverse-transition alert: an already-POSTED invoice (S2: erpPostedAt = the post genuinely landed
+                    // in ERP, not merely initiated) whose covering GRN just left GrnApproved. A merely-initiated post
+                    // that has not yet landed does NOT alert here — its dispatch can still resolve. Tenant-scoped.
+                    if (oldStatus == GrnStatus.GrnApproved && newStatus != GrnStatus.GrnApproved && grn.InvoiceId is Guid revInvId)
+                    {
+                        var posted = await db.Invoices.IgnoreQueryFilters()
+                            .AnyAsync(i => i.Id == revInvId && i.TenantId == tenantId && i.ErpPostedAt != null, token);
+                        if (posted)
+                        {
+                            reverseAlert = true;
+                            RaiseReverseTransitionAlert(db, tenantId, revInvId, grn, now);
+                        }
                     }
                 }
 
@@ -283,12 +290,16 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                 await outbox.EnqueueAsync(OutboxTransactionType.InvoicePost, OutboxEntity.Invoice, inv.Id, key, null, token);
 
                 // System-actor audit referencing the triggering GRN — money-movement automation must be legible.
+                // Operation MUST be one of Insert/Update/Delete (CK_AuditEntry_operation): this row records the
+                // erpPostInitiatedAt field update, so it is an "Update". The auto-post intent is carried verbatim
+                // in NewValue below — a non-conforming Operation (e.g. "AutoPost") fails the CHECK constraint and
+                // 500s the whole cascade SaveChanges.
                 db.AuditEntries.Add(new AuditEntry
                 {
                     Id = Guid.NewGuid(),
                     EntityName = nameof(Domain.Entities.Proc.Invoice),
                     EntityId = inv.Id,
-                    Operation = "AutoPost",
+                    Operation = "Update",
                     FieldName = nameof(Domain.Entities.Proc.Invoice.ErpPostInitiatedAt),
                     OldValue = null,
                     NewValue = $"GRN-approved auto-post enqueued (key={key}; trigger GRN={candidate.triggeringGrnId})",

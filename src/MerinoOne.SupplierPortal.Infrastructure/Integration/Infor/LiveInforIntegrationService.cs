@@ -69,71 +69,11 @@ public class LiveInforIntegrationService : IInforIntegrationService
 
     public async Task<InforSyncResult> SyncSupplierAsync(Guid supplierId, CancellationToken ct = default)
     {
-        var supplier = await _db.Suppliers
-            .Include(s => s.Addresses)
-            .Include(s => s.Contacts)
-            .Include(s => s.BankDetails)
-            .Include(s => s.Licenses)
-            .FirstOrDefaultAsync(s => s.Id == supplierId, ct);
-        if (supplier is null) return Fail("Supplier", $"Supplier {supplierId} not found.");
-
-        // R4 Module 1 — extended supplier payload: carries addresses, contacts, bank details, licenses,
-        // term/currency codes, poResponseMode and erpCode. TODO: confirm the real LN supplier (business partner)
-        // field map — including the addresses[] / contacts[] child field names.
-        var payload = new
-        {
-            SupplierCode = supplier.SupplierCode,
-            ErpCode = supplier.ErpCode,
-            Name = supplier.LegalName,
-            TradeName = supplier.TradeName,
-            GstNumber = supplier.GstNumber,
-            PanNumber = supplier.PanNumber,
-            IsActive = supplier.IsActiveSupplier,
-            PaymentTermCode = supplier.PaymentTermCode,
-            DeliveryTermCode = supplier.DeliveryTermCode,
-            PoResponseMode = supplier.PoResponseMode.ToString(),
-            Addresses = supplier.Addresses.Select(a => new
-            {
-                a.AddressType,
-                Line1 = a.AddressLine1,
-                Line2 = a.AddressLine2,
-                a.Area,
-                a.City,
-                a.State,
-                Pincode = a.Pincode,
-                a.Country,
-                a.ErpCode,
-            }).ToList(),
-            Contacts = supplier.Contacts.Select(c => new
-            {
-                c.ContactName,
-                c.Designation,
-                c.Email,
-                c.Phone,
-                c.IsPrimary,
-                c.AddressId,
-                c.ErpCode,
-            }).ToList(),
-            BankDetails = supplier.BankDetails.Select(b => new
-            {
-                b.BankName,
-                b.BankAddress,
-                b.AccountName,
-                b.AccountNumber,
-                b.IfscCode,
-                b.SwiftCode,
-                b.IsPrimary,
-                b.ErpCode,
-            }).ToList(),
-            Licenses = supplier.Licenses.Select(l => new
-            {
-                l.LicenseNumber,
-                l.LicenseType,
-                IssueDate = l.IssueDate?.ToString("yyyy-MM-dd"),
-                ExpiryDate = l.ExpiryDate?.ToString("yyyy-MM-dd"),
-                l.ErpCode,
-            }).ToList(),
-        };
+        // R4 Module 1 — the supplier body (header + addresses[]/contacts[]/bankDetails[]/licenses[]) is built by the
+        // shared SupplierOutboundPayloadBuilder so Mock and Live POST/log the identical canonical payload. The builder
+        // uses IgnoreQueryFilters (this can run under the tenant-less background dispatcher).
+        var payload = await SupplierOutboundPayloadBuilder.BuildPayloadAsync(_db, supplierId, ct);
+        if (payload is null) return Fail("Supplier", $"Supplier {supplierId} not found.");
         return await SendAsync("Supplier", EndpointPaths.Supplier, payload, ct);
     }
 
@@ -184,20 +124,11 @@ public class LiveInforIntegrationService : IInforIntegrationService
 
     public async Task<InforSyncResult> SubmitInvoiceAsync(Guid invoiceId, CancellationToken ct = default)
     {
-        var invoice = await _db.Invoices.FindAsync(new object?[] { invoiceId }, ct);
-        if (invoice is null) return Fail("Invoice", $"Invoice {invoiceId} not found.");
-
-        // TODO: confirm the real LN self-billing / invoice field map (incl. lines if required).
-        var payload = new
-        {
-            InvoiceNumber = invoice.InvoiceNumber,
-            InvoiceDate = invoice.InvoiceDate.ToString("o"),
-            Currency = invoice.CurrencyCode,
-            InvoiceAmount = invoice.InvoiceAmount,
-            TaxAmount = invoice.TaxAmount,
-            NetAmount = invoice.NetAmount,
-            EInvoiceIrn = invoice.EInvoiceIrn,
-        };
+        // R4 — the invoice body is built by the shared InvoiceOutboundPayloadBuilder so Mock and Live POST/log the
+        // identical canonical payload. The builder uses IgnoreQueryFilters (this can run under the tenant-less
+        // background dispatcher).
+        var payload = await InvoiceOutboundPayloadBuilder.BuildPayloadAsync(_db, invoiceId, ct);
+        if (payload is null) return Fail("Invoice", $"Invoice {invoiceId} not found.");
         return await SendAsync("Invoice", EndpointPaths.Invoice, payload, ct);
     }
 
@@ -219,121 +150,11 @@ public class LiveInforIntegrationService : IInforIntegrationService
     // each line's erpRef. The OutboxDispatcherWorker owns the InforSyncLog/IntegrationError write on the result.
     public async Task<InforSyncResult> SubmitSupplierChangeAsync(Guid changeRequestId, CancellationToken ct = default)
     {
-        var cr = await _db.SupplierChangeRequests
-            .Include(r => r.Lines)
-            .FirstOrDefaultAsync(r => r.Id == changeRequestId, ct);
-        if (cr is null) return Fail("SupplierChange", $"SupplierChangeRequest {changeRequestId} not found.");
-
-        var supplier = await _db.Suppliers
-            .Include(s => s.Addresses)
-            .Include(s => s.Contacts)
-            .Include(s => s.BankDetails)
-            .Include(s => s.Licenses)
-            .FirstOrDefaultAsync(s => s.Id == cr.SupplierId, ct);
-        if (supplier is null) return Fail("SupplierChange", $"Supplier {cr.SupplierId} not found for change {changeRequestId}.");
-
-        // Build the full intended end-state per erpCode-keyed entity that the change touched. We dedupe by entity so
-        // multiple field-level Edit lines on the same row collapse to one end-state object. Deletes carry the row's
-        // erpCode + a delete flag so LN can retire the matching record.
-        var entities = new List<object>();
-        var seen = new HashSet<string>(); // "<target>:<id>" dedupe key
-
-        foreach (var line in cr.Lines.Where(l => !l.IsDeleted))
-        {
-            var dedupe = $"{line.TargetEntity}:{line.TargetEntityId}";
-            switch (line.TargetEntity)
-            {
-                case Domain.Enums.ChangeTargetEntity.Supplier:
-                    if (seen.Add("Supplier:self"))
-                        entities.Add(new
-                        {
-                            EntityType = "Supplier",
-                            Operation = line.Operation.ToString(),
-                            ErpCode = supplier.ErpCode,
-                            supplier.LegalName,
-                            supplier.TradeName,
-                            supplier.GstNumber,
-                            supplier.PanNumber,
-                            supplier.MsmeRegNumber,
-                            supplier.MsmeCategory,
-                            supplier.Website,
-                        });
-                    break;
-
-                case Domain.Enums.ChangeTargetEntity.Address:
-                {
-                    if (!seen.Add(dedupe)) break;
-                    var a = supplier.Addresses.FirstOrDefault(x => x.Id == line.TargetEntityId);
-                    entities.Add(new
-                    {
-                        EntityType = "Address",
-                        Operation = line.Operation.ToString(),
-                        ErpCode = a?.ErpCode,
-                        a?.AddressType, a?.AddressLine1, a?.AddressLine2, a?.Area,
-                        a?.City, a?.State, a?.Pincode, a?.Country,
-                        Deleted = a is null || a.IsDeleted,
-                    });
-                    break;
-                }
-
-                case Domain.Enums.ChangeTargetEntity.Contact:
-                {
-                    if (!seen.Add(dedupe)) break;
-                    var c = supplier.Contacts.FirstOrDefault(x => x.Id == line.TargetEntityId);
-                    entities.Add(new
-                    {
-                        EntityType = "Contact",
-                        Operation = line.Operation.ToString(),
-                        ErpCode = c?.ErpCode,
-                        c?.ContactName, c?.Designation, c?.Email, c?.Phone, IsPrimary = c?.IsPrimary,
-                        Deleted = c is null || c.IsDeleted,
-                    });
-                    break;
-                }
-
-                case Domain.Enums.ChangeTargetEntity.Bank:
-                {
-                    if (!seen.Add(dedupe)) break;
-                    var b = supplier.BankDetails.FirstOrDefault(x => x.Id == line.TargetEntityId);
-                    entities.Add(new
-                    {
-                        EntityType = "Bank",
-                        Operation = line.Operation.ToString(),
-                        ErpCode = b?.ErpCode,
-                        b?.BankName, b?.BankAddress, b?.AccountName, b?.AccountNumber,
-                        b?.IfscCode, b?.SwiftCode, IsPrimary = b?.IsPrimary,
-                        Deleted = b is null || b.IsDeleted,
-                    });
-                    break;
-                }
-
-                case Domain.Enums.ChangeTargetEntity.License:
-                {
-                    if (!seen.Add(dedupe)) break;
-                    var l = supplier.Licenses.FirstOrDefault(x => x.Id == line.TargetEntityId);
-                    entities.Add(new
-                    {
-                        EntityType = "License",
-                        Operation = line.Operation.ToString(),
-                        ErpCode = l?.ErpCode,
-                        l?.LicenseNumber, l?.LicenseType, l?.Remarks,
-                        IssueDate = l?.IssueDate?.ToString("yyyy-MM-dd"),
-                        ExpiryDate = l?.ExpiryDate?.ToString("yyyy-MM-dd"),
-                        Deleted = l is null || l.IsDeleted,
-                    });
-                    break;
-                }
-            }
-        }
-
-        var payload = new
-        {
-            ChangeRequestId = cr.Id,
-            SupplierCode = supplier.SupplierCode,
-            SupplierErpCode = supplier.ErpCode,
-            Summary = cr.Summary,
-            Entities = entities,
-        };
+        // R4 — the supplier-change body (the full intended end-state per erpCode-keyed entity the change touched) is
+        // built by the shared SupplierChangeOutboundPayloadBuilder so Mock and Live POST/log the identical canonical
+        // payload. The builder uses IgnoreQueryFilters (this runs under the tenant-less background dispatcher).
+        var payload = await SupplierChangeOutboundPayloadBuilder.BuildPayloadAsync(_db, changeRequestId, ct);
+        if (payload is null) return Fail("SupplierChange", $"SupplierChangeRequest {changeRequestId} (or its supplier) not found.");
         return await SendAsync("SupplierChange", EndpointPaths.SupplierChange, payload, ct);
     }
 

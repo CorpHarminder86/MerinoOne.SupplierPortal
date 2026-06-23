@@ -6,7 +6,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MerinoOne.SupplierPortal.Application.Integration.Queries;
 
-public record GetSyncLogQuery(int Page = 1, int PageSize = 50, string? Status = null, string? EntityName = null) : IRequest<PagedResult<InforSyncLogDto>>;
+public record GetSyncLogQuery(
+    int Page = 1, int PageSize = 50, string? Status = null, string? EntityName = null,
+    string? Direction = null, DateTime? FromDate = null, DateTime? ToDate = null) : IRequest<PagedResult<InforSyncLogDto>>;
 
 public class GetSyncLogQueryHandler : IRequestHandler<GetSyncLogQuery, PagedResult<InforSyncLogDto>>
 {
@@ -18,6 +20,9 @@ public class GetSyncLogQueryHandler : IRequestHandler<GetSyncLogQuery, PagedResu
         var q = _db.InforSyncLogs.AsQueryable();
         if (!string.IsNullOrEmpty(request.Status)) q = q.Where(x => x.Status.ToString() == request.Status);
         if (!string.IsNullOrEmpty(request.EntityName)) q = q.Where(x => x.EntityName == request.EntityName);
+        if (!string.IsNullOrEmpty(request.Direction)) q = q.Where(x => x.Direction.ToString() == request.Direction);
+        if (request.FromDate.HasValue) { var f = request.FromDate.Value.Date; q = q.Where(x => x.SyncedAt >= f); }
+        if (request.ToDate.HasValue) { var t = request.ToDate.Value.Date.AddDays(1); q = q.Where(x => x.SyncedAt < t); }
 
         var total = await q.CountAsync(ct);
         var items = await q.OrderByDescending(x => x.SyncedAt)

@@ -65,10 +65,11 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
+    private readonly Common.Documents.AsnAttachmentRebinder _rebinder;
 
-    public CreateAsnCommandHandler(IAppDbContext db, ICurrentUser user)
+    public CreateAsnCommandHandler(IAppDbContext db, ICurrentUser user, Common.Documents.AsnAttachmentRebinder rebinder)
     {
-        _db = db; _user = user;
+        _db = db; _user = user; _rebinder = rebinder;
     }
 
     public async Task<AsnDetailDto> Handle(CreateAsnCommand request, CancellationToken ct)
@@ -218,10 +219,13 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
 
         _db.Asns.Add(asn);
 
-        await _db.SaveChangesAsync(ct);   // ASN + junction + lines in ONE transaction. NO ERP post (Draft only).
+        // R4 (2026-06-23) — rebind any files uploaded DURING creation (ownerEntityType='Staging' under the client's
+        // StagingKey) onto this ASN, in the SAME transaction. The rebinder only touches staging rows already stamped
+        // with the supplier's seccode at upload time, so cross-supplier keys can't leak in.
+        await _rebinder.RebindAsync(body.StagingKey, null, asnId, asn.SeccodeId, now, ct);
 
-        // The Draft ASN now has a real id; the supplier attaches files directly to it (ownerEntityType='Asn')
-        // via the authenticated /document-uploads/attach endpoint while it stays Draft.
+        await _db.SaveChangesAsync(ct);   // ASN + junction + lines + rebound attachments in ONE transaction. NO ERP post (Draft only).
+
         return await AsnDtoBuilder.BuildAsync(_db, asnId, ct);
     }
 }

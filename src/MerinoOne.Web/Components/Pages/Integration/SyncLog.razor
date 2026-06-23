@@ -26,8 +26,27 @@ else
             </div>
         </header>
 
-        <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;">
-            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="Reload">
+        <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="entityFilter" @bind:after="OnFilterChanged">
+                <option value="">All entities</option>
+                <option value="Asn">ASN</option>
+                <option value="Invoice">Invoice</option>
+                <option value="Supplier">Supplier</option>
+                <option value="SupplierChange">Supplier change</option>
+                <option value="Po">Purchase order</option>
+                <option value="DeliverySchedule">Delivery schedule</option>
+                <option value="GrnReceipt">Goods receipt</option>
+                <option value="Payment">Payment</option>
+                <option value="Tax">Tax</option>
+                <option value="Item">Item</option>
+            </select>
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="directionFilter" @bind:after="OnFilterChanged">
+                <option value="">All directions</option>
+                <option value="Inbound">Inbound</option>
+                <option value="Outbound">Outbound</option>
+                <option value="Bidirectional">Bidirectional</option>
+            </select>
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="OnFilterChanged">
                 <option value="">All statuses</option>
                 <option value="Pending">Pending</option>
                 <option value="Success">Success</option>
@@ -35,6 +54,13 @@ else
                 <option value="Retrying">Retrying</option>
                 <option value="Reconciled">Reconciled</option>
             </select>
+            <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:4px;">From
+                <input type="date" class="rz-textbox" style="padding:7px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;" @bind="fromDate" @bind:after="OnFilterChanged" />
+            </label>
+            <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:4px;">To
+                <input type="date" class="rz-textbox" style="padding:7px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;" @bind="toDate" @bind:after="OnFilterChanged" />
+            </label>
+            <button class="rz-button" style="padding:7px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="ClearDates">Clear dates</button>
         </div>
 
         @if (loading)
@@ -147,8 +173,17 @@ else
     private bool busy = false;
     private bool notFound = false;
     private string statusFilter = string.Empty;
+    private string entityFilter = string.Empty;
+    private string directionFilter = string.Empty;
+    // Default the date range to the CURRENT MONTH (first of month → today).
+    private DateTime? fromDate = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime? toDate = DateTime.Today;
     private int page = 1;
     private const int PageSize = 50;
+
+    // Any filter change resets to page 1 before reloading.
+    private async Task OnFilterChanged() { page = 1; await Reload(); }
+    private async Task ClearDates() { fromDate = null; toDate = null; page = 1; await Reload(); }
 
     protected override async Task OnInitializedAsync() => await Reload();
 
@@ -172,6 +207,10 @@ else
         loading = true; notFound = false;
         var url = $"api/integration/sync-log?page={page}&pageSize={PageSize}";
         if (!string.IsNullOrWhiteSpace(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
+        if (!string.IsNullOrWhiteSpace(entityFilter)) url += $"&entityName={Uri.EscapeDataString(entityFilter)}";
+        if (!string.IsNullOrWhiteSpace(directionFilter)) url += $"&direction={Uri.EscapeDataString(directionFilter)}";
+        if (fromDate.HasValue) url += $"&fromDate={fromDate.Value:yyyy-MM-dd}";
+        if (toDate.HasValue) url += $"&toDate={toDate.Value:yyyy-MM-dd}";
         try
         {
             var resp = await Api.GetAsync<PagedResult<InforSyncLogDto>>(url);
