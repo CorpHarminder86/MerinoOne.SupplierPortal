@@ -21,8 +21,12 @@ public class GlobalExceptionHandler
         catch (UnauthorizedAccessException) { await Write(ctx, HttpStatusCode.Unauthorized, new[] { "Unauthorized." }); }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unhandled exception");
-            await Write(ctx, HttpStatusCode.InternalServerError, new[] { "An unexpected error occurred.", ex.Message });
+            // SECURITY: log the full exception SERVER-SIDE (with the trace id for correlation), but NEVER return
+            // ex.Message to the client — it leaks SQL constraint/index/table names + infra detail (info disclosure).
+            // The caller gets a generic message + the traceId (already on the Result body) to quote to support.
+            _logger.LogError(ex, "Unhandled exception (traceId={TraceId})", ctx.TraceIdentifier);
+            await Write(ctx, HttpStatusCode.InternalServerError,
+                new[] { "An unexpected error occurred. Please reference the traceId when contacting support." });
         }
     }
 

@@ -41,5 +41,17 @@ public interface IOutboxDispatcher
 /// canonical "what we sent" body the service built for the POST — both Mock and Live populate it so the
 /// <see cref="OutboxDispatcherWorker"/> can persist it to <c>InforSyncLog.PayloadJson</c> and the SyncLog
 /// payload viewer can render it. Null for routes that do not build a payload.
+///
+/// <para><paramref name="ErpCode"/> (additive, optional) is the SYNCHRONOUS-ack optimization (FIX #2 longer-term
+/// primary fix): when the ERP returns the entity's assigned code INLINE in the POST response, the dispatcher
+/// applies it (writes the code back + flips the outbox row straight to <c>Acked</c>) without waiting for the
+/// async <c>/inbound/erp-ack</c> callback — closing the "Dispatched but never Acked" gap at the source. Null when
+/// the ERP does not return a code inline (e.g. the Mock, or a fire-and-forget LN BOD that acks asynchronously),
+/// in which case the row stays <c>Dispatched</c> and the async ack (or the reconciliation sweep) takes over.</para>
 /// </summary>
-public record InforSyncResult(bool Success, string? IdempotencyKey, string? Message, string? RequestPayloadJson = null);
+public record InforSyncResult(
+    bool Success,
+    string? IdempotencyKey,
+    string? Message,
+    string? RequestPayloadJson = null,
+    string? ErpCode = null);

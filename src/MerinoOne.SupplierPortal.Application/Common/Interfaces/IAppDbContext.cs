@@ -109,4 +109,18 @@ public interface IAppDbContext
     /// (the previously-tracked Added/Modified entities must not be re-attempted).
     /// </summary>
     void ClearChangeTracker();
+
+    /// <summary>
+    /// FIX #1 — the currently tracked change-tracker entries. The inbound poison-isolation path snapshots the
+    /// pending Added/Modified business entities after a batched flush fails so it can re-flush them individually
+    /// and pinpoint the genuinely-failing rows (the provider batches inserts into a MERGE that cannot attribute a
+    /// constraint failure to one row).
+    /// </summary>
+    IReadOnlyList<Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry> ChangeTrackerEntries();
+
+    /// <summary>
+    /// FIX #1 — attaches a previously-detached entity and returns its entry so the poison-isolation path can replay
+    /// it under its original state in an individual flush. Mirrors <c>DbContext.Attach(object)</c>.
+    /// </summary>
+    Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry Attach(object entity);
 }

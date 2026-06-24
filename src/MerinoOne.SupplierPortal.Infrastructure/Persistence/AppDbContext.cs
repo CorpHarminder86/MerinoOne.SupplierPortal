@@ -416,4 +416,12 @@ public class AppDbContext : DbContext, IAppDbContext
         => Database.BeginTransactionAsync(ct);
 
     public void ClearChangeTracker() => ChangeTracker.Clear();
+
+    /// <summary>FIX #1 — snapshot of the current change-tracker entries for inbound poison-row isolation.</summary>
+    public IReadOnlyList<Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry> ChangeTrackerEntries()
+        => ChangeTracker.Entries().ToList();
+
+    /// <summary>FIX #1 — attach a detached entity for an individual replay flush during poison-row isolation.</summary>
+    public Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry Attach(object entity)
+        => base.Attach(entity);
 }

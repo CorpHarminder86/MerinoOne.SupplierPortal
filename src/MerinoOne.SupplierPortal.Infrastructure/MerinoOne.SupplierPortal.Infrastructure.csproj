@@ -21,6 +21,10 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <!-- SECURITY (NU1903): pin the transitive System.Security.Cryptography.Xml (pulled in at the vulnerable 9.0.0
+         via Azure.Identity / IdentityModel) to a patched 9.0.x servicing release.
+         Advisories GHSA-37gx-xxp4-5rgx, GHSA-w3x6-4m5h-cxqf. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.17" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -28,5 +32,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets the test project drive the internal OutboxDispatcherWorker.ReconcileStaleDispatchedAsync sweep
+         directly (FIX #2 focused test) without hosting the background loop. -->
+    <InternalsVisibleTo Include="MerinoOne.SupplierPortal.Tests" />
+  </ItemGroup>
 
 </Project>

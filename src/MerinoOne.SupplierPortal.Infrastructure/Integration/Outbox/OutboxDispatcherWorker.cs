@@ -55,9 +55,20 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
     private const string StaleThresholdConfigKey = "Integration:OutboxSendingStaleThresholdMinutes";
     private const int DefaultStaleThresholdMinutes = 5;
 
+    /// <summary>
+    /// FIX #2 — config key for the stale-<c>Dispatched</c> (POST landed, no ERP ack) reconciliation threshold
+    /// (minutes). Default 60.
+    /// </summary>
+    private const string DispatchedStaleThresholdConfigKey = "Integration:OutboxDispatchedStaleThresholdMinutes";
+    private const int DefaultDispatchedStaleThresholdMinutes = 60;
+
+    /// <summary>Stable reason marker that de-dupes the stale-Dispatched alert (keyed off the existing IntegrationError).</summary>
+    private const string DispatchedReconcileReason = "outbox-dispatched-no-ack";
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<OutboxDispatcherWorker> _logger;
     private readonly TimeSpan _staleSendingThreshold;
+    private readonly TimeSpan _staleDispatchedThreshold;
 
     public OutboxDispatcherWorker(IServiceScopeFactory scopeFactory, ILogger<OutboxDispatcherWorker> logger, IConfiguration cfg)
     {
@@ -68,12 +79,18 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
             ? m
             : DefaultStaleThresholdMinutes;
         _staleSendingThreshold = TimeSpan.FromMinutes(minutes);
+
+        var dispatchedMinutes = int.TryParse(cfg[DispatchedStaleThresholdConfigKey], out var dm) && dm >= 1
+            ? dm
+            : DefaultDispatchedStaleThresholdMinutes;
+        _staleDispatchedThreshold = TimeSpan.FromMinutes(dispatchedMinutes);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("OutboxDispatcherWorker started. Poll={Poll}s Batch={Batch} StaleSendingSweep={Stale}min",
-            PollInterval.TotalSeconds, BatchSize, _staleSendingThreshold.TotalMinutes);
+        _logger.LogInformation(
+            "OutboxDispatcherWorker started. Poll={Poll}s Batch={Batch} StaleSendingSweep={Stale}min StaleDispatchedSweep={Dispatched}min",
+            PollInterval.TotalSeconds, BatchSize, _staleSendingThreshold.TotalMinutes, _staleDispatchedThreshold.TotalMinutes);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -102,6 +119,11 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         // re-claim them below. A row left Sending by a crash between claim-commit and POST would otherwise never
         // auto-retry (the scan only re-selects Pending).
         await SweepStaleSendingAsync(db, ct);
+
+        // FIX #2 — stranded-Dispatched reconciliation: a row that POSTed successfully (Dispatched) but whose ERP ack
+        // never arrived sits Dispatched forever with no operator visibility. Raise a ONE-TIME IntegrationError for
+        // each such row past the configured threshold. Alert-only (no auto-resend — the POST already landed).
+        await SweepStaleDispatchedAsync(db, ct);
 
         // IgnoreQueryFilters: this is a SYSTEM component draining EVERY tenant's outbox. The background scope has
         // no HttpContext so ICurrentUser.TenantId is null — the always-on tenant filter would otherwise strand
@@ -155,6 +177,99 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         if (reset > 0)
             _logger.LogWarning("[Outbox] Stale-Sending sweep re-armed {Count} row(s) older than {Threshold}min back to Pending.",
                 reset, _staleSendingThreshold.TotalMinutes);
+    }
+
+    /// <summary>
+    /// FIX #2 — stranded-<c>Dispatched</c> reconciliation sweep. Mirrors <see cref="SweepStaleSendingAsync"/> but for
+    /// the ASYNC-ack gap: a row whose POST genuinely landed (flipped <c>Sending → Dispatched</c>) but whose
+    /// <c>/inbound/erp-ack</c> callback NEVER arrived sits <c>Dispatched</c> (and never reaches the terminal
+    /// <see cref="OutboxStatus.Acked"/>) forever, invisible to operators. This finds every <c>Dispatched</c> row
+    /// (NOT yet <c>Acked</c>, <see cref="OutboxMessage.AckedAt"/> still null) older than the configurable
+    /// <see cref="_staleDispatchedThreshold"/> (<c>Integration:OutboxDispatchedStaleThresholdMinutes</c>, default 60)
+    /// that has NOT already been alerted, and raises EXACTLY ONE retryable <see cref="IntegrationError"/> per row
+    /// ("landed but no ERP ack — reconcile"). De-dupe uses the least-invasive existing column: a Dispatched success
+    /// clears <see cref="OutboxMessage.LastError"/> to null, so <c>LastError == null</c> marks "not yet alerted"; the
+    /// sweep stamps a stable marker after raising the alert so the next sweep skips the row.
+    ///
+    /// <para><b>NO auto-resend</b> (deliberate): the POST already landed, so a re-send risks a double-post — LN dedupes
+    /// on its business key, but alert-only is the safer reconciliation posture. An operator (or the eventual ack)
+    /// resolves the row.</para>
+    /// </summary>
+    private Task SweepStaleDispatchedAsync(IAppDbContext db, CancellationToken ct)
+        => ReconcileStaleDispatchedAsync(db, _staleDispatchedThreshold, BatchSize, _logger, ct);
+
+    /// <summary>
+    /// FIX #2 — the testable core of the stranded-<c>Dispatched</c> reconciliation. Extracted as <c>internal static</c>
+    /// so a focused test can drive it directly (no hosted background loop / no fixed wall-clock wait). Returns the
+    /// number of IntegrationErrors raised this pass. Idempotent across passes: the per-row <see cref="OutboxMessage.LastError"/>
+    /// marker stamped after the first alert excludes the row on subsequent passes (the "not re-alerted" guarantee).
+    /// </summary>
+    internal static async Task<int> ReconcileStaleDispatchedAsync(
+        IAppDbContext db, TimeSpan threshold, int batchSize, ILogger logger, CancellationToken ct)
+    {
+        var cutoff = DateTime.UtcNow - threshold;
+        var now = DateTime.UtcNow;
+
+        // Read the stranded rows (untracked) — only those not yet alerted (LastError null) past the threshold.
+        var stranded = await db.OutboxMessages
+            .IgnoreQueryFilters()
+            .Where(m => !m.IsDeleted
+                        && m.Status == OutboxStatus.Dispatched
+                        && m.AckedAt == null
+                        && m.LastError == null
+                        && (m.DispatchedAt ?? m.UpdatedOn ?? m.CreatedOn) < cutoff)
+            .Select(m => new
+            {
+                m.Id, m.TenantId, m.EntityName, m.EntityId, m.TransactionType, m.AttemptCount,
+                m.DispatchedAt, m.UpdatedOn, m.CreatedOn
+            })
+            .Take(batchSize)
+            .ToListAsync(ct);
+
+        if (stranded.Count == 0) return 0;
+
+        var raised = 0;
+        foreach (var row in stranded)
+        {
+            if (ct.IsCancellationRequested) break;
+
+            var landedAt = row.DispatchedAt ?? row.UpdatedOn ?? row.CreatedOn;
+            var minutes = (int)Math.Round((now - landedAt).TotalMinutes);
+
+            // ONE IntegrationError per stranded row (retryable, unresolved) so it surfaces in the operator UI.
+            db.IntegrationErrors.Add(new IntegrationError
+            {
+                Id = Guid.NewGuid(),
+                TenantId = row.TenantId,
+                EntityName = row.EntityName,
+                ErrorMessage =
+                    $"Outbound {row.TransactionType} {row.EntityName}:{row.EntityId} landed but no ERP ack after {minutes} min — reconcile.",
+                StackTrace = DispatchedReconcileReason,   // stable reason marker (de-dupe / classification handle).
+                RetryCount = row.AttemptCount,            // carry the attempt count through.
+                IsResolved = false,
+                CreatedBy = "outbox-dispatcher",
+                CreatedOn = now,
+            });
+
+            // Mark the row so it is NOT re-alerted on the next sweep (least-invasive: reuse the existing LastError
+            // column, which a Dispatched success cleared to null). Server-side conditional update guarded on the
+            // still-Dispatched + still-unalerted state so a concurrent ack (Dispatched → Acked) cannot be clobbered.
+            await db.OutboxMessages
+                .IgnoreQueryFilters()
+                .Where(m => m.Id == row.Id && m.Status == OutboxStatus.Dispatched && m.AckedAt == null && m.LastError == null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(m => m.LastError, Truncate($"{DispatchedReconcileReason}: alerted at {now:O} after {minutes} min.", 2000))
+                    .SetProperty(m => m.UpdatedBy, "outbox-dispatcher")
+                    .SetProperty(m => m.UpdatedOn, now), ct);
+
+            raised++;
+            logger.LogWarning(
+                "[Outbox] Stale-Dispatched reconcile: {Tx} {Entity}:{Id} landed but no ERP ack after {Minutes}min — raised IntegrationError.",
+                row.TransactionType, row.EntityName, row.EntityId, minutes);
+        }
+
+        await db.SaveChangesAsync(ct);
+        return raised;
     }
 
     /// <summary>
@@ -231,12 +346,26 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
 
         if (result.Success)
         {
-            // Flip the claimed row Sending → Dispatched (the POST landed).
+            // FIX #2 (sync-ack seam) — if the ERP returned the entity's code INLINE in the POST response, the post is
+            // already fully acknowledged: flip the row straight to the terminal Acked (stamp AckedAt) so it never sits
+            // Dispatched-awaiting-an-async-ack (and the reconciliation sweep never alerts on it). When no inline code
+            // is returned (Mock; or an LN BOD that acks asynchronously) the row stays Dispatched and the async
+            // /inbound/erp-ack callback (or, failing that, SweepStaleDispatchedAsync) takes over.
+            //
+            // TODO (sync-ack write-back): the inline code currently flips the outbox row to Acked; writing the code
+            // back onto the business entity (Supplier→SupCode, Asn→ASNNo, Invoice/Payment/…) reuses the per-entity
+            // mapping that lives in UpsertErpAckCommand.StampErpCodeAsync (Application layer). Until that stamp helper
+            // is lifted to a shared service the dispatcher can call, the async erp-ack remains the write-back path for
+            // the entity code even when the row is acked inline here. The Mock returns ErpCode=null, so this branch is
+            // dormant by default — no behaviour change for the existing Mock-mode tests.
+            var hasInlineErpCode = !string.IsNullOrWhiteSpace(result.ErpCode);
+
             await db.OutboxMessages
                 .IgnoreQueryFilters()
                 .Where(m => m.Id == rowId && m.Status == OutboxStatus.Sending)
                 .ExecuteUpdateAsync(s => s
-                    .SetProperty(m => m.Status, OutboxStatus.Dispatched)
+                    .SetProperty(m => m.Status, hasInlineErpCode ? OutboxStatus.Acked : OutboxStatus.Dispatched)
+                    .SetProperty(m => m.AckedAt, hasInlineErpCode ? now : (DateTime?)null)
                     .SetProperty(m => m.LastError, (string?)null)
                     .SetProperty(m => m.UpdatedBy, "outbox-dispatcher")
                     .SetProperty(m => m.UpdatedOn, now), ct);
