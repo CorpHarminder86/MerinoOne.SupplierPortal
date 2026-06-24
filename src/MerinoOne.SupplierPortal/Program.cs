@@ -243,6 +243,9 @@ app.UseCors();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
+// SECURITY: forced-password-change hard gate — runs after authz so the principal/claims are populated; blocks
+// every endpoint except change-password while must_change_password=true.
+app.UseMiddleware<MerinoOne.SupplierPortal.Middlewares.MustChangePasswordGate>();
 app.MapControllers();
 
 app.Run();

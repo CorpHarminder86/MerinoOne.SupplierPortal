@@ -250,6 +250,10 @@ Returns: LoginResponse with token + roles + permissions; 401 on expired/invalid/
             new(ClaimTypes.Name, user.FullName),
             new(ClaimTypes.Email, user.Email),
         };
+        // SECURITY: forced-password-change marker. When set, the MustChangePasswordGate middleware blocks every
+        // endpoint except change-password until the user changes the password and re-authenticates.
+        if (user.MustChangePassword)
+            claims.Add(new Claim("must_change_password", "true"));
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
         claims.AddRange(perms.Select(p => new Claim("permission", p)));
 
