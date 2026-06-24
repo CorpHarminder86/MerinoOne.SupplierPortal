@@ -90,6 +90,8 @@ public class AppDbContext : DbContext, IAppDbContext
 
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
+    public DbSet<PurchaseOrderNegotiation> PurchaseOrderNegotiations => Set<PurchaseOrderNegotiation>();
+    public DbSet<PurchaseOrderNegotiationLine> PurchaseOrderNegotiationLines => Set<PurchaseOrderNegotiationLine>();
     public DbSet<DeliverySchedule> DeliverySchedules => Set<DeliverySchedule>();
     public DbSet<Asn> Asns => Set<Asn>();
     public DbSet<AsnLine> AsnLines => Set<AsnLine>();

@@ -93,6 +93,22 @@ else
                     <span class="mer-nav-item__icon material-symbols-outlined">description</span>
                     <span class="mer-nav-item__label">Purchase Orders</span>
                 </NavLink>
+                @* R4 — PO Negotiation. Buyers/admins with ApproveNegotiation see the full review queue;
+                   a supplier user sees only its own raised negotiations ("PO Change Request"). *@
+                @if (Token.HasPermission("PurchaseOrder.ApproveNegotiation"))
+                {
+                    <NavLink class="mer-nav-item" href="po-negotiation-review" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">gavel</span>
+                        <span class="mer-nav-item__label">PO Negotiations</span>
+                    </NavLink>
+                }
+                else if (Token.HasPermission("PurchaseOrder.Negotiate"))
+                {
+                    <NavLink class="mer-nav-item" href="po-negotiations" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">handshake</span>
+                        <span class="mer-nav-item__label">PO Change Request</span>
+                    </NavLink>
+                }
                 <NavLink class="mer-nav-item" href="delivery-schedules" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">event</span>
                     <span class="mer-nav-item__label">Delivery Schedules</span>

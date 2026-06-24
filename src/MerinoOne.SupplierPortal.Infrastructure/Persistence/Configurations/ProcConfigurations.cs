@@ -94,6 +94,72 @@ public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseO
     }
 }
 
+// R4 (2026-06-24) — PO Negotiation. Aggregate root (seccode RLS + RowVersion + tenant scope), mirrors
+// SupplierChangeRequest. Filtered-unique on (purchaseOrderId) for the open (Submitted) negotiation enforces
+// one open negotiation per PO at the DB level. No PO-line mutation on approve — ERP re-syncs the revised PO.
+public class PurchaseOrderNegotiationConfiguration : IEntityTypeConfiguration<PurchaseOrderNegotiation>
+{
+    public void Configure(EntityTypeBuilder<PurchaseOrderNegotiation> b)
+    {
+        b.ApplyBaseEntityConvention("PurchaseOrderNegotiation", "proc", "purchaseOrderNegotiation");
+        b.Property(x => x.PurchaseOrderId).HasColumnName("purchaseOrderId");
+        b.Property(x => x.PoNumber).HasColumnName("poNumber").HasMaxLength(50).IsRequired();
+        b.Property(x => x.SupplierId).HasColumnName("supplierId");
+        b.Property(x => x.NegotiationStatus).HasColumnName("negotiationStatus").HasConversion<string>()
+            .HasMaxLength(30).IsRequired();
+        b.Property(x => x.PreviousPoStatus).HasColumnName("previousPoStatus").HasConversion<string>()
+            .HasMaxLength(30).IsRequired();
+        b.Property(x => x.SubmittedAt).HasColumnName("submittedAt").HasColumnType("datetime2");
+        b.Property(x => x.ReviewedAt).HasColumnName("reviewedAt").HasColumnType("datetime2");
+        b.Property(x => x.ReviewedBy).HasColumnName("reviewedBy").HasMaxLength(100);
+        b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
+        b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
+
+        b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
+            .HasConstraintName("FK_PurchaseOrderNegotiation_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_PurchaseOrderNegotiation_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.NegotiationStatus).HasDatabaseName("IX_PurchaseOrderNegotiation_negotiationStatus");
+        // Composite scope index — the always-on tenant + company business-data filter scans this path.
+        b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_PurchaseOrderNegotiation_tenant_company");
+        // One OPEN (Submitted) negotiation per PO. Filtered on isDeleted=0 so a resolved/soft-deleted negotiation
+        // never blocks raising a fresh one; matches the filtered-unique pattern elsewhere in this codebase.
+        b.HasIndex(x => x.PurchaseOrderId)
+            .HasDatabaseName("UX_PurchaseOrderNegotiation_po_open").IsUnique()
+            .HasFilter("[negotiationStatus] = 'Submitted' AND [isDeleted] = 0");
+    }
+}
+
+// R4 (2026-06-24) — PO Negotiation delta line. Child of the negotiation aggregate (AuditableEntity, two-key +
+// audit only, no seccode of its own — the negotiation root carries it). CASCADE from the negotiation, RESTRICT
+// to the source PO line (cross-aggregate ERP-master row).
+public class PurchaseOrderNegotiationLineConfiguration : IEntityTypeConfiguration<PurchaseOrderNegotiationLine>
+{
+    public void Configure(EntityTypeBuilder<PurchaseOrderNegotiationLine> b)
+    {
+        b.ApplyBaseEntityConvention("PurchaseOrderNegotiationLine", "proc", "purchaseOrderNegotiationLine");
+        b.Property(x => x.PurchaseOrderNegotiationId).HasColumnName("purchaseOrderNegotiationId");
+        b.Property(x => x.PurchaseOrderLineId).HasColumnName("purchaseOrderLineId");
+        b.Property(x => x.PositionNo).HasColumnName("positionNo");
+        b.Property(x => x.SequenceNo).HasColumnName("sequenceNo");
+        b.Property(x => x.ItemCode).HasColumnName("itemCode").HasMaxLength(50).IsRequired();
+        b.Property(x => x.OriginalQty).HasColumnName("originalQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.NegotiatedQty).HasColumnName("negotiatedQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.OriginalDeliveryDate).HasColumnName("originalDeliveryDate").HasColumnType("datetime2");
+        b.Property(x => x.NegotiatedDeliveryDate).HasColumnName("negotiatedDeliveryDate").HasColumnType("datetime2");
+
+        b.HasOne(x => x.PurchaseOrderNegotiation).WithMany(p => p.Lines).HasForeignKey(x => x.PurchaseOrderNegotiationId)
+            .HasConstraintName("FK_PurchaseOrderNegotiationLine_PurchaseOrderNegotiation_PurchaseOrderNegotiationId")
+            .OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)
+            .HasConstraintName("FK_PurchaseOrderNegotiationLine_PurchaseOrderLine_PurchaseOrderLineId")
+            .OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.PurchaseOrderNegotiationId).HasDatabaseName("IX_PurchaseOrderNegotiationLine_negotiation");
+    }
+}
+
 public class DeliveryScheduleConfiguration : IEntityTypeConfiguration<DeliverySchedule>
 {
     public void Configure(EntityTypeBuilder<DeliverySchedule> b)

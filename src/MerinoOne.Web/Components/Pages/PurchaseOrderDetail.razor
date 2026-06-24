@@ -49,6 +49,24 @@ else
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject
                     </button>
                 }
+                @* PO Negotiation (req 1) — supplier proposes revised qty / delivery dates. Peer of Accept/Reject,
+                   gated on the negotiate permission + an eligible status. Hidden once a negotiation is open
+                   (PoStatus == "Negotiation") so only "Cancel Negotiation" shows. *@
+                @if (Token.HasPermission("PurchaseOrder.Negotiate") && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
+                {
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-blue);background:var(--mer-surface);color:var(--mer-blue);cursor:pointer;" @onclick="EnterNegotiation" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">handshake</span> Negotiation
+                    </button>
+                }
+                @* While a negotiation is open the PO is locked in "Negotiation" — Ack/Accept/Reject/Negotiation
+                   are all hidden (their status guards above already exclude "Negotiation"); the supplier may
+                   only withdraw it (req 3 / state machine §2). *@
+                @if (Token.HasPermission("PurchaseOrder.Negotiate") && detail.PoStatus == "Negotiation")
+                {
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="CancelNegotiation" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">undo</span> Cancel Negotiation
+                    </button>
+                }
                 @if (!ManualResponse && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
                 {
                     <span class="tlg-status tlg-status--info" title="Supplier is in Auto PO-response mode" style="align-self:center;">
@@ -111,6 +129,32 @@ else
             </div>
         </div>
 
+        @* ---------------- Negotiation edit bar (req 3) ---------------- *@
+        @if (negotiating)
+        {
+            <div class="rz-card" style="padding:16px 20px;margin-top:16px;border:1px solid var(--mer-blue);background:var(--mer-blue-50);">
+                <div style="display:flex;align-items:flex-start;gap:10px;">
+                    <span class="material-symbols-outlined" style="font-size:20px;color:var(--mer-blue);">handshake</span>
+                    <div style="flex:1;">
+                        <div style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);">Negotiation mode</div>
+                        <p style="font-size:12px;color:var(--mer-ink-700);margin:2px 0 10px;">Edit the <b>Qty</b> and <b>Delivery Date</b> on the lines you want to renegotiate. Only changed lines are submitted.</p>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:4px;">Notes for the buyer (optional)</label>
+                        <textarea class="rz-textbox" rows="2" style="width:100%;max-width:560px;padding:8px 10px;font-family:inherit;" @bind="negotiationNotes"></textarea>
+                        @if (!string.IsNullOrEmpty(negotiationError))
+                        {
+                            <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;max-width:560px;">@negotiationError</div>
+                        }
+                    </div>
+                    <div style="display:flex;gap:8px;flex-shrink:0;">
+                        <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);cursor:pointer;" @onclick="CancelEdit" disabled="@busy">Cancel</button>
+                        <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="SubmitNegotiation" disabled="@busy">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">send</span> @(busy ? "Submitting…" : "Submit Negotiation")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+
         <div class="rz-card" style="padding:20px;margin-top:16px;">
             <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)</h3>
             @if (detail.Lines.Count == 0)
@@ -139,19 +183,40 @@ else
                     <tbody>
                     @foreach (var ln in detail.Lines.OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo))
                     {
+                        var line = ln;
                         <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PositionNo</td>
-                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.SequenceNo</td>
-                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
-                            <td style="padding:6px 4px;">@ln.ItemDescription</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
-                            <td style="padding:6px 4px;">@ln.OrderUnit</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.PriceUnit.ToString("0.00")</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.NetAmount.ToString("0.00")</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.DiscountPct == 0 ? "—" : ln.DiscountPct.ToString("0.##"))</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.DiscountAmount == 0 ? "—" : ln.DiscountAmount.ToString("0.00"))</td>
-                            <td style="padding:6px 4px;" title="@ln.TaxDescription">@(string.IsNullOrEmpty(ln.TaxCode) ? "—" : ln.TaxCode)</td>
-                            <td style="padding:6px 4px;font-family:Inter,monospace;">@(ln.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@line.PositionNo</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@line.SequenceNo</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@line.ItemCode</td>
+                            <td style="padding:6px 4px;">@line.ItemDescription</td>
+                            @if (negotiating && edits.TryGetValue(line.Id, out var edit))
+                            {
+                                @* Editable Qty (req 3) — all other columns stay read-only. *@
+                                <td style="padding:6px 4px;text-align:right;">
+                                    <input type="number" step="0.001" min="0" class="rz-textbox" style="width:90px;padding:4px 6px;text-align:right;font-family:Inter,monospace;" @bind="edit.Qty" />
+                                </td>
+                                <td style="padding:6px 4px;">@line.OrderUnit</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.PriceUnit.ToString("0.00")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.NetAmount.ToString("0.00")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountPct == 0 ? "—" : line.DiscountPct.ToString("0.##"))</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : line.DiscountAmount.ToString("0.00"))</td>
+                                <td style="padding:6px 4px;" title="@line.TaxDescription">@(string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode)</td>
+                                @* Editable Delivery Date (req 3). *@
+                                <td style="padding:6px 4px;">
+                                    <input type="date" class="rz-textbox" style="padding:4px 6px;font-family:Inter,monospace;" @bind="edit.DeliveryDate" />
+                                </td>
+                            }
+                            else
+                            {
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.OrderQty.ToString("0.###")</td>
+                                <td style="padding:6px 4px;">@line.OrderUnit</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.PriceUnit.ToString("0.00")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.NetAmount.ToString("0.00")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountPct == 0 ? "—" : line.DiscountPct.ToString("0.##"))</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : line.DiscountAmount.ToString("0.00"))</td>
+                                <td style="padding:6px 4px;" title="@line.TaxDescription">@(string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode)</td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;">@(line.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            }
                         </tr>
                     }
                     </tbody>
@@ -227,12 +292,18 @@ else
                     }
                     <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:8px;display:block;">Notes (optional)</label>
                     <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="dialogNotes"></textarea>
+                    @* Confirmation step (req 2) — the supplier must explicitly confirm before the Accept POSTs.
+                       This commits to the PO terms (or the proposed alternate date) and cannot be undone. *@
+                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--mer-ink-700);margin-top:12px;background:var(--mer-amber-50, var(--mer-blue-50));padding:10px 12px;border-radius:6px;">
+                        <input type="checkbox" checked="@acceptConfirmed" @onchange="e => acceptConfirmed = (bool)(e.Value ?? false)" style="margin-top:2px;" />
+                        <span>I confirm I am accepting <b>@detail.PoNumber</b>@(proposeAlt ? " with the proposed delivery date above" : " as ordered"). This commits the order and cannot be undone.</span>
+                    </label>
                     @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
                 </div>
                 <footer class="merino-dialog__footer">
                     <div class="merino-dialog__actions">
                         <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showAccept = false">Cancel</button>
-                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoAccept" disabled="@busy">@(busy ? "Working…" : "Accept")</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoAccept" disabled="@(busy || !acceptConfirmed)">@(busy ? "Working…" : "Confirm Accept")</button>
                     </div>
                 </footer>
             </div>
@@ -318,10 +389,27 @@ else
     private bool showReject = false;
     private bool showApproveProposal = false;
     private bool proposeAlt = false;
+    private bool acceptConfirmed = false;   // req 2 — explicit confirm gate on the Accept dialog
     private DateTime? proposedDate;
     private string dialogNotes = string.Empty;
     private string rejectionReason = string.Empty;
     private string dialogError = string.Empty;
+
+    // ---------------- Negotiation (req 1 + 3 + 4) ----------------
+    // Inline editable line grid state. `edits` is keyed by PurchaseOrderLineId and seeded from the live PO
+    // line (OrderQty / DeliveryDate); on submit we POST only the lines whose Qty OR DeliveryDate changed.
+    private sealed class LineEdit
+    {
+        public decimal OriginalQty;
+        public DateTime? OriginalDate;
+        public decimal Qty;
+        public DateTime? DeliveryDate;
+        public bool Changed => Qty != OriginalQty || DeliveryDate != OriginalDate;
+    }
+    private bool negotiating = false;
+    private string negotiationNotes = string.Empty;
+    private string negotiationError = string.Empty;
+    private Dictionary<Guid, LineEdit> edits = new();
 
     protected override async Task OnInitializedAsync() => await Load();
 
@@ -335,9 +423,86 @@ else
     }
 
     private void OpenAcknowledge() { dialogNotes = string.Empty; dialogError = string.Empty; showAcknowledge = true; }
-    private void OpenAccept() { dialogNotes = string.Empty; dialogError = string.Empty; proposeAlt = false; proposedDate = null; showAccept = true; }
+    private void OpenAccept() { dialogNotes = string.Empty; dialogError = string.Empty; proposeAlt = false; proposedDate = null; acceptConfirmed = false; showAccept = true; }
     private void OpenReject() { rejectionReason = string.Empty; dialogError = string.Empty; showReject = true; }
     private void OpenApproveProposal() { dialogNotes = string.Empty; dialogError = string.Empty; showApproveProposal = true; }
+
+    // ---------------- Negotiation handlers ----------------
+    // Enter inline edit mode (req 3): snapshot each line's qty/date so we can diff on submit and discard on cancel.
+    private void EnterNegotiation()
+    {
+        if (detail is null) return;
+        negotiationError = string.Empty;
+        negotiationNotes = string.Empty;
+        edits = detail.Lines.ToDictionary(
+            l => l.Id,
+            l => new LineEdit { OriginalQty = l.OrderQty, OriginalDate = l.DeliveryDate, Qty = l.OrderQty, DeliveryDate = l.DeliveryDate });
+        negotiating = true;
+    }
+
+    // Discard local edits, no API call (req 3).
+    private void CancelEdit()
+    {
+        negotiating = false;
+        edits = new();
+        negotiationNotes = string.Empty;
+        negotiationError = string.Empty;
+    }
+
+    private async Task SubmitNegotiation()
+    {
+        if (detail is null) return;
+        var changed = edits
+            .Where(kv => kv.Value.Changed)
+            .Select(kv => new PoNegotiationLineInput(kv.Key, kv.Value.Qty, kv.Value.DeliveryDate))
+            .ToList();
+
+        if (changed.Count == 0) { negotiationError = "Change at least one line's quantity or delivery date before submitting."; return; }
+        if (changed.Any(l => l.NegotiatedQty <= 0)) { negotiationError = "Negotiated quantity must be greater than zero."; return; }
+
+        busy = true; negotiationError = string.Empty;
+        var req = new CreatePoNegotiationRequest(detail.Id, string.IsNullOrWhiteSpace(negotiationNotes) ? null : negotiationNotes.Trim(), changed);
+        var resp = await Api.PostAsync<PoNegotiationDto, CreatePoNegotiationRequest>("api/purchase-orders/negotiations", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Negotiation submitted", Detail = "The buyer will review your proposed changes." });
+            CancelEdit();
+            await Load();   // PO now shows "Negotiation"
+        }
+        else
+        {
+            negotiationError = resp?.Errors?.FirstOrDefault() ?? "Failed to submit negotiation.";
+        }
+        busy = false;
+    }
+
+    // Withdraw the open negotiation (req 3 / state machine). Needs the open negotiation's id, which we look up
+    // from the supplier's own Submitted list filtered to this PO, then POST .../{id}/cancel.
+    private async Task CancelNegotiation()
+    {
+        if (detail is null) return;
+        busy = true;
+        var list = await Api.GetAsync<List<PoNegotiationListItemDto>>("api/purchase-orders/negotiations?status=Submitted");
+        var open = list?.Data?.FirstOrDefault(n => string.Equals(n.PoNumber, detail.PoNumber, StringComparison.OrdinalIgnoreCase));
+        if (open is null)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not cancel", Detail = "No open negotiation found for this PO.", Duration = 6000 });
+            await Load();
+            busy = false;
+            return;
+        }
+        var resp = await Api.PostAsync<object?>($"api/purchase-orders/negotiations/{open.Id}/cancel", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Negotiation cancelled", Detail = "The PO reverted to its previous status." });
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not cancel", Detail = resp?.Errors?.FirstOrDefault() ?? "Cancel failed.", Duration = 6000 });
+        }
+        await Load();
+        busy = false;
+    }
 
     private async Task DoAcknowledge()
     {
@@ -380,8 +545,8 @@ else
 
     private string StatusClass(string status) => status switch
     {
-        "Accepted" or "Delivered" or "Closed" => "tlg-status--active",
-        "Released" or "Acknowledged" or "DateProposed" or "PartiallyDelivered" => "tlg-status--pending",
+        "Accepted" or "Delivered" or "Closed" or "Approved" => "tlg-status--active",
+        "Released" or "Acknowledged" or "DateProposed" or "PartiallyDelivered" or "Negotiation" => "tlg-status--pending",
         "Rejected" or "Cancelled" => "tlg-status--danger",
         _ => "tlg-status--info"
     };

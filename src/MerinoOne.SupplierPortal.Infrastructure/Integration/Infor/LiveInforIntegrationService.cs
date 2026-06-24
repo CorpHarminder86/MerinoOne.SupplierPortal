@@ -45,6 +45,8 @@ public class LiveInforIntegrationService : IInforIntegrationService
         public const string Invoice = "LN/lnapi/odata/cisli.selfBillingInvoices/Invoices";
         public const string Asn = "LN/lnapi/odata/whinh.advanceShipmentNotices/Asns";
         public const string SupplierChange = "LN/lnapi/odata/tdapi.bpSuppliers/SupplierChanges";
+        // TODO: confirm real Infor LN BOD path + field map (PO-negotiation cutover — see memory `infor-live-cutover-checklist`).
+        public const string PoNegotiation = "LN/lnapi/odata/tdapi.purchaseOrders/Negotiations";
     }
 
     private readonly IInforConnectionProvider _connections;
@@ -156,6 +158,18 @@ public class LiveInforIntegrationService : IInforIntegrationService
         var payload = await SupplierChangeOutboundPayloadBuilder.BuildPayloadAsync(_db, changeRequestId, ct);
         if (payload is null) return Fail("SupplierChange", $"SupplierChangeRequest {changeRequestId} (or its supplier) not found.");
         return await SendAsync("SupplierChange", EndpointPaths.SupplierChange, payload, ct);
+    }
+
+    // R4 (2026-06-24) — pushes a buyer-APPROVED PO negotiation (revised qty / delivery dates) to LN. The body is
+    // built by the shared PoNegotiationOutboundPayloadBuilder so Mock and Live POST/log the identical canonical
+    // payload. The builder uses IgnoreQueryFilters (this runs under the tenant-less background dispatcher). The
+    // deterministic outbox key (replayed via IOutboundIdempotencyContext in SendAsync) is the correlation id LN
+    // echoes back on /inbound/erp-ack. The OutboxDispatcherWorker owns the InforSyncLog write on the result.
+    public async Task<InforSyncResult> ApprovePoNegotiationAsync(Guid negotiationId, CancellationToken ct = default)
+    {
+        var payload = await PoNegotiationOutboundPayloadBuilder.BuildPayloadAsync(_db, negotiationId, ct);
+        if (payload is null) return Fail("PoNegotiation", $"PurchaseOrderNegotiation {negotiationId} not found.");
+        return await SendAsync("PoNegotiation", EndpointPaths.PoNegotiation, payload, ct);
     }
 
     // ── plumbing ──────────────────────────────────────────────────────────────────────────────

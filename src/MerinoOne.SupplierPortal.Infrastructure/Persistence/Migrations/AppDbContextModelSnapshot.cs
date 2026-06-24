@@ -5950,6 +5950,260 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.ToTable("PurchaseOrderLine", "proc");
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderNegotiation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("purchaseOrderNegotiationId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<string>("NegotiationStatus")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("negotiationStatus");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("PoNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("poNumber");
+
+                    b.Property<string>("PreviousPoStatus")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("previousPoStatus");
+
+                    b.Property<Guid>("PurchaseOrderId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("purchaseOrderId");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("rejectionReason");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("reviewedAt");
+
+                    b.Property<string>("ReviewedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("reviewedBy");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion")
+                        .HasColumnName("rowVersion");
+
+                    b.Property<Guid>("SeccodeId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("seccodeId");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("purchaseOrderNegotiationSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<DateTime>("SubmittedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("submittedAt");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("supplierId");
+
+                    b.Property<Guid?>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_PurchaseOrderNegotiation");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("NegotiationStatus")
+                        .HasDatabaseName("IX_PurchaseOrderNegotiation_negotiationStatus");
+
+                    b.HasIndex("PurchaseOrderId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PurchaseOrderNegotiation_po_open")
+                        .HasFilter("[negotiationStatus] = 'Submitted' AND [isDeleted] = 0");
+
+                    b.HasIndex("SeccodeId");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PurchaseOrderNegotiation_purchaseOrderNegotiationSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_PurchaseOrderNegotiation_tenant_company");
+
+                    b.ToTable("PurchaseOrderNegotiation", "proc");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderNegotiationLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("purchaseOrderNegotiationLineId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<string>("ItemCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("itemCode");
+
+                    b.Property<DateTime?>("NegotiatedDeliveryDate")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("negotiatedDeliveryDate");
+
+                    b.Property<decimal>("NegotiatedQty")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("negotiatedQty");
+
+                    b.Property<DateTime?>("OriginalDeliveryDate")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("originalDeliveryDate");
+
+                    b.Property<decimal>("OriginalQty")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("originalQty");
+
+                    b.Property<int>("PositionNo")
+                        .HasColumnType("int")
+                        .HasColumnName("positionNo");
+
+                    b.Property<Guid>("PurchaseOrderLineId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("purchaseOrderLineId");
+
+                    b.Property<Guid>("PurchaseOrderNegotiationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("purchaseOrderNegotiationId");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("purchaseOrderNegotiationLineSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<int>("SequenceNo")
+                        .HasColumnType("int")
+                        .HasColumnName("sequenceNo");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_PurchaseOrderNegotiationLine");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("PurchaseOrderLineId");
+
+                    b.HasIndex("PurchaseOrderNegotiationId")
+                        .HasDatabaseName("IX_PurchaseOrderNegotiationLine_negotiation");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PurchaseOrderNegotiationLine_purchaseOrderNegotiationLineSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.ToTable("PurchaseOrderNegotiationLine", "proc");
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.Tax", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8036,6 +8290,48 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Navigation("Tax");
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderNegotiation", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrder", "PurchaseOrder")
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PurchaseOrderNegotiation_PurchaseOrder_PurchaseOrderId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Seccode", "Owner")
+                        .WithMany()
+                        .HasForeignKey("SeccodeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PurchaseOrderNegotiation_Seccode_SeccodeId");
+
+                    b.Navigation("Owner");
+
+                    b.Navigation("PurchaseOrder");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderNegotiationLine", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderLine", "PurchaseOrderLine")
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PurchaseOrderNegotiationLine_PurchaseOrderLine_PurchaseOrderLineId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderNegotiation", "PurchaseOrderNegotiation")
+                        .WithMany("Lines")
+                        .HasForeignKey("PurchaseOrderNegotiationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_PurchaseOrderNegotiationLine_PurchaseOrderNegotiation_PurchaseOrderNegotiationId");
+
+                    b.Navigation("PurchaseOrderLine");
+
+                    b.Navigation("PurchaseOrderNegotiation");
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplier", b =>
                 {
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Mdm.Currency", "Currency")
@@ -8303,6 +8599,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrder", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderNegotiation", b =>
                 {
                     b.Navigation("Lines");
                 });

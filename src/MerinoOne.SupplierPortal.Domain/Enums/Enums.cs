@@ -32,8 +32,20 @@ public enum PoStatus
     PartiallyDelivered,
     Delivered,
     Closed,
-    Cancelled
+    Cancelled,
+    // R4 (2026-06-24) — PO Negotiation. Persisted as the enum name (string), no DB CHECK on poStatus — the C#
+    // enum is the guard. Negotiation = an open supplier negotiation is in flight; Approved = buyer approved the
+    // negotiated terms (ERP re-syncs the revised PO inbound; local lines are NOT mutated). APPEND-ONLY.
+    Negotiation,
+    Approved
 }
+
+/// <summary>
+/// R4 (2026-06-24) — PO Negotiation lifecycle. Submitted = supplier raised the negotiation (open); the buyer
+/// resolves it to Approved or Rejected, or the supplier withdraws it to Cancelled. Persisted as the enum name
+/// (string), no DB CHECK — the C# enum is the guard. APPEND-ONLY.
+/// </summary>
+public enum PoNegotiationStatus { Submitted, Approved, Rejected, Cancelled }
 
 public enum ScheduleStatus { Proposed, Approved, Rejected, Cancelled }
 

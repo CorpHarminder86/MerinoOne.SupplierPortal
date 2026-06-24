@@ -64,6 +64,8 @@ public interface IAppDbContext
 
     DbSet<PurchaseOrder> PurchaseOrders { get; }
     DbSet<PurchaseOrderLine> PurchaseOrderLines { get; }
+    DbSet<PurchaseOrderNegotiation> PurchaseOrderNegotiations { get; }
+    DbSet<PurchaseOrderNegotiationLine> PurchaseOrderNegotiationLines { get; }
     DbSet<DeliverySchedule> DeliverySchedules { get; }
     DbSet<Asn> Asns { get; }
     DbSet<AsnLine> AsnLines { get; }

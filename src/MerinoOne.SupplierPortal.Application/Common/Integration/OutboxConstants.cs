@@ -18,6 +18,8 @@ public static class OutboxTransactionType
     public const string InvoicePost     = "InvoicePost";
     public const string SupplierChange  = "SupplierChange";
     public const string SupplierSync    = "SupplierSync";
+    // R4 (2026-06-24) — PO Negotiation: buyer-approved negotiation pushed to ERP (round-trip). APPEND-ONLY.
+    public const string PoNegotiationApprove = "PoNegotiationApprove";
 }
 
 /// <summary>

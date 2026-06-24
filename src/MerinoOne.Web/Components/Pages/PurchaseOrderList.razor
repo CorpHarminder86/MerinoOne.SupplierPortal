@@ -207,13 +207,13 @@
     private void CreateAsnFromSelected()
     {
         if (asnSel.Count == 0) return;
-        Nav.NavigateTo($"/asns/new?pos={string.Join(",", asnSel)}");
+        Nav.NavigateToRoute($"/asns/new?pos={string.Join(",", asnSel)}");
     }
 
     private string StatusClass(string status) => status switch
     {
-        "Accepted" or "Delivered" or "Closed" => "tlg-status--active",
-        "Released" or "Acknowledged" or "DateProposed" or "PartiallyDelivered" => "tlg-status--pending",
+        "Accepted" or "Delivered" or "Closed" or "Approved" => "tlg-status--active",
+        "Released" or "Acknowledged" or "DateProposed" or "PartiallyDelivered" or "Negotiation" => "tlg-status--pending",
         "Rejected" or "Cancelled" => "tlg-status--danger",
         _ => "tlg-status--info"
     };

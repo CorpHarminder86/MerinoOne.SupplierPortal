@@ -1,0 +1,269 @@
+@page "/po-negotiation-review/{Id:guid}"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+@inject NotificationService Notif
+
+@* ------------------------------------------------------------------------------------------------
+   Buyer review detail. Header + a per-line "original → negotiated" diff built from the NEGOTIATION
+   lines (NOT the live PO lines — ERP stays the line master; the negotiated values live only on this
+   record until ERP re-syncs). Changed cells are highlighted. Approve / Reject (reason) are gated on
+   PurchaseOrder.ApproveNegotiation AND the state machine (only while Submitted). 409 (concurrent
+   approve / wrong state) + 403 surface via toast, then reload so the now-stale actions reflect reality.
+   Mirrors SupplierChangeRequestDetail.
+------------------------------------------------------------------------------------------------ *@
+
+<PageTitle>@(detail is null ? "PO negotiation" : $"Negotiation · {detail.PoNumber}")</PageTitle>
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else if (detail == null)
+{
+    <div class="tl-empty">PO negotiation not found.</div>
+}
+else
+{
+    <div class="tl-page">
+        <a href="po-negotiation-review" class="mer-back-link">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
+            Back to PO negotiations
+        </a>
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">@detail.PoNumber</h1>
+                    <span class="tlg-status @PoNegotiationStatus.CssClass(detail.NegotiationStatus)">@PoNegotiationStatus.Label(detail.NegotiationStatus)</span>
+                </div>
+                <p class="tl-sub">
+                    <a href="purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);text-decoration:none;">@detail.SupplierName</a>
+                    · @detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s") proposed
+                </p>
+            </div>
+            @if (CanReview && PoNegotiationStatus.IsReviewable(detail.NegotiationStatus))
+            {
+                <div class="tl-header__actions">
+                    <button class="rz-button rz-danger" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenReject" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span> Reject
+                    </button>
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove" disabled="@busy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                    </button>
+                </div>
+            }
+            else if (CanReview)
+            {
+                @* Reviewer is present but the negotiation is not in a reviewable state — explain WHY there
+                   are no actions (already approved / rejected / cancelled by the supplier). *@
+                <div class="tl-header__actions">
+                    <span class="tlg-status tlg-status--info" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;max-width:420px;line-height:1.3;white-space:normal;">
+                        <span class="material-symbols-outlined" style="font-size:16px;">info</span> @ReviewHint(detail.NegotiationStatus)
+                    </span>
+                </div>
+            }
+        </header>
+
+        @* ---------------- Header meta ---------------- *@
+        <div class="rz-card" style="padding:20px;margin-bottom:16px;">
+            <dl style="display:grid;grid-template-columns:150px 1fr 150px 1fr;gap:6px 16px;font-size:13px;">
+                <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName</dd>
+                <dt style="color:var(--mer-ink-500);">PO previous status</dt><dd>@detail.PreviousPoStatus</dd>
+                <dt style="color:var(--mer-ink-500);">Submitted</dt><dd style="font-family:Inter,monospace;">@detail.SubmittedAt.ToString("yyyy-MM-dd HH:mm")</dd>
+                <dt style="color:var(--mer-ink-500);">Reviewed by</dt><dd>@(string.IsNullOrWhiteSpace(detail.ReviewedBy) ? "—" : detail.ReviewedBy)</dd>
+                <dt style="color:var(--mer-ink-500);">Reviewed at</dt><dd style="font-family:Inter,monospace;">@(detail.ReviewedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+                <dt style="color:var(--mer-ink-500);">Notes</dt>
+                <dd style="grid-column:2 / span 3;">@(string.IsNullOrWhiteSpace(detail.Notes) ? "—" : detail.Notes)</dd>
+            </dl>
+            @if (!string.IsNullOrWhiteSpace(detail.RejectionReason))
+            {
+                <div style="background:var(--mer-red-50);color:var(--mer-red);padding:10px 14px;border-radius:6px;font-size:12.5px;margin-top:12px;display:flex;gap:8px;align-items:flex-start;">
+                    <span class="material-symbols-outlined" style="font-size:16px;">report</span>
+                    <span><b>Reviewer note:</b> @detail.RejectionReason</span>
+                </div>
+            }
+        </div>
+
+        @* ---------------- Diff table (sourced from the negotiation lines, NOT the live PO) ---------------- *@
+        <div class="rz-card" style="padding:20px;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Proposed changes (@detail.Lines.Count)</h3>
+            @if (detail.Lines.Count == 0)
+            {
+                <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">difference</span><div>No lines on this negotiation.</div></div>
+            }
+            else
+            {
+                <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                    <thead>
+                        <tr style="border-bottom:1px solid var(--mer-line);">
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Seq</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Original Qty</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Negotiated Qty</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Original Delivery</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Negotiated Delivery</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var ln in detail.Lines.OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo))
+                    {
+                        var qtyChanged = ln.NegotiatedQty != ln.OriginalQty;
+                        var dateChanged = ln.NegotiatedDeliveryDate != ln.OriginalDeliveryDate;
+                        <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PositionNo</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.SequenceNo</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);@(qtyChanged ? "text-decoration:line-through;" : "")">@ln.OriginalQty.ToString("0.###")</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:@(qtyChanged ? "700" : "400");color:@(qtyChanged ? "var(--mer-green-dark)" : "var(--mer-ink-700)");background:@(qtyChanged ? "var(--mer-green-50)" : "transparent");">@ln.NegotiatedQty.ToString("0.###")</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;color:var(--mer-ink-500);@(dateChanged ? "text-decoration:line-through;" : "")">@(ln.OriginalDeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;font-weight:@(dateChanged ? "700" : "400");color:@(dateChanged ? "var(--mer-green-dark)" : "var(--mer-ink-700)");background:@(dateChanged ? "var(--mer-green-50)" : "transparent");">@(ln.NegotiatedDeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    @* ---------------- Approve dialog ---------------- *@
+    @if (showApprove)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="success" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">task_alt</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">PO negotiation</div>
+                        <h2 class="merino-dialog__title">Approve negotiation on @detail.PoNumber?</h2>
+                        <p class="merino-dialog__subtitle">The PO moves to <b>Approved</b> and the negotiated terms are pushed to ERP. The PO lines are not changed locally — ERP re-syncs the revised PO.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showApprove = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    @if (!string.IsNullOrEmpty(actionError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;">@actionError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApprove = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApprove" disabled="@busy">@(busy ? "Approving…" : "Approve & push")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* ---------------- Reject dialog ---------------- *@
+    @if (showReject)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="danger" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">block</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">PO negotiation</div>
+                        <h2 class="merino-dialog__title">Reject negotiation on @detail.PoNumber?</h2>
+                        <p class="merino-dialog__subtitle">No changes are applied. The PO reverts to <b>@detail.PreviousPoStatus</b> and the supplier can respond again.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showReject = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Reason (required)</label>
+                    <textarea class="rz-textbox" rows="4" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="reasonText"></textarea>
+                    @if (!string.IsNullOrEmpty(actionError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@actionError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showReject = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="danger" @onclick="DoReject" disabled="@busy">@(busy ? "Rejecting…" : "Reject")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private PoNegotiationDto? detail;
+    private bool loading = true;
+    private bool busy;
+
+    private bool showApprove;
+    private bool showReject;
+    private string reasonText = string.Empty;
+    private string actionError = string.Empty;
+
+    private bool CanReview => Token.HasPermission("PurchaseOrder.ApproveNegotiation");
+
+    // Why a reviewer sees no Approve/Reject buttons for a non-reviewable negotiation (only Submitted acts).
+    private static string ReviewHint(string status) => status switch
+    {
+        "Approved"  => "Already approved — negotiated terms have been pushed to ERP.",
+        "Rejected"  => "Already rejected — no further review actions.",
+        "Cancelled" => "Cancelled by the supplier — no further review actions.",
+        _           => "No review actions available for this status.",
+    };
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<PoNegotiationDto>($"api/purchase-orders/negotiations/{Id}");
+        detail = resp?.Data;
+        loading = false;
+    }
+
+    // ---------------- Review actions ----------------
+    private void OpenApprove() { actionError = string.Empty; showApprove = true; }
+    private void OpenReject() { reasonText = string.Empty; actionError = string.Empty; showReject = true; }
+
+    private async Task DoApprove()
+    {
+        busy = true; actionError = string.Empty;
+        var resp = await Api.PostAsync<object?>($"api/purchase-orders/negotiations/{Id}/approve", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Approved", Detail = "PO approved and negotiated terms queued for ERP push." });
+            showApprove = false;
+            await Load();
+        }
+        else
+        {
+            // 409 (wrong state / concurrent approve) and 403 (guard denial) arrive as Success=false with the
+            // server's typed title in Errors. Surface via toast AND inline, then refresh so the now-stale
+            // status + disabled actions reflect reality.
+            actionError = FirstError(resp?.Errors, "Approval failed.");
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not approve", Detail = actionError, Duration = 6000 });
+            await Load();
+        }
+        busy = false;
+    }
+
+    private async Task DoReject()
+    {
+        if (string.IsNullOrWhiteSpace(reasonText)) { actionError = "A reason is required."; return; }
+        busy = true; actionError = string.Empty;
+        var resp = await Api.PostAsync($"api/purchase-orders/negotiations/{Id}/reject", new RejectPoNegotiationRequest(reasonText.Trim()));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Rejected", Detail = "PO reverted to its previous status." });
+            showReject = false;
+            await Load();
+        }
+        else
+        {
+            actionError = FirstError(resp?.Errors, "Rejection failed.");
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not reject", Detail = actionError, Duration = 6000 });
+            await Load();
+        }
+        busy = false;
+    }
+
+    private static string FirstError(List<string>? errors, string fallback)
+        => errors is { Count: > 0 } ? errors[0] : fallback;
+}

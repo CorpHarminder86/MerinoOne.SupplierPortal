@@ -1,0 +1,112 @@
+@page "/po-negotiation-review"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+
+@* ------------------------------------------------------------------------------------------------
+   Buyer/admin review queue — all in-tenant PO negotiations visible to the caller's seccode. Default
+   filter is Submitted (the actionable queue). Free-text refines PO number / supplier client-side so
+   toggling stays instant. Each row opens the diff/detail view. Mirrors SupplierChangeRequestList.
+------------------------------------------------------------------------------------------------ *@
+
+<PageTitle>PO negotiations</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">PO negotiations</h1>
+                <span class="tl-count-chip">@(filtered?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Revised quantity / delivery-date proposals raised by suppliers, awaiting review or already actioned.</p>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar">
+        <input class="rz-textbox" placeholder="Search PO number / supplier…" style="width:300px;padding:8px 12px;" @bind="search" @bind:event="oninput" @bind:after="ApplyFilters" />
+        <select class="rz-textbox" style="width:200px;padding:8px 12px;" @bind="statusFilter" @bind:after="Load">
+            <option value="">All statuses</option>
+            @foreach (var s in StatusFilterOptions)
+            {
+                <option value="@s">@PoNegotiationStatus.Label(s)</option>
+            }
+        </select>
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (filtered == null || filtered.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">gavel</span>
+            <div>No PO negotiations match.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 1fr 1fr 120px 90px 160px; --tl-min-width: 880px;">
+            <div class="tlg-header">
+                <div class="tlg-col">PO Number</div>
+                <div class="tlg-col">Supplier</div>
+                <div class="tlg-col">Status</div>
+                <div class="tlg-col">Lines</div>
+                <div class="tlg-col">Submitted</div>
+            </div>
+            @foreach (var r in filtered)
+            {
+                var row = r;
+                <div class="tlg-row" @onclick="() => Open(row.Id)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">@row.PoNumber</div>
+                    <div class="tlg-col tlg-name">@row.SupplierName</div>
+                    <div class="tlg-col"><span class="tlg-status @PoNegotiationStatus.CssClass(row.NegotiationStatus)">@PoNegotiationStatus.Label(row.NegotiationStatus)</span></div>
+                    <div class="tlg-col">@row.LineCount</div>
+                    <div class="tlg-col tlg-code">@row.SubmittedAt.ToString("yyyy-MM-dd")</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<PoNegotiationListItemDto>? all;
+    private List<PoNegotiationListItemDto>? filtered;
+    private bool loading = true;
+    private string search = string.Empty;
+    private string statusFilter = "Submitted";   // default to the actionable queue
+
+    private static readonly string[] StatusFilterOptions =
+        { "Submitted", "Approved", "Rejected", "Cancelled" };
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        // Server-side status filter (the endpoint supports ?status=). Free-text is refined client-side.
+        var url = "api/purchase-orders/negotiations";
+        if (!string.IsNullOrEmpty(statusFilter)) url += $"?status={Uri.EscapeDataString(statusFilter)}";
+        var resp = await Api.GetAsync<List<PoNegotiationListItemDto>>(url);
+        all = resp?.Data ?? new();
+        ApplyFilters();
+        loading = false;
+    }
+
+    private void ApplyFilters()
+    {
+        if (all == null) { filtered = new(); return; }
+        IEnumerable<PoNegotiationListItemDto> q = all;
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x =>
+                x.PoNumber.Contains(s, StringComparison.OrdinalIgnoreCase)
+                || x.SupplierName.Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+        filtered = q.ToList();
+    }
+
+    private void Open(Guid id) => Nav.NavigateToRoute($"/po-negotiation-review/{id}");
+}

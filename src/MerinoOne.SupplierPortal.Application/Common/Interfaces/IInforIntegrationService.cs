@@ -15,6 +15,14 @@ public interface IInforIntegrationService
     /// owns the Mock + Live implementations (Increment C).
     /// </summary>
     Task<InforSyncResult> SubmitSupplierChangeAsync(Guid changeRequestId, CancellationToken ct = default);
+
+    /// <summary>
+    /// R4 (2026-06-24) — pushes a buyer-APPROVED PO negotiation (revised qty / delivery dates) to ERP. The
+    /// dispatcher routes the <c>PoNegotiationApprove</c> outbox row here; this method builds the canonical payload
+    /// (via <c>PoNegotiationOutboundPayloadBuilder</c>) and performs the outbound call. The InforSyncLog write is
+    /// owned by the <c>OutboxDispatcherWorker</c> on the result.
+    /// </summary>
+    Task<InforSyncResult> ApprovePoNegotiationAsync(Guid negotiationId, CancellationToken ct = default);
 }
 
 /// <summary>

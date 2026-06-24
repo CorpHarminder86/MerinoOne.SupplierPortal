@@ -485,6 +485,7 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
             OutboxTransactionType.InvoicePost     => await infor.SubmitInvoiceAsync(id, ct),
             OutboxTransactionType.SupplierSync    => await infor.SyncSupplierAsync(id, ct),
             OutboxTransactionType.SupplierChange  => await infor.SubmitSupplierChangeAsync(id, ct),
+            OutboxTransactionType.PoNegotiationApprove => await infor.ApprovePoNegotiationAsync(id, ct),
             _ => new InforSyncResult(false, row.DeterministicKey,
                     $"No outbox dispatch route for transactionType '{row.TransactionType}'."),
         };

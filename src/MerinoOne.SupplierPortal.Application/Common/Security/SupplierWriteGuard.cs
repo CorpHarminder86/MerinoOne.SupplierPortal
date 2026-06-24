@@ -28,6 +28,18 @@ public sealed class SupplierWriteGuard
     }
 
     public async Task EnsureCanWriteAsync(Guid supplierId, Guid supplierSeccodeId, CancellationToken ct)
+        => await EnsureCanWriteAsync(supplierId, supplierSeccodeId, "Supplier.ChangeRequest", ct);
+
+    /// <summary>
+    /// Same resolution order as the parameterless overload, but the supplier self-service path (step 3) is gated on
+    /// the caller-supplied <paramref name="selfServicePermission"/> rather than the hard-wired
+    /// <c>Supplier.ChangeRequest</c>. R4 (2026-06-24) — the PO-negotiation create uses this with
+    /// <c>PurchaseOrder.Negotiate</c> so a supplier can write the portal-originated negotiation envelope (Owner =
+    /// supplier G-seccode, seccode RLS still scopes it) WITHOUT a row-level <c>canWrite</c> grant and WITHOUT
+    /// holding the supplier-change permission. The global RLS write rule is unchanged: the supplier still cannot
+    /// write the live PO / line rows directly — only this negotiation aggregate.
+    /// </summary>
+    public async Task EnsureCanWriteAsync(Guid supplierId, Guid supplierSeccodeId, string selfServicePermission, CancellationToken ct)
     {
         // 1. Privileged internal users write anything.
         if (_user.IsAdmin || _user.IsManager) return;
@@ -43,8 +55,8 @@ public sealed class SupplierWriteGuard
                            && !r.IsDeleted, ct);
         if (hasWriteGrant) return;
 
-        // 3. Supplier self-service: Supplier.ChangeRequest permission + a verified SupplierUserMap membership.
-        if (_user.HasPermission("Supplier.ChangeRequest"))
+        // 3. Supplier self-service: the self-service permission + a verified SupplierUserMap membership.
+        if (_user.HasPermission(selfServicePermission))
         {
             var isMappedMember = await (
                 from m in _db.SupplierUserMaps.IgnoreQueryFilters().Where(m => m.SupplierId == supplierId && !m.IsDeleted)

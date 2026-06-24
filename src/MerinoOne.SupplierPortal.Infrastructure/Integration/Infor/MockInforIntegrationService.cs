@@ -42,4 +42,10 @@ public class MockInforIntegrationService : IInforIntegrationService
     // PayloadRef='SupplierChange:<guid>') are written by the OutboxDispatcherWorker on this success.
     public async Task<InforSyncResult> SubmitSupplierChangeAsync(Guid id, CancellationToken ct = default)
         => Ok("SubmitSupplierChange", id, await SupplierChangeOutboundPayloadBuilder.BuildJsonAsync(_db, id, ct));
+
+    // R4 (2026-06-24) — PO negotiation approve. Builds the SAME canonical payload Live posts (via the shared
+    // builder) so dev/Mock approvals land a viewable InforSyncLog.PayloadJson (EntityName='PurchaseOrder',
+    // PayloadRef='PurchaseOrder:<negotiationId>') the user can share with the LN team for BOD field-map confirmation.
+    public async Task<InforSyncResult> ApprovePoNegotiationAsync(Guid id, CancellationToken ct = default)
+        => Ok("ApprovePoNegotiation", id, await PoNegotiationOutboundPayloadBuilder.BuildJsonAsync(_db, id, ct));
 }

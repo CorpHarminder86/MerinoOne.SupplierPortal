@@ -19,6 +19,9 @@ public static class PermissionCatalog
         new PermissionSeed("PurchaseOrder.Acknowledge",    "Acknowledge PO",            "Purchase Order", "Acknowledge receipt of a PO"),
         new PermissionSeed("PurchaseOrder.Accept",         "Accept PO",                 "Purchase Order", "Accept, reject or propose a date on a PO"),
         new PermissionSeed("PurchaseOrder.ApproveProposal","Approve PO proposal",       "Purchase Order", "Approve a supplier-proposed delivery date"),
+        // R4 (2026-06-24) — PO negotiation lifecycle (supplier raises; buyer approves/rejects).
+        new PermissionSeed("PurchaseOrder.Negotiate",          "Negotiate PO",          "PurchaseOrder",  "Raise a PO negotiation (change qty/delivery date)"),
+        new PermissionSeed("PurchaseOrder.ApproveNegotiation", "Approve PO negotiation","PurchaseOrder",  "Review/approve/reject a PO negotiation"),
         new PermissionSeed("PurchaseOrder.Write",          "Create/update PO",          "Purchase Order", "Create or update PO documents (ERP sync, admin)"),
         new PermissionSeed("DeliverySchedule.Read",        "View delivery schedules",   "Shipment",       "View delivery schedules"),
         new PermissionSeed("DeliverySchedule.Propose",     "Propose delivery schedule", "Shipment",       "Propose a delivery schedule"),
@@ -80,6 +83,8 @@ public static class PermissionCatalog
         ["PurchaseOrder.Acknowledge"]     = new[] { "SuperAdmin","Supplier" },
         ["PurchaseOrder.Accept"]          = new[] { "SuperAdmin","Supplier" },
         ["PurchaseOrder.ApproveProposal"] = new[] { "SuperAdmin","Buyer" },
+        ["PurchaseOrder.Negotiate"]          = new[] { "SuperAdmin","Supplier" },
+        ["PurchaseOrder.ApproveNegotiation"] = new[] { "SuperAdmin","Buyer" },
         ["PurchaseOrder.Write"]           = new[] { "SuperAdmin","Buyer" },
         ["DeliverySchedule.Read"]         = new[] { "SuperAdmin","Admin","Buyer","Finance","Supplier","ReadOnly" },
         ["DeliverySchedule.Propose"]      = new[] { "SuperAdmin","Supplier" },
