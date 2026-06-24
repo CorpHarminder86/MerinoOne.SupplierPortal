@@ -15,10 +15,18 @@ public record GetAuditTrailQuery(string EntityName, Guid EntityId) : IRequest<Li
 public class GetAuditTrailQueryHandler : IRequestHandler<GetAuditTrailQuery, List<AuditEntryDto>>
 {
     private readonly ISqlConnectionFactory _sql;
-    public GetAuditTrailQueryHandler(ISqlConnectionFactory sql) => _sql = sql;
+    private readonly ICurrentUser _user;
+    public GetAuditTrailQueryHandler(ISqlConnectionFactory sql, ICurrentUser user)
+    {
+        _sql = sql;
+        _user = user;
+    }
 
     public async Task<List<AuditEntryDto>> Handle(GetAuditTrailQuery request, CancellationToken ct)
     {
+        // SECURITY: this raw-Dapper read bypasses the EF AuditEntry query filter, so it MUST tenant-scope itself
+        // explicitly (else cross-tenant IDOR — a Settings.Read admin in tenant A could read any tenant's
+        // OldValue/NewValue by entityName+GUID). Fail-closed: a null caller tenant matches nothing.
         const string sql = @"
 SELECT auditEntryId  AS Id,
        auditEntrySeq AS Seq,
@@ -33,12 +41,13 @@ SELECT auditEntryId  AS Id,
   FROM [audit].[AuditEntry]
  WHERE entityName = @EntityName
    AND entityId   = @EntityId
+   AND tenantId   = @TenantId
  ORDER BY changedOn DESC;";
 
         await using var cn = await _sql.OpenAsync(ct);
         var rows = await cn.QueryAsync<AuditEntryDto>(new CommandDefinition(
             sql,
-            new { request.EntityName, request.EntityId },
+            new { request.EntityName, request.EntityId, TenantId = _user.TenantId },
             cancellationToken: ct));
         return rows.AsList();
     }

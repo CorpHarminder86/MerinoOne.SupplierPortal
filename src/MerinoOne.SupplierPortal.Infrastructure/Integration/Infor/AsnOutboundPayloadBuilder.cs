@@ -54,9 +54,13 @@ internal static class AsnOutboundPayloadBuilder
         if (asn is null) return null;
 
         // The ASN line carries no itemCode; resolve it from the source PO line (PurchaseOrderLineId → ItemCode).
+        // IgnoreQueryFilters (+ re-apply !IsDeleted): this runs in the tenant-less OutboxDispatcher scope, and with
+        // the scope gate now fail-CLOSED a filtered query could otherwise drop these rows → null ItemCode in the
+        // outbound payload. Matches how the ASN root is loaded above.
         var poLineIds = asn.Lines.Select(l => l.PurchaseOrderLineId).Distinct().ToList();
         var itemCodeByPoLine = await db.PurchaseOrderLines
-            .Where(p => poLineIds.Contains(p.Id))
+            .IgnoreQueryFilters()
+            .Where(p => poLineIds.Contains(p.Id) && !p.IsDeleted)
             .Select(p => new { p.Id, p.ItemCode })
             .ToDictionaryAsync(p => p.Id, p => p.ItemCode, ct);
 

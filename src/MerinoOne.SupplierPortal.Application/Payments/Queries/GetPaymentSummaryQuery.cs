@@ -127,6 +127,7 @@ WITH src AS (
     LEFT JOIN [supplier].[Supplier] sup ON sup.supplierId = i.supplierId
     LEFT JOIN [proc].[PaymentTerm] st ON st.paymentTermId = sup.paymentTermId
     WHERE i.isDeleted = 0
+      AND i.tenantId = @tenantId
       AND (@supplierId IS NULL OR i.supplierId = @supplierId)
       AND (@from IS NULL OR i.invoiceDate >= @from)
       AND (@to IS NULL OR i.invoiceDate <= @to)
@@ -141,6 +142,8 @@ OFFSET @offset ROWS FETCH NEXT @take ROWS ONLY;";
 
         var p = new
         {
+            // SECURITY: tenant-scope the privileged Dapper branch (raw SQL bypasses the EF global filter).
+            tenantId = _user.TenantId,
             supplierId = request.SupplierId,
             from = request.From,
             to = request.To,

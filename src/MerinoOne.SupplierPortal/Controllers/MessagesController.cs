@@ -52,6 +52,7 @@ Returns: List<MessageRecipientDto>, tenant-scoped.")]
     }
 
     [HttpPost("messages")]
+    [Authorize(Policy = "Communication.Write")]
     [EndpointSummary("Send message")]
     [EndpointDescription(@"Posts a new message into an existing thread, or starts a new thread.
 Body:
@@ -66,6 +67,7 @@ Returns: MessageDto on success; 400 on validation; 403 if caller is not a partic
     }
 
     [HttpPost("messages/{id:guid}/read")]
+    [Authorize(Policy = "Communication.Read")]
     [EndpointSummary("Mark message read")]
     [EndpointDescription(@"Flags a single message as read by the current user.
 Filters / params:

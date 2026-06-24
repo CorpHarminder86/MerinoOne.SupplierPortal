@@ -222,8 +222,10 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                             .AnyAsync(i => i.Id == revInvId && i.TenantId == tenantId && i.ErpPostedAt != null, token);
                         if (posted)
                         {
+                            // Raise the alert ONCE per GrnNumber, not once per PO-position row (a multi-line GRN
+                            // shares one covering invoice — N rows reverting is one logical reversal).
+                            if (!reverseAlert) RaiseReverseTransitionAlert(db, tenantId, revInvId, grn, now);
                             reverseAlert = true;
-                            RaiseReverseTransitionAlert(db, tenantId, revInvId, grn, now);
                         }
                     }
                 }
@@ -297,6 +299,10 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                 db.AuditEntries.Add(new AuditEntry
                 {
                     Id = Guid.NewGuid(),
+                    // Stamp the invoice's tenant explicitly — this row is added manually (not via the audit
+                    // interceptor), and AuditEntry now has a fail-closed tenant filter, so a null TenantId would
+                    // make the money-movement audit invisible to the owning tenant once the scope gate is enabled.
+                    TenantId = inv.TenantId,
                     EntityName = nameof(Domain.Entities.Proc.Invoice),
                     EntityId = inv.Id,
                     Operation = "Update",

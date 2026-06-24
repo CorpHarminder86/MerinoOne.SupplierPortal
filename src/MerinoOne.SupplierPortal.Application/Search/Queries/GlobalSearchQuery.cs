@@ -66,6 +66,7 @@ WITH hits AS (
            CAST(registrationStatus AS NVARCHAR(50)) AS status, createdOn AS [when]
       FROM [supplier].[Supplier]
      WHERE isDeleted = 0
+       AND tenantId = @tenantId
        AND (supplierCode LIKE @q OR legalName LIKE @q OR ISNULL(tradeName, N'') LIKE @q)
     UNION ALL
     SELECT 'PurchaseOrder', purchaseOrderId, poNumber, poNumber,
@@ -73,6 +74,7 @@ WITH hits AS (
            CAST(poStatus AS NVARCHAR(50)), poDate
       FROM [proc].[PurchaseOrder]
      WHERE isDeleted = 0
+       AND tenantId = @tenantId
        AND (poNumber LIKE @q OR ISNULL(notes, N'') LIKE @q)
     UNION ALL
     SELECT 'Invoice', invoiceId, invoiceNumber, invoiceNumber,
@@ -80,6 +82,7 @@ WITH hits AS (
            CAST(invoiceStatus AS NVARCHAR(50)), invoiceDate
       FROM [proc].[Invoice]
      WHERE isDeleted = 0
+       AND tenantId = @tenantId
        AND (invoiceNumber LIKE @q OR ISNULL(eInvoiceIrn, N'') LIKE @q)
     UNION ALL
     SELECT 'Asn', asnId, asnNumber, asnNumber,
@@ -87,6 +90,7 @@ WITH hits AS (
            CAST(asnStatus AS NVARCHAR(50)), expectedDeliveryDate
       FROM [proc].[Asn]
      WHERE isDeleted = 0
+       AND tenantId = @tenantId
        AND (asnNumber LIKE @q OR ISNULL(trackingNumber, N'') LIKE @q)
     UNION ALL
     SELECT 'GoodsReceipt', goodsReceiptId, grnNumber, grnNumber,
@@ -95,6 +99,7 @@ WITH hits AS (
            grnDate
       FROM [proc].[GoodsReceipt]
      WHERE isDeleted = 0
+       AND tenantId = @tenantId
        AND grnNumber LIKE @q
     UNION ALL
     SELECT 'Payment', paymentId, paymentReference, paymentReference,
@@ -103,6 +108,7 @@ WITH hits AS (
            paymentDate
       FROM [proc].[Payment]
      WHERE isDeleted = 0
+       AND tenantId = @tenantId
        AND paymentReference LIKE @q
     UNION ALL
     SELECT 'CommunicationMessage', communicationMessageId, CAST(threadId AS NVARCHAR(40)),
@@ -111,6 +117,7 @@ WITH hits AS (
            sentAt
       FROM [comm].[CommunicationMessage]
      WHERE isDeleted = 0
+       AND tenantId = @tenantId
        AND messageBody LIKE @q
 )
 SELECT TOP (@limit) module AS Module, id AS Id, code AS Code, title AS Title,
@@ -124,7 +131,8 @@ SELECT TOP (@limit) module AS Module, id AS Id, code AS Code, title AS Title,
         await using var cn = await _sql.OpenAsync(ct);
         var rows = await cn.QueryAsync<SearchResultDto>(new CommandDefinition(
             sql,
-            new { q = like, module, from, to, limit },
+            // SECURITY: tenant-scope the privileged Dapper search (raw SQL bypasses the EF global filter).
+            new { q = like, module, from, to, limit, tenantId = _user.TenantId },
             cancellationToken: ct));
         return rows.AsList();
     }
