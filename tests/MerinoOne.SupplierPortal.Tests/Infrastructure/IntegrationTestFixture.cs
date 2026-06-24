@@ -74,6 +74,12 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
             await db.Database.MigrateAsync();
 
             await SeedAsync(db);
+
+            // Phase-1 security + RLS harness: roles/permissions, login-able users (Admin/Supplier/Buyer),
+            // and a second tenant with foreign supplier/sync-log/document rows. Layered on top of the
+            // money-path seed; never mutates it. See SecurityTestHarness for the gate-flip strategy.
+            await SecurityTestHarness.SeedAsync(db);
+
             DbAvailable = true;
         }
         catch (Exception ex)
