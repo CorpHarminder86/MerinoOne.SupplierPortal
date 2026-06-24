@@ -103,8 +103,12 @@ If a backend-developer or blazor-developer reports a schema gap, you reopen the 
 
 ## Connection string
 
+NOT stored here (no plaintext secret in source). Dev: `dotnet user-secrets` on the API project
+(`ConnectionStrings:DefaultConnection`). Prod: `ConnectionStrings__DefaultConnection` env var. Tests:
+`MERINO_TEST_CONNECTION` env var. Shape:
+
 ```
-Data Source=10.10.104.12\SqlExpress;Initial Catalog=merino-supplier-dev;Persist Security Info=True;User ID=sa;Password=sa@1234;Pooling=True;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=True;
+Data Source=<server>\SqlExpress;Initial Catalog=merino-supplier-dev;User ID=<user>;Password=<secret>;Encrypt=True;TrustServerCertificate=True;
 ```
 
 ## Tech stack (locked from TSD §2)

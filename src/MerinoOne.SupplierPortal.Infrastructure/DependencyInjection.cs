@@ -23,8 +23,14 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration cfg)
     {
-        var cs = cfg.GetConnectionString("DefaultConnection")
-                  ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
+        // SECURITY: the connection string is intentionally NOT committed (no plaintext SA secret in appsettings.json).
+        // Dev resolves it from user-secrets (auto-loaded in Development); prod from the
+        // ConnectionStrings__DefaultConnection environment variable. A blank/whitespace value fails fast here.
+        var cs = cfg.GetConnectionString("DefaultConnection");
+        if (string.IsNullOrWhiteSpace(cs))
+            throw new InvalidOperationException(
+                "ConnectionStrings:DefaultConnection is not configured. Set it via user-secrets (dev) or the " +
+                "ConnectionStrings__DefaultConnection environment variable (prod).");
 
         services.AddScoped<AuditableEntityInterceptor>();
         // Stamps tenant + active-company onto inserted rows (skips the system principal). Scoped so it

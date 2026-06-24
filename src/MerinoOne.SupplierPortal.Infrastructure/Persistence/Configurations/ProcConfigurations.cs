@@ -419,5 +419,12 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         b.HasIndex(x => x.InvoiceId).HasDatabaseName("IX_Payment_invoiceId");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Payment_tenant_company");
+        // R4 (2026-06-24) — DB-level dedup guard for inbound Payment sync. Concurrent inbound pushes race past the
+        // app-level read-modify-write dedup (UpsertPaymentsCommand.cs:79-82); this filtered unique index enforces the
+        // app's effective uniqueness scope (tenant + invoice + reference). Filtered on isDeleted=0 so soft-deleted rows
+        // never block re-insert of the same logical payment; paymentReference IS NOT NULL future-proofs the guard.
+        b.HasIndex("TenantId", "TenantEntityId", nameof(Payment.InvoiceId), nameof(Payment.PaymentReference))
+            .HasDatabaseName("UX_Payment_tenant_invoice_paymentReference").IsUnique()
+            .HasFilter("[isDeleted] = 0 AND [paymentReference] IS NOT NULL");
     }
 }

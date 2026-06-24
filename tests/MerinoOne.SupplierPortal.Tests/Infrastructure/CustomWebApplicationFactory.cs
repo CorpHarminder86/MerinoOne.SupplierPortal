@@ -20,9 +20,15 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     /// <summary>
     /// Dedicated test DB on the existing SQL Express. SEPARATE from -dev so a test run never touches dev data.
+    /// SECURITY: no plaintext SA secret in source — the connection string (with credentials) is read from the
+    /// MERINO_TEST_CONNECTION environment variable; absent that it falls back to a non-secret local default
+    /// (tests Skip.If the DB is unreachable, so a missing env var degrades to skipped, not a leak).
+    /// Set it once per machine, e.g. (PowerShell):
+    ///   [Environment]::SetEnvironmentVariable("MERINO_TEST_CONNECTION","Data Source=...;User ID=...;Password=...","User")
     /// </summary>
-    public const string TestConnectionString =
-        "Data Source=10.10.104.12\\SqlExpress;Initial Catalog=merino-supplier-test;User ID=sa;Password=sa@1234;Encrypt=True;TrustServerCertificate=True;";
+    public static readonly string TestConnectionString =
+        Environment.GetEnvironmentVariable("MERINO_TEST_CONNECTION")
+        ?? "Server=localhost;Database=merino-supplier-test;Trusted_Connection=True;Encrypt=True;TrustServerCertificate=True;";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

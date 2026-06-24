@@ -5497,6 +5497,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.HasIndex("TenantId", "TenantEntityId")
                         .HasDatabaseName("IX_Payment_tenant_company");
 
+                    b.HasIndex("TenantId", "TenantEntityId", "InvoiceId", "PaymentReference")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Payment_tenant_invoice_paymentReference")
+                        .HasFilter("[isDeleted] = 0 AND [paymentReference] IS NOT NULL");
+
                     b.ToTable("Payment", "proc");
                 });
 

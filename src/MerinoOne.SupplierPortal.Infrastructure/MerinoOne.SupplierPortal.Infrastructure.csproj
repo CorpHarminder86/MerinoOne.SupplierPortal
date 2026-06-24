@@ -20,6 +20,9 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.0" />
+    <!-- Provides AddUserSecrets for DesignTimeDbContextFactory (ef tooling resolves the dev connection string from
+         the startup project's user-secrets store; this class library doesn't get the extension transitively). -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
     <!-- SECURITY (NU1903): pin the transitive System.Security.Cryptography.Xml (pulled in at the vulnerable 9.0.0
          via Azure.Identity / IdentityModel) to a patched 9.0.x servicing release.
