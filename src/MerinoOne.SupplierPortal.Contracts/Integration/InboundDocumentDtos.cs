@@ -31,13 +31,16 @@ public record PoLineRecord(
 
 /// <summary>
 /// One inbound Purchase Order pushed by Infor LN. <see cref="PoNumber"/> is the natural key within the
-/// resolved company. <see cref="SupplierCode"/> resolves the owning supplier (and the PO's seccode). PoType /
-/// PoStatus are enum NAMEs (default Material / Released). Currency / payment-term / delivery-term resolve by
-/// code against the resolved company (FK + snapshot).
+/// resolved company. The owning supplier (and the PO's seccode) resolves from EITHER
+/// <see cref="ErpSupplierCode"/> (matched against <c>Supplier.ErpCode</c>) OR <see cref="SupplierCode"/>
+/// (matched against <c>Supplier.SupplierCode</c>). When BOTH are supplied, <see cref="ErpSupplierCode"/> wins
+/// (it is the ERP's authoritative identity); when NEITHER is supplied the row is rejected — at least one is
+/// required. PoType / PoStatus are enum NAMEs (default Material / Released). Currency / payment-term /
+/// delivery-term resolve by code against the resolved company (FK + snapshot).
 /// </summary>
 public record PoRecord(
     string PoNumber,
-    string SupplierCode,
+    string? SupplierCode,
     DateTime PoDate,
     IReadOnlyList<PoLineRecord> Lines,
     string? PoType = null,
@@ -48,7 +51,10 @@ public record PoRecord(
     string? DeliveryTermCode = null,
     string? CurrencyCode = null,
     string? Notes = null,
-    string? ErpSyncId = null);
+    string? ErpSyncId = null,
+    /// <summary>ERP supplier code (matched against <c>Supplier.ErpCode</c>). Takes priority over
+    /// <see cref="SupplierCode"/> when both are supplied. One of the two is required.</summary>
+    string? ErpSupplierCode = null);
 
 /// <summary>Inbound PO push body. See <see cref="PushGrnStatusRequest"/> for company semantics.</summary>
 public record PushPurchaseOrdersRequest(

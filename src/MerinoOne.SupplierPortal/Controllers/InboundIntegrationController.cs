@@ -206,10 +206,10 @@ Behaviour: on success resolves portalRef to exactly one outbox row of transactio
     [RequestSizeLimit(2_000_000)]
     [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Po")]
     [EndpointSummary("Push purchase orders (Infor LN)")]
-    [EndpointDescription(@"Creates/updates Purchase Orders (+ lines) pushed by Infor LN. PoNumber is the natural key within the resolved company; supplier/currency/payment-term/delivery-term/item/tax resolve by code (resolve-or-keep-snapshot). The PO's seccode is the owning supplier's, so supplier users see it via RLS.
+    [EndpointDescription(@"Creates/updates Purchase Orders (+ lines) pushed by Infor LN. PoNumber is the natural key within the resolved company; currency/payment-term/delivery-term/item/tax resolve by code (resolve-or-keep-snapshot). The owning supplier resolves from erpSupplierCode (matched on Supplier.ErpCode) OR supplierCode (matched on Supplier.SupplierCode); when both are present erpSupplierCode WINS, when neither is present the row is rejected (at least one required). The PO's seccode is the owning supplier's, so supplier users see it via RLS.
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.Po` and be bound to the resolved company.
-Body: { companyCode, orders:[{ poNumber, supplierCode, poDate, poType?, poStatus?, currencyCode?, paymentTerms?, deliveryTerms?, notes?, erpSyncId?, lines:[{ positionNo, sequenceNo, itemCode, orderUnit, orderQty, priceUnit, price, discountPct, discountAmount, deliveryDate?, taxCode?, taxDescription? }] }] }.
-Behaviour: 200 + UpsertResultDto; 400 unknown company / unknown supplier (per-row) / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+Body: { companyCode, orders:[{ poNumber, supplierCode?, erpSupplierCode?, poDate, poType?, poStatus?, currencyCode?, paymentTerms?, deliveryTerms?, notes?, erpSyncId?, lines:[{ positionNo, sequenceNo, itemCode, orderUnit, orderQty, priceUnit, price, discountPct, discountAmount, deliveryDate?, taxCode?, taxDescription? }] }] }. supplierCode/erpSupplierCode: supply at least one.
+Behaviour: 200 + UpsertResultDto; 400 unknown company / unknown supplier code or erpCode (per-row) / neither supplier identifier supplied / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
     public async Task<Result<UpsertResultDto>> PurchaseOrders([FromBody] PushPurchaseOrdersRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertPurchaseOrdersCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 

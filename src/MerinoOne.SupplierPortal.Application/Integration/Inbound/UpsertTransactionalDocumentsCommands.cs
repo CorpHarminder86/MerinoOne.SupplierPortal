@@ -27,7 +27,13 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
         RuleForEach(x => x.Body.Orders).ChildRules(o =>
         {
             o.RuleFor(r => r.PoNumber).NotEmpty().MaximumLength(60);
-            o.RuleFor(r => r.SupplierCode).NotEmpty().MaximumLength(40);
+            // Supplier identity: one of erpSupplierCode / supplierCode is required (flow 4 reject). When both
+            // are present erpSupplierCode wins in the handler — see PoRecord. Each is length-capped when present.
+            o.RuleFor(r => r.SupplierCode).MaximumLength(40);
+            o.RuleFor(r => r.ErpSupplierCode).MaximumLength(40);
+            o.RuleFor(r => r)
+                .Must(r => !string.IsNullOrWhiteSpace(r.SupplierCode) || !string.IsNullOrWhiteSpace(r.ErpSupplierCode))
+                .WithMessage("Either supplierCode or erpSupplierCode is required.");
             o.RuleFor(r => r.Lines).NotNull();
         });
     }
@@ -39,7 +45,7 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
     {
         var recs = request.Body.Orders;
         var canonical = recs.Select(r =>
-            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.SupplierCode.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.Lines.Count}");
+            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.Lines.Count}");
         var codes = recs.Select(r => r.PoNumber.Trim());
         return exec.ExecuteAsync(TransactionalInboundEntity.Po, request.Body.CompanyCode, request.BoundCompanyIds,
             request.IdempotencyKey, recs.Count, canonical, codes, request.Body, Upsert, ct);
@@ -49,12 +55,27 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
             var now = DateTime.UtcNow;
             var results = new List<RowResult>(recs.Count);
 
-            // Resolve owning suppliers (by code within the tenant) → Id + seccode for the PO's RLS owner.
-            var supCodes = recs.Select(r => r.SupplierCode.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            var supMap = (await db.Suppliers.IgnoreQueryFilters()
-                    .Where(s => !s.IsDeleted && s.TenantId == tenantId && supCodes.Contains(s.SupplierCode))
-                    .Select(s => new { s.SupplierCode, s.Id, s.SeccodeId }).ToListAsync(token))
+            // Resolve owning suppliers → Id + seccode for the PO's RLS owner. A row identifies its supplier by
+            // EITHER erpSupplierCode (matched on Supplier.ErpCode) OR supplierCode (matched on Supplier.SupplierCode);
+            // erpSupplierCode takes priority when both are present (it is the ERP's authoritative key). Validator
+            // already rejects rows with neither — the per-row guard below is defensive. We collect the codes we'll
+            // actually look up (erp-codes from erp rows, supplier-codes only from rows NOT using erp) and build two
+            // case-insensitive maps in one query, de-duping by First() exactly as the legacy single-key path did.
+            var erpCodes = recs.Where(r => !string.IsNullOrWhiteSpace(r.ErpSupplierCode))
+                .Select(r => r.ErpSupplierCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var supCodes = recs.Where(r => string.IsNullOrWhiteSpace(r.ErpSupplierCode) && !string.IsNullOrWhiteSpace(r.SupplierCode))
+                .Select(r => r.SupplierCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            var matchedSuppliers = await db.Suppliers.IgnoreQueryFilters()
+                .Where(s => !s.IsDeleted && s.TenantId == tenantId
+                    && (supCodes.Contains(s.SupplierCode) || (s.ErpCode != null && erpCodes.Contains(s.ErpCode))))
+                .Select(s => new { s.SupplierCode, s.ErpCode, s.Id, s.SeccodeId }).ToListAsync(token);
+
+            var supByCode = matchedSuppliers
                 .GroupBy(s => s.SupplierCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var supByErp = matchedSuppliers.Where(s => !string.IsNullOrWhiteSpace(s.ErpCode))
+                .GroupBy(s => s.ErpCode!, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
             // Master resolution maps (resolve-or-leave-null; keep snapshot strings).
@@ -83,8 +104,21 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
             foreach (var rec in recs)
             {
                 var poNum = rec.PoNumber.Trim();
-                if (!supMap.TryGetValue(rec.SupplierCode.Trim(), out var sup))
-                { results.Add(new RowResult(poNum, RowOutcome.Failed, $"Unknown supplier code '{rec.SupplierCode}'.")); continue; }
+
+                // erpSupplierCode wins when present (flows 1 & 3); else supplierCode (flow 2); neither = reject (flow 4).
+                var erp = rec.ErpSupplierCode?.Trim();
+                var sc = rec.SupplierCode?.Trim();
+                var useErp = !string.IsNullOrWhiteSpace(erp);
+                var sup = useErp
+                    ? (supByErp.TryGetValue(erp!, out var byErp) ? byErp : null)
+                    : (!string.IsNullOrWhiteSpace(sc) && supByCode.TryGetValue(sc!, out var byCode) ? byCode : null);
+                if (sup is null)
+                {
+                    var why = useErp ? $"Unknown supplier erpCode '{erp}'."
+                        : !string.IsNullOrWhiteSpace(sc) ? $"Unknown supplier code '{sc}'."
+                        : "Either supplierCode or erpSupplierCode is required.";
+                    results.Add(new RowResult(poNum, RowOutcome.Failed, why)); continue;
+                }
 
                 Guid? curId = !string.IsNullOrWhiteSpace(rec.CurrencyCode) && curMap.TryGetValue(rec.CurrencyCode.Trim(), out var ci) ? ci : null;
                 var poType = Enum.TryParse<PoType>(rec.PoType, true, out var pt) ? pt : PoType.Material;

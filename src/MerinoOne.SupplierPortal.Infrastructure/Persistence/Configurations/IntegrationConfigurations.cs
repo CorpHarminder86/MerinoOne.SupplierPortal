@@ -97,7 +97,10 @@ public class ApiKeyConfiguration : IEntityTypeConfiguration<ApiKey>
         b.Property(x => x.Label).HasColumnName("label").HasMaxLength(200).IsRequired();
         b.Property(x => x.KeyPrefix).HasColumnName("keyPrefix").HasMaxLength(20).IsRequired();
         b.Property(x => x.KeyHash).HasColumnName("keyHash").HasColumnType("char(64)").IsRequired();
-        b.Property(x => x.Scopes).HasColumnName("scopes").HasMaxLength(400).IsRequired();
+        // Scopes is an unbounded CSV of scope tokens that grows with every new inbound endpoint; it is never
+        // indexed/filtered, so a fixed length just breaks again later (see 0027). nvarchar(max) per the
+        // OutboxMessage.payloadJson / InforConnectionSetting precedent in this same file.
+        b.Property(x => x.Scopes).HasColumnName("scopes").HasColumnType("nvarchar(max)").IsRequired();
         b.Property(x => x.TenantEntityId).HasColumnName("tenantEntityId").HasColumnType("uniqueidentifier");
         b.Property(x => x.ExpiresAt).HasColumnName("expiresAt").HasColumnType("datetime2");
         b.Property(x => x.LastUsedAt).HasColumnName("lastUsedAt").HasColumnType("datetime2");

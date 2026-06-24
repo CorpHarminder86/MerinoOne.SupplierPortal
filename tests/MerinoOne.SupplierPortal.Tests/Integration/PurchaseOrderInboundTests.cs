@@ -130,6 +130,95 @@ public class PurchaseOrderInboundTests
         lotLine.IsSerialized.Should().BeFalse();
     }
 
+    /// <summary>
+    /// Supplier-identity resolution on the inbound PO push (erpSupplierCode / supplierCode). Covers all four
+    /// flows: (1) erpSupplierCode only → resolve by Supplier.ErpCode; (2) supplierCode only → resolve by code
+    /// [covered by the test above]; (3) BOTH → erpSupplierCode WINS; (4) NEITHER → 400, nothing persists.
+    /// Plus an unknown erpCode → per-row failure (200, Failed=1).
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_resolves_supplier_by_erpCode_with_priority_over_supplierCode()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+
+        // Supplier A carries an ERP code; Supplier B is a decoy that only has a supplier code — used to prove the
+        // priority rule (a PO citing A's erpCode AND B's supplierCode must bind A, not B).
+        var supA = await _fx.CreateSupplierAsync($"A{tag}", IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId);
+        var supB = await _fx.CreateSupplierAsync($"B{tag}", IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId);
+        var erp = $"ERP-{tag}";
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var a = await db.Suppliers.IgnoreQueryFilters().FirstAsync(x => x.Id == supA.SupplierId);
+            a.ErpCode = erp;
+            await db.SaveChangesAsync();
+        }
+
+        var inbound = _fx.CreateInboundClient();
+
+        PushPurchaseOrdersRequest Body(string poNum, string? supplierCode, string? erpSupplierCode) =>
+            new(IntegrationTestFixture.CompanyCode, new[]
+            {
+                new PoRecord(
+                    PoNumber: poNum,
+                    SupplierCode: supplierCode,
+                    PoDate: DateTime.UtcNow.Date,
+                    Lines: new[]
+                    {
+                        new PoLineRecord(PositionNo: 10, SequenceNo: 1, ItemCode: $"ITM-{tag}",
+                            OrderUnit: "EA", OrderQty: 1, PriceUnit: 1, Price: 1),
+                    },
+                    PoStatus: nameof(PoStatus.Released),
+                    CurrencyCode: "INR",
+                    ErpSupplierCode: erpSupplierCode),
+            });
+
+        async Task<Guid?> ResolvedSupplierIdAsync(string poNum)
+        {
+            using var s = _fx.Factory.Services.CreateScope();
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await db.PurchaseOrders.IgnoreQueryFilters()
+                .Where(p => p.PoNumber == poNum && p.TenantId == IntegrationTestFixture.TenantId)
+                .Select(p => (Guid?)p.SupplierId).FirstOrDefaultAsync();
+        }
+
+        // ---- Flow 1: erpSupplierCode only → resolves Supplier A by ErpCode. ----
+        var po1 = $"PO-ERP1-{tag}";
+        var resp1 = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", Body(po1, supplierCode: null, erpSupplierCode: erp));
+        resp1.StatusCode.Should().Be(HttpStatusCode.OK);
+        var r1 = await Read<UpsertResultDto>(resp1);
+        r1.Data!.Failed.Should().Be(0);
+        r1.Data!.Inserted.Should().Be(1);
+        (await ResolvedSupplierIdAsync(po1)).Should().Be(supA.SupplierId, because: "erpSupplierCode matched Supplier.ErpCode");
+
+        // ---- Flow 3: BOTH present → erpSupplierCode WINS (binds A), supplierCode (B) is ignored. ----
+        var po3 = $"PO-ERP3-{tag}";
+        var resp3 = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", Body(po3, supplierCode: supB.SupplierCode, erpSupplierCode: erp));
+        resp3.StatusCode.Should().Be(HttpStatusCode.OK);
+        var r3 = await Read<UpsertResultDto>(resp3);
+        r3.Data!.Failed.Should().Be(0);
+        r3.Data!.Inserted.Should().Be(1);
+        (await ResolvedSupplierIdAsync(po3)).Should().Be(supA.SupplierId,
+            because: "with both identifiers present, erpSupplierCode takes priority over supplierCode");
+
+        // ---- Unknown erpCode → per-row failure (200, Failed=1, nothing inserted). ----
+        var po9 = $"PO-ERP9-{tag}";
+        var resp9 = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", Body(po9, supplierCode: null, erpSupplierCode: $"NOPE-{tag}"));
+        resp9.StatusCode.Should().Be(HttpStatusCode.OK);
+        var r9 = await Read<UpsertResultDto>(resp9);
+        r9.Data!.Inserted.Should().Be(0);
+        r9.Data!.Failed.Should().Be(1, because: "an unresolvable erpSupplierCode fails that row, not the whole batch");
+        (await ResolvedSupplierIdAsync(po9)).Should().BeNull();
+
+        // ---- Flow 4: NEITHER identifier → request rejected by the validator (400), nothing persists. ----
+        var po4 = $"PO-ERP4-{tag}";
+        var resp4 = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", Body(po4, supplierCode: null, erpSupplierCode: null));
+        resp4.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ResolvedSupplierIdAsync(po4)).Should().BeNull();
+    }
+
     private static async Task<Result<T>> Read<T>(HttpResponseMessage resp)
     {
         var stream = await resp.Content.ReadAsStreamAsync();

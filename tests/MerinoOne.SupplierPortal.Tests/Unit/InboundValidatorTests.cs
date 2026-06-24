@@ -139,4 +139,50 @@ public class InboundValidatorTests
 
         result.IsValid.Should().BeFalse();
     }
+
+    // -------------------- UpsertPurchaseOrdersCommandValidator — supplier-identity one-of (flows 1-4) --------------------
+
+    private static UpsertPurchaseOrdersCommand PoCmd(params PoRecord[] orders)
+        => new(new PushPurchaseOrdersRequest("2000", orders), NoBoundCompanies, null);
+
+    private static PoRecord Po(string? supplierCode = null, string? erpSupplierCode = null)
+        => new(PoNumber: "PO-1", SupplierCode: supplierCode, PoDate: DateTime.UtcNow.Date,
+               Lines: Array.Empty<PoLineRecord>(), ErpSupplierCode: erpSupplierCode);
+
+    [Fact] // flow 2
+    public void Po_with_only_supplierCode_passes()
+    {
+        var result = new UpsertPurchaseOrdersCommandValidator().Validate(PoCmd(Po(supplierCode: "S0001")));
+        result.IsValid.Should().BeTrue(because: string.Join("; ", result.Errors.Select(e => e.ErrorMessage)));
+    }
+
+    [Fact] // flow 1
+    public void Po_with_only_erpSupplierCode_passes()
+    {
+        var result = new UpsertPurchaseOrdersCommandValidator().Validate(PoCmd(Po(erpSupplierCode: "ERP-9")));
+        result.IsValid.Should().BeTrue(because: string.Join("; ", result.Errors.Select(e => e.ErrorMessage)));
+    }
+
+    [Fact] // flow 3 — both is valid at the validator; the handler applies erpCode priority
+    public void Po_with_both_identifiers_passes()
+    {
+        var result = new UpsertPurchaseOrdersCommandValidator().Validate(PoCmd(Po(supplierCode: "S0001", erpSupplierCode: "ERP-9")));
+        result.IsValid.Should().BeTrue(because: string.Join("; ", result.Errors.Select(e => e.ErrorMessage)));
+    }
+
+    [Fact] // flow 4 — neither is rejected
+    public void Po_with_neither_supplier_identifier_is_rejected()
+    {
+        var result = new UpsertPurchaseOrdersCommandValidator().Validate(PoCmd(Po()));
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.ErrorMessage.Contains("Either supplierCode or erpSupplierCode is required"));
+    }
+
+    [Fact] // whitespace counts as absent (flow 4)
+    public void Po_with_blank_supplier_identifiers_is_rejected()
+    {
+        var result = new UpsertPurchaseOrdersCommandValidator().Validate(PoCmd(Po(supplierCode: "   ", erpSupplierCode: " ")));
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.ErrorMessage.Contains("Either supplierCode or erpSupplierCode is required"));
+    }
 }

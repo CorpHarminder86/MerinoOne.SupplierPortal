@@ -2061,8 +2061,7 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Scopes")
                         .IsRequired()
-                        .HasMaxLength(400)
-                        .HasColumnType("nvarchar(400)")
+                        .HasColumnType("nvarchar(max)")
                         .HasColumnName("scopes");
 
                     b.Property<int>("Seq")
