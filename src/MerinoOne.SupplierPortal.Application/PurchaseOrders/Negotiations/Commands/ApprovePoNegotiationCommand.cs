@@ -68,6 +68,9 @@ public class ApprovePoNegotiationCommandHandler : IRequestHandler<ApprovePoNegot
         await _outbox.EnqueueAsync(
             OutboxTransactionType.PoNegotiationApprove, OutboxEntity.PurchaseOrder, negotiation.Id, key, payloadJson: null, ct);
 
+        // PO "History" tab: mark the approval (the per-line proposal rows were written on submit).
+        PoNegotiationHistory.RecordOutcome(_db, po, "approved", "Buyer approved — queued to ERP.", actor, now);
+
         try
         {
             await _db.SaveChangesAsync(ct);   // negotiation + PO state + outbox row — one transaction; dispatch is post-commit.

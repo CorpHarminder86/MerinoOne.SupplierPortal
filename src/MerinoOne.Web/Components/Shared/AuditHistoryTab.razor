@@ -49,6 +49,14 @@ else
     [Parameter] public string EntityName { get; set; } = string.Empty;
     [Parameter] public Guid EntityId { get; set; }
 
+    /// <summary>
+    /// Optional override for the audit API path. Defaults to the generic admin-only endpoint
+    /// (<c>api/audit/{EntityName}/{EntityId}</c>, gated on Settings.Read). Pages whose owner should see the trail
+    /// without admin rights pass an entity-scoped path instead — e.g. PO detail passes
+    /// <c>api/purchase-orders/{id}/history</c> (gated on PurchaseOrder.Read) so the supplier sees their PO's history.
+    /// </summary>
+    [Parameter] public string? ApiPath { get; set; }
+
     private List<AuditEntryDto>? rows;
     private bool loading = true;
 
@@ -57,7 +65,8 @@ else
         loading = true;
         try
         {
-            var resp = await Api.GetAsync<List<AuditEntryDto>>($"api/audit/{EntityName}/{EntityId}");
+            var path = string.IsNullOrWhiteSpace(ApiPath) ? $"api/audit/{EntityName}/{EntityId}" : ApiPath;
+            var resp = await Api.GetAsync<List<AuditEntryDto>>(path);
             rows = resp?.Data;
         }
         catch

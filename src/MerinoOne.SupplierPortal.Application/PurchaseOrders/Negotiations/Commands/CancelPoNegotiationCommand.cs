@@ -49,6 +49,9 @@ public class CancelPoNegotiationCommandHandler : IRequestHandler<CancelPoNegotia
         po.UpdatedBy = actor;
         po.UpdatedOn = now;
 
+        // PO "History" tab: mark the withdrawal.
+        PoNegotiationHistory.RecordOutcome(_db, po, "cancelled", "Withdrawn by supplier.", actor, now);
+
         await _db.SaveChangesAsync(ct);
         return Unit.Value;
     }

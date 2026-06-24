@@ -63,6 +63,9 @@ public class RejectPoNegotiationCommandHandler : IRequestHandler<RejectPoNegotia
         po.UpdatedBy = actor;
         po.UpdatedOn = now;
 
+        // PO "History" tab: mark the rejection, carrying the reason (not captured anywhere else on the PO).
+        PoNegotiationHistory.RecordOutcome(_db, po, "rejected", negotiation.RejectionReason, actor, now);
+
         await _db.SaveChangesAsync(ct);
         return Unit.Value;
     }

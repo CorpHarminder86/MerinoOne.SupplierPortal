@@ -133,6 +133,10 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
         po.UpdatedOn = now;
 
         _db.PurchaseOrderNegotiations.Add(negotiation);
+
+        // Surface the proposed per-line qty / delivery changes on the PO "History" tab (PO-targeted audit rows).
+        PoNegotiationHistory.RecordSubmitted(_db, po, negotiation, actor, now);
+
         await _db.SaveChangesAsync(ct);
 
         return PoNegotiationMapper.ToDto(negotiation, supplier.LegalName);

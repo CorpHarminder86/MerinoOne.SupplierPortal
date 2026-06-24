@@ -2,6 +2,7 @@ using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Application.PurchaseOrders.Commands;
 using MerinoOne.SupplierPortal.Application.PurchaseOrders.Queries;
+using MerinoOne.SupplierPortal.Contracts.Audit;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -43,6 +44,19 @@ Returns: PagedResult<PurchaseOrderListItemDto>. Requires permission **PurchaseOr
     {
         var data = await _mediator.Send(new GetPurchaseOrderListQuery(page, pageSize, status, type, supplierId, search), ct);
         return Result<ContractsPagedResult>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpGet("{id:guid}/history")]
+    [Authorize(Policy = "PurchaseOrder.Read")]
+    [EndpointSummary("Purchase order change history")]
+    [EndpointDescription(@"Field-level audit trail for ONE purchase order — status transitions plus the qty /
+delivery-date changes proposed via a PO negotiation. Unlike the generic audit endpoint (Settings.Read, admins
+only), this is gated on **PurchaseOrder.Read** and seccode-scoped, so a supplier sees the history of POs it owns
+(and only those). Returns: List<AuditEntryDto> newest first; empty if the PO is not visible to the caller.")]
+    public async Task<Result<List<AuditEntryDto>>> History(Guid id, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetPurchaseOrderHistoryQuery(id), ct);
+        return Result<List<AuditEntryDto>>.Ok(data, HttpContext.TraceIdentifier);
     }
 
     [HttpGet("items-to-deliver")]

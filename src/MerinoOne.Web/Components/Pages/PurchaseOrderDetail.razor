@@ -89,7 +89,9 @@ else
 
         @if (tab == "history")
         {
-            <AuditHistoryTab EntityName="PurchaseOrder" EntityId="@Id" />
+            @* PO-scoped history endpoint (PurchaseOrder.Read) so the supplier sees their own PO's history —
+               incl. negotiation qty/delivery changes — not just admins (the generic audit API needs Settings.Read). *@
+            <AuditHistoryTab EntityName="PurchaseOrder" EntityId="@Id" ApiPath="@($"api/purchase-orders/{Id}/history")" />
         }
         else
         {
