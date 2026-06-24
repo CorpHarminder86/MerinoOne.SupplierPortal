@@ -43,8 +43,12 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
                                l.TaxDescription, l.TaxId,
                                l.ItemId ?? (item != null ? (Guid?)item.Id : null),
                                item != null && item.IsSerialized,
-                               item != null && item.IsLotControlled))
+                               item != null && item.IsLotControlled,
+                               l.Price - l.DiscountAmount))
                           .ToListAsync(ct);
+
+        // PO header total = sum of line net amounts (Price − DiscountAmount). Derived, not persisted.
+        var totalAmount = lines.Sum(l => l.NetAmount);
 
         return new PurchaseOrderDetailDto(
             row.po.Id, row.po.Seq, row.po.PoNumber,
@@ -59,6 +63,7 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
             row.po.Version, null, row.po.ErpSyncId, row.po.Notes,
             lines,
             // PO-response mode from the owning supplier (already joined above) — drives accept/reject UI gating.
-            row.s.PoResponseMode.ToString());
+            row.s.PoResponseMode.ToString(),
+            totalAmount);
     }
 }

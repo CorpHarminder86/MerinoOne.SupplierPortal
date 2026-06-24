@@ -4,7 +4,7 @@
 @inject TokenAccessor Token
 @inject NotificationService Notif
 
-<PageTitle>Infor endpoints</PageTitle>
+<PageTitle>Integration Endpoints</PageTitle>
 
 @if (!Token.HasPermission("Integration.Read"))
 {
@@ -19,7 +19,7 @@ else
         <header class="tl-header">
             <div>
                 <div class="tl-title-row">
-                    <h1 class="tl-title">Infor endpoints</h1>
+                    <h1 class="tl-title">Integration Endpoints</h1>
                     <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
                 </div>
                 <p class="tl-sub">Inbound/outbound channels — enable/disable kill-switch + inbound session telemetry</p>

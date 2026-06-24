@@ -69,12 +69,15 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 40px 150px 1.4fr 110px 120px 130px 120px 70px 110px; --tl-min-width: 1160px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 40px 140px 1.3fr 90px 130px 120px 120px 105px 115px 110px 70px 90px; --tl-min-width: 1500px;">
             <div class="tlg-header">
                 <div class="tlg-col" title="Select for ASN"></div>
                 <div class="tlg-col">PO #</div>
                 <div class="tlg-col">Supplier</div>
                 <div class="tlg-col">Type</div>
+                <div class="tlg-col tlg-col--num">Amount</div>
+                <div class="tlg-col">Payment terms</div>
+                <div class="tlg-col">Delivery terms</div>
                 <div class="tlg-col">PO Date</div>
                 <div class="tlg-col">Status</div>
                 <div class="tlg-col">Response</div>
@@ -103,6 +106,9 @@
                     <div class="tlg-col tlg-code">@item.PoNumber</div>
                     <div class="tlg-col tlg-name">@item.SupplierName</div>
                     <div class="tlg-col">@item.PoType</div>
+                    <div class="tlg-col tlg-col--num tlg-code">@(string.IsNullOrEmpty(item.CurrencyCode) ? "" : item.CurrencyCode + " ")@item.TotalAmount.ToString("N2")</div>
+                    <div class="tlg-col">@(string.IsNullOrEmpty(item.PaymentTerms) ? "—" : item.PaymentTerms)</div>
+                    <div class="tlg-col">@(string.IsNullOrEmpty(item.DeliveryTerms) ? "—" : item.DeliveryTerms)</div>
                     <div class="tlg-col tlg-code">@item.PoDate.ToString("yyyy-MM-dd")</div>
                     <div class="tlg-col"><span class="tlg-status @StatusClass(item.PoStatus)">@item.PoStatus</span></div>
                     <div class="tlg-col">

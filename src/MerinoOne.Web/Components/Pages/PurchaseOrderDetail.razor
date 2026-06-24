@@ -85,6 +85,7 @@ else
                     <dt style="color:var(--mer-ink-500);">Currency</dt><dd>@(string.IsNullOrEmpty(detail.CurrencyCode) ? "—" : detail.CurrencyCode)</dd>
                     <dt style="color:var(--mer-ink-500);">Payment terms</dt><dd>@(detail.PaymentTerms ?? "—")</dd>
                     <dt style="color:var(--mer-ink-500);">Delivery terms</dt><dd>@(detail.DeliveryTerms ?? "—")</dd>
+                    <dt style="color:var(--mer-ink-500);">Total amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@(string.IsNullOrEmpty(detail.CurrencyCode) ? "" : detail.CurrencyCode + " ")@detail.TotalAmount.ToString("0.00")</dd>
                     @if (detail.AcknowledgmentAt.HasValue)
                     {
                         <dt style="color:var(--mer-ink-500);">Acknowledged</dt><dd style="font-family:Inter,monospace;">@detail.AcknowledgmentAt.Value.ToString("yyyy-MM-dd HH:mm")</dd>
@@ -146,7 +147,7 @@ else
                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
                             <td style="padding:6px 4px;">@ln.OrderUnit</td>
                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.PriceUnit.ToString("0.00")</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.Price.ToString("0.00")</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.NetAmount.ToString("0.00")</td>
                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.DiscountPct == 0 ? "—" : ln.DiscountPct.ToString("0.##"))</td>
                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.DiscountAmount == 0 ? "—" : ln.DiscountAmount.ToString("0.00"))</td>
                             <td style="padding:6px 4px;" title="@ln.TaxDescription">@(string.IsNullOrEmpty(ln.TaxCode) ? "—" : ln.TaxCode)</td>
@@ -154,6 +155,13 @@ else
                         </tr>
                     }
                     </tbody>
+                    <tfoot>
+                        <tr style="border-top:2px solid var(--mer-line);font-weight:700;">
+                            <td colspan="7" style="padding:8px 4px;text-align:right;color:var(--mer-ink-700);">Total@(string.IsNullOrEmpty(detail.CurrencyCode) ? "" : " (" + detail.CurrencyCode + ")")</td>
+                            <td style="padding:8px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-blue-darker);">@detail.TotalAmount.ToString("0.00")</td>
+                            <td colspan="4"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             }
         </div>

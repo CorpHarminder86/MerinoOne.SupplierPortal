@@ -83,6 +83,14 @@ public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseO
             .HasConstraintName("FK_PurchaseOrderLine_Tax_TaxId").OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => x.TaxId).HasDatabaseName("IX_PurchaseOrderLine_taxId");
+        // R4 (2026-06-24) — enforce the PO line natural key (PO, positionNo, sequenceNo). The inbound PO upsert
+        // now keys lines on (positionNo, sequenceNo) — two lines may share positionNo with differing sequenceNo —
+        // so this DB-level guard mirrors the app's effective uniqueness scope. Filtered on isDeleted=0 so a
+        // soft-deleted line never blocks re-inserting the same (po, position, seq); matches the filtered-unique
+        // pattern elsewhere in this codebase (UX_Payment_tenant_invoice_paymentReference, UQ_AsnPurchaseOrder_asn_po).
+        b.HasIndex(x => new { x.PurchaseOrderId, x.PositionNo, x.SequenceNo })
+            .HasDatabaseName("UX_PurchaseOrderLine_po_position_seq").IsUnique()
+            .HasFilter("[isDeleted] = 0");
     }
 }
 

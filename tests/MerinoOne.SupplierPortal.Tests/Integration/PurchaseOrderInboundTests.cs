@@ -128,6 +128,13 @@ public class PurchaseOrderInboundTests
         lotLine.DiscountPct.Should().Be(5m);
         lotLine.IsLotControlled.Should().BeTrue(because: "the line item is lot-controlled in inv.Item");
         lotLine.IsSerialized.Should().BeFalse();
+
+        // PO LIST surfaces amount (sum of line nets = 100 + 25), currency, and the term strings.
+        var listResp = await supplierClient.GetAsync($"/api/purchase-orders?supplierId={supplier.SupplierId}&pageSize=200");
+        var list = await Read<MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<PurchaseOrderListItemDto>>(listResp);
+        var listRow = list.Data!.Items.Single(p => p.PoNumber == poNumber);
+        listRow.TotalAmount.Should().Be(125m, because: "list amount = sum of line net amounts (Price − DiscountAmount)");
+        listRow.CurrencyCode.Should().Be("INR");
     }
 
     /// <summary>
@@ -217,6 +224,71 @@ public class PurchaseOrderInboundTests
         var resp4 = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", Body(po4, supplierCode: null, erpSupplierCode: null));
         resp4.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await ResolvedSupplierIdAsync(po4)).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Line natural key = (positionNo, sequenceNo). A second push for the SAME position but a different sequence
+    /// must ADD a new line, not overwrite the existing one (the reported bug). Also asserts the PO header
+    /// TotalAmount = sum of each line's NetAmount (Price − DiscountAmount).
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_second_push_same_position_new_sequence_adds_line_and_header_total_sums_net()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poNumber = $"PO-SEQ-{tag}";
+
+        PushPurchaseOrdersRequest Body(int positionNo, int sequenceNo, decimal price, decimal discountAmount) =>
+            new(IntegrationTestFixture.CompanyCode, new[]
+            {
+                new PoRecord(
+                    PoNumber: poNumber, SupplierCode: supplier.SupplierCode, PoDate: DateTime.UtcNow.Date,
+                    Lines: new[]
+                    {
+                        new PoLineRecord(PositionNo: positionNo, SequenceNo: sequenceNo, ItemCode: $"ITM-{tag}",
+                            OrderUnit: "EA", OrderQty: 1, PriceUnit: price, Price: price, DiscountAmount: discountAmount),
+                    },
+                    PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR")
+            });
+
+        // Push 1: position 10 / seq 1, price 100, discount 10 → net 90.
+        var resp1 = await inbound_PostAsync(Body(10, 1, price: 100m, discountAmount: 10m));
+        (await Read<UpsertResultDto>(resp1)).Data!.Inserted.Should().Be(1);
+
+        // Push 2: SAME position 10 but seq 2, price 200, discount 0 → net 200. Must ADD, not overwrite seq 1.
+        var resp2 = await inbound_PostAsync(Body(10, 2, price: 200m, discountAmount: 0m));
+        var r2 = (await Read<UpsertResultDto>(resp2)).Data!;
+        r2.Failed.Should().Be(0, because: r2.Rows.Count > 0 ? string.Join(" | ", r2.Rows.Select(x => $"{x.Code}/{x.Outcome}/{x.Error}")) : "no failures expected");
+        r2.Updated.Should().Be(1, because: "the PO already exists, so push 2 is an update that adds a line");
+
+        Guid poId;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var po = await db.PurchaseOrders.IgnoreQueryFilters()
+                .FirstAsync(p => p.PoNumber == poNumber && p.TenantId == IntegrationTestFixture.TenantId);
+            poId = po.Id;
+            var lines = await db.PurchaseOrderLines.IgnoreQueryFilters()
+                .Where(l => l.PurchaseOrderId == poId && !l.IsDeleted)
+                .Select(l => new { l.PositionNo, l.SequenceNo }).ToListAsync();
+            lines.Should().HaveCount(2, because: "position 10 seq 2 was ADDED alongside the existing seq 1, not merged into it");
+            lines.Should().Contain(x => x.PositionNo == 10 && x.SequenceNo == 1);
+            lines.Should().Contain(x => x.PositionNo == 10 && x.SequenceNo == 2);
+        }
+
+        // Header total = sum of line net amounts (90 + 200 = 290); each line carries its own NetAmount.
+        var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var detail = (await Read<PurchaseOrderDetailDto>(await supplierClient.GetAsync($"/api/purchase-orders/{poId}"))).Data!;
+        detail.TotalAmount.Should().Be(290m);
+        detail.Lines.Single(l => l.SequenceNo == 1).NetAmount.Should().Be(90m);
+        detail.Lines.Single(l => l.SequenceNo == 2).NetAmount.Should().Be(200m);
+
+        Task<HttpResponseMessage> inbound_PostAsync(PushPurchaseOrdersRequest body) =>
+            _fx.CreateInboundClient().PostAsJsonAsync("/api/integration/inbound/purchase-orders", body);
     }
 
     private static async Task<Result<T>> Read<T>(HttpResponseMessage resp)

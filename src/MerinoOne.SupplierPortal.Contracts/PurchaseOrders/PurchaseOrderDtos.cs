@@ -15,7 +15,13 @@ public record PurchaseOrderListItemDto(
     // R4 (2026-06-22): the owning supplier's PO-response behaviour ("Manual" | "Auto"), joined from
     // Supplier.PoResponseMode. Lets the PO list gate accept/reject affordances per-row without a second
     // GET /api/suppliers/{id} per PO. Trailing optional positional — defaults to "Manual".
-    string PoResponseMode = "Manual");
+    string PoResponseMode = "Manual",
+    // PO list display: total amount (sum of line net = Price − DiscountAmount) + currency snapshot + the
+    // header payment/delivery term strings. Trailing optional positionals.
+    decimal TotalAmount = 0,
+    string? CurrencyCode = null,
+    string? PaymentTerms = null,
+    string? DeliveryTerms = null);
 
 public record PagedResult<T>(
     List<T> Items,
@@ -50,7 +56,9 @@ public record PurchaseOrderDetailDto(
     // R4 (2026-06-22): the owning supplier's PO-response behaviour ("Manual" | "Auto"), joined from
     // Supplier.PoResponseMode — replaces the UI's second GET /api/suppliers/{supplierId} per PO detail.
     // Trailing optional positional — defaults to "Manual".
-    string PoResponseMode = "Manual");
+    string PoResponseMode = "Manual",
+    // PO header total = sum of each line's NetAmount (Price − DiscountAmount). Display-only (derived, not stored).
+    decimal TotalAmount = 0);
 
 public record PurchaseOrderLineDto(
     Guid Id,
@@ -73,7 +81,9 @@ public record PurchaseOrderLineDto(
     // lot-controlled per item — at most one is true. Default false when the line has no resolvable Item.
     Guid? ItemId = null,
     bool IsSerialized = false,
-    bool IsLotControlled = false);
+    bool IsLotControlled = false,
+    // Line net amount = Price (extended line amount) − DiscountAmount. The PO header TotalAmount is the sum of these.
+    decimal NetAmount = 0);
 
 public record AcknowledgePoRequest(string? Notes = null);
 public record AcceptPoRequest(DateTime? ProposedDate, string? Notes = null);

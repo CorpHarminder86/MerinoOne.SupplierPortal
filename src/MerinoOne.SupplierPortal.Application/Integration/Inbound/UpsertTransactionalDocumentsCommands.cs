@@ -44,8 +44,12 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
     public Task<UpsertResultDto> Handle(UpsertPurchaseOrdersCommand request, CancellationToken ct)
     {
         var recs = request.Body.Orders;
+        // Canonical includes a per-line digest (position/seq/item/qty/price/discount) — NOT just Lines.Count — so a
+        // follow-up push that adds a line (e.g. position 10 seq 2 alongside an existing seq 1) hashes differently and
+        // is NOT short-circuited as a duplicate by the no-header idempotency fallback. Line natural key = (position, seq).
         var canonical = recs.Select(r =>
-            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.Lines.Count}");
+            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|" +
+            string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.SequenceNo}/{l.ItemCode}/{l.OrderQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}")));
         var codes = recs.Select(r => r.PoNumber.Trim());
         return exec.ExecuteAsync(TransactionalInboundEntity.Po, request.Body.CompanyCode, request.BoundCompanyIds,
             request.IdempotencyKey, recs.Count, canonical, codes, request.Body, Upsert, ct);
@@ -133,7 +137,7 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
                     po.CurrencyId = curId; po.CurrencyCode = rec.CurrencyCode?.Trim();
                     po.Notes = rec.Notes; po.ErpSyncId = rec.ErpSyncId ?? po.ErpSyncId;
                     po.Version += 1; po.UpdatedBy = "infor:inbound"; po.UpdatedOn = now;
-                    SyncLines(po, rec, itemMap, taxMap, now);
+                    SyncLines(db, po, rec, itemMap, taxMap, now);
                     results.Add(new RowResult(poNum, RowOutcome.Updated, null));
                 }
                 else
@@ -156,20 +160,32 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
         }
     }
 
-    // Upsert lines by PositionNo: update matched, add new (does not delete lines absent from the push).
-    private static void SyncLines(PurchaseOrder po, PoRecord rec,
+    // Upsert lines by their natural key (PositionNo, SequenceNo): update the matched line, add new ones (does not
+    // delete lines absent from the push). A push for the same PositionNo with a different SequenceNo ADDS a new line
+    // rather than overwriting the existing seq — mirrors the (purchaseOrderId, positionNo, sequenceNo) unique index.
+    //
+    // NEW lines are added straight to the DbSet with an explicit PurchaseOrderId — NOT via the tracked po.Lines
+    // navigation. Adding to the loaded navigation of an ALREADY-PERSISTED, change-tracked PurchaseOrder makes EF emit
+    // a spurious optimistic-concurrency UPDATE against the parent (rowVersion) that fails "0 rows affected" when
+    // batched with the child INSERT; the explicit-FK DbSet add inserts the line cleanly without touching the parent's
+    // concurrency token. (For a brand-new PO the insert path below still uses the navigation — that aggregate is all-Added.)
+    private static void SyncLines(IAppDbContext db, PurchaseOrder po, PoRecord rec,
         IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, Guid> taxMap, DateTime now)
     {
-        var byPos = po.Lines.Where(l => !l.IsDeleted).ToDictionary(l => l.PositionNo);
+        var byKey = new Dictionary<(int, int), PurchaseOrderLine>();
+        foreach (var existing in po.Lines.Where(l => !l.IsDeleted))
+            byKey[(existing.PositionNo, existing.SequenceNo)] = existing; // last-wins guards any legacy dup pre-index
         foreach (var l in rec.Lines)
         {
-            if (byPos.TryGetValue(l.PositionNo, out var line))
+            if (byKey.TryGetValue((l.PositionNo, l.SequenceNo), out var line))
             {
                 Apply(line, l, itemMap, taxMap); line.UpdatedBy = "infor:inbound"; line.UpdatedOn = now;
             }
             else
             {
-                po.Lines.Add(NewLine(l, itemMap, taxMap, now));
+                var newLine = NewLine(l, itemMap, taxMap, now);
+                newLine.PurchaseOrderId = po.Id;
+                db.PurchaseOrderLines.Add(newLine);
             }
         }
     }

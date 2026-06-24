@@ -66,7 +66,11 @@ public class GetPurchaseOrderListQueryHandler : IRequestHandler<GetPurchaseOrder
                 x.po.PoType.ToString(), x.po.PoDate, x.po.PoStatus.ToString(),
                 x.po.Version, x.po.CreatedOn,
                 // PO-response mode from the joined supplier — per-row accept/reject gating, no N+1.
-                x.s.PoResponseMode.ToString()))
+                x.s.PoResponseMode.ToString(),
+                // Total = sum of live line net amounts (Price − DiscountAmount); correlated subquery, paged so bounded.
+                _db.PurchaseOrderLines.Where(l => !l.IsDeleted && l.PurchaseOrderId == x.po.Id)
+                    .Sum(l => (decimal?)(l.Price - l.DiscountAmount)) ?? 0m,
+                x.po.CurrencyCode, x.po.PaymentTerms, x.po.DeliveryTerms))
             .ToListAsync(ct);
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling((double)total / pageSize);

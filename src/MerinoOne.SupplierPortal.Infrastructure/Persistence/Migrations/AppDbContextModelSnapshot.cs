@@ -5933,8 +5933,6 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ItemId");
 
-                    b.HasIndex("PurchaseOrderId");
-
                     b.HasIndex("Seq")
                         .IsUnique()
                         .HasDatabaseName("UX_PurchaseOrderLine_purchaseOrderLineSeq");
@@ -5943,6 +5941,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TaxId")
                         .HasDatabaseName("IX_PurchaseOrderLine_taxId");
+
+                    b.HasIndex("PurchaseOrderId", "PositionNo", "SequenceNo")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PurchaseOrderLine_po_position_seq")
+                        .HasFilter("[isDeleted] = 0");
 
                     b.ToTable("PurchaseOrderLine", "proc");
                 });
