@@ -16,7 +16,9 @@ public record CityRecord(string Code, string Description, string CountryCode, st
 public record PostalCodeRecord(string Code, string? Area, string CountryCode, string? StateCode, string? CityCode, bool IsActive = true);
 public record UnitRecord(string Code, string Description, string UnitType, string? IsoCode, int DecimalPlaces, decimal ConversionFactor, string? BaseUnitCode, bool IsActive = true);
 public record ItemGroupRecord(string Code, string Description, bool IsActive = true);
-public record ItemRecord(string Code, string Description, string? UnitCode, string? ItemGroupCode, string? HsnCode, bool IsActive = true);
+// IsSerialized / IsLotControlled — LN-fed inventory control flags (Item.IsSerialized / IsLotControlled). Trailing
+// optional (default false) so existing payloads stay valid. ASN line capture reads these for serial / lot entry.
+public record ItemRecord(string Code, string Description, string? UnitCode, string? ItemGroupCode, string? HsnCode, bool IsActive = true, bool IsSerialized = false, bool IsLotControlled = false);
 public record TaxRecord(string Code, string Description, decimal? TaxRate = null, bool IsActive = true);
 
 // ---- Tenant-scoped push bodies (no CompanyCode) ----

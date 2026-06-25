@@ -174,7 +174,7 @@ public class UpsertItemsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
     public Task<UpsertResultDto> Handle(UpsertItemsCommand request, CancellationToken ct)
     {
         var recs = request.Body.Items;
-        var canonical = recs.Select(r => $"{r.Code.Trim().ToUpperInvariant()}|{(r.Description ?? "").Trim()}|{r.UnitCode}|{r.ItemGroupCode}|{r.HsnCode}|{r.IsActive}");
+        var canonical = recs.Select(r => $"{r.Code.Trim().ToUpperInvariant()}|{(r.Description ?? "").Trim()}|{r.UnitCode}|{r.ItemGroupCode}|{r.HsnCode}|{r.IsActive}|{r.IsSerialized}|{r.IsLotControlled}");
         var codes = recs.Select(r => r.Code.Trim());
         return exec.ExecuteAsync(SharedEndpoint.Item, request.Body.CompanyCode, request.BoundCompanyIds, request.IdempotencyKey,
             recs.Count, canonical, codes, request.Body, Upsert, ct);
@@ -200,6 +200,10 @@ public class UpsertItemsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
             foreach (var rec in recs)
             {
                 var code = rec.Code.Trim();
+                // Domain rule (CK_Item_serialized_xor_lot): an item is serial- OR lot-controlled, never both.
+                // Fail this row cleanly here (poison-row isolation) instead of letting the SQL CHECK leak its name.
+                if (rec.IsSerialized && rec.IsLotControlled)
+                { results.Add(new RowResult(code, RowOutcome.Failed, "An item cannot be both serialized and lot-controlled.")); continue; }
                 Guid? unitId = null, groupId = null;
                 if (!string.IsNullOrWhiteSpace(rec.UnitCode))
                 {
@@ -220,6 +224,7 @@ public class UpsertItemsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
                     row.HsnCode = InboundResolve.Norm(rec.HsnCode);
                     row.UnitId = unitId; row.ItemGroupId = groupId;
                     row.IsActive = rec.IsActive;
+                    row.IsSerialized = rec.IsSerialized; row.IsLotControlled = rec.IsLotControlled;
                     row.UpdatedBy = "infor:inbound"; row.UpdatedOn = now;
                     results.Add(new RowResult(code, RowOutcome.Updated, null));
                 }
@@ -230,6 +235,7 @@ public class UpsertItemsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
                         Id = Guid.NewGuid(), TenantId = tenantId, TenantEntityId = sourceId, Code = code,
                         Description = (rec.Description ?? "").Trim(),
                         HsnCode = InboundResolve.Norm(rec.HsnCode), UnitId = unitId, ItemGroupId = groupId, IsActive = rec.IsActive,
+                        IsSerialized = rec.IsSerialized, IsLotControlled = rec.IsLotControlled,
                         CreatedBy = "infor:inbound", CreatedOn = now
                     });
                     results.Add(new RowResult(code, RowOutcome.Inserted, null));

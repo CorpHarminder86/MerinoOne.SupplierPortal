@@ -125,6 +125,15 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
     [RequestSizeLimit(2_000_000)]
     [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Item")]
     [EndpointSummary("Push items (Infor LN)")]
+    [EndpointDescription(@"Upserts company-scoped Item master rows pushed by Infor LN (ICompanyScoped, ERP-fed). CompanyCode is resolved + normalized to the share-group source; upsert keyed on (sourceId, Code). Unit + item group are referenced by code (resolved within the source company).
+Auth: X-APIKey scheme; key must carry `Integration.Inbound.Item` and be bound to the source company the body resolves to.
+Headers:
+- **Idempotency-Key**: Optional — a replay with the same key (or identical body) is a no-op.
+Body: { companyCode, items:[{ code, description, unitCode?, itemGroupCode?, hsnCode?, isActive, isSerialized, isLotControlled }] }.
+- **isSerialized**: Optional (default false) — item is serial-controlled; ASN line capture then requires serial numbers.
+- **isLotControlled**: Optional (default false) — item is lot/batch-controlled; ASN line capture then requires lot + expiry.
+- isSerialized and isLotControlled are MUTUALLY EXCLUSIVE (an item is serial- or lot-controlled, not both); a row with both true fails as Failed (the rest of the batch still upserts).
+Behaviour: 200 + UpsertResultDto (per-row Inserted/Updated/Failed); 400 unknown company / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
     public async Task<Result<UpsertResultDto>> Items([FromBody] PushItemsRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertItemsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
