@@ -1,4 +1,3 @@
-using System.Text.Json;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Integration;
@@ -17,8 +16,10 @@ public record AcceptPoCommand(Guid PurchaseOrderId, AcceptPoRequest Body) : IReq
 /// performs the LN post. No LN HTTP call inside the unit of work (fixes D1), key reused across retries (D2),
 /// failures become retryable IntegrationErrors via the dispatcher (D3).
 ///
-/// Gated on <c>poResponseMode = Manual</c> — for <c>Auto</c> suppliers the portal auto-accepts at PO release
-/// (server-side hook), so a manual accept is rejected (409).
+/// R4 (2026-06-26) — D1/D2: ACCEPT IS ACCEPT-ONLY now (the old "accept with an alternate/proposed date" branch
+/// is retired — all counter-proposals flow through the PurchaseOrderNegotiation aggregate). For
+/// <c>PoConfirmationMode.AutoAccept</c> suppliers the portal auto-stamps Accepted at PO release (server-side hook),
+/// so a manual accept is rejected (409); AcceptToShip / AcknowledgeToShip suppliers accept here manually.
 /// </summary>
 public class AcceptPoCommandHandler : IRequestHandler<AcceptPoCommand, Unit>
 {
@@ -36,29 +37,21 @@ public class AcceptPoCommandHandler : IRequestHandler<AcceptPoCommand, Unit>
                  ?? throw new NotFoundException("PurchaseOrder", request.PurchaseOrderId);
 
         var mode = await _db.Suppliers.Where(s => s.Id == po.SupplierId)
-            .Select(s => s.PoResponseMode).FirstOrDefaultAsync(ct);
-        if (mode == PoResponseMode.Auto)
-            throw new ConflictException("This supplier is in Auto PO-response mode; PO acceptance is handled automatically at release.");
+            .Select(s => s.PoConfirmationMode).FirstOrDefaultAsync(ct);
+        if (mode == PoConfirmationMode.AutoAccept)
+            throw new ConflictException("This supplier is in AutoAccept confirmation mode; PO acceptance is handled automatically at release.");
 
-        if (request.Body.ProposedDate.HasValue)
-        {
-            po.ProposedDeliveryDate = request.Body.ProposedDate.Value;
-            po.PoStatus = PoStatus.DateProposed;
-        }
-        else
-        {
-            po.AcceptedAt = DateTime.UtcNow;
-            po.PoStatus = PoStatus.Accepted;
-        }
+        po.AcceptedAt = DateTime.UtcNow;
+        po.PoStatus = PoStatus.Accepted;
 
         if (!string.IsNullOrWhiteSpace(request.Body.Notes))
             po.Notes = request.Body.Notes;
 
         // Deterministic key — REUSED across retries so LN dedupes (doubles as the ERP correlation id / portalRef).
         // Tenant-qualified (review B2): PoNumber is unique within the tenant; the key must be tenant-unique.
+        // R4 (2026-06-26) — D2: accept is accept-only (no proposed-date payload).
         var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "accept");
-        var payload = JsonSerializer.Serialize(new { proposedDate = request.Body.ProposedDate?.ToString("o") });
-        await _outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, payload, ct);
+        await _outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, null, ct);
 
         await _db.SaveChangesAsync(ct);   // PO state + outbox row in one transaction; dispatch is post-commit.
         return Unit.Value;

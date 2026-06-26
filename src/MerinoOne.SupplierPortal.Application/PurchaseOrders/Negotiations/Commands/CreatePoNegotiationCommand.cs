@@ -69,6 +69,12 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
         var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == po.SupplierId, ct)
                        ?? throw new NotFoundException("Supplier", po.SupplierId);
 
+        // R4 (2026-06-26) — D1: the negotiate entry-point is gated on the supplier's AllowNegotiate toggle. A
+        // supplier configured no-negotiate cannot raise a counter-proposal (UC-PO-04). 409 (conflicting config),
+        // mirrors the AllowReject gate on /reject.
+        if (!supplier.AllowNegotiate)
+            throw new ConflictException("This supplier is not permitted to negotiate purchase orders.");
+
         // Permission-based supplier write-path authorization (see XML doc). Throws ForbiddenException (403).
         await _guard.EnsureCanWriteAsync(supplier.Id, po.SeccodeId, "PurchaseOrder.Negotiate", ct);
 

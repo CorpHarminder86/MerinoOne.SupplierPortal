@@ -47,7 +47,7 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
             .OrderBy(d => d.DocumentType)
             .Select(d => new SupplierDocumentDto(
                 d.Id,
-                d.DocumentType.ToString(),
+                d.DocumentType,
                 d.FileName,
                 d.FileSizeKb,
                 d.MimeType,
@@ -159,8 +159,11 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
             s.PaymentTermCode,
             s.DeliveryTermId,
             s.DeliveryTermCode,
-            s.PoResponseMode.ToString(),
-            s.ErpCode
+            s.PoConfirmationMode.ToString(),   // R4 (2026-06-26) — D1 (DTO field name kept as PoResponseMode).
+            s.ErpCode,
+            // R4 (2026-06-26) — Phase 5b / D1: the action toggles that travel with the confirmation mode.
+            s.AllowNegotiate,
+            s.AllowReject
         );
     }
 }

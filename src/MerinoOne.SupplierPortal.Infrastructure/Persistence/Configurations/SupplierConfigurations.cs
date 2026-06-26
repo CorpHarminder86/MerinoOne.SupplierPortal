@@ -46,9 +46,17 @@ public class SupplierConfiguration : IEntityTypeConfiguration<SupplierEntity>
         b.Property(x => x.DeliveryTermId).HasColumnName("deliveryTermId").HasColumnType("uniqueidentifier");
         b.Property(x => x.PaymentTermCode).HasColumnName("paymentTermCode").HasMaxLength(40);
         b.Property(x => x.DeliveryTermCode).HasColumnName("deliveryTermCode").HasMaxLength(40);
-        b.Property(x => x.PoResponseMode).HasColumnName("poResponseMode").HasConversion<string>()
-            .HasMaxLength(20).HasDefaultValue(PoResponseMode.Manual).IsRequired();
+        // R4 (2026-06-26) — D1: retyped to PoConfirmationMode; the DB COLUMN NAME IS UNCHANGED ("poResponseMode")
+        // so 2b only data-migrates the stored string values (Manual→AcceptToShip, Auto→AutoAccept) — no rename.
+        b.Property(x => x.PoConfirmationMode).HasColumnName("poResponseMode").HasConversion<string>()
+            .HasMaxLength(20).HasDefaultValue(PoConfirmationMode.AcceptToShip).IsRequired();
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
+        // R4 (2026-06-26) — TSD R4 Addendum §3.4: PO confirmation-gate action toggles. ADDITIVE this phase
+        // (the PoResponseMode→PoConfirmationMode replacement + gate wiring is Phase 2). NOT NULL DEFAULT 1
+        // (EF-auto-named defaults) so existing rows are safe.
+        b.Property(x => x.AllowNegotiate).HasColumnName("allowNegotiate").HasColumnType("bit").HasDefaultValue(true);
+        b.Property(x => x.AllowReject).HasColumnName("allowReject").HasColumnType("bit").HasDefaultValue(true);
 
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_Supplier_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);

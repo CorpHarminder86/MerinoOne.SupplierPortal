@@ -40,8 +40,20 @@ public class Supplier : BaseAggregateRoot
     public DeliveryTerm? DeliveryTerm { get; set; }
     public string? PaymentTermCode { get; set; }
     public string? DeliveryTermCode { get; set; }
-    public PoResponseMode PoResponseMode { get; set; } = PoResponseMode.Manual;
+
+    // R4 (2026-06-26) — TSD R4 Addendum §3.4 / D1: the PO confirmation mode that drives the ship-gate (§6.2).
+    // REPLACES the old PoResponseMode {Manual,Auto}; the DB COLUMN stays "poResponseMode" (HasColumnName), so 2b
+    // only data-migrates the stored values (Manual→AcceptToShip, Auto→AutoAccept) — no column rename. Default
+    // AcceptToShip (the strictest, gate-never-undefined default).
+    public PoConfirmationMode PoConfirmationMode { get; set; } = PoConfirmationMode.AcceptToShip;
     public string? ErpCode { get; set; }
+
+    // R4 (2026-06-26) — TSD R4 Addendum §3.4, Component 3 (PO Confirmation Gate). Per-supplier action toggles
+    // that accompany the confirmation mode: whether the supplier may negotiate (propose new terms) or reject/
+    // decline a PO. NOT NULL DEFAULT 1 so existing rows are safe. AllowReject gates /reject; AllowNegotiate gates
+    // the PO Negotiation create (CreatePoNegotiationCommand).
+    public bool AllowNegotiate { get; set; } = true;
+    public bool AllowReject { get; set; } = true;
 
     public ICollection<SupplierVerification> Verifications { get; set; } = new List<SupplierVerification>();
     public ICollection<SupplierAddress> Addresses { get; set; } = new List<SupplierAddress>();

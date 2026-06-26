@@ -1,8 +1,11 @@
 using FluentValidation;
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Documents;
 using MerinoOne.SupplierPortal.Application.Invoices;
+using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -27,27 +30,34 @@ namespace MerinoOne.SupplierPortal.Application.Shipments.Commands;
 /// </list>
 /// ASN status + junction (unchanged) + draft Invoice + Outbox row all commit in ONE <c>SaveChangesAsync</c>.
 /// </summary>
-public record SubmitAsnCommand(Guid Id) : IRequest<AsnDetailDto>;
+// R4 (2026-06-26) — §6.5 / UC-PO-09: OverrideReason carries the optional admin gate-override reason on submit.
+// R4 (2026-06-26) — Phase 4 / §8.3 / UC-ATT-03: AcknowledgeMissingAttachments confirms proceeding past a missing
+// Warning-level attachment. Returns SubmitOutcome<AsnDetailDto> so the Warning "confirm to proceed" path can be
+// modelled WITHOUT throwing (Mandatory-missing still throws ValidationException → 400).
+public record SubmitAsnCommand(Guid Id, string? OverrideReason = null, bool AcknowledgeMissingAttachments = false)
+    : IRequest<SubmitOutcome<AsnDetailDto>>;
 
 public class SubmitAsnCommandValidator : AbstractValidator<SubmitAsnCommand>
 {
     public SubmitAsnCommandValidator() => RuleFor(x => x.Id).NotEmpty();
 }
 
-public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, AsnDetailDto>
+public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, SubmitOutcome<AsnDetailDto>>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly IOutboxDispatcher _outbox;
     private readonly DraftInvoiceFromAsnFactory _invoiceFactory;
+    private readonly AttachmentSubmitGuard _attachmentGuard;
 
     public SubmitAsnCommandHandler(
-        IAppDbContext db, ICurrentUser user, IOutboxDispatcher outbox, DraftInvoiceFromAsnFactory invoiceFactory)
+        IAppDbContext db, ICurrentUser user, IOutboxDispatcher outbox, DraftInvoiceFromAsnFactory invoiceFactory,
+        AttachmentSubmitGuard attachmentGuard)
     {
-        _db = db; _user = user; _outbox = outbox; _invoiceFactory = invoiceFactory;
+        _db = db; _user = user; _outbox = outbox; _invoiceFactory = invoiceFactory; _attachmentGuard = attachmentGuard;
     }
 
-    public async Task<AsnDetailDto> Handle(SubmitAsnCommand request, CancellationToken ct)
+    public async Task<SubmitOutcome<AsnDetailDto>> Handle(SubmitAsnCommand request, CancellationToken ct)
     {
         var asn = await _db.Asns.FirstOrDefaultAsync(a => a.Id == request.Id, ct)
                   ?? throw new NotFoundException("Asn", request.Id);
@@ -113,6 +123,17 @@ public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, AsnDeta
         var coveredPoSet = coveredPoIds.ToHashSet();
         if (asn.PurchaseOrderId.HasValue) coveredPoSet.Add(asn.PurchaseOrderId.Value);
         var poIdList = coveredPoSet.ToList();
+
+        // R4 (2026-06-26) — Addendum §6.2 / §6.5, Component 3 (PO Confirmation Gate). Re-evaluate the ship-gate per
+        // covered PO on Draft → Submitted (a mid-fulfilment ERP Modify can have reset a covered PO to Released since
+        // the draft was saved — UC-ASN-08). This gates ONLY this Draft submission; already-Submitted/InTransit ASNs
+        // are never re-blocked (this handler asserts Draft up front — UC-ASN-09). Admin override (UC-PO-09): a caller
+        // holding PurchaseOrder.OverrideGate with a non-empty OverrideReason proceeds + writes an audited row.
+        var coveredPos = await _db.PurchaseOrders.Where(p => poIdList.Contains(p.Id)).ToListAsync(ct);
+        var confirmationMode = await _db.Suppliers.Where(s => s.Id == asn.SupplierId)
+            .Select(s => s.PoConfirmationMode).FirstOrDefaultAsync(ct);
+        PoConfirmationGateEnforcer.Enforce(
+            _db, coveredPos, confirmationMode, request.OverrideReason, _user, asn.Id, asn.AsnNumber, now);
 
         var errors = new Dictionary<string, List<string>>();
         void AddErr(string key, string msg)
@@ -222,6 +243,17 @@ public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, AsnDeta
         if (errors.Count > 0)
             throw new ValidationException(errors.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToArray()));
 
+        // ---- Attachment Requirement Governance (Phase 4 / §8.3, UC-ATT-01..05) --------------------------
+        // Evaluate the active policy (entity "Asn", supplier = this ASN's supplier) AFTER all line validation but
+        // BEFORE the state flip. Mandatory-missing throws (400). Warning-missing + not-acknowledged returns the
+        // ConfirmationRequired outcome WITHOUT mutating the ASN. Acknowledged-skip stages a skip AuditEntry that
+        // commits in this handler's SaveChangesAsync (same transaction).
+        var attachmentDecision = await _attachmentGuard.EvaluateAsync(
+            _db, DocumentOwnerTypes.Asn, asn.Id, asn.AsnNumber, asn.SupplierId,
+            request.AcknowledgeMissingAttachments, asn.TenantId, now, ct);
+        if (attachmentDecision.RequiresConfirmation)
+            return SubmitOutcome<AsnDetailDto>.Confirm(attachmentDecision.MissingWarning);
+
         // ---- Flip to Submitted + stamp + ERP correlation key --------------------------------------------
         // deterministic — reused across retries; tenant-qualified (review B2).
         var key = OutboxKey.For(OutboxEntity.Asn, asn.TenantId, asn.AsnNumber, "submit");
@@ -238,9 +270,10 @@ public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, AsnDeta
         // ---- Outbox: ASN -> ERP post, dispatched POST-COMMIT (never an LN HTTP call inside this txn) ------
         await _outbox.EnqueueAsync(OutboxTransactionType.AsnPost, OutboxEntity.Asn, asn.Id, key, null, ct);
 
-        // ONE transaction: ASN status + draft Invoice (+ lines) + Outbox row.
+        // ONE transaction: ASN status + draft Invoice (+ lines) + Outbox row + any attachment-skip audit.
         await _db.SaveChangesAsync(ct);
 
-        return await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct);
+        var dto = await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct);
+        return SubmitOutcome<AsnDetailDto>.Completed(dto);
     }
 }

@@ -17,11 +17,15 @@ public static class PermissionCatalog
         new PermissionSeed("Supplier.ApproveChange",       "Approve supplier change",   "Supplier",       "Review/approve/reject a supplier change request"),
         new PermissionSeed("PurchaseOrder.Read",           "View POs",                  "Purchase Order", "View purchase orders"),
         new PermissionSeed("PurchaseOrder.Acknowledge",    "Acknowledge PO",            "Purchase Order", "Acknowledge receipt of a PO"),
-        new PermissionSeed("PurchaseOrder.Accept",         "Accept PO",                 "Purchase Order", "Accept, reject or propose a date on a PO"),
-        new PermissionSeed("PurchaseOrder.ApproveProposal","Approve PO proposal",       "Purchase Order", "Approve a supplier-proposed delivery date"),
+        new PermissionSeed("PurchaseOrder.Accept",         "Accept PO",                 "Purchase Order", "Accept or reject a PO"),
         // R4 (2026-06-24) — PO negotiation lifecycle (supplier raises; buyer approves/rejects).
+        // R4 (2026-06-26) — D2: PurchaseOrder.ApproveProposal REMOVED (the date-only propose/approve flow is retired;
+        // PO negotiation replaces it). 2b removes the seeded permission + role-permission rows.
         new PermissionSeed("PurchaseOrder.Negotiate",          "Negotiate PO",          "PurchaseOrder",  "Raise a PO negotiation (change qty/delivery date)"),
         new PermissionSeed("PurchaseOrder.ApproveNegotiation", "Approve PO negotiation","PurchaseOrder",  "Review/approve/reject a PO negotiation"),
+        // R4 (2026-06-26) — §6.5 / UC-PO-09: admin-only PO confirmation-gate override (ship despite the gate with a
+        // mandatory reason + audited override row). Granted SuperAdmin + Admin only.
+        new PermissionSeed("PurchaseOrder.OverrideGate",   "Override PO ship gate",     "Purchase Order", "Override the PO confirmation gate to ship despite an unconfirmed/contested PO (mandatory reason, audited)"),
         new PermissionSeed("PurchaseOrder.Write",          "Create/update PO",          "Purchase Order", "Create or update PO documents (ERP sync, admin)"),
         new PermissionSeed("DeliverySchedule.Read",        "View delivery schedules",   "Shipment",       "View delivery schedules"),
         new PermissionSeed("DeliverySchedule.Propose",     "Propose delivery schedule", "Shipment",       "Propose a delivery schedule"),
@@ -82,9 +86,10 @@ public static class PermissionCatalog
         ["PurchaseOrder.Read"]            = new[] { "SuperAdmin","Admin","Buyer","Finance","Supplier","ReadOnly" },
         ["PurchaseOrder.Acknowledge"]     = new[] { "SuperAdmin","Supplier" },
         ["PurchaseOrder.Accept"]          = new[] { "SuperAdmin","Supplier" },
-        ["PurchaseOrder.ApproveProposal"] = new[] { "SuperAdmin","Buyer" },
         ["PurchaseOrder.Negotiate"]          = new[] { "SuperAdmin","Supplier" },
         ["PurchaseOrder.ApproveNegotiation"] = new[] { "SuperAdmin","Buyer" },
+        // R4 (2026-06-26) — §6.5: gate override is admin-only (SuperAdmin + Admin).
+        ["PurchaseOrder.OverrideGate"]    = new[] { "SuperAdmin","Admin" },
         ["PurchaseOrder.Write"]           = new[] { "SuperAdmin","Buyer" },
         ["DeliverySchedule.Read"]         = new[] { "SuperAdmin","Admin","Buyer","Finance","Supplier","ReadOnly" },
         ["DeliverySchedule.Propose"]      = new[] { "SuperAdmin","Supplier" },

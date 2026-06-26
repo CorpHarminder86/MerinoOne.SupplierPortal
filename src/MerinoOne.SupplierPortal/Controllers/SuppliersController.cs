@@ -103,15 +103,23 @@ Returns: List<SupplierVerificationDto> ordered chronologically; 404 if supplier 
 Filters / params:
 - **id**: Required — supplier GUID.
 Body:
-- **body**: ApproveSupplierRequest with approver notes.
+- **body**: ApproveSupplierRequest with approver notes + AcknowledgeMissingAttachments (§8.3).
 Side effects:
 - Flips supplier status to Approved + stamps approver/timestamp.
 - Triggers downstream Infor master-data sync.
-Returns: empty success; 404 if not found; 409 if not in approvable state.")]
-    public async Task<Result> Approve(Guid id, [FromBody] ApproveSupplierRequest body, CancellationToken ct)
+Attachment governance (§8.3): a missing MANDATORY supplier attachment blocks (400, message names the types). A
+missing WARNING attachment on the first call returns 200 with confirmationRequired=true + confirmationMessage +
+missingAttachments (NOT an error, supplier NOT approved); re-approve with AcknowledgeMissingAttachments=true to
+proceed (the skip is audited).
+Returns: empty success; 200 confirmationRequired on a Warning skip; 404 if not found; 400 on mandatory-attachment
+missing; 409 if not in approvable state.")]
+    public async Task<Result<object?>> Approve(Guid id, [FromBody] ApproveSupplierRequest body, CancellationToken ct)
     {
-        await _mediator.Send(new ApproveSupplierCommand(id, body), ct);
-        return Result.Ok(HttpContext.TraceIdentifier);
+        var outcome = await _mediator.Send(new ApproveSupplierCommand(id, body), ct);
+        return outcome.IsCompleted
+            ? Result<object?>.Ok(null, HttpContext.TraceIdentifier)
+            : Result<object?>.NeedsConfirmation(
+                outcome.ConfirmationMessage!, outcome.MissingWarning, HttpContext.TraceIdentifier);
     }
 
     [HttpPost("{id:guid}/reject")]
@@ -214,8 +222,9 @@ suppliers see only their own. Filters / params: **withinDays** (optional). Retur
 
     [HttpPost("{id:guid}/po-response-mode")]
     [Authorize(Policy = "Supplier.Approve")]
-    [EndpointSummary("Set supplier PO-response mode")]
-    [EndpointDescription(@"Admin sets a supplier's PO-response behaviour (Manual / Auto). Editable post-approval.
+    [EndpointSummary("Set supplier PO-confirmation mode")]
+    [EndpointDescription(@"Admin sets a supplier's PO confirmation mode (AutoAccept / AcknowledgeToShip / AcceptToShip)
+plus the AllowNegotiate / AllowReject action toggles. Editable post-approval.
 Body: SetPoResponseModeRequest. Returns empty success; 404 if not found; 400 on invalid mode. Requires **Supplier.Approve**.")]
     public async Task<Result> SetPoResponseMode(Guid id, [FromBody] SetPoResponseModeRequest body, CancellationToken ct)
     {

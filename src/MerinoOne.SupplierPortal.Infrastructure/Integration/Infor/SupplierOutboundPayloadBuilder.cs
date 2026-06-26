@@ -67,7 +67,8 @@ internal static class SupplierOutboundPayloadBuilder
             IsActive = supplier.IsActiveSupplier,
             PaymentTermCode = supplier.PaymentTermCode,
             DeliveryTermCode = supplier.DeliveryTermCode,
-            PoResponseMode = supplier.PoResponseMode.ToString(),
+            // R4 (2026-06-26) — D1: PoConfirmationMode (was PoResponseMode). Payload field name kept stable for LN.
+            PoResponseMode = supplier.PoConfirmationMode.ToString(),
             Addresses = supplier.Addresses.Where(a => !a.IsDeleted).Select(a => new
             {
                 a.AddressType,

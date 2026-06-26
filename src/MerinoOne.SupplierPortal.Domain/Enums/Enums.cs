@@ -28,7 +28,11 @@ public enum PoStatus
     Acknowledged,
     Accepted,
     Rejected,
-    DateProposed,
+    // R4 (2026-06-26) — TSD R4 Addendum §3.5 / D2: DateProposed REMOVED. The old date-only "propose a delivery
+    // date" flow is retired; ALL qty/price/date counter-proposals now flow through the single PurchaseOrderNegotiation
+    // aggregate (PoStatus.Negotiation). 2b data-migrates any residual DateProposed rows → Released. (gap left here so
+    // existing persisted enum-name strings keep their position — string-persisted, no DB CHECK; the C# enum is the
+    // guard. The removed member was between Rejected and PartiallyDelivered.)
     PartiallyDelivered,
     Delivered,
     Closed,
@@ -36,6 +40,8 @@ public enum PoStatus
     // R4 (2026-06-24) — PO Negotiation. Persisted as the enum name (string), no DB CHECK on poStatus — the C#
     // enum is the guard. Negotiation = an open supplier negotiation is in flight; Approved = buyer approved the
     // negotiated terms (ERP re-syncs the revised PO inbound; local lines are NOT mutated). APPEND-ONLY.
+    // R4 (2026-06-26) — D2 / §6.2: BOTH Negotiation and Approved BLOCK shipping in every confirmation mode (they
+    // replace the removed DateProposed row in the ship-gate matrix — see PoConfirmationPolicy.AllowsShipping).
     Negotiation,
     Approved
 }
@@ -96,12 +102,20 @@ public enum DocumentType
 }
 
 /// <summary>
-/// Supplier PO-response behaviour. <c>Manual</c> = supplier explicitly Acknowledges/Accepts/Rejects each PO;
-/// <c>Auto</c> = the portal auto-acknowledges + auto-confirms the delivery date + posts the acceptance to ERP
-/// at PO release (server-side hook, owned by backend-developer). Persisted as the enum name (string), no CHECK.
+/// R4 (2026-06-26) — TSD R4 Addendum §3.4 / D1, Component 3 (PO Confirmation Gate). Per-supplier confirmation
+/// mode that decides which PO state unblocks shipping (the ship-gate matrix, §6.2). REPLACES the old
+/// <c>PoResponseMode {Manual,Auto}</c> (column kept as <c>poResponseMode</c>; 2b only data-migrates the stored
+/// values Manual→AcceptToShip / Auto→AutoAccept). Persisted as the enum name (string), no DB CHECK — the C# enum
+/// is the guard.
+/// <list type="bullet">
+///   <item><c>AutoAccept</c> — the portal auto-stamps Accepted + acceptedAt at PO release (ship-gate open at
+///         Released); retains the old <c>Auto</c> behaviour. No manual confirmation step.</item>
+///   <item><c>AcknowledgeToShip</c> — Acknowledged (or Accepted) unblocks shipping.</item>
+///   <item><c>AcceptToShip</c> (default) — the PO must be Accepted before shipping.</item>
+/// </list>
 /// APPEND-ONLY.
 /// </summary>
-public enum PoResponseMode { Manual, Auto }
+public enum PoConfirmationMode { AutoAccept, AcknowledgeToShip, AcceptToShip }
 
 // R4 (2026-06-22) — Module 2 (Supplier Change Management). All persisted as the enum name (string), no DB CHECK
 // — the C# enum is the guard (matches the dominant status-enum convention). APPEND-ONLY.
@@ -177,3 +191,12 @@ public enum TransactionalInboundEntity { Grn, Payment, InvoiceStatus, ErpAck, Po
 
 /// <summary>Unit dimension / quantity type (INFOR LN unit type).</summary>
 public enum UnitType { Quantity, Length, Area, Volume, Mass, Time, Other }
+
+/// <summary>
+/// R4 (2026-06-26) — TSD R4 Addendum §3.8, Component 5 (Attachment Requirement Governance). The strength at
+/// which an attachment type is required when a transaction (ASN / Invoice / Supplier) is submitted:
+/// <c>Mandatory</c> = submit blocked until present; <c>Warning</c> = skippable after explicit confirmation
+/// (audited); <c>Optional</c> = skippable silently (also the default when no policy row exists). Persisted as
+/// the enum name (string), no DB CHECK — the C# enum is the guard. APPEND-ONLY.
+/// </summary>
+public enum AttachmentRequirement { Mandatory, Warning, Optional }

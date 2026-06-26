@@ -1,4 +1,5 @@
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Application.Shipments.Commands;
 using MerinoOne.SupplierPortal.Application.Shipments.Queries;
@@ -88,15 +89,25 @@ Returns: AsnDetailDto on success; 404 if not found; 409 if not Draft. Requires *
     [HttpPost("{id:guid}/submit")]
     [Authorize(Policy = "Asn.Write")]
     [EndpointSummary("Submit ASN")]
-    [EndpointDescription(@"Submits a DRAFT ASN (Draft -> Submitted). In ONE transaction: validates over-ship,
-lot/serial (per Item flags) and the single-currency guard; stamps submittedAt/by + erpSyncId; creates EXACTLY
-ONE draft Invoice spanning all the ASN's POs; enqueues the ASN->ERP post on the outbox (dispatched post-commit).
-Locks the ASN (and its attachments) against further edits.
-Returns: AsnDetailDto (Submitted, with DraftInvoiceId) on success; 400 on validation; 409 if not Draft. Requires **Asn.Write**.")]
-    public async Task<Result<AsnDetailDto>> Submit(Guid id, CancellationToken ct)
+    [EndpointDescription(@"Submits a DRAFT ASN (Draft -> Submitted). In ONE transaction: enforces the PO confirmation
+gate per covered PO; validates over-ship, lot/serial (per Item flags) and the single-currency guard; stamps
+submittedAt/by + erpSyncId; creates EXACTLY ONE draft Invoice spanning all the ASN's POs; enqueues the ASN->ERP
+post on the outbox (dispatched post-commit). Locks the ASN (and its attachments) against further edits.
+Body:
+- **body**: Optional SubmitAsnRequest — OverrideReason, used only by a caller holding PurchaseOrder.OverrideGate to
+  ship despite a blocking PO confirmation gate (audited); AcknowledgeMissingAttachments confirms proceeding past a
+  Warning-level attachment requirement (§8.3).
+Attachment governance (§8.3): a missing MANDATORY attachment blocks (400, message names the types). A missing
+WARNING attachment on the first call returns 200 with **confirmationRequired=true** + confirmationMessage +
+missingAttachments (NOT an error, nothing committed); re-submit with AcknowledgeMissingAttachments=true to proceed
+(the skip is audited).
+Returns: AsnDetailDto (Submitted, with DraftInvoiceId) on success; 200 confirmationRequired on a Warning skip; 400 on
+validation / gate block / mandatory-missing; 409 if not Draft. Requires **Asn.Write**.")]
+    public async Task<Result<AsnDetailDto>> Submit(Guid id, [FromBody] SubmitAsnRequest? body, CancellationToken ct)
     {
-        var data = await _mediator.Send(new SubmitAsnCommand(id), ct);
-        return Result<AsnDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+        var outcome = await _mediator.Send(
+            new SubmitAsnCommand(id, body?.OverrideReason, body?.AcknowledgeMissingAttachments ?? false), ct);
+        return outcome.ToResult(HttpContext.TraceIdentifier);
     }
 
     [HttpPost("{id:guid}/cancel")]

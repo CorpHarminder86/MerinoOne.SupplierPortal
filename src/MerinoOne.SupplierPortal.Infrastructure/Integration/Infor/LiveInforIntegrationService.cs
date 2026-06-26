@@ -99,12 +99,14 @@ public class LiveInforIntegrationService : IInforIntegrationService
         var po = await _db.PurchaseOrders.FindAsync(new object?[] { purchaseOrderId }, ct);
         if (po is null) return Fail("PurchaseOrder", $"PurchaseOrder {purchaseOrderId} not found.");
 
-        // TODO: confirm the real LN PO-acceptance / date-proposal field map.
+        // TODO: confirm the real LN PO-acceptance field map.
+        // R4 (2026-06-26) — D2: accept is accept-only (PurchaseOrder.ProposedDeliveryDate removed). The optional
+        // proposedDate parameter is retained on the interface but is null on the accept path now.
         var payload = new
         {
             PoNumber = po.PoNumber,
             Action = "Accept",
-            ProposedDeliveryDate = (proposedDate ?? po.ProposedDeliveryDate)?.ToString("o"),
+            ProposedDeliveryDate = proposedDate?.ToString("o"),
         };
         return await SendAsync("PurchaseOrder", EndpointPaths.PurchaseOrderAccept, payload, ct);
     }

@@ -51,7 +51,13 @@ public record SupplierDetailDto(
     Guid? DeliveryTermId,
     string? DeliveryTermCode,
     string PoResponseMode,
-    string? ErpCode);
+    string? ErpCode,
+    // R4 (2026-06-26) — Phase 5b / D1: the two action toggles that accompany PoResponseMode (the PO confirmation
+    // mode). AllowNegotiate gates the supplier's "Negotiation" affordance; AllowReject gates "Reject/Decline".
+    // Trailing optional (default true) so existing positional constructions stay valid; the supplier-settings UI
+    // round-trips all three via SetPoResponseModeRequest.
+    bool AllowNegotiate = true,
+    bool AllowReject = true);
 
 /// <summary>
 /// A portal user mapped to this supplier (via SupplierUserMap → SecRight). Resolved cross-company /
@@ -121,7 +127,11 @@ public record SupplierInviteSummaryDto(
     string Status);
 
 public record InviteSupplierRequest(string LegalName, string Email, string SupplierType);
-public record ApproveSupplierRequest(string? OverrideComment);
+// R4 (2026-06-26) — Phase 4 / §8.3 / UC-ATT-03: AcknowledgeMissingAttachments confirms proceeding past any
+// Warning-level attachment requirement on the Supplier entity at approval. First approve (false) with a missing
+// Warning attachment returns a 200 carrying ConfirmationRequired=true + the warning list; re-approve with true to
+// proceed (audited). Mandatory-missing always blocks (400).
+public record ApproveSupplierRequest(string? OverrideComment, bool AcknowledgeMissingAttachments = false);
 public record RejectSupplierRequest(string Reason);
 public record VerifyNicRequest(string[] Types);
 
@@ -233,8 +243,13 @@ public record SupplierLicenseExpiringDto(
     DateOnly? ExpiryDate,
     int? DaysToExpiry);
 
-/// <summary>Admin sets the supplier's PO-response behaviour (Manual / Auto).</summary>
-public record SetPoResponseModeRequest(string PoResponseMode);
+/// <summary>
+/// R4 (2026-06-26) — D1: admin sets the supplier's PO confirmation mode (AutoAccept / AcknowledgeToShip /
+/// AcceptToShip) plus the two action toggles (AllowNegotiate / AllowReject). Field name kept as PoResponseMode
+/// for contract stability (the UI is Phase 5). AllowNegotiate / AllowReject are optional (default true) so older
+/// callers stay source-compatible.
+/// </summary>
+public record SetPoResponseModeRequest(string PoResponseMode, bool AllowNegotiate = true, bool AllowReject = true);
 
 /// <summary>
 /// Internal user sets the supplier's commercial terms (R4 #1) — Currency + Payment/Delivery term FKs. The

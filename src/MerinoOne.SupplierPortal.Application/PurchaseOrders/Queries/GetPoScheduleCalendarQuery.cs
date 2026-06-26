@@ -50,7 +50,7 @@ public class GetPoScheduleCalendarQueryHandler : IRequestHandler<GetPoScheduleCa
                       && (po.PoStatus == PoStatus.Released
                           || po.PoStatus == PoStatus.Acknowledged
                           || po.PoStatus == PoStatus.Accepted
-                          || po.PoStatus == PoStatus.DateProposed
+                          || po.PoStatus == PoStatus.Negotiation   // R4 (2026-06-26) — D2: DateProposed retired → Negotiation.
                           || po.PoStatus == PoStatus.PartiallyDelivered)
                 select new { po.Id, po.PoNumber, po.SupplierId, SupplierName = s.LegalName, l.DeliveryDate, l.ItemCode, l.OrderQty };
 

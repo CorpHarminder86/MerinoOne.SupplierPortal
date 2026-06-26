@@ -12,7 +12,9 @@ public record AcknowledgePoCommand(Guid PurchaseOrderId, AcknowledgePoRequest Bo
 
 /// <summary>
 /// PO acknowledgement (supplier). MIGRATED onto the Increment 0 outbox: local state change + outbox row in one
-/// transaction; the post-commit dispatcher posts the acknowledgement to LN. Gated on <c>poResponseMode = Manual</c>.
+/// transaction; the post-commit dispatcher posts the acknowledgement to LN. R4 (2026-06-26) — D1: blocked for
+/// <c>PoConfirmationMode.AutoAccept</c> suppliers (auto-handled at release); AcceptToShip / AcknowledgeToShip
+/// suppliers acknowledge here manually.
 /// </summary>
 public class AcknowledgePoCommandHandler : IRequestHandler<AcknowledgePoCommand, Unit>
 {
@@ -30,9 +32,9 @@ public class AcknowledgePoCommandHandler : IRequestHandler<AcknowledgePoCommand,
                  ?? throw new NotFoundException("PurchaseOrder", request.PurchaseOrderId);
 
         var mode = await _db.Suppliers.Where(s => s.Id == po.SupplierId)
-            .Select(s => s.PoResponseMode).FirstOrDefaultAsync(ct);
-        if (mode == PoResponseMode.Auto)
-            throw new ConflictException("This supplier is in Auto PO-response mode; PO acknowledgement is handled automatically at release.");
+            .Select(s => s.PoConfirmationMode).FirstOrDefaultAsync(ct);
+        if (mode == PoConfirmationMode.AutoAccept)
+            throw new ConflictException("This supplier is in AutoAccept confirmation mode; PO acknowledgement is handled automatically at release.");
 
         // Idempotent: if already acknowledged or further along, leave as-is.
         if (po.PoStatus == PoStatus.Released)

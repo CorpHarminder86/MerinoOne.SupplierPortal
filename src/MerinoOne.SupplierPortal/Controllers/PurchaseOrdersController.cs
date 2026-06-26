@@ -64,7 +64,7 @@ only), this is gated on **PurchaseOrder.Read** and seccode-scoped, so a supplier
     [EndpointSummary("Items to be delivered")]
     [EndpointDescription(@"Enhancement R4 — Module 8. Open PO lines grouped by (ItemCode, DeliveryDate), netted
 against received GRN qty. OpenQty = OrderQty − Σ GoodsReceipt.ReceivedQty. Open-PO statuses: Released,
-Acknowledged, Accepted, DateProposed, PartiallyDelivered.
+Acknowledged, Accepted, Negotiation, PartiallyDelivered.
 Filters / params:
 - **page**: Optional — 1-based page index (default 1).
 - **pageSize**: Optional — rows per page (default 50, max 200).
@@ -142,7 +142,7 @@ Returns: empty success; 404 if not found; 409 if not in acknowledgeable state. R
     [HttpPost("{id:guid}/accept")]
     [Authorize(Policy = "PurchaseOrder.Accept")]
     [EndpointSummary("Accept PO")]
-    [EndpointDescription(@"Supplier commits to PO terms as issued.
+    [EndpointDescription(@"Supplier commits to PO terms as issued (accept-only — a counter-proposal goes through PO negotiation).
 Filters / params:
 - **id**: Required — PO GUID.
 Body:
@@ -153,7 +153,7 @@ Side effects:
 Returns: empty success; 404 if not found; 409 if not in acceptable state. Requires permission **PurchaseOrder.Accept**.")]
     public async Task<Result> Accept(Guid id, [FromBody] AcceptPoRequest? body, CancellationToken ct)
     {
-        await _mediator.Send(new AcceptPoCommand(id, body ?? new AcceptPoRequest(null)), ct);
+        await _mediator.Send(new AcceptPoCommand(id, body ?? new AcceptPoRequest()), ct);
         return Result.Ok(HttpContext.TraceIdentifier);
     }
 
@@ -175,37 +175,6 @@ Returns: empty success; 404 if not found; 409 if not in rejectable state. Requir
         return Result.Ok(HttpContext.TraceIdentifier);
     }
 
-    [HttpPost("{id:guid}/propose-date")]
-    [Authorize(Policy = "PurchaseOrder.Accept")]
-    [EndpointSummary("Propose PO date")]
-    [EndpointDescription(@"Supplier counter-proposes a revised delivery date for a PO line.
-Filters / params:
-- **id**: Required — PO GUID.
-Body:
-- **body**: ProposePoDateRequest with line reference + proposed date + justification.
-Side effects:
-- Creates a pending proposal awaiting buyer approval; PO stays in current state.
-Returns: empty success; 404 if not found; 409 if PO not in proposable state. Requires permission **PurchaseOrder.Accept**.")]
-    public async Task<Result> ProposeDate(Guid id, [FromBody] ProposePoDateRequest body, CancellationToken ct)
-    {
-        await _mediator.Send(new ProposePoDateCommand(id, body), ct);
-        return Result.Ok(HttpContext.TraceIdentifier);
-    }
-
-    [HttpPost("{id:guid}/approve-proposal")]
-    [Authorize(Policy = "PurchaseOrder.ApproveProposal")]
-    [EndpointSummary("Approve PO proposal")]
-    [EndpointDescription(@"Buyer approves a supplier-proposed date change.
-Filters / params:
-- **id**: Required — PO GUID.
-Body:
-- **body**: Optional ApproveProposalRequest with approver notes.
-Side effects:
-- Updates the PO line's committed date and clears the pending proposal.
-Returns: empty success; 404 if not found; 409 if no open proposal. Requires permission **PurchaseOrder.ApproveProposal**.")]
-    public async Task<Result> ApproveProposal(Guid id, [FromBody] ApproveProposalRequest? body, CancellationToken ct)
-    {
-        await _mediator.Send(new ApproveProposalCommand(id, body ?? new ApproveProposalRequest()), ct);
-        return Result.Ok(HttpContext.TraceIdentifier);
-    }
+    // R4 (2026-06-26) — D2: the date-only /propose-date + /approve-proposal endpoints are RETIRED. All
+    // counter-proposals (qty/price/date) now flow through PO Negotiation (POST /api/po-negotiations).
 }

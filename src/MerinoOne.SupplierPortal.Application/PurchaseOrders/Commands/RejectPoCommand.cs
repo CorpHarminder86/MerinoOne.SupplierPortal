@@ -22,7 +22,9 @@ public class RejectPoCommandValidator : AbstractValidator<RejectPoCommand>
 
 /// <summary>
 /// PO rejection (supplier). MIGRATED onto the Increment 0 outbox: local state change + outbox row in one
-/// transaction; the post-commit dispatcher posts the rejection (with reason) to LN. Gated on <c>poResponseMode = Manual</c>.
+/// transaction; the post-commit dispatcher posts the rejection (with reason) to LN. R4 (2026-06-26) — D1: blocked
+/// for <c>PoConfirmationMode.AutoAccept</c> suppliers (auto-handled at release), and gated on the supplier's
+/// <c>AllowReject</c> toggle (a supplier configured no-reject cannot decline a PO; UC-PO-05).
 /// </summary>
 public class RejectPoCommandHandler : IRequestHandler<RejectPoCommand, Unit>
 {
@@ -39,10 +41,13 @@ public class RejectPoCommandHandler : IRequestHandler<RejectPoCommand, Unit>
         var po = await _db.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == request.PurchaseOrderId, ct)
                  ?? throw new NotFoundException("PurchaseOrder", request.PurchaseOrderId);
 
-        var mode = await _db.Suppliers.Where(s => s.Id == po.SupplierId)
-            .Select(s => s.PoResponseMode).FirstOrDefaultAsync(ct);
-        if (mode == PoResponseMode.Auto)
-            throw new ConflictException("This supplier is in Auto PO-response mode; PO responses are handled automatically at release.");
+        var supplier = await _db.Suppliers.Where(s => s.Id == po.SupplierId)
+            .Select(s => new { s.PoConfirmationMode, s.AllowReject }).FirstOrDefaultAsync(ct)
+            ?? throw new NotFoundException("Supplier", po.SupplierId);
+        if (supplier.PoConfirmationMode == PoConfirmationMode.AutoAccept)
+            throw new ConflictException("This supplier is in AutoAccept confirmation mode; PO responses are handled automatically at release.");
+        if (!supplier.AllowReject)
+            throw new ConflictException("This supplier is not permitted to reject purchase orders.");
 
         po.PoStatus = PoStatus.Rejected;
         po.RejectionReason = request.Body.Reason;

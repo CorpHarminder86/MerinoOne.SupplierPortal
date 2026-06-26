@@ -28,7 +28,9 @@ public class PurchaseOrder : BaseAggregateRoot
     public DateTime? AcknowledgmentAt { get; set; }
     public DateTime? AcceptedAt { get; set; }
     public string? RejectionReason { get; set; }
-    public DateTime? ProposedDeliveryDate { get; set; }
+    // R4 (2026-06-26) — D2: ProposedDeliveryDate REMOVED. The old date-only propose/approve flow is retired; the
+    // single PurchaseOrderNegotiation aggregate is the sole negotiate path (per-line qty/price/date). 2b drops the
+    // proposedDeliveryDate column.
     public int Version { get; set; } = 1;
     public string? ErpSyncId { get; set; }
     public string? Notes { get; set; }

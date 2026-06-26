@@ -9,9 +9,10 @@ using Microsoft.EntityFrameworkCore;
 namespace MerinoOne.SupplierPortal.Application.Suppliers.Commands;
 
 /// <summary>
-/// Admin sets a supplier's PO-response mode (Manual / Auto). Editable post-approval (the field is NOT frozen at
-/// approval — §3.1(g)). For <c>Auto</c> the PO release path auto-acknowledges + auto-confirms + posts acceptance
-/// (feature-flagged hook — see <c>AutoPoReleaseHook</c>).
+/// R4 (2026-06-26) — D1: admin sets a supplier's PO confirmation mode (AutoAccept / AcknowledgeToShip /
+/// AcceptToShip) plus the action toggles AllowNegotiate / AllowReject. Editable post-approval (the field is NOT
+/// frozen at approval — §3.1(g)). For <c>AutoAccept</c> the PO release path auto-stamps Accepted + posts the
+/// acceptance (feature-flagged hook — see <c>ApplyAutoPoReleaseCommand</c>).
 /// </summary>
 public record SetSupplierPoResponseModeCommand(Guid SupplierId, SetPoResponseModeRequest Body) : IRequest<Unit>;
 
@@ -21,8 +22,8 @@ public class SetSupplierPoResponseModeCommandValidator : AbstractValidator<SetSu
     {
         RuleFor(x => x.Body.PoResponseMode)
             .NotEmpty()
-            .Must(v => Enum.TryParse<PoResponseMode>(v, ignoreCase: true, out _))
-            .WithMessage($"PoResponseMode must be one of: {string.Join(", ", Enum.GetNames<PoResponseMode>())}.");
+            .Must(v => Enum.TryParse<PoConfirmationMode>(v, ignoreCase: true, out _))
+            .WithMessage($"PoResponseMode must be one of: {string.Join(", ", Enum.GetNames<PoConfirmationMode>())}.");
     }
 }
 
@@ -37,7 +38,9 @@ public class SetSupplierPoResponseModeCommandHandler : IRequestHandler<SetSuppli
         var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == request.SupplierId, ct)
                        ?? throw new NotFoundException("Supplier", request.SupplierId);
 
-        supplier.PoResponseMode = Enum.Parse<PoResponseMode>(request.Body.PoResponseMode, ignoreCase: true);
+        supplier.PoConfirmationMode = Enum.Parse<PoConfirmationMode>(request.Body.PoResponseMode, ignoreCase: true);
+        supplier.AllowNegotiate = request.Body.AllowNegotiate;
+        supplier.AllowReject = request.Body.AllowReject;
         supplier.UpdatedBy = _user.UserCode;
         supplier.UpdatedOn = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);

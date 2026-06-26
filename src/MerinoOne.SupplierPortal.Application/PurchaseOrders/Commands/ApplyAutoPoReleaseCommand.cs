@@ -10,12 +10,14 @@ using Microsoft.Extensions.Logging;
 namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Commands;
 
 /// <summary>
-/// Server-side PO-release hook for suppliers in <c>poResponseMode = Auto</c> (Q8-2). When a PO is released, this
-/// command auto-acknowledges it, auto-confirms the delivery date, and ENQUEUES the acceptance to ERP via the
-/// Increment 0 outbox (one local transaction + post-commit dispatch — same invariant as the manual path).
+/// R4 (2026-06-26) — D1, TSD R4 Addendum §6.2 / UC-PO-10. Server-side PO-release hook for suppliers in
+/// <c>PoConfirmationMode.AutoAccept</c>. When a PO is released, this command AUTO-STAMPS it Accepted + acceptedAt
+/// (the ship-gate is open immediately, no manual confirmation step), auto-acknowledges it, and ENQUEUES the
+/// acceptance to ERP via the Increment 0 outbox (one local transaction + post-commit dispatch — same invariant
+/// as the manual path). Ports the old <c>PoResponseMode.Auto</c> auto-accept behaviour onto the new mode.
 ///
 /// <para><b>FEATURE-FLAGGED</b> behind <c>Features:AutoPoRelease</c> (default OFF). When the flag is off the hook
-/// is a no-op so enabling Auto mode is inert until operations switch the flag on.</para>
+/// is a no-op so enabling AutoAccept mode is inert until operations switch the flag on.</para>
 ///
 /// <para><b>OPEN QUESTION (release-hook wiring) — flagged to solution-architect, NOT guessed:</b> the COMMAND
 /// SURFACE is implemented, but the call site that should INVOKE it on PO release is NOT wired this turn. The portal
@@ -55,12 +57,13 @@ public class ApplyAutoPoReleaseCommandHandler : IRequestHandler<ApplyAutoPoRelea
                  ?? throw new NotFoundException("PurchaseOrder", request.PurchaseOrderId);
 
         var mode = await _db.Suppliers.Where(s => s.Id == po.SupplierId)
-            .Select(s => s.PoResponseMode).FirstOrDefaultAsync(ct);
-        if (mode != PoResponseMode.Auto) return Unit.Value;   // Manual suppliers respond through the manual commands.
+            .Select(s => s.PoConfirmationMode).FirstOrDefaultAsync(ct);
+        // Only AutoAccept suppliers are auto-handled; AcceptToShip / AcknowledgeToShip respond via the manual commands.
+        if (mode != PoConfirmationMode.AutoAccept) return Unit.Value;
 
         var now = DateTime.UtcNow;
 
-        // Auto-acknowledge + auto-confirm the delivery date + auto-accept (Q8-2).
+        // D1 — AUTO-STAMP Accepted + acceptedAt at release (ship-gate open immediately); also stamp acknowledged.
         po.AcknowledgmentAt ??= now;
         po.AcceptedAt = now;
         po.PoStatus = PoStatus.Accepted;
@@ -71,7 +74,7 @@ public class ApplyAutoPoReleaseCommandHandler : IRequestHandler<ApplyAutoPoRelea
         await _outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, null, ct);
 
         await _db.SaveChangesAsync(ct);
-        _logger.LogInformation("Auto-released PO {PoNumber} (supplier in Auto mode): acknowledged + accepted + acceptance enqueued.", po.PoNumber);
+        _logger.LogInformation("Auto-released PO {PoNumber} (supplier in AutoAccept mode): acknowledged + accepted + acceptance enqueued.", po.PoNumber);
         return Unit.Value;
     }
 }

@@ -23,13 +23,14 @@ public record GetItemsToDeliverQuery(
 
 public class GetItemsToDeliverQueryHandler : IRequestHandler<GetItemsToDeliverQuery, PagedResult<ItemsToDeliverRowDto>>
 {
-    // Open-PO statuses (plan completeness #26 — DateProposed included).
+    // Open-PO statuses. R4 (2026-06-26) — D2: DateProposed retired → Negotiation (a PO under negotiation still has
+    // open lines to deliver once the terms are resolved; same "open / awaiting resolution" semantics).
     private static readonly PoStatus[] OpenStatuses =
     {
         PoStatus.Released,
         PoStatus.Acknowledged,
         PoStatus.Accepted,
-        PoStatus.DateProposed,
+        PoStatus.Negotiation,
         PoStatus.PartiallyDelivered,
     };
 
@@ -50,7 +51,7 @@ public class GetItemsToDeliverQueryHandler : IRequestHandler<GetItemsToDeliverQu
                     where po.PoStatus == PoStatus.Released
                           || po.PoStatus == PoStatus.Acknowledged
                           || po.PoStatus == PoStatus.Accepted
-                          || po.PoStatus == PoStatus.DateProposed
+                          || po.PoStatus == PoStatus.Negotiation
                           || po.PoStatus == PoStatus.PartiallyDelivered
                     select new { l, po };
 
