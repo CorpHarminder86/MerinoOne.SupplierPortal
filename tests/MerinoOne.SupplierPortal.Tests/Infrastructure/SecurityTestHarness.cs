@@ -49,16 +49,21 @@ public static class SecurityTestHarness
     // --- Tenant-A (the fixture tenant) login-able users -------------------------------------------------
     public static class Users
     {
-        public const string Admin    = "sec-admin-a";     // role Admin    → HAS Supplier.Approve
-        public const string Supplier = "sec-supplier-a";  // role Supplier → NO Supplier.Approve
-        public const string Buyer    = "sec-buyer-a";     // role Buyer    → NO Supplier.Approve
-        public const string AdminB   = "sec-admin-b";     // role Admin under tenant B (cross-tenant principal)
+        public const string Admin      = "sec-admin-a";       // role Admin    → HAS Supplier.Approve
+        public const string Supplier   = "sec-supplier-a";    // role Supplier → NO Supplier.Approve
+        public const string Buyer      = "sec-buyer-a";       // role Buyer    → NO Supplier.Approve
+        public const string AdminB     = "sec-admin-b";       // role Admin under tenant B (cross-tenant principal)
+        // R4 (2026-06-26) — UC-PO-09: the gate-override path needs ONE principal holding BOTH Asn.Write AND
+        // PurchaseOrder.OverrideGate. Neither Admin (no Asn.Write) nor Supplier (no OverrideGate) alone qualifies;
+        // SuperAdmin holds both, so a SuperAdmin-role user under the fixture tenant drives the audited override.
+        public const string SuperAdmin = "sec-superadmin-a";  // role SuperAdmin → HAS Asn.Write + OverrideGate
     }
 
-    public static readonly Guid AdminUserId    = Det("sec.user", Users.Admin);
-    public static readonly Guid SupplierUserId = Det("sec.user", Users.Supplier);
-    public static readonly Guid BuyerUserId    = Det("sec.user", Users.Buyer);
-    public static readonly Guid AdminBUserId   = Det("sec.user", Users.AdminB);
+    public static readonly Guid AdminUserId      = Det("sec.user", Users.Admin);
+    public static readonly Guid SupplierUserId   = Det("sec.user", Users.Supplier);
+    public static readonly Guid BuyerUserId      = Det("sec.user", Users.Buyer);
+    public static readonly Guid AdminBUserId     = Det("sec.user", Users.AdminB);
+    public static readonly Guid SuperAdminUserId = Det("sec.user", Users.SuperAdmin);
 
     // --- Tenant B (the foreign tenant for cross-tenant isolation) ---------------------------------------
     public static readonly Guid TenantBId        = Det("sec.tenant", "B");
@@ -109,6 +114,8 @@ public static class SecurityTestHarness
             "Supplier", IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, roleMap, now);
         await SeedUserAsync(db, BuyerUserId,    Users.Buyer,    "Sec Buyer A",    "sec-buyer-a@merino.local",
             "Buyer",    IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, roleMap, now);
+        await SeedUserAsync(db, SuperAdminUserId, Users.SuperAdmin, "Sec SuperAdmin A", "sec-superadmin-a@merino.local",
+            "SuperAdmin", IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, roleMap, now);
 
         // Give the Supplier-role user CanRead on the fixture supplier's G-seccode so it is NOT a no-rows
         // principal when the seccode filter enforces (used as a sanity baseline; not strictly required).
@@ -187,7 +194,7 @@ public static class SecurityTestHarness
             db.DocumentUploads.Add(new DocumentUpload
             {
                 Id = DocBId, OwnerEntityType = "Supplier", OwnerEntityId = SupplierBId,
-                DocumentType = DocumentType.License, FileName = "tenantB-secret.pdf",
+                DocumentType = nameof(DocumentType.License), FileName = "tenantB-secret.pdf",
                 FileUrl = "tenantB/secret.pdf", FileSizeKb = 1, MimeType = "application/pdf",
                 UploadedBy = "seed", SeccodeId = SupplierBSeccode, TenantId = TenantBId, TenantEntityId = CompanyBId,
                 AiValidationStatus = AiValidationStatus.Pending, CreatedBy = "seed", CreatedOn = now
