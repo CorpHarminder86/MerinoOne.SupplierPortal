@@ -24,6 +24,13 @@ public static class DocumentOwnerTypes
     public const string Supplier = "Supplier";
 
     /// <summary>
+    /// R4 (2026-06-26) — Phase 4: an invoice's attachments (e.g. tax invoice / e-invoice / e-way bill).
+    /// ownerEntityId = Invoice.Id. Aligns with the seeded <c>doc.AttachmentEntity</c> code "Invoice" so the
+    /// attachment-requirement policy evaluator matches uploads to the Invoice entity.
+    /// </summary>
+    public const string Invoice = "Invoice";
+
+    /// <summary>
     /// Deferred-upload holding pen: files uploaded by a logged-in user BEFORE the owning aggregate
     /// (e.g. a new SupplierLicense) has been saved. ownerEntityId = a client-generated draft GUID
     /// (the "staging key"). The owning command re-points these rows to the real owner on save.

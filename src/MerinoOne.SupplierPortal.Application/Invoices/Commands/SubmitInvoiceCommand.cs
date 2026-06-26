@@ -1,6 +1,8 @@
 using FluentValidation;
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Documents;
 using MerinoOne.SupplierPortal.Application.Invoices.Queries;
 using MerinoOne.SupplierPortal.Contracts.Invoices;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -18,25 +20,29 @@ namespace MerinoOne.SupplierPortal.Application.Invoices.Commands;
 /// soft, configurable check here. On submit the invoice becomes ELIGIBLE for LN posting but is <b>NOT posted</b>
 /// (posting is GRN-gated, Module 5). No outbox enqueue here.
 /// </summary>
-public record SubmitInvoiceCommand(Guid Id, SubmitInvoiceRequest Body) : IRequest<InvoiceDetailDto>;
+// R4 (2026-06-26) — Phase 4 / §8.3 / UC-ATT-03: returns SubmitOutcome<InvoiceDetailDto> so the Warning "confirm
+// to proceed" attachment path can be modelled WITHOUT throwing (Mandatory-missing still throws → 400).
+public record SubmitInvoiceCommand(Guid Id, SubmitInvoiceRequest Body) : IRequest<SubmitOutcome<InvoiceDetailDto>>;
 
 public class SubmitInvoiceCommandValidator : AbstractValidator<SubmitInvoiceCommand>
 {
     public SubmitInvoiceCommandValidator() => RuleFor(x => x.Id).NotEmpty();
 }
 
-public class SubmitInvoiceCommandHandler : IRequestHandler<SubmitInvoiceCommand, InvoiceDetailDto>
+public class SubmitInvoiceCommandHandler : IRequestHandler<SubmitInvoiceCommand, SubmitOutcome<InvoiceDetailDto>>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly IMediator _mediator;
+    private readonly AttachmentSubmitGuard _attachmentGuard;
 
-    public SubmitInvoiceCommandHandler(IAppDbContext db, ICurrentUser user, IMediator mediator)
+    public SubmitInvoiceCommandHandler(
+        IAppDbContext db, ICurrentUser user, IMediator mediator, AttachmentSubmitGuard attachmentGuard)
     {
-        _db = db; _user = user; _mediator = mediator;
+        _db = db; _user = user; _mediator = mediator; _attachmentGuard = attachmentGuard;
     }
 
-    public async Task<InvoiceDetailDto> Handle(SubmitInvoiceCommand request, CancellationToken ct)
+    public async Task<SubmitOutcome<InvoiceDetailDto>> Handle(SubmitInvoiceCommand request, CancellationToken ct)
     {
         var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == request.Id, ct)
                       ?? throw new NotFoundException("Invoice", request.Id);
@@ -55,6 +61,17 @@ public class SubmitInvoiceCommandHandler : IRequestHandler<SubmitInvoiceCommand,
             throw new ValidationException(errors);
 
         var now = DateTime.UtcNow;
+
+        // ---- Attachment Requirement Governance (Phase 4 / §8.3, UC-ATT-01..05) --------------------------
+        // Entity "Invoice", supplier = this invoice's supplier. Mandatory-missing throws (400); Warning-missing +
+        // not-acknowledged returns ConfirmationRequired WITHOUT mutating the invoice; acknowledged-skip stages the
+        // skip AuditEntry that commits with the status flip below (same transaction).
+        var attachmentDecision = await _attachmentGuard.EvaluateAsync(
+            _db, DocumentOwnerTypes.Invoice, invoice.Id, invoice.InvoiceNumber, invoice.SupplierId,
+            request.Body.AcknowledgeMissingAttachments, invoice.TenantId, now, ct);
+        if (attachmentDecision.RequiresConfirmation)
+            return SubmitOutcome<InvoiceDetailDto>.Confirm(attachmentDecision.MissingWarning);
+
         invoice.InvoiceStatus = InvoiceStatus.Submitted;   // eligible for the GRN-gated posting set (Module 5).
         invoice.SubmittedBy = _user.UserCode;
         invoice.SubmittedAt = now;
@@ -63,6 +80,7 @@ public class SubmitInvoiceCommandHandler : IRequestHandler<SubmitInvoiceCommand,
 
         await _db.SaveChangesAsync(ct);   // NO ERP post — posting is GRN-gated (Module 5).
 
-        return await _mediator.Send(new GetInvoiceByIdQuery(invoice.Id), ct);
+        var dto = await _mediator.Send(new GetInvoiceByIdQuery(invoice.Id), ct);
+        return SubmitOutcome<InvoiceDetailDto>.Completed(dto);
     }
 }

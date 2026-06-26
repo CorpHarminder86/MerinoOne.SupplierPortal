@@ -56,7 +56,7 @@ public sealed class LicenseAttachmentRebinder
         {
             doc.OwnerEntityType = DocumentOwnerTypes.SupplierLicense;
             doc.OwnerEntityId = licenseId;
-            doc.DocumentType = DocumentType.License;
+            doc.DocumentType = nameof(DocumentType.License);
             doc.UpdatedBy = _user.UserCode;
             doc.UpdatedOn = now;
         }

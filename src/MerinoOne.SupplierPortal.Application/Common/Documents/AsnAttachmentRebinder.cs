@@ -56,7 +56,7 @@ public sealed class AsnAttachmentRebinder
         {
             doc.OwnerEntityType = DocumentOwnerTypes.Asn;
             doc.OwnerEntityId = asnId;
-            doc.DocumentType = DocumentType.AsnAttachment;
+            doc.DocumentType = nameof(DocumentType.AsnAttachment);
             doc.UpdatedBy = _user.UserCode;
             doc.UpdatedOn = now;
         }

@@ -52,8 +52,12 @@ public class DocumentUploadsController : ControllerBase
             return Result<UploadedDocumentDto>.Fail("File is required.");
         if (file.Length > MaxBytes)
             return Result<UploadedDocumentDto>.Fail($"File exceeds {MaxBytes / 1024 / 1024} MB.");
-        if (!Enum.TryParse<DocumentType>(documentType, true, out var docType))
+        // ONBOARDING anonymous path STAYS enum-validated (§16.7 — onboarding is hardcoded for Phase 1, and the
+        // caller is unauthenticated so there is no tenant to scope an AttachmentType master lookup against). The
+        // stored documentType is the canonical enum member NAME.
+        if (!Enum.TryParse<DocumentType>(documentType, true, out var docTypeEnum))
             return Result<UploadedDocumentDto>.Fail($"Unknown documentType '{documentType}'.");
+        var docType = docTypeEnum.ToString();
 
         var now = DateTime.UtcNow;
         var invite = await _db.SupplierInvites.IgnoreQueryFilters().FirstOrDefaultAsync(i => i.Token == token, ct);
@@ -108,7 +112,7 @@ public class DocumentUploadsController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         var dto = new UploadedDocumentDto(
-            docId, docType.ToString(), file.FileName, sizeKb,
+            docId, docType, file.FileName, sizeKb,
             string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType,
             // Base-href-relative (NO leading slash) so the browser resolves against the Web
             // app's <base href> — works both at root ("/") and at sub-path ("/sup-dev/").
@@ -145,7 +149,11 @@ public class DocumentUploadsController : ControllerBase
     [EndpointDescription(@"Uploads a file and binds it to a SupplierLicense (ownerEntityType='SupplierLicense'), a
 Draft ASN (ownerEntityType='Asn' — LOCKED once Submitted), or a deferred-upload staging slot
 (ownerEntityType='Staging' + a client-generated draft GUID). 5 MB cap. canWrite-gated against the supplier's
-seccode (403 on mismatch). Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
+seccode (403 on mismatch).
+documentType (optional, §3.6): when supplied it is validated against the tenant's ACTIVE doc.AttachmentType master
+(NOT the legacy enum) — an admin-added type works immediately; an inactive/absent code is rejected (400). When
+omitted the owner-mode default is used (License for SupplierLicense/Staging, AsnAttachment for Asn).
+Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
     public async Task<Result<DocumentAttachmentDto>> Attach(
         [FromForm] IFormFile file,
         [FromForm] string ownerEntityType,
@@ -154,7 +162,8 @@ seccode (403 on mismatch). Returns DocumentAttachmentDto. Requires **Supplier.Wr
         [FromServices] ICurrentUser user,
         [FromServices] SupplierWriteGuard guard,
         [FromServices] IDocumentValidationService docValidator,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromForm] string? documentType = null)
     {
         if (file is null || file.Length == 0)
             return Result<DocumentAttachmentDto>.Fail("File is required.");
@@ -175,6 +184,22 @@ seccode (403 on mismatch). Returns DocumentAttachmentDto. Requires **Supplier.Wr
 
         // SecRight.canWrite gate against the supplier's G-seccode — throws ForbiddenException (403) on mismatch.
         await guard.EnsureCanWriteAsync(supplier.Id, supplier.SeccodeId, ct);
+
+        // R4 (2026-06-26) — §3.6: when an explicit documentType is supplied, validate it against the tenant's ACTIVE
+        // AttachmentType MASTER (not the legacy enum) so admin-added types are usable immediately and inactive/absent
+        // codes are rejected. Scope by the SUPPLIER's tenant (deterministic — the row lands in the supplier's tenant
+        // regardless of the active-company header; IgnoreQueryFilters because the master is owned by the tenant-admin
+        // seccode and the caller holds no SecRight on it). When omitted, the owner-mode default type is used.
+        var requestedType = string.IsNullOrWhiteSpace(documentType) ? null : documentType.Trim();
+        if (requestedType is not null)
+        {
+            var typeIsActiveMasterCode = await _db.AttachmentTypes.IgnoreQueryFilters()
+                .AnyAsync(t => t.Code == requestedType && t.IsActive && !t.IsDeleted
+                               && t.TenantId == supplier.TenantId, ct);
+            if (!typeIsActiveMasterCode)
+                return Result<DocumentAttachmentDto>.Fail(
+                    $"documentType '{requestedType}' is not an active attachment type for this tenant.");
+        }
 
         // Direct attach: the license must exist and belong to this supplier (so the owner pointer is valid).
         if (isLicense)
@@ -206,10 +231,13 @@ seccode (403 on mismatch). Returns DocumentAttachmentDto. Requires **Supplier.Wr
         var stored = await _storage.StoreAsync(read, file.FileName, mime, supplier.SeccodeId, ct);
         var sizeKb = (int)Math.Ceiling(stored.SizeBytes / 1024d);
 
-        var (resolvedOwnerType, resolvedDocType) =
-            isLicense ? (DocumentOwnerTypes.SupplierLicense, DocumentType.License)
-            : isAsn ? (DocumentOwnerTypes.Asn, DocumentType.AsnAttachment)
-            : (DocumentOwnerTypes.Staging, DocumentType.License);   // Staging keeps License as a neutral default; rebind sets the real type.
+        // Owner-mode default type (string codes now — DocumentType.* via nameof). An explicit, master-validated
+        // requestedType overrides the default so a caller can tag e.g. an ASN attachment "TestCertificate".
+        var (resolvedOwnerType, defaultDocType) =
+            isLicense ? (DocumentOwnerTypes.SupplierLicense, nameof(DocumentType.License))
+            : isAsn ? (DocumentOwnerTypes.Asn, nameof(DocumentType.AsnAttachment))
+            : (DocumentOwnerTypes.Staging, nameof(DocumentType.License));   // Staging keeps License as a neutral default; rebind sets the real type.
+        var resolvedDocType = requestedType ?? defaultDocType;
 
         var docId = Guid.NewGuid();
         var doc = new DocumentUpload

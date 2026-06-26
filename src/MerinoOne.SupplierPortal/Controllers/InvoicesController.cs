@@ -1,4 +1,5 @@
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Application.Invoices.Commands;
 using MerinoOne.SupplierPortal.Application.Invoices.Queries;
@@ -105,12 +106,16 @@ Returns: InvoiceDetailDto on success; 404 if not found; 409 if not Draft; 400 on
     [EndpointDescription(@"Submits a DRAFT invoice. Validates the mandatory fields (invoiceNumber + invoiceDate;
 the draft placeholder number must be replaced). Marks it ELIGIBLE for LN posting but does NOT post (posting is
 GRN-gated, Module 5).
-Returns: InvoiceDetailDto (Submitted) on success; 404 if not found; 409 if not Draft; 400 on missing mandatory
-fields. Requires **Invoice.Submit**.")]
+Attachment governance (§8.3): a missing MANDATORY attachment blocks (400, message names the types). A missing
+WARNING attachment on the first call returns 200 with **confirmationRequired=true** + confirmationMessage +
+missingAttachments (NOT an error, nothing committed); re-submit with AcknowledgeMissingAttachments=true to proceed
+(the skip is audited).
+Returns: InvoiceDetailDto (Submitted) on success; 200 confirmationRequired on a Warning skip; 404 if not found; 409
+if not Draft; 400 on missing mandatory fields / mandatory attachment. Requires **Invoice.Submit**.")]
     public async Task<Result<InvoiceDetailDto>> Submit(Guid id, [FromBody] SubmitInvoiceRequest? body, CancellationToken ct)
     {
-        var data = await _mediator.Send(new SubmitInvoiceCommand(id, body ?? new SubmitInvoiceRequest()), ct);
-        return Result<InvoiceDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+        var outcome = await _mediator.Send(new SubmitInvoiceCommand(id, body ?? new SubmitInvoiceRequest()), ct);
+        return outcome.ToResult(HttpContext.TraceIdentifier);
     }
 
     [HttpPost("{id:guid}/revoke")]

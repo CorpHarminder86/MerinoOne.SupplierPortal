@@ -372,7 +372,7 @@ public class RegisterSupplierCommandHandler : IRequestHandler<RegisterSupplierCo
                     if (doc is null || doc.OwnerEntityType != "PendingInvite" || doc.OwnerEntityId != invite.Id) continue;
                     doc.OwnerEntityType = "SupplierLicense";
                     doc.OwnerEntityId = licenseId;
-                    doc.DocumentType = DocumentType.License;
+                    doc.DocumentType = nameof(DocumentType.License);
                     doc.SeccodeId = seccodeId;
                     doc.TenantId = inviteTenantId;
                     doc.TenantEntityId = inviteCompanyId;

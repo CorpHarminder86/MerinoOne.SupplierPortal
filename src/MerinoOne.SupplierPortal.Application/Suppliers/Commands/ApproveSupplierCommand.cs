@@ -1,7 +1,9 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Documents;
 using MerinoOne.SupplierPortal.Application.Users.Commands;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
@@ -14,11 +16,14 @@ using ValidationException = MerinoOne.SupplierPortal.Application.Common.Exceptio
 
 namespace MerinoOne.SupplierPortal.Application.Suppliers.Commands;
 
-public record ApproveSupplierCommand(Guid SupplierId, ApproveSupplierRequest Body) : IRequest<Unit>;
+// R4 (2026-06-26) — Phase 4 / §8.3 / UC-ATT-03: returns SubmitOutcome<Unit> so the Warning "confirm to proceed"
+// attachment path can be modelled WITHOUT throwing (Mandatory-missing still throws → 400). The existing NIC-fail
+// override comment (a separate, unrelated gate) is untouched.
+public record ApproveSupplierCommand(Guid SupplierId, ApproveSupplierRequest Body) : IRequest<SubmitOutcome<Unit>>;
 
 public class ApproveSupplierCommandValidator : AbstractValidator<ApproveSupplierCommand> { /* business validation done in handler — needs DB */ }
 
-public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierCommand, Unit>
+public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierCommand, SubmitOutcome<Unit>>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
@@ -26,6 +31,7 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
     private readonly IEmailService _email;
     private readonly IConfiguration _config;
     private readonly SupplierMapService _mapService;
+    private readonly AttachmentSubmitGuard _attachmentGuard;
     private readonly ILogger<ApproveSupplierCommandHandler> _logger;
 
     public ApproveSupplierCommandHandler(
@@ -35,6 +41,7 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
         IEmailService email,
         IConfiguration config,
         SupplierMapService mapService,
+        AttachmentSubmitGuard attachmentGuard,
         ILogger<ApproveSupplierCommandHandler> logger)
     {
         _db = db;
@@ -43,10 +50,11 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
         _email = email;
         _config = config;
         _mapService = mapService;
+        _attachmentGuard = attachmentGuard;
         _logger = logger;
     }
 
-    public async Task<Unit> Handle(ApproveSupplierCommand request, CancellationToken ct)
+    public async Task<SubmitOutcome<Unit>> Handle(ApproveSupplierCommand request, CancellationToken ct)
     {
         var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == request.SupplierId, ct)
                        ?? throw new NotFoundException("Supplier", request.SupplierId);
@@ -68,6 +76,19 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
         }
 
         var now = DateTime.UtcNow;
+
+        // ---- Attachment Requirement Governance (Phase 4 / §8.3, UC-ATT-01..05) --------------------------
+        // Entity "Supplier", supplier = this supplier (its own override tier). The onboarding hardcoded doc rules
+        // stay (§16.7) — this is an ADDITIONAL admin-configured gate over the same Supplier-owned uploads. Evaluated
+        // BEFORE the Approved transition + user provisioning. Mandatory-missing throws (400); Warning-missing +
+        // not-acknowledged returns ConfirmationRequired WITHOUT approving; acknowledged-skip stages the skip audit
+        // that commits with the approval below (same SaveChangesAsync).
+        var attachmentDecision = await _attachmentGuard.EvaluateAsync(
+            _db, DocumentOwnerTypes.Supplier, supplier.Id, supplier.SupplierCode, supplier.Id,
+            request.Body.AcknowledgeMissingAttachments, supplier.TenantId, now, ct);
+        if (attachmentDecision.RequiresConfirmation)
+            return SubmitOutcome<Unit>.Confirm(attachmentDecision.MissingWarning);
+
         supplier.RegistrationStatus = RegistrationStatus.Approved;
         supplier.IsActiveSupplier = true;
         supplier.ApprovedAt = now;
@@ -259,7 +280,7 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
             }
         }
 
-        return Unit.Value;
+        return SubmitOutcome<Unit>.Completed(Unit.Value);
     }
 
     private async Task<string> ResolveUniqueUserCodeAsync(string baseCode, CancellationToken ct)

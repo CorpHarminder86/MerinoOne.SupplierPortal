@@ -120,7 +120,11 @@ public record UpdateInvoiceRequest(
     string? EWayBillNumber,
     string? Notes);
 
-public record SubmitInvoiceRequest();
+// R4 (2026-06-26) — Phase 4 / §8.3 / UC-ATT-03: AcknowledgeMissingAttachments confirms proceeding past any
+// Warning-level attachment requirement on the Invoice entity. First submit (false) with a missing Warning
+// attachment returns a 200 carrying ConfirmationRequired=true + the warning list; re-submit with true to proceed
+// (audited). Mandatory-missing always blocks (400).
+public record SubmitInvoiceRequest(bool AcknowledgeMissingAttachments = false);
 
 // R4 (2026-06-22) — Module 4 (Q9): admin pre-post revoke (Submitted -> Draft). RowVersion (base64, from the
 // detail DTO) is required for the optimistic-concurrency guard — a stale token yields 409.
