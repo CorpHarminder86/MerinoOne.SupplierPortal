@@ -383,14 +383,18 @@ else
                 <div style="border-top:1px solid var(--mer-line-soft);margin-top:14px;padding-top:14px;">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
                         <div>
-                            <div style="font-size:12.5px;font-weight:600;color:var(--mer-ink-900);">PO response mode</div>
-                            <div style="font-size:11.5px;color:var(--mer-ink-500);max-width:340px;">
-                                @(detail.PoResponseMode == "Auto"
-                                    ? "Auto — incoming POs are acknowledged and accepted automatically at release."
-                                    : "Manual — the supplier must acknowledge / accept / reject each PO.")
-                            </div>
+                            <div style="font-size:12.5px;font-weight:600;color:var(--mer-ink-900);">PO confirmation mode</div>
+                            <div style="font-size:11.5px;color:var(--mer-ink-500);max-width:340px;">@PoModeDescription(detail.PoResponseMode)</div>
                         </div>
-                        <span class="tlg-status @(detail.PoResponseMode == "Auto" ? "tlg-status--info" : "tlg-status--active")">@detail.PoResponseMode</span>
+                        <span class="tlg-status @(detail.PoResponseMode == "AutoAccept" ? "tlg-status--info" : "tlg-status--active")">@PoModeLabel(detail.PoResponseMode)</span>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:10px;">
+                        <span class="tlg-status @(detail.AllowNegotiate ? "tlg-status--active" : "tlg-status--info")" title="Whether the supplier may propose new terms">
+                            <span class="material-symbols-outlined" style="font-size:13px;vertical-align:middle;">handshake</span> Negotiate @(detail.AllowNegotiate ? "on" : "off")
+                        </span>
+                        <span class="tlg-status @(detail.AllowReject ? "tlg-status--active" : "tlg-status--info")" title="Whether the supplier may reject / decline a PO">
+                            <span class="material-symbols-outlined" style="font-size:13px;vertical-align:middle;">cancel</span> Reject @(detail.AllowReject ? "on" : "off")
+                        </span>
                     </div>
                     @if (Token.HasPermission("Supplier.Approve"))
                     {
@@ -542,6 +546,42 @@ else
         </div>
     }
 
+    @* ---------------- Missing-attachment Warning confirm on approval (§8.3 / UC-ATT-03) ---------------- *@
+    @if (showApproveAttachConfirm)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="warning" data-size="md" style="width:560px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">rule</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Supplier · Attachments</div>
+                        <h2 class="merino-dialog__title">Proceed without all attachments?</h2>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showApproveAttachConfirm = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <p style="font-size:13px;color:var(--mer-ink-700);">@approveAttachMessage</p>
+                    @if (approveAttachMissing.Count > 0)
+                    {
+                        <div style="margin-top:10px;border:1px solid var(--mer-line);border-radius:6px;padding:10px 12px;background:var(--mer-ink-50);">
+                            <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:6px;">Not uploaded</div>
+                            <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--mer-ink-700);">
+                                @foreach (var m in approveAttachMissing) { <li>@m</li> }
+                            </ul>
+                        </div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApproveAttachConfirm = false">Go back</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="() => DoApproveInternal(true)" disabled="@busy">@(busy ? "Approving…" : "Yes, proceed")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
     @* ---------------- Bank detail dialog ---------------- *@
     @if (showBank)
     {
@@ -675,18 +715,37 @@ else
                     <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">swap_horiz</span></div>
                     <div class="merino-dialog__head-text">
                         <div class="merino-dialog__eyebrow">Supplier</div>
-                        <h2 class="merino-dialog__title">PO response mode</h2>
-                        <p class="merino-dialog__subtitle">How this supplier responds to released purchase orders.</p>
+                        <h2 class="merino-dialog__title">PO confirmation mode</h2>
+                        <p class="merino-dialog__subtitle">Which confirmation state unblocks shipping for this supplier, plus the actions they may take.</p>
                     </div>
                     <button class="merino-dialog__close" @onclick="() => showPoMode = false"><span class="material-symbols-outlined">close</span></button>
                 </header>
                 <div class="merino-dialog__body">
-                    <label style="display:block;font-size:13px;font-weight:600;color:var(--mer-ink-700);margin-bottom:8px;">
-                        <input type="radio" name="pomode" checked="@(poModeValue == "Manual")" @onchange='() => poModeValue = "Manual"' /> Manual — supplier acknowledges / accepts / rejects each PO
-                    </label>
-                    <label style="display:block;font-size:13px;font-weight:600;color:var(--mer-ink-700);">
-                        <input type="radio" name="pomode" checked="@(poModeValue == "Auto")" @onchange='() => poModeValue = "Auto"' /> Auto — POs are acknowledged + accepted automatically at release
-                    </label>
+                    @* R4 (2026-06-26) — D1: the PO-response setting is a 3-way confirmation mode (PoConfirmationMode). *@
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        @foreach (var opt in PoModeOptions)
+                        {
+                            var value = opt.Value;
+                            <label style="display:flex;align-items:flex-start;gap:10px;font-size:13px;color:var(--mer-ink-700);cursor:pointer;border:1px solid @(poModeValue == value ? "var(--mer-blue)" : "var(--mer-line)");border-radius:8px;padding:10px 12px;background:@(poModeValue == value ? "var(--mer-blue-50)" : "var(--mer-surface)");">
+                                <input type="radio" name="pomode" checked="@(poModeValue == value)" @onchange='() => poModeValue = value' style="margin-top:2px;" />
+                                <span>
+                                    <span style="font-weight:700;color:var(--mer-blue-darker);display:block;">@opt.Label</span>
+                                    <span style="font-size:11.5px;color:var(--mer-ink-500);">@opt.Hint</span>
+                                </span>
+                            </label>
+                        }
+                    </div>
+
+                    <div style="border-top:1px solid var(--mer-line-soft);margin-top:14px;padding-top:12px;display:flex;flex-direction:column;gap:10px;">
+                        <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--mer-ink-700);cursor:pointer;">
+                            <input type="checkbox" checked="@poAllowNegotiate" @onchange="e => poAllowNegotiate = (bool)(e.Value ?? false)" />
+                            <span><b>Allow negotiate</b> — supplier may propose new qty / price / delivery terms.</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--mer-ink-700);cursor:pointer;">
+                            <input type="checkbox" checked="@poAllowReject" @onchange="e => poAllowReject = (bool)(e.Value ?? false)" />
+                            <span><b>Allow reject</b> — supplier may reject / decline a PO.</span>
+                        </label>
+                    </div>
                     @if (!string.IsNullOrEmpty(poModeError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@poModeError</div> }
                 </div>
                 <footer class="merino-dialog__footer">
@@ -804,8 +863,25 @@ else
     private const long MaxAttachBytes = 5L * 1024 * 1024;
 
     private bool showPoMode;
-    private string poModeValue = "Manual";
+    // R4 (2026-06-26) — D1: 3-way PoConfirmationMode + two action toggles. Default to the strictest (AcceptToShip).
+    private string poModeValue = "AcceptToShip";
+    private bool poAllowNegotiate = true;
+    private bool poAllowReject = true;
     private string poModeError = string.Empty;
+
+    private static readonly (string Value, string Label, string Hint)[] PoModeOptions = new[]
+    {
+        ("AutoAccept", "Ship at release (auto-accept)", "POs are accepted automatically at release — shipping is open immediately, no manual step."),
+        ("AcknowledgeToShip", "Acknowledge before ship", "Shipping unblocks once the supplier acknowledges (or accepts) the PO."),
+        ("AcceptToShip", "Accept before ship", "The PO must be accepted before any ASN can be created (strictest)."),
+    };
+
+    private static string PoModeLabel(string mode) =>
+        PoModeOptions.FirstOrDefault(o => o.Value == mode).Label ?? mode;
+
+    private static string PoModeDescription(string mode) =>
+        PoModeOptions.FirstOrDefault(o => o.Value == mode).Hint
+        ?? "The PO must be accepted before any ASN can be created.";
 
     // Commercial terms (R4 #1, internal edit)
     private bool showTerms;
@@ -1069,10 +1145,12 @@ else
         busy = false;
     }
 
-    // ---- PO response mode ----
+    // ---- PO confirmation mode (R4 D1: 3-way mode + AllowNegotiate / AllowReject) ----
     private void OpenPoMode()
     {
-        poModeValue = detail?.PoResponseMode ?? "Manual";
+        poModeValue = string.IsNullOrEmpty(detail?.PoResponseMode) ? "AcceptToShip" : detail!.PoResponseMode;
+        poAllowNegotiate = detail?.AllowNegotiate ?? true;
+        poAllowReject = detail?.AllowReject ?? true;
         poModeError = string.Empty;
         showPoMode = true;
     }
@@ -1080,8 +1158,10 @@ else
     private async Task SavePoMode()
     {
         busy = true; poModeError = string.Empty;
-        var resp = await Api.PostAsync<SetPoResponseModeRequest>($"api/suppliers/{Id}/po-response-mode", new SetPoResponseModeRequest(poModeValue));
-        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "PO response mode updated" }); showPoMode = false; await Load(); }
+        var resp = await Api.PostAsync<SetPoResponseModeRequest>(
+            $"api/suppliers/{Id}/po-response-mode",
+            new SetPoResponseModeRequest(poModeValue, poAllowNegotiate, poAllowReject));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "PO confirmation mode updated" }); showPoMode = false; await Load(); }
         else { poModeError = resp?.Errors?.FirstOrDefault() ?? "Failed to update mode."; }
         busy = false;
     }
@@ -1163,19 +1243,42 @@ else
 
     private void OpenApprove() { overrideComment = string.Empty; approveError = string.Empty; showApprove = true; }
 
-    private async Task DoApprove()
+    // R4 (2026-06-26) — §8.3 / UC-ATT-03: missing-Warning-attachment confirm two-step on supplier approval.
+    private bool showApproveAttachConfirm = false;
+    private string approveAttachMessage = string.Empty;
+    private List<string> approveAttachMissing = new();
+
+    private Task DoApprove() => DoApproveInternal(acknowledgeMissingAttachments: false);
+
+    private async Task DoApproveInternal(bool acknowledgeMissingAttachments)
     {
         busy = true; approveError = string.Empty;
-        var resp = await Api.PostAsync<ApproveSupplierRequest>($"api/suppliers/{Id}/approve", new ApproveSupplierRequest(string.IsNullOrWhiteSpace(overrideComment) ? null : overrideComment));
+        var resp = await Api.PostAsync<ApproveSupplierRequest>(
+            $"api/suppliers/{Id}/approve",
+            new ApproveSupplierRequest(string.IsNullOrWhiteSpace(overrideComment) ? null : overrideComment, acknowledgeMissingAttachments));
+
+        // (1) Success.
         if (resp?.Success == true)
         {
+            showApproveAttachConfirm = false; showApprove = false;
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Approved", Detail = $"{detail!.LegalName} is now Active." });
-            showApprove = false;
             await Load();
         }
+        // (2) Warning attachments missing — 200 ConfirmationRequired, nothing committed. Confirm to proceed.
+        else if (resp?.ConfirmationRequired == true)
+        {
+            approveAttachMessage = string.IsNullOrEmpty(resp.ConfirmationMessage)
+                ? "One or more required attachments were not uploaded, do you wish to proceed?"
+                : resp.ConfirmationMessage!;
+            approveAttachMissing = resp.MissingAttachments ?? new();
+            showApprove = false;
+            showApproveAttachConfirm = true;
+        }
+        // (3) Blocking error (incl. mandatory-missing 400).
         else
         {
             approveError = resp?.Errors?.FirstOrDefault() ?? "Approval failed.";
+            if (showApproveAttachConfirm) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Approval failed", Detail = approveError }); }
         }
         busy = false;
     }

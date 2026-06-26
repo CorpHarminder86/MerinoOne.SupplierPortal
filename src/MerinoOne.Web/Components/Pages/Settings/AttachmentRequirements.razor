@@ -1,0 +1,415 @@
+@page "/settings/attachment-requirements"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+@* R4 (2026-06-26) — Phase 5b / §8.5 + D5: Attachment Requirement Governance settings (Settings.Write). Two parts:
+   (1) the attachment-type catalogue (add / rename / deactivate); (2) the two-tier policy editor — pick an entity
+   (Supplier / Asn / Invoice), set each type's tenant-default requirement (Mandatory / Warning / Optional), and
+   optionally a per-supplier override (blank = inherit) showing the effective requirement (supplier wins). *@
+
+<PageTitle>Attachment requirements</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Attachment requirements</h1>
+            </div>
+            <p class="tl-sub">Attachment-type catalogue + per-entity requirement policy · Settings → Fulfilment</p>
+        </div>
+    </header>
+
+    @if (!CanWrite)
+    {
+        <div class="tl-empty">You do not have permission to manage fulfilment settings.</div>
+    }
+    else
+    {
+        <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;">
+            <button class="mer-tab @(tab=="policy"?"mer-tab--active":"")" @onclick='() => tab="policy"' style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="policy"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="policy"?"var(--mer-blue)":"var(--mer-ink-700)");">Policy editor</button>
+            <button class="mer-tab @(tab=="catalogue"?"mer-tab--active":"")" @onclick='() => tab="catalogue"' style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="catalogue"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="catalogue"?"var(--mer-blue)":"var(--mer-ink-700)");">Type catalogue (@types.Count)</button>
+        </div>
+
+        @if (tab == "catalogue")
+        {
+            @* ---------------- Type catalogue ---------------- *@
+            <div class="rz-card" style="padding:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <div>
+                        <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">Attachment types (@types.Count)</h3>
+                        <p style="color:var(--mer-ink-500);font-size:12px;">The catalogue of attachment types policies can reference. Code aligns with the upload documentType and is immutable.</p>
+                    </div>
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewType">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add type
+                    </button>
+                </div>
+
+                @if (typesLoading)
+                {
+                    <div class="tl-empty">Loading…</div>
+                }
+                else if (types.Count == 0)
+                {
+                    <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">attachment</span><div>No attachment types yet.</div></div>
+                }
+                else
+                {
+                    <div class="tl-grid-wrapper" style="--tl-cols: 200px 1.4fr 110px 110px; --tl-min-width: 760px;">
+                        <div class="tlg-header">
+                            <div class="tlg-col">Code</div>
+                            <div class="tlg-col">Name</div>
+                            <div class="tlg-col">Active</div>
+                            <div class="tlg-col tlg-col--actions">Actions</div>
+                        </div>
+                        @foreach (var t in types)
+                        {
+                            var type = t;
+                            <div class="tlg-row">
+                                <div class="tlg-col tlg-code">@type.Code</div>
+                                <div class="tlg-col tlg-desc">@type.Name</div>
+                                <div class="tlg-col"><span class="tlg-status @(type.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(type.IsActive ? "Yes" : "No")</span></div>
+                                <div class="tlg-col tlg-col--actions">
+                                    <button @onclick="() => OpenEditType(type)" title="Rename / toggle" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            @* ---------------- Policy editor ---------------- *@
+            <div class="tl-filter-bar">
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);align-self:center;">Entity</label>
+                <select class="rz-dropdown" style="min-width:240px;padding:8px 10px;" value="@selectedEntityCode" @onchange="OnEntitySelect">
+                    <option value="">— Select an entity —</option>
+                    @foreach (var en in entities)
+                    {
+                        <option value="@en.Code" selected="@(selectedEntityCode == en.Code)">@en.Name</option>
+                    }
+                </select>
+
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);align-self:center;margin-left:8px;">Supplier override</label>
+                <select class="rz-dropdown" style="min-width:320px;padding:8px 10px;" value="@(selectedSupplierId?.ToString() ?? "")" @onchange="OnSupplierSelect">
+                    <option value="">— Tenant default only —</option>
+                    @foreach (var s in suppliers)
+                    {
+                        <option value="@s.Id" selected="@(selectedSupplierId == s.Id)">@s.LegalName (@s.SupplierCode)</option>
+                    }
+                </select>
+            </div>
+
+            @if (string.IsNullOrEmpty(selectedEntityCode))
+            {
+                <div class="tl-empty">
+                    <span class="material-symbols-outlined" style="font-size:32px;">policy</span>
+                    <div>Pick an entity to edit its attachment requirement policy.</div>
+                </div>
+            }
+            else if (policyLoading)
+            {
+                <div class="tl-empty">Loading…</div>
+            }
+            else
+            {
+                <div class="rz-card" style="padding:20px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                        <h3 style="font-size:14px;font-weight:700;margin:0;color:var(--mer-blue-darker);">@EntityName(selectedEntityCode) requirements</h3>
+                        @if (selectedSupplierId.HasValue)
+                        {
+                            <span class="tlg-status tlg-status--info">Override: @SupplierLabel(selectedSupplierId.Value)</span>
+                        }
+                    </div>
+                    <p style="color:var(--mer-ink-500);font-size:12px;margin-bottom:14px;">
+                        @(selectedSupplierId.HasValue
+                            ? "Set a per-supplier requirement (blank = inherit the tenant default). The supplier override wins; the effective level the supplier sees is shown at right."
+                            : "Set the tenant-default requirement for each attachment type. Mandatory blocks submit; Warning prompts a confirm; Optional is silent.")
+                    </p>
+
+                    @if (PolicyRowsForActiveTypes.Count == 0)
+                    {
+                        <div class="tl-empty"><div>No active attachment types. Add types in the catalogue tab first.</div></div>
+                    }
+                    else
+                    {
+                        <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                            <thead>
+                                <tr style="border-bottom:1px solid var(--mer-line);">
+                                    <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Attachment type</th>
+                                    <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);width:240px;">@(selectedSupplierId.HasValue ? "Supplier override" : "Tenant default")</th>
+                                    @if (selectedSupplierId.HasValue)
+                                    {
+                                        <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);width:160px;">Effective</th>
+                                    }
+                                    <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);width:90px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            @foreach (var p in PolicyRowsForActiveTypes)
+                            {
+                                var row = p;
+                                var sel = selections[row.TypeCode];
+                                <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                                    <td style="padding:8px 4px;"><span style="font-family:Inter,monospace;font-weight:600;color:var(--mer-blue-darker);">@row.TypeName</span> <span style="color:var(--mer-ink-400);">· @row.TypeCode</span></td>
+                                    <td style="padding:8px 4px;">
+                                        <select class="rz-dropdown" style="width:220px;padding:6px 8px;" @bind="sel.Requirement">
+                                            @if (selectedSupplierId.HasValue)
+                                            {
+                                                <option value="">— Inherit tenant default —</option>
+                                            }
+                                            <option value="Mandatory">Mandatory</option>
+                                            <option value="Warning">Warning</option>
+                                            <option value="Optional">Optional</option>
+                                        </select>
+                                    </td>
+                                    @if (selectedSupplierId.HasValue)
+                                    {
+                                        <td style="padding:8px 4px;"><span class="tlg-status @ReqClass(row.EffectiveRequirement)">@row.EffectiveRequirement</span></td>
+                                    }
+                                    <td style="padding:8px 4px;text-align:right;">
+                                        <button @onclick="() => SavePolicy(row)" disabled="@busy" title="Save" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:18px;">save</span></button>
+                                        @if (row.HasRowAtThisTier)
+                                        {
+                                            <button @onclick="() => ClearPolicy(row)" disabled="@busy" title="Clear (revert to default/Optional)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:18px;">backspace</span></button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            }
+        }
+    }
+</div>
+
+@* ---------------- Type add/edit dialog ---------------- *@
+@if (showTypeDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">attachment</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Attachment type</div>
+                    <h2 class="merino-dialog__title">@(editingTypeId.HasValue ? "Edit attachment type" : "New attachment type")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showTypeDialog = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Code @(editingTypeId.HasValue ? "(immutable)" : "*")</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="typeFormCode" disabled="@editingTypeId.HasValue" placeholder="e.g. TestCertificate" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Name *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="typeFormName" placeholder="e.g. Test Certificate" />
+                    </div>
+                    @if (editingTypeId.HasValue)
+                    {
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" @bind="typeFormActive" /> Active
+                        </label>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(typeError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@typeError</div> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showTypeDialog = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="SaveType" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool CanWrite => Token.HasPermission("Settings.Write");
+    private string tab = "policy";
+    private bool busy;
+
+    // Catalogue
+    private List<AttachmentTypeDto> types = new();
+    private bool typesLoading;
+    private bool showTypeDialog;
+    private Guid? editingTypeId;
+    private string typeFormCode = string.Empty;
+    private string typeFormName = string.Empty;
+    private bool typeFormActive = true;
+    private string typeError = string.Empty;
+
+    // Policy editor
+    private List<AttachmentEntityDto> entities = new();
+    private List<SupplierListItemDto> suppliers = new();
+    private string selectedEntityCode = string.Empty;
+    private Guid? selectedSupplierId;
+    private bool policyLoading;
+    // The API returns tenant-default rows (supplierId NULL) and, when a supplierId is passed, that supplier's
+    // override rows too — each carrying the effective requirement. We index by type code for editing.
+    private List<AttachmentPolicyDto> policies = new();
+    private readonly Dictionary<string, PolicySelection> selections = new();
+
+    private sealed class PolicySelection { public string Requirement = ""; }
+
+    // One editable row per ACTIVE attachment type, merged with the policy at the active tier (supplier override if a
+    // supplier is selected, else the tenant default).
+    private sealed record PolicyRow(string TypeCode, string TypeName, string EffectiveRequirement, bool HasRowAtThisTier);
+
+    private List<PolicyRow> PolicyRowsForActiveTypes
+    {
+        get
+        {
+            var result = new List<PolicyRow>();
+            foreach (var t in types.Where(x => x.IsActive).OrderBy(x => x.Name))
+            {
+                // Effective = supplier-override row ?? tenant-default row ?? Optional (the API computes this and stamps
+                // EffectiveRequirement on every returned row; we read it off whichever row matches this type).
+                var match = policies.FirstOrDefault(p => string.Equals(p.AttachmentTypeCode, t.Code, StringComparison.OrdinalIgnoreCase));
+                var effective = match?.EffectiveRequirement ?? "Optional";
+                // A row exists "at this tier" when there is a policy row whose SupplierId matches the active tier.
+                var hasRowAtThisTier = policies.Any(p =>
+                    string.Equals(p.AttachmentTypeCode, t.Code, StringComparison.OrdinalIgnoreCase)
+                    && p.SupplierId == selectedSupplierId);
+                result.Add(new PolicyRow(t.Code, t.Name, effective, hasRowAtThisTier));
+            }
+            return result;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanWrite) return;
+        await LoadTypes();
+        var en = await Api.GetAsync<List<AttachmentEntityDto>>("api/settings/attachment-entities?isActive=true");
+        entities = en?.Data ?? new();
+        var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+        suppliers = (sup?.Data ?? new()).OrderBy(s => s.LegalName).ToList();
+    }
+
+    // ---- Type catalogue ----
+    private async Task LoadTypes()
+    {
+        typesLoading = true;
+        var resp = await Api.GetAsync<List<AttachmentTypeDto>>("api/settings/attachment-types");
+        types = resp?.Data ?? new();
+        typesLoading = false;
+    }
+
+    private void OpenNewType()
+    {
+        editingTypeId = null;
+        typeFormCode = string.Empty; typeFormName = string.Empty; typeFormActive = true; typeError = string.Empty;
+        showTypeDialog = true;
+    }
+
+    private void OpenEditType(AttachmentTypeDto t)
+    {
+        editingTypeId = t.Id;
+        typeFormCode = t.Code; typeFormName = t.Name; typeFormActive = t.IsActive; typeError = string.Empty;
+        showTypeDialog = true;
+    }
+
+    private async Task SaveType()
+    {
+        typeError = string.Empty;
+        if (string.IsNullOrWhiteSpace(typeFormName)) { typeError = "Name is required."; return; }
+        if (!editingTypeId.HasValue && string.IsNullOrWhiteSpace(typeFormCode)) { typeError = "Code is required."; return; }
+        busy = true;
+        ApiResult<AttachmentTypeDto>? resp;
+        if (editingTypeId.HasValue)
+            resp = await Api.PutAsync<AttachmentTypeDto, UpdateAttachmentTypeRequest>($"api/settings/attachment-types/{editingTypeId}", new UpdateAttachmentTypeRequest(typeFormName.Trim(), typeFormActive));
+        else
+            resp = await Api.PostAsync<AttachmentTypeDto, CreateAttachmentTypeRequest>("api/settings/attachment-types", new CreateAttachmentTypeRequest(typeFormCode.Trim(), typeFormName.Trim()));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+            showTypeDialog = false;
+            await LoadTypes();
+            if (!string.IsNullOrEmpty(selectedEntityCode)) await LoadPolicies();
+        }
+        else { typeError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    // ---- Policy editor ----
+    private async Task OnEntitySelect(ChangeEventArgs e)
+    {
+        selectedEntityCode = e.Value?.ToString() ?? string.Empty;
+        if (!string.IsNullOrEmpty(selectedEntityCode)) await LoadPolicies();
+        else policies = new();
+    }
+
+    private async Task OnSupplierSelect(ChangeEventArgs e)
+    {
+        selectedSupplierId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        if (!string.IsNullOrEmpty(selectedEntityCode)) await LoadPolicies();
+    }
+
+    private async Task LoadPolicies()
+    {
+        policyLoading = true;
+        var url = $"api/settings/attachment-policies?entityCode={Uri.EscapeDataString(selectedEntityCode)}";
+        if (selectedSupplierId.HasValue) url += $"&supplierId={selectedSupplierId}";
+        var resp = await Api.GetAsync<List<AttachmentPolicyDto>>(url);
+        policies = resp?.Data ?? new();
+        // Seed the editable selectors from the policy row AT THE ACTIVE TIER (supplier override row if a supplier is
+        // selected, else the tenant-default row). Blank = no row at this tier (inherit / Optional).
+        selections.Clear();
+        foreach (var t in types.Where(x => x.IsActive))
+        {
+            var atTier = policies.FirstOrDefault(p =>
+                string.Equals(p.AttachmentTypeCode, t.Code, StringComparison.OrdinalIgnoreCase)
+                && p.SupplierId == selectedSupplierId);
+            selections[t.Code] = new PolicySelection { Requirement = atTier?.Requirement ?? "" };
+        }
+        policyLoading = false;
+    }
+
+    private async Task SavePolicy(PolicyRow row)
+    {
+        var sel = selections[row.TypeCode];
+        // Blank selection at the supplier tier = clear the override (DELETE). At the tenant tier we require a value.
+        if (string.IsNullOrEmpty(sel.Requirement))
+        {
+            if (selectedSupplierId.HasValue) { await ClearPolicy(row); return; }
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Pick a requirement", Detail = "Choose Mandatory / Warning / Optional for the tenant default." });
+            return;
+        }
+        busy = true;
+        var req = new UpsertAttachmentPolicyRequest(selectedEntityCode, row.TypeCode, selectedSupplierId, sel.Requirement);
+        var resp = await Api.PutAsync<AttachmentPolicyDto, UpsertAttachmentPolicyRequest>("api/settings/attachment-policies", req);
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" }); await LoadPolicies(); }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+    private async Task ClearPolicy(PolicyRow row)
+    {
+        var atTier = policies.FirstOrDefault(p =>
+            string.Equals(p.AttachmentTypeCode, row.TypeCode, StringComparison.OrdinalIgnoreCase)
+            && p.SupplierId == selectedSupplierId);
+        if (atTier is null) { await LoadPolicies(); return; }
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/settings/attachment-policies/{atTier.Id}");
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Cleared" }); await LoadPolicies(); }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+    private string EntityName(string code) => entities.FirstOrDefault(e => e.Code == code)?.Name ?? code;
+    private string SupplierLabel(Guid id) => suppliers.FirstOrDefault(s => s.Id == id) is { } s ? $"{s.LegalName} ({s.SupplierCode})" : id.ToString();
+
+    private static string ReqClass(string req) => req switch
+    {
+        "Mandatory" => "tlg-status--danger",
+        "Warning" => "tlg-status--pending",
+        _ => "tlg-status--info"
+    };
+}

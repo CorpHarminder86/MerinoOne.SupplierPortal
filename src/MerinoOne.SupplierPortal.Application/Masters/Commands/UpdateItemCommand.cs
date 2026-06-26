@@ -15,6 +15,12 @@ public class UpdateItemCommandValidator : AbstractValidator<UpdateItemCommand>
     {
         RuleFor(x => x.Body.Description).NotEmpty().MaximumLength(500);
         RuleFor(x => x.Body.HsnCode).MaximumLength(20);
+        // R4 (2026-06-26) — §7.4: decimal(5,2) non-negative, range 0–999.99.
+        RuleFor(x => x.Body.OverShipTolerancePct!.Value)
+            .InclusiveBetween(0m, 999.99m)
+            .When(x => x.Body.OverShipTolerancePct.HasValue)
+            .WithName("OverShipTolerancePct")
+            .WithMessage("Over-ship tolerance must be between 0 and 999.99.");
     }
 }
 
@@ -42,10 +48,14 @@ public class UpdateItemCommandHandler : IRequestHandler<UpdateItemCommand, ItemD
         i.ItemGroupId = request.Body.ItemGroupId;
         i.UnitId = request.Body.UnitId;
         i.IsActive = request.Body.IsActive;
+        // R4 (2026-06-26) — §7.4: null leaves the stored tolerance unchanged (admin grid sends only what it edits).
+        if (request.Body.OverShipTolerancePct.HasValue)
+            i.OverShipTolerancePct = request.Body.OverShipTolerancePct.Value;
         i.UpdatedBy = _user.UserCode;
         i.UpdatedOn = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return new ItemDto(i.Id, i.Seq, i.Code, i.Description, i.HsnCode,
-            i.ItemGroupId, groupCode, i.UnitId, unitCode, i.IsActive, i.CreatedOn);
+            i.ItemGroupId, groupCode, i.UnitId, unitCode, i.IsActive, i.CreatedOn,
+            i.IsSerialized, i.IsLotControlled, i.OverShipTolerancePct);
     }
 }

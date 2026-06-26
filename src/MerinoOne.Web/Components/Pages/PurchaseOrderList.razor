@@ -31,7 +31,8 @@
             <option value="Released">Released</option>
             <option value="Acknowledged">Acknowledged</option>
             <option value="Accepted">Accepted</option>
-            <option value="DateProposed">Date Proposed</option>
+            <option value="Negotiation">Negotiation</option>
+            <option value="Approved">Approved</option>
             <option value="PartiallyDelivered">Partially Delivered</option>
             <option value="Delivered">Delivered</option>
             <option value="Rejected">Rejected</option>
@@ -87,9 +88,12 @@
             @foreach (var po in paged.Items)
             {
                 var item = po;
-                var isAuto = string.Equals(item.PoResponseMode, "Auto", StringComparison.OrdinalIgnoreCase);
-                // Manual + actionable status → surface a quick "Respond" deep-link to the detail page where the
-                // permission-gated Acknowledge / Accept / Reject dialogs live. Auto rows are acknowledged + accepted
+                // R4 (2026-06-26) — D1: the list DTO's PoResponseMode now carries the PoConfirmationMode value
+                // (AutoAccept / AcknowledgeToShip / AcceptToShip). AutoAccept = no manual step (auto-accepted at
+                // release); the other two require a manual Ack/Accept/Reject.
+                var isAuto = string.Equals(item.PoResponseMode, "AutoAccept", StringComparison.OrdinalIgnoreCase);
+                // Non-AutoAccept + actionable status → surface a quick "Respond" deep-link to the detail page where the
+                // permission-gated Acknowledge / Accept / Reject dialogs live. AutoAccept rows are accepted
                 // automatically at release, so they only carry the mode badge.
                 var canRespond = !isAuto && (item.PoStatus == "Released" || item.PoStatus == "Acknowledged");
                 var asnEligible = item.PoStatus is "Released" or "Acknowledged" or "Accepted" or "PartiallyDelivered";
@@ -114,13 +118,13 @@
                     <div class="tlg-col">
                         @if (isAuto)
                         {
-                            <span class="tlg-status tlg-status--info" title="POs are acknowledged + accepted automatically at release">
-                                <span class="material-symbols-outlined" style="font-size:13px;vertical-align:middle;">bolt</span> Auto
+                            <span class="tlg-status tlg-status--info" title="Ship at release — POs are accepted automatically">
+                                <span class="material-symbols-outlined" style="font-size:13px;vertical-align:middle;">bolt</span> Auto-accept
                             </span>
                         }
                         else
                         {
-                            <span class="tlg-status tlg-status--active" title="Supplier acknowledges / accepts / rejects each PO">Manual</span>
+                            <span class="tlg-status tlg-status--active" title="@PoModeTitle(item.PoResponseMode)">@PoModeShort(item.PoResponseMode)</span>
                         }
                     </div>
                     <div class="tlg-col tlg-col--num">@item.Version</div>
@@ -209,6 +213,21 @@
         if (asnSel.Count == 0) return;
         Nav.NavigateToRoute($"/asns/new?pos={string.Join(",", asnSel)}");
     }
+
+    // R4 (2026-06-26) — D1: short label + tooltip for the non-AutoAccept confirmation modes.
+    private static string PoModeShort(string mode) => mode switch
+    {
+        "AcknowledgeToShip" => "Acknowledge",
+        "AcceptToShip" => "Accept",
+        _ => "Accept"
+    };
+
+    private static string PoModeTitle(string mode) => mode switch
+    {
+        "AcknowledgeToShip" => "Acknowledge before ship — acknowledging unblocks shipping",
+        "AcceptToShip" => "Accept before ship — the PO must be accepted before any ASN",
+        _ => "The PO must be confirmed before shipping"
+    };
 
     private string StatusClass(string status) => status switch
     {

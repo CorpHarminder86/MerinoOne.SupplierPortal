@@ -18,7 +18,7 @@ public class GetItemByIdQueryHandler : IRequestHandler<GetItemByIdQuery, ItemDto
         return await _db.Items.Where(x => x.Id == request.Id)
             .Select(i => new ItemDto(i.Id, i.Seq, i.Code, i.Description, i.HsnCode,
                 i.ItemGroupId, i.ItemGroup!.Code, i.UnitId, i.Unit!.Code, i.IsActive, i.CreatedOn,
-                i.IsSerialized, i.IsLotControlled))
+                i.IsSerialized, i.IsLotControlled, i.OverShipTolerancePct))
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("Item", request.Id);
     }

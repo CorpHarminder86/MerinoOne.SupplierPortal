@@ -174,7 +174,7 @@ public class UpsertItemsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
     public Task<UpsertResultDto> Handle(UpsertItemsCommand request, CancellationToken ct)
     {
         var recs = request.Body.Items;
-        var canonical = recs.Select(r => $"{r.Code.Trim().ToUpperInvariant()}|{(r.Description ?? "").Trim()}|{r.UnitCode}|{r.ItemGroupCode}|{r.HsnCode}|{r.IsActive}|{r.IsSerialized}|{r.IsLotControlled}");
+        var canonical = recs.Select(r => $"{r.Code.Trim().ToUpperInvariant()}|{(r.Description ?? "").Trim()}|{r.UnitCode}|{r.ItemGroupCode}|{r.HsnCode}|{r.IsActive}|{r.IsSerialized}|{r.IsLotControlled}|{r.OverShipTolerancePct ?? 0m}");
         var codes = recs.Select(r => r.Code.Trim());
         return exec.ExecuteAsync(SharedEndpoint.Item, request.Body.CompanyCode, request.BoundCompanyIds, request.IdempotencyKey,
             recs.Count, canonical, codes, request.Body, Upsert, ct);
@@ -225,6 +225,8 @@ public class UpsertItemsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
                     row.UnitId = unitId; row.ItemGroupId = groupId;
                     row.IsActive = rec.IsActive;
                     row.IsSerialized = rec.IsSerialized; row.IsLotControlled = rec.IsLotControlled;
+                    // R4 (2026-06-26) — §7.4: LN-fed over-ship tolerance floor; null → 0 (strict).
+                    row.OverShipTolerancePct = rec.OverShipTolerancePct ?? 0m;
                     row.UpdatedBy = "infor:inbound"; row.UpdatedOn = now;
                     results.Add(new RowResult(code, RowOutcome.Updated, null));
                 }
@@ -236,6 +238,8 @@ public class UpsertItemsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
                         Description = (rec.Description ?? "").Trim(),
                         HsnCode = InboundResolve.Norm(rec.HsnCode), UnitId = unitId, ItemGroupId = groupId, IsActive = rec.IsActive,
                         IsSerialized = rec.IsSerialized, IsLotControlled = rec.IsLotControlled,
+                        // R4 (2026-06-26) — §7.4: LN-fed over-ship tolerance floor; null → 0 (strict).
+                        OverShipTolerancePct = rec.OverShipTolerancePct ?? 0m,
                         CreatedBy = "infor:inbound", CreatedOn = now
                     });
                     results.Add(new RowResult(code, RowOutcome.Inserted, null));

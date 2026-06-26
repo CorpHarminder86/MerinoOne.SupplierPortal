@@ -17,6 +17,12 @@ public class CreateItemCommandValidator : AbstractValidator<CreateItemCommand>
         RuleFor(x => x.Body.Code).NotEmpty().MaximumLength(50);
         RuleFor(x => x.Body.Description).NotEmpty().MaximumLength(500);
         RuleFor(x => x.Body.HsnCode).MaximumLength(20);
+        // R4 (2026-06-26) — §7.4: decimal(5,2) non-negative, range 0–999.99.
+        RuleFor(x => x.Body.OverShipTolerancePct!.Value)
+            .InclusiveBetween(0m, 999.99m)
+            .When(x => x.Body.OverShipTolerancePct.HasValue)
+            .WithName("OverShipTolerancePct")
+            .WithMessage("Over-ship tolerance must be between 0 and 999.99.");
     }
 }
 
@@ -49,12 +55,15 @@ public class CreateItemCommandHandler : IRequestHandler<CreateItemCommand, ItemD
             ItemGroupId = request.Body.ItemGroupId,
             UnitId = request.Body.UnitId,
             IsActive = request.Body.IsActive,
+            // R4 (2026-06-26) — §7.4: null → entity default (0, strict). The SupplierItem override wins at resolve time.
+            OverShipTolerancePct = request.Body.OverShipTolerancePct ?? 0m,
             CreatedBy = _user.UserCode,
             CreatedOn = DateTime.UtcNow,
         };
         _db.Items.Add(entity);
         await _db.SaveChangesAsync(ct);
         return new ItemDto(entity.Id, entity.Seq, entity.Code, entity.Description, entity.HsnCode,
-            entity.ItemGroupId, groupCode, entity.UnitId, unitCode, entity.IsActive, entity.CreatedOn);
+            entity.ItemGroupId, groupCode, entity.UnitId, unitCode, entity.IsActive, entity.CreatedOn,
+            entity.IsSerialized, entity.IsLotControlled, entity.OverShipTolerancePct);
     }
 }

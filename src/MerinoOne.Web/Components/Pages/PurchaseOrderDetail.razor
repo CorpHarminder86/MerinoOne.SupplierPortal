@@ -45,14 +45,18 @@ else
                     <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenAccept" disabled="@busy">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Accept
                     </button>
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenReject" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject
-                    </button>
+                    @* R4 (2026-06-26) — D1 / §3.4: Reject/Decline is hidden when the supplier config has AllowReject=false. *@
+                    @if (detail.AllowReject)
+                    {
+                        <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenReject" disabled="@busy">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject
+                        </button>
+                    }
                 }
-                @* PO Negotiation (req 1) — supplier proposes revised qty / delivery dates. Peer of Accept/Reject,
-                   gated on the negotiate permission + an eligible status. Hidden once a negotiation is open
-                   (PoStatus == "Negotiation") so only "Cancel Negotiation" shows. *@
-                @if (Token.HasPermission("PurchaseOrder.Negotiate") && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
+                @* PO Negotiation (req 1) — supplier proposes revised qty / price / delivery dates. Peer of Accept/Reject,
+                   gated on the negotiate permission + an eligible status + the supplier's AllowNegotiate toggle (R4 D1).
+                   Hidden once a negotiation is open (PoStatus == "Negotiation") so only "Cancel Negotiation" shows. *@
+                @if (detail.AllowNegotiate && Token.HasPermission("PurchaseOrder.Negotiate") && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
                 {
                     <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-blue);background:var(--mer-surface);color:var(--mer-blue);cursor:pointer;" @onclick="EnterNegotiation" disabled="@busy">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">handshake</span> Negotiation
@@ -69,16 +73,12 @@ else
                 }
                 @if (!ManualResponse && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
                 {
-                    <span class="tlg-status tlg-status--info" title="Supplier is in Auto PO-response mode" style="align-self:center;">
-                        <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">bolt</span> Auto response
+                    <span class="tlg-status tlg-status--info" title="Supplier is in AutoAccept confirmation mode" style="align-self:center;">
+                        <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">bolt</span> Auto accept
                     </span>
                 }
-                @if (Token.HasPermission("PurchaseOrder.ApproveProposal") && detail.PoStatus == "DateProposed")
-                {
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApproveProposal" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">event_available</span> Approve Proposal
-                    </button>
-                }
+                @* R4 (2026-06-26) — D2: the date-only "Approve Proposal" buyer action is retired; counter-proposals
+                   now resolve through PO negotiation. *@
             </div>
         </header>
 
@@ -113,10 +113,6 @@ else
                     @if (detail.AcceptedAt.HasValue)
                     {
                         <dt style="color:var(--mer-ink-500);">Accepted</dt><dd style="font-family:Inter,monospace;">@detail.AcceptedAt.Value.ToString("yyyy-MM-dd HH:mm")</dd>
-                    }
-                    @if (detail.ProposedDeliveryDate.HasValue)
-                    {
-                        <dt style="color:var(--mer-ink-500);">Proposed delivery</dt><dd style="font-family:Inter,monospace;color:var(--mer-amber-800);">@detail.ProposedDeliveryDate.Value.ToString("yyyy-MM-dd")</dd>
                     }
                     @if (!string.IsNullOrEmpty(detail.RejectionReason))
                     {
@@ -180,6 +176,8 @@ else
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Disc Amt</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Tax</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Delivery</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Shipped</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Balance / allowance</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -209,6 +207,8 @@ else
                                 <td style="padding:6px 4px;">
                                     <input type="date" class="rz-textbox" style="padding:4px 6px;font-family:Inter,monospace;" @bind="edit.DeliveryDate" />
                                 </td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQtyToDate.ToString("0.###")</td>
+                                <td style="padding:6px 4px;">@BalanceCell(line)</td>
                             }
                             else
                             {
@@ -220,6 +220,8 @@ else
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : line.DiscountAmount.ToString("0.00"))</td>
                                 <td style="padding:6px 4px;" title="@line.TaxDescription">@(string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode)</td>
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@(line.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQtyToDate.ToString("0.###")</td>
+                                <td style="padding:6px 4px;">@BalanceCell(line)</td>
                             }
                         </tr>
                     }
@@ -228,7 +230,7 @@ else
                         <tr style="border-top:2px solid var(--mer-line);font-weight:700;">
                             <td colspan="7" style="padding:8px 4px;text-align:right;color:var(--mer-ink-700);">Total@(string.IsNullOrEmpty(detail.CurrencyCode) ? "" : " (" + detail.CurrencyCode + ")")</td>
                             <td style="padding:8px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-blue-darker);">@detail.TotalAmount.ToString("0.00")</td>
-                            <td colspan="4"></td>
+                            <td colspan="6"></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -276,31 +278,20 @@ else
                     <div class="merino-dialog__head-text">
                         <div class="merino-dialog__eyebrow">Purchase Order</div>
                         <h2 class="merino-dialog__title">Accept @detail.PoNumber</h2>
-                        <p class="merino-dialog__subtitle">Optionally propose an alternate delivery date.</p>
+                        <p class="merino-dialog__subtitle">Accept the PO as ordered. To counter-propose qty / price / dates, use Negotiation instead.</p>
                     </div>
                     <button class="merino-dialog__close" @onclick="() => showAccept = false"><span class="material-symbols-outlined">close</span></button>
                 </header>
                 <div class="merino-dialog__body">
-                    <div style="margin-bottom:10px;">
-                        <label style="display:block;font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-bottom:4px;">
-                            <input type="radio" name="del" checked="@(!proposeAlt)" @onchange="() => proposeAlt = false" /> Accept as-is
-                        </label>
-                        <label style="display:block;font-size:12px;font-weight:600;color:var(--mer-ink-700);">
-                            <input type="radio" name="del" checked="@proposeAlt" @onchange="() => proposeAlt = true" /> Propose alternate date
-                        </label>
-                    </div>
-                    @if (proposeAlt)
-                    {
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Proposed date</label>
-                        <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="proposedDate" />
-                    }
+                    @* R4 (2026-06-26) — D2: Accept is accept-only now. To counter-propose qty/price/date the supplier
+                       uses PO negotiation (the "Negotiation" action), not an accept-with-alternate-date. *@
                     <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:8px;display:block;">Notes (optional)</label>
                     <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="dialogNotes"></textarea>
                     @* Confirmation step (req 2) — the supplier must explicitly confirm before the Accept POSTs.
-                       This commits to the PO terms (or the proposed alternate date) and cannot be undone. *@
+                       This commits to the PO terms and cannot be undone. *@
                     <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--mer-ink-700);margin-top:12px;background:var(--mer-amber-50, var(--mer-blue-50));padding:10px 12px;border-radius:6px;">
                         <input type="checkbox" checked="@acceptConfirmed" @onchange="e => acceptConfirmed = (bool)(e.Value ?? false)" style="margin-top:2px;" />
-                        <span>I confirm I am accepting <b>@detail.PoNumber</b>@(proposeAlt ? " with the proposed delivery date above" : " as ordered"). This commits the order and cannot be undone.</span>
+                        <span>I confirm I am accepting <b>@detail.PoNumber</b> as ordered. This commits the order and cannot be undone.</span>
                     </label>
                     @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
                 </div>
@@ -343,34 +334,7 @@ else
         </div>
     }
 
-    @if (showApproveProposal)
-    {
-        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
-            <div class="merino-dialog" data-variant="info" style="width:540px;">
-                <div class="merino-dialog__accent"></div>
-                <header class="merino-dialog__header">
-                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">event_available</span></div>
-                    <div class="merino-dialog__head-text">
-                        <div class="merino-dialog__eyebrow">Buyer action</div>
-                        <h2 class="merino-dialog__title">Approve proposed date</h2>
-                        <p class="merino-dialog__subtitle">Proposed: <b>@(detail.ProposedDeliveryDate?.ToString("yyyy-MM-dd"))</b></p>
-                    </div>
-                    <button class="merino-dialog__close" @onclick="() => showApproveProposal = false"><span class="material-symbols-outlined">close</span></button>
-                </header>
-                <div class="merino-dialog__body">
-                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Comment (optional)</label>
-                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="dialogNotes"></textarea>
-                    @if (!string.IsNullOrEmpty(dialogError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@dialogError</div> }
-                </div>
-                <footer class="merino-dialog__footer">
-                    <div class="merino-dialog__actions">
-                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApproveProposal = false">Cancel</button>
-                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApproveProposal" disabled="@busy">@(busy ? "Working…" : "Approve")</button>
-                    </div>
-                </footer>
-            </div>
-        </div>
-    }
+    @* R4 (2026-06-26) — D2: the date-only "Approve proposed date" buyer dialog is retired (PO negotiation replaces it). *@
 }
 
 @code {
@@ -380,10 +344,11 @@ else
     private bool busy = false;
     private string tab = "overview";
 
-    // Supplier's PO-response mode now travels on PurchaseOrderDetailDto.PoResponseMode (joined from
-    // Supplier.PoResponseMode by the API) — no second GET /api/suppliers/{id} needed. Defaults to Manual
-    // (the DTO's own default) so a missing/empty value never hides the manual actions.
-    private bool ManualResponse => !string.Equals(detail?.PoResponseMode, "Auto", StringComparison.OrdinalIgnoreCase);
+    // R4 (2026-06-26) — D1: the supplier's PO-confirmation mode travels on PurchaseOrderDetailDto.PoResponseMode
+    // (joined from Supplier.PoConfirmationMode by the API; field name kept stable). "Manual" here means NOT
+    // AutoAccept (AcceptToShip / AcknowledgeToShip both require a manual Ack/Accept/Reject affordance). Defaults to
+    // the non-AutoAccept branch so a missing/empty value never hides the manual actions.
+    private bool ManualResponse => !string.Equals(detail?.PoResponseMode, "AutoAccept", StringComparison.OrdinalIgnoreCase);
 
     private void TabOverview() => tab = "overview";
     private void TabHistory() => tab = "history";
@@ -391,10 +356,7 @@ else
     private bool showAcknowledge = false;
     private bool showAccept = false;
     private bool showReject = false;
-    private bool showApproveProposal = false;
-    private bool proposeAlt = false;
     private bool acceptConfirmed = false;   // req 2 — explicit confirm gate on the Accept dialog
-    private DateTime? proposedDate;
     private string dialogNotes = string.Empty;
     private string rejectionReason = string.Empty;
     private string dialogError = string.Empty;
@@ -429,9 +391,8 @@ else
     }
 
     private void OpenAcknowledge() { dialogNotes = string.Empty; dialogError = string.Empty; showAcknowledge = true; }
-    private void OpenAccept() { dialogNotes = string.Empty; dialogError = string.Empty; proposeAlt = false; proposedDate = null; acceptConfirmed = false; showAccept = true; }
+    private void OpenAccept() { dialogNotes = string.Empty; dialogError = string.Empty; acceptConfirmed = false; showAccept = true; }
     private void OpenReject() { rejectionReason = string.Empty; dialogError = string.Empty; showReject = true; }
-    private void OpenApproveProposal() { dialogNotes = string.Empty; dialogError = string.Empty; showApproveProposal = true; }
 
     // ---------------- Negotiation handlers ----------------
     // Enter inline edit mode (req 3): snapshot each line's qty/date so we can diff on submit and discard on cancel.
@@ -523,8 +484,8 @@ else
     private async Task DoAccept()
     {
         busy = true; dialogError = string.Empty;
-        var req = new AcceptPoRequest(proposeAlt ? proposedDate : null, string.IsNullOrWhiteSpace(dialogNotes) ? null : dialogNotes);
-        // NOTE: AcceptPoRequest.ProposedDate maps to PO.ProposedDeliveryDate server-side per backend DTOs.
+        // R4 (2026-06-26) — D2: accept is accept-only (no proposed date).
+        var req = new AcceptPoRequest(string.IsNullOrWhiteSpace(dialogNotes) ? null : dialogNotes);
         var resp = await Api.PostAsync<PurchaseOrderDetailDto, AcceptPoRequest>($"api/purchase-orders/{Id}/accept", req);
         if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Accepted" }); showAccept = false; await Load(); }
         else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
@@ -541,20 +502,46 @@ else
         busy = false;
     }
 
-    private async Task DoApproveProposal()
-    {
-        busy = true; dialogError = string.Empty;
-        var resp = await Api.PostAsync<PurchaseOrderDetailDto, ApproveProposalRequest>($"api/purchase-orders/{Id}/approve-proposal", new ApproveProposalRequest(string.IsNullOrWhiteSpace(dialogNotes) ? null : dialogNotes));
-        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Approved" }); showApproveProposal = false; await Load(); }
-        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
-        busy = false;
-    }
-
     private string StatusClass(string status) => status switch
     {
         "Accepted" or "Delivered" or "Closed" or "Approved" => "tlg-status--active",
-        "Released" or "Acknowledged" or "DateProposed" or "PartiallyDelivered" or "Negotiation" => "tlg-status--pending",
+        "Released" or "Acknowledged" or "PartiallyDelivered" or "Negotiation" => "tlg-status--pending",
         "Rejected" or "Cancelled" => "tlg-status--danger",
         _ => "tlg-status--info"
+    };
+
+    // R4 (2026-06-26) — Phase 5b / §7.3 + §5.3 / DI-04: render the NOMINAL balance and the over-ship ALLOWANCE
+    // separately (so a 0 balance with an accepted over-ship headroom never reads inconsistent), plus the
+    // "qty reduced below shipped" exception flag (UC-ASN-10).
+    private RenderFragment BalanceCell(PurchaseOrderLineDto line) => builder =>
+    {
+        var seq = 0;
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "style", "display:flex;flex-direction:column;gap:2px;font-family:Inter,monospace;");
+
+        builder.OpenElement(seq++, "span");
+        builder.AddContent(seq++, $"Balance {line.Balance.ToString("0.###")}");
+        builder.CloseElement();
+
+        var extra = line.OverShipAllowance - line.Balance;
+        if (extra > 0)
+        {
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "style", "font-size:10.5px;color:var(--mer-ink-500);");
+            builder.AddContent(seq++, $"over-ship allowance up to {line.OverShipAllowance.ToString("0.###")}");
+            builder.CloseElement();
+        }
+
+        if (line.IsOverShippedQtyReduced)
+        {
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "class", "tlg-status tlg-status--danger");
+            builder.AddAttribute(seq++, "title", "Order qty was revised below the quantity already shipped");
+            builder.AddAttribute(seq++, "style", "font-family:'Plus Jakarta Sans',sans-serif;width:fit-content;margin-top:2px;");
+            builder.AddContent(seq++, "qty reduced below shipped");
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
     };
 }

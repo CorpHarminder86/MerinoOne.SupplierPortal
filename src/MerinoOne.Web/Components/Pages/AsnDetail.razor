@@ -126,6 +126,7 @@
                         <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
                         <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Order Qty</th>
                         <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Ship Qty</th>
+                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Balance / allowance</th>
                         <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Batch</th>
                         <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Expiry</th>
                     </tr>
@@ -143,13 +144,14 @@
                         <td style="padding:6px 4px;font-family:Inter,monospace;">@line.ItemCode</td>
                         <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.OrderQty.ToString("0.###")</td>
                         <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQty.ToString("0.###")</td>
+                        <td style="padding:6px 4px;">@DetailBalanceCell(line)</td>
                         <td style="padding:6px 4px;">@(string.IsNullOrEmpty(line.BatchNumber) ? "—" : line.BatchNumber)</td>
                         <td style="padding:6px 4px;font-family:Inter,monospace;">@(line.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                     </tr>
                     @if (hasSerials)
                     {
                         <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                            <td colspan="8" style="padding:4px 4px 10px 16px;">
+                            <td colspan="9" style="padding:4px 4px 10px 16px;">
                                 <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:4px;">Serials (@line.SerialNumbers!.Count)</div>
                                 <div style="display:flex;flex-wrap:wrap;gap:4px;">
                                     @foreach (var s in line.SerialNumbers!)
@@ -163,7 +165,7 @@
                     @if (hasLots)
                     {
                         <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                            <td colspan="8" style="padding:4px 4px 10px 16px;">
+                            <td colspan="9" style="padding:4px 4px 10px 16px;">
                                 <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:4px;">Lots (@line.Lots!.Count)</div>
                                 <div style="display:flex;flex-wrap:wrap;gap:6px;">
                                     @foreach (var lot in line.Lots!)
@@ -300,6 +302,7 @@
                                 <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Seq</th>
                                 <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
                                 <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Order Qty</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Balance / allowance</th>
                                 <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Ship Qty</th>
                                 <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Batch</th>
                                 <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Expiry</th>
@@ -314,6 +317,7 @@
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@(ln.SequenceNo?.ToString() ?? "—")</td>
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
+                                <td style="padding:6px 4px;">@BalanceCell(ln)</td>
                                 <td style="padding:6px 4px;text-align:right;"><input type="number" step="0.001" class="rz-textbox" style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;" @bind="ln.ShippedQty" /></td>
                                 <td style="padding:6px 4px;"><input type="text" class="rz-textbox" style="width:120px;padding:4px 6px;" @bind="ln.BatchNumber" /></td>
                                 <td style="padding:6px 4px;"><input type="date" class="rz-textbox" style="width:130px;padding:4px 6px;" @bind="ln.ExpiryDate" /></td>
@@ -480,12 +484,26 @@
                         }
                         else
                         {
-                            <label class="doc-uploader__choose" style="position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;">
-                                <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
-                                @(attachUploading ? "Uploading…" : "Add file")
-                                <InputFile OnChange="OnAsnFileSelectedAsync" accept=".pdf,.jpg,.jpeg,.png" disabled="@attachUploading"
-                                           style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
-                            </label>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                @* R4 (2026-06-26) — §8.5 / §3.6: optional document-type tag from the active attachment-type
+                                   master. Tagging an attachment lets the §8.3 policy evaluator recognise it as present. *@
+                                @if (attachmentTypes.Count > 0)
+                                {
+                                    <select class="rz-dropdown" style="padding:6px 10px;font-size:12px;" @bind="selectedAttachType">
+                                        <option value="AsnAttachment">Document type…</option>
+                                        @foreach (var t in attachmentTypes)
+                                        {
+                                            <option value="@t.Code">@t.Name</option>
+                                        }
+                                    </select>
+                                }
+                                <label class="doc-uploader__choose" style="position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;">
+                                    <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
+                                    @(attachUploading ? "Uploading…" : "Add file")
+                                    <InputFile OnChange="OnAsnFileSelectedAsync" accept=".pdf,.jpg,.jpeg,.png" disabled="@attachUploading"
+                                               style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
+                                </label>
+                            </div>
                         }
                     </div>
                     <p style="font-size:11px;color:var(--mer-ink-500);margin-bottom:8px;">PDF or image, up to 5 MB. Attachments are editable only while the ASN is Draft.</p>
@@ -596,6 +614,84 @@
     </div>
 }
 
+@* ---------------- PO confirmation-gate override dialog (§6.5 / UC-PO-09) ---------------- *@
+@if (showGateOverride)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="warning" data-size="md" style="width:560px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">gpp_maybe</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">ASN · Gate override</div>
+                    <h2 class="merino-dialog__title">PO not confirmed for shipping</h2>
+                    <p class="merino-dialog__subtitle">The confirmation gate blocked this shipment.</p>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showGateOverride = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="background:var(--mer-amber-50);color:var(--mer-amber-800);padding:10px 12px;border-radius:6px;font-size:12.5px;margin-bottom:12px;white-space:pre-wrap;">@gateBlockMessage</div>
+                @if (CanOverrideGate)
+                {
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Override reason (required)</label>
+                    <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" placeholder="Why is this exceptional shipment authorised?" @bind="gateOverrideReason"></textarea>
+                    <p style="font-size:11px;color:var(--mer-ink-500);margin-top:6px;">This bypasses the confirmation gate and is recorded on the PO history (who / when / reason).</p>
+                }
+                else
+                {
+                    <p style="font-size:12.5px;color:var(--mer-ink-700);">Ask the supplier to confirm the PO, or an authorised user to override the gate.</p>
+                }
+                @if (!string.IsNullOrEmpty(gateOverrideError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@gateOverrideError</div> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showGateOverride = false">Cancel</button>
+                    @if (CanOverrideGate)
+                    {
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="ConfirmGateOverride" disabled="@busy">@(busy ? "Working…" : "Override &amp; proceed")</button>
+                    }
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@* ---------------- Missing-attachment Warning confirm dialog (§8.3 / UC-ATT-03) ---------------- *@
+@if (showAttachConfirm)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="warning" data-size="md" style="width:560px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">rule</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">ASN · Attachments</div>
+                    <h2 class="merino-dialog__title">Proceed without all attachments?</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showAttachConfirm = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="font-size:13px;color:var(--mer-ink-700);">@attachConfirmMessage</p>
+                @if (attachMissing.Count > 0)
+                {
+                    <div style="margin-top:10px;border:1px solid var(--mer-line);border-radius:6px;padding:10px 12px;background:var(--mer-ink-50);">
+                        <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:6px;">Not uploaded</div>
+                        <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--mer-ink-700);">
+                            @foreach (var m in attachMissing) { <li>@m</li> }
+                        </ul>
+                    </div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showAttachConfirm = false">Go back</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="ConfirmSubmitWithMissingAttachments" disabled="@busy">@(busy ? "Submitting…" : "Yes, proceed")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
 <DocumentPreviewer Doc="_previewDoc" OnClose="() => _previewDoc = null" />
 
 @code {
@@ -639,17 +735,43 @@
     private bool attachUploading;
     private string attachError = string.Empty;
     private Guid attachSupplierId;
+    // R4 (2026-06-26) — §3.6 / §8.5: the active attachment-type catalogue for the optional document-type picker.
+    // Best-effort (Settings.Read); empty list (e.g. a supplier user without the permission) simply hides the picker
+    // and attachments default to the AsnAttachment type. selectedAttachType is the code passed to /attach.
+    private List<AttachmentTypeDto> attachmentTypes = new();
+    private string selectedAttachType = "AsnAttachment";
     // R4 (2026-06-23) — deferred-upload staging key for create-mode attachments (rebound onto the ASN by CreateAsn).
     private Guid _stagingKey = Guid.NewGuid();
 
     private bool showCancel = false;
     private string dialogError = string.Empty;
 
+    // R4 (2026-06-26) — §6.5 / UC-PO-09: PO confirmation-gate block + admin override. When create/submit returns the
+    // gate message, surface it; a caller with PurchaseOrder.OverrideGate can supply a reason to re-submit past it.
+    private bool showGateOverride = false;
+    private string gateBlockMessage = string.Empty;
+    private string gateOverrideReason = string.Empty;
+    private string gateOverrideError = string.Empty;
+    // Which operation triggered the gate block, so the override re-runs the same path.
+    private bool gateFromSubmit = false;
+
+    // R4 (2026-06-26) — §8.3 / UC-ATT-03: missing-Warning-attachment confirm. The first submit returns a 200 with
+    // ConfirmationRequired=true; on confirm we re-submit with AcknowledgeMissingAttachments=true.
+    private bool showAttachConfirm = false;
+    private string attachConfirmMessage = string.Empty;
+    private List<string> attachMissing = new();
+
     private DocumentPreviewer.DocumentDescriptor? _previewDoc;
 
     private bool IsNew => !Id.HasValue;
     private bool IsLocked => detail?.IsLocked == true;
     private bool CanWrite => Token.IsSupplier || Token.HasPermission("Asn.Write");
+    private bool CanOverrideGate => Token.HasPermission("PurchaseOrder.OverrideGate");
+
+    // The gate block message names the required action; the API stamps it under the "poStatus" error key. Match the
+    // stable prefix so we route it to the override dialog rather than the generic error banner.
+    private static bool IsGateBlock(string? msg) =>
+        !string.IsNullOrEmpty(msg) && msg.Contains("before shipments can be created", StringComparison.OrdinalIgnoreCase);
 
     private IEnumerable<string> SelectedPoNumbers =>
         selectedPoMap.Values.Select(p => p.PoNumber);
@@ -685,8 +807,18 @@
             _loadedId = Id;
             _loadedNew = IsNew;
             currentStep = 1;
+            await LoadAttachmentTypes();
             await Reload();
         }
+    }
+
+    // Best-effort: the active attachment-type catalogue feeds the optional document-type picker. A caller without
+    // Settings.Read gets an empty list (the picker hides), so this never blocks the ASN flow.
+    private async Task LoadAttachmentTypes()
+    {
+        if (attachmentTypes.Count > 0) return;
+        var resp = await Api.GetAsync<List<AttachmentTypeDto>>("api/settings/attachment-types?isActive=true");
+        attachmentTypes = resp?.Data ?? new();
     }
 
     private async Task Reload()
@@ -753,7 +885,12 @@
                     IsSerialized = l.SerialNumbers is { Count: > 0 },
                     IsLotControlled = l.Lots is { Count: > 0 },
                     Serials = l.SerialNumbers?.ToList() ?? new(),
-                    Lots = l.Lots?.Select(x => new LotRow { LotNo = x.LotNo, Qty = x.Qty, ExpiryDate = x.ExpiryDate }).ToList() ?? new()
+                    Lots = l.Lots?.Select(x => new LotRow { LotNo = x.LotNo, Qty = x.Qty, ExpiryDate = x.ExpiryDate }).ToList() ?? new(),
+                    // R4 (2026-06-26) — §7.3 / DI-04: ship-tracking from the ASN line (ReloadLines re-merges the PO
+                    // line's authoritative figures for editable drafts; the locked read-only view uses these).
+                    ShippedQtyToDate = l.ShippedQtyToDate,
+                    Balance = l.Balance,
+                    OverShipAllowance = l.OverShipAllowance
                 }).ToList();
 
                 // For an editable (Draft) ASN prime the PO search so the picker can add/remove POs (same supplier).
@@ -872,7 +1009,12 @@
                     IsLotControlled = l.IsLotControlled,
                     // Preserve already-captured serials/lots across a PO add/remove re-merge.
                     Serials = prev?.Serials ?? new(),
-                    Lots = prev?.Lots ?? new()
+                    Lots = prev?.Lots ?? new(),
+                    // R4 (2026-06-26) — §7.3 / DI-04: live ship-tracking from the PO line.
+                    ShippedQtyToDate = l.ShippedQtyToDate,
+                    Balance = l.Balance,
+                    OverShipAllowance = l.OverShipAllowance,
+                    IsOverShippedQtyReduced = l.IsOverShippedQtyReduced
                 });
             }
         }
@@ -897,21 +1039,7 @@
 
         if (IsNew)
         {
-            // Single-PO → pass the scalar for back-compat; multi-PO → pass the list (scalar null).
-            var poList = selectedPoIds.ToList();
-            var req = new CreateAsnRequest(
-                poList.Count == 1 ? poList[0] : (Guid?)null,
-                poList.Count > 1 ? poList : null,
-                expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
-                StagingKey: _stagingKey);
-            var resp = await Api.PostAsync<AsnDetailDto, CreateAsnRequest>("api/asns", req);
-            if (resp?.Success == true && resp.Data != null)
-            {
-                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft ASN created" });
-                // Navigate to the saved draft so attachments (ownerEntityType='Asn') become available + submit is enabled.
-                NavMgr.NavigateToRoute($"/asns/{resp.Data.Id}");
-            }
-            else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed to create ASN."; }
+            await CreateDraftAsync(lineReqs, overrideReason: null);
         }
         else
         {
@@ -947,15 +1075,105 @@
             return;
         }
 
-        var resp = await Api.PostAsync<AsnDetailDto, object>($"api/asns/{Id}/submit", new { });
+        await SubmitAsnAsync(overrideReason: null, acknowledgeMissingAttachments: false);
+        busy = false;
+    }
+
+    // ---- Create draft (with optional gate override). On a gate block, route to the override dialog. ----
+    private async Task CreateDraftAsync(List<CreateAsnLineRequest> lineReqs, string? overrideReason)
+    {
+        var poList = selectedPoIds.ToList();
+        var req = new CreateAsnRequest(
+            poList.Count == 1 ? poList[0] : (Guid?)null,
+            poList.Count > 1 ? poList : null,
+            expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
+            StagingKey: _stagingKey,
+            OverrideReason: string.IsNullOrWhiteSpace(overrideReason) ? null : overrideReason.Trim());
+        var resp = await Api.PostAsync<AsnDetailDto, CreateAsnRequest>("api/asns", req);
         if (resp?.Success == true && resp.Data != null)
         {
+            showGateOverride = false;
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft ASN created" });
+            // Navigate to the saved draft so attachments (ownerEntityType='Asn') become available + submit is enabled.
+            NavMgr.NavigateToRoute($"/asns/{resp.Data.Id}");
+            return;
+        }
+        var err = resp?.Errors?.FirstOrDefault();
+        if (IsGateBlock(err)) { OpenGateOverride(err!, fromSubmit: false); }
+        else { submitError = err ?? "Failed to create ASN."; }
+    }
+
+    // ---- Submit (Draft -> Submitted) — handles the gate block AND the §8.3 Warning-attachment confirm two-step. ----
+    private async Task SubmitAsnAsync(string? overrideReason, bool acknowledgeMissingAttachments)
+    {
+        var body = new SubmitAsnRequest(
+            string.IsNullOrWhiteSpace(overrideReason) ? null : overrideReason.Trim(),
+            acknowledgeMissingAttachments);
+        var resp = await Api.PostAsync<AsnDetailDto, SubmitAsnRequest>($"api/asns/{Id}/submit", body);
+
+        // (1) Success — submitted.
+        if (resp?.Success == true && resp.Data != null)
+        {
+            showGateOverride = false; showAttachConfirm = false;
             detail = resp.Data;
             attachments.Clear();
             attachments.AddRange(resp.Data.Attachments);
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN submitted", Detail = resp.Data.DraftInvoiceId.HasValue ? "A draft invoice was created." : string.Empty });
+            return;
         }
-        else { submitError = resp?.Errors?.FirstOrDefault() ?? "Submit failed (over-ship, lot/serial or mixed-currency check, or the ASN is no longer Draft)."; }
+
+        // (2) Warning attachments missing — 200 ConfirmationRequired, nothing committed. Show the confirm dialog.
+        if (resp?.ConfirmationRequired == true)
+        {
+            showGateOverride = false;
+            attachConfirmMessage = string.IsNullOrEmpty(resp.ConfirmationMessage)
+                ? "One or more required attachments were not uploaded, do you wish to proceed?"
+                : resp.ConfirmationMessage!;
+            attachMissing = resp.MissingAttachments ?? new();
+            showAttachConfirm = true;
+            return;
+        }
+
+        // (3) Gate block — route to the override dialog (mandatory-missing + every other 400 = a blocking error).
+        var err = resp?.Errors?.FirstOrDefault();
+        if (IsGateBlock(err)) { OpenGateOverride(err!, fromSubmit: true); }
+        else { submitError = err ?? "Submit failed (over-ship, lot/serial or mixed-currency check, missing mandatory attachment, or the ASN is no longer Draft)."; }
+    }
+
+    private void OpenGateOverride(string message, bool fromSubmit)
+    {
+        gateBlockMessage = message;
+        gateFromSubmit = fromSubmit;
+        gateOverrideReason = string.Empty;
+        gateOverrideError = string.Empty;
+        showAttachConfirm = false;
+        showGateOverride = true;
+    }
+
+    private async Task ConfirmGateOverride()
+    {
+        if (string.IsNullOrWhiteSpace(gateOverrideReason)) { gateOverrideError = "A reason is required to override the gate."; return; }
+        busy = true; gateOverrideError = string.Empty; submitError = string.Empty;
+        if (gateFromSubmit)
+        {
+            await SubmitAsnAsync(gateOverrideReason, acknowledgeMissingAttachments: false);
+        }
+        else
+        {
+            var lineReqs = BuildLineRequests();
+            await CreateDraftAsync(lineReqs, gateOverrideReason);
+        }
+        busy = false;
+    }
+
+    // Re-submit acknowledging the missing Warning attachments (§8.3). Carries the gate reason if the gate was also
+    // overridden earlier in this submit attempt.
+    private async Task ConfirmSubmitWithMissingAttachments()
+    {
+        busy = true; submitError = string.Empty;
+        await SubmitAsnAsync(
+            overrideReason: string.IsNullOrWhiteSpace(gateOverrideReason) ? null : gateOverrideReason,
+            acknowledgeMissingAttachments: true);
         busy = false;
     }
 
@@ -994,6 +1212,8 @@
             content.Add(new StringContent(IsNew ? "Staging" : "Asn"), "ownerEntityType");
             content.Add(new StringContent((IsNew ? _stagingKey : Id!.Value).ToString()), "ownerEntityId");
             content.Add(new StringContent(attachSupplierId.ToString()), "supplierId");
+            // R4 (2026-06-26) — §3.6: tag with the chosen active master code (validated server-side); defaults to AsnAttachment.
+            content.Add(new StringContent(string.IsNullOrWhiteSpace(selectedAttachType) ? "AsnAttachment" : selectedAttachType), "documentType");
 
             var resp = await Api.PostMultipartAsync<DocumentAttachmentDto>("api/document-uploads/attach", content);
             if (resp?.Success == true && resp.Data is not null) attachments.Add(resp.Data);
@@ -1018,6 +1238,43 @@
         contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? "image"
         : string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase) ? "picture_as_pdf"
         : "description";
+
+    // R4 (2026-06-26) — §7.3 / §5.3 / DI-04: render the nominal balance + the over-ship allowance SEPARATELY, plus
+    // the "qty reduced below shipped" exception flag. Shared shape for the wizard (LineRow) and the locked view
+    // (AsnLineDto) via the two thin wrappers below.
+    private static RenderFragment RenderBalance(decimal balance, decimal overShipAllowance, bool overShippedReduced) => builder =>
+    {
+        var seq = 0;
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "style", "display:flex;flex-direction:column;gap:2px;font-family:Inter,monospace;");
+
+        builder.OpenElement(seq++, "span");
+        builder.AddContent(seq++, $"Balance {balance.ToString("0.###")}");
+        builder.CloseElement();
+
+        if (overShipAllowance - balance > 0)
+        {
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "style", "font-size:10.5px;color:var(--mer-ink-500);");
+            builder.AddContent(seq++, $"over-ship allowance up to {overShipAllowance.ToString("0.###")}");
+            builder.CloseElement();
+        }
+
+        if (overShippedReduced)
+        {
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "class", "tlg-status tlg-status--danger");
+            builder.AddAttribute(seq++, "title", "Order qty was revised below the quantity already shipped");
+            builder.AddAttribute(seq++, "style", "font-family:'Plus Jakarta Sans',sans-serif;width:fit-content;margin-top:2px;");
+            builder.AddContent(seq++, "qty reduced below shipped");
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+
+    private RenderFragment BalanceCell(LineRow l) => RenderBalance(l.Balance, l.OverShipAllowance, l.IsOverShippedQtyReduced);
+    // AsnLineDto carries no IsOverShippedQtyReduced (it's a PO-line concept) — pass false in the locked view.
+    private RenderFragment DetailBalanceCell(AsnLineDto l) => RenderBalance(l.Balance, l.OverShipAllowance, false);
 
     private void BackToList() => NavMgr.NavigateToRoute("/asns");
 
@@ -1137,6 +1394,15 @@
         public bool IsLotControlled { get; set; }
         public List<string> Serials { get; set; } = new();
         public List<LotRow> Lots { get; set; } = new();
+
+        // R4 (2026-06-26) — §7.3 / §5.3 / DI-04: the PO-line ship-tracking figures shown on the ASN wizard. Balance
+        // is nominal (MAX(0, orderQty − shippedQtyToDate)); OverShipAllowance is the tolerance-adjusted ceiling
+        // headroom — shown SEPARATELY. IsOverShippedQtyReduced flags a line whose orderQty was revised below the
+        // already-shipped cumulative (UC-ASN-10).
+        public decimal ShippedQtyToDate { get; set; }
+        public decimal Balance { get; set; }
+        public decimal OverShipAllowance { get; set; }
+        public bool IsOverShippedQtyReduced { get; set; }
 
         // Transient UI state (not persisted): the paste textarea buffer + the last paste warning for this line.
         public string? _pasteBuffer { get; set; }

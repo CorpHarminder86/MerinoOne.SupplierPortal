@@ -1,0 +1,186 @@
+@page "/settings/supplier-item-tolerances"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+@* R4 (2026-06-26) — Phase 5b / §7.4: Supplier+Item over-ship tolerance override grid (Settings.Write). Pick a
+   supplier → every active item master joined to that supplier's override + the resolved tolerance the ASN guard
+   applies. Blank override = inherit the item master; an explicit value (incl. 0) = a per-supplier cap. *@
+
+<PageTitle>Supplier item tolerances</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Supplier item tolerances</h1>
+                @if (selectedSupplierId.HasValue && rows != null)
+                {
+                    <span class="tl-count-chip">@rows.Count</span>
+                }
+            </div>
+            <p class="tl-sub">Per-supplier over-ship tolerance overrides · Settings → Fulfilment</p>
+        </div>
+    </header>
+
+    @if (!CanWrite)
+    {
+        <div class="tl-empty">You do not have permission to manage fulfilment settings.</div>
+    }
+    else
+    {
+        <div class="tl-filter-bar">
+            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);align-self:center;">Supplier</label>
+            <select class="rz-dropdown" style="min-width:360px;padding:8px 10px;" value="@selectedSupplierId" @onchange="OnSupplierSelect">
+                <option value="">— Select a supplier —</option>
+                @foreach (var s in suppliers)
+                {
+                    <option value="@s.Id" selected="@(selectedSupplierId == s.Id)">@s.LegalName (@s.SupplierCode)</option>
+                }
+            </select>
+            <input class="rz-textbox" placeholder="Filter items…" style="width:260px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="ApplyFilter" />
+        </div>
+
+        @if (!selectedSupplierId.HasValue)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">tune</span>
+                <div>Select a supplier to load its item-tolerance grid.</div>
+            </div>
+        }
+        else if (loading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (filtered == null || filtered.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">inventory_2</span>
+                <div>No items match.</div>
+            </div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.4fr 130px 200px 130px 110px; --tl-min-width: 1040px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Item code</div>
+                    <div class="tlg-col">Description</div>
+                    <div class="tlg-col">Item master %</div>
+                    <div class="tlg-col">Supplier override % (blank = inherit)</div>
+                    <div class="tlg-col">Resolved %</div>
+                    <div class="tlg-col tlg-col--actions">Actions</div>
+                </div>
+                @foreach (var r in filtered)
+                {
+                    var row = r;
+                    var edit = edits[row.ItemId];
+                    <div class="tlg-row">
+                        <div class="tlg-col tlg-code">@row.ItemCode</div>
+                        <div class="tlg-col tlg-desc">@row.ItemDescription</div>
+                        <div class="tlg-col tlg-code">@row.ItemMasterTolerancePct.ToString("0.##")%</div>
+                        <div class="tlg-col">
+                            <input type="number" step="0.01" min="0" max="999.99" class="rz-textbox"
+                                   style="width:120px;padding:5px 8px;font-family:Inter,monospace;text-align:right;"
+                                   placeholder="inherit" @bind="edit.Value" />
+                        </div>
+                        <div class="tlg-col tlg-code">
+                            <span class="tlg-status @(row.SupplierOverridePct.HasValue ? "tlg-status--active" : "tlg-status--info")">@row.ResolvedTolerancePct.ToString("0.##")%</span>
+                        </div>
+                        <div class="tlg-col tlg-col--actions">
+                            <button @onclick="() => SaveRow(row)" disabled="@busy" title="Save override" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;">
+                                <span class="material-symbols-outlined" style="font-size:18px;">save</span>
+                            </button>
+                            @if (row.SupplierItemId.HasValue)
+                            {
+                                <button @onclick="() => ClearRow(row)" disabled="@busy" title="Clear override (inherit master)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">backspace</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private bool CanWrite => Token.HasPermission("Settings.Write");
+
+    private List<SupplierListItemDto> suppliers = new();
+    private Guid? selectedSupplierId;
+    private List<SupplierItemToleranceDto>? rows;
+    private List<SupplierItemToleranceDto>? filtered;
+    private readonly Dictionary<Guid, RowEdit> edits = new();
+    private string search = string.Empty;
+    private bool loading;
+    private bool busy;
+
+    private sealed class RowEdit { public decimal? Value; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanWrite) return;
+        var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+        suppliers = (sup?.Data ?? new()).OrderBy(s => s.LegalName).ToList();
+    }
+
+    private async Task OnSupplierSelect(ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var id)) { selectedSupplierId = id; await Load(); }
+        else { selectedSupplierId = null; rows = filtered = null; }
+    }
+
+    private async Task Load()
+    {
+        if (!selectedSupplierId.HasValue) return;
+        loading = true;
+        var resp = await Api.GetAsync<List<SupplierItemToleranceDto>>($"api/settings/supplier-items?supplierId={selectedSupplierId}");
+        rows = resp?.Data ?? new();
+        edits.Clear();
+        foreach (var r in rows) edits[r.ItemId] = new RowEdit { Value = r.SupplierOverridePct };
+        ApplyFilter();
+        loading = false;
+    }
+
+    private void ApplyFilter()
+    {
+        if (rows == null) { filtered = new(); return; }
+        IEnumerable<SupplierItemToleranceDto> q = rows;
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x => x.ItemCode.Contains(s, StringComparison.OrdinalIgnoreCase)
+                          || x.ItemDescription.Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+        filtered = q.ToList();
+    }
+
+    private async Task SaveRow(SupplierItemToleranceDto row)
+    {
+        if (!selectedSupplierId.HasValue) return;
+        var value = edits[row.ItemId].Value;
+        if (value is { } v && (v < 0m || v > 999.99m))
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Invalid", Detail = "Override must be between 0 and 999.99 (or blank to inherit)." });
+            return;
+        }
+        busy = true;
+        // Blank (null) is a valid value here — it clears the override (stored as NULL = inherit).
+        var req = new UpsertSupplierItemToleranceRequest(selectedSupplierId.Value, row.ItemId, value);
+        var resp = await Api.PutAsync<SupplierItemToleranceDto, UpsertSupplierItemToleranceRequest>("api/settings/supplier-items", req);
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" }); await Load(); }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+    private async Task ClearRow(SupplierItemToleranceDto row)
+    {
+        if (!row.SupplierItemId.HasValue) return;
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/settings/supplier-items/{row.SupplierItemId}");
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Override cleared (inherits master)" }); await Load(); }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+}

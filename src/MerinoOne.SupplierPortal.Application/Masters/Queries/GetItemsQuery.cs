@@ -26,7 +26,7 @@ public class GetItemsQueryHandler : IRequestHandler<GetItemsQuery, List<ItemDto>
         return await q.OrderBy(i => i.Code)
             .Select(i => new ItemDto(i.Id, i.Seq, i.Code, i.Description, i.HsnCode,
                 i.ItemGroupId, i.ItemGroup!.Code, i.UnitId, i.Unit!.Code, i.IsActive, i.CreatedOn,
-                i.IsSerialized, i.IsLotControlled))
+                i.IsSerialized, i.IsLotControlled, i.OverShipTolerancePct))
             .ToListAsync(ct);
     }
 }

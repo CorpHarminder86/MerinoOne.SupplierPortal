@@ -57,17 +57,23 @@ public record ItemDto(
     // R4 A3: LN-fed control flags. ERP is the authority; surfaced read-only in the admin grid and they
     // drive ASN lot/serial capture. Trailing optional so existing positional constructions stay valid.
     bool IsSerialized = false,
-    bool IsLotControlled = false);
+    bool IsLotControlled = false,
+    // R4 (2026-06-26) — §7.4: the item-master over-ship tolerance floor (% — NOT NULL, default 0). The
+    // SupplierItem override (when present) wins; this is the fallback. Trailing optional so existing
+    // positional constructions stay valid.
+    decimal OverShipTolerancePct = 0m);
 
 // Create requests
 public record CreateDeliveryTermRequest(string Code, string Description, bool IsActive = true);
 public record CreatePaymentTermRequest(string Code, string Description, int NetDays, bool IsActive = true);
-public record CreateItemRequest(string Code, string Description, string? HsnCode, Guid? ItemGroupId = null, Guid? UnitId = null, bool IsActive = true);
+// R4 (2026-06-26) — §7.4: OverShipTolerancePct optional (trailing); null → defaults to the entity default (0).
+public record CreateItemRequest(string Code, string Description, string? HsnCode, Guid? ItemGroupId = null, Guid? UnitId = null, bool IsActive = true, decimal? OverShipTolerancePct = null);
 
 // Update requests (Code remains immutable to keep it stable for FK lookups; rest editable)
 public record UpdateDeliveryTermRequest(string Description, bool IsActive);
 public record UpdatePaymentTermRequest(string Description, int NetDays, bool IsActive);
-public record UpdateItemRequest(string Description, string? HsnCode, Guid? ItemGroupId, Guid? UnitId, bool IsActive);
+// R4 (2026-06-26) — §7.4: OverShipTolerancePct optional (trailing); null leaves the stored value unchanged.
+public record UpdateItemRequest(string Description, string? HsnCode, Guid? ItemGroupId, Guid? UnitId, bool IsActive, decimal? OverShipTolerancePct = null);
 
 /// <summary>
 /// Convenience upsert payload used by the admin Items page — accepts code on every save

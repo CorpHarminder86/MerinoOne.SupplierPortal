@@ -255,6 +255,18 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">tune</span>
                         <span class="mer-nav-item__label">System Settings</span>
                     </NavLink>
+                    @* R4 (2026-06-26) — Phase 5b: fulfilment-control settings (Settings.Write). *@
+                    @if (Token.HasPermission("Settings.Write"))
+                    {
+                        <NavLink class="mer-nav-item" href="settings/supplier-item-tolerances" ActiveClass="active">
+                            <span class="mer-nav-item__icon material-symbols-outlined">straighten</span>
+                            <span class="mer-nav-item__label">Supplier Item Tolerances</span>
+                        </NavLink>
+                        <NavLink class="mer-nav-item" href="settings/attachment-requirements" ActiveClass="active">
+                            <span class="mer-nav-item__icon material-symbols-outlined">attach_file</span>
+                            <span class="mer-nav-item__label">Attachment Requirements</span>
+                        </NavLink>
+                    }
                     <NavLink class="mer-nav-item" href="admin/email-templates" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">mail</span>
                         <span class="mer-nav-item__label">Email Templates</span>

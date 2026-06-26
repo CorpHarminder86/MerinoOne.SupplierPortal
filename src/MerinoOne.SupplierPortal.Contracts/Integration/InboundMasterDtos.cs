@@ -18,7 +18,8 @@ public record UnitRecord(string Code, string Description, string UnitType, strin
 public record ItemGroupRecord(string Code, string Description, bool IsActive = true);
 // IsSerialized / IsLotControlled — LN-fed inventory control flags (Item.IsSerialized / IsLotControlled). Trailing
 // optional (default false) so existing payloads stay valid. ASN line capture reads these for serial / lot entry.
-public record ItemRecord(string Code, string Description, string? UnitCode, string? ItemGroupCode, string? HsnCode, bool IsActive = true, bool IsSerialized = false, bool IsLotControlled = false);
+// OverShipTolerancePct (R4 §7.4) — LN-fed item-master over-ship tolerance floor (%). Trailing optional; null → 0.
+public record ItemRecord(string Code, string Description, string? UnitCode, string? ItemGroupCode, string? HsnCode, bool IsActive = true, bool IsSerialized = false, bool IsLotControlled = false, decimal? OverShipTolerancePct = null);
 public record TaxRecord(string Code, string Description, decimal? TaxRate = null, bool IsActive = true);
 
 // ---- Tenant-scoped push bodies (no CompanyCode) ----

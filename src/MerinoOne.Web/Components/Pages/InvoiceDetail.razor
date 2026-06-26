@@ -429,6 +429,42 @@ else
         </div>
     }
 
+    @* ---------------- Missing-attachment Warning confirm (§8.3 / UC-ATT-03) ---------------- *@
+    @if (showAttachConfirm)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="warning" data-size="md" style="width:560px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">rule</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Invoice · Attachments</div>
+                        <h2 class="merino-dialog__title">Proceed without all attachments?</h2>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showAttachConfirm = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <p style="font-size:13px;color:var(--mer-ink-700);">@attachConfirmMessage</p>
+                    @if (attachMissing.Count > 0)
+                    {
+                        <div style="margin-top:10px;border:1px solid var(--mer-line);border-radius:6px;padding:10px 12px;background:var(--mer-ink-50);">
+                            <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:6px;">Not uploaded</div>
+                            <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--mer-ink-700);">
+                                @foreach (var m in attachMissing) { <li>@m</li> }
+                            </ul>
+                        </div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showAttachConfirm = false">Go back</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="() => DoSubmitInternal(true)" disabled="@busy">@(busy ? "Submitting…" : "Yes, proceed")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
     @if (showRevoke)
     {
         <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
@@ -554,14 +590,44 @@ else
     }
 
     // ---- Submit (Draft -> Submitted) ----
+    // R4 (2026-06-26) — §8.3 / UC-ATT-03: missing-Warning-attachment confirm two-step.
+    private bool showAttachConfirm = false;
+    private string attachConfirmMessage = string.Empty;
+    private List<string> attachMissing = new();
+
     private void OpenSubmit() { dialogError = string.Empty; showSubmit = true; }
 
-    private async Task DoSubmit()
+    private Task DoSubmit() => DoSubmitInternal(acknowledgeMissingAttachments: false);
+
+    private async Task DoSubmitInternal(bool acknowledgeMissingAttachments)
     {
         busy = true; dialogError = string.Empty;
-        var resp = await Api.PostAsync<InvoiceDetailDto, SubmitInvoiceRequest>($"api/invoices/{Id}/submit", new SubmitInvoiceRequest());
-        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invoice submitted" }); showSubmit = false; await Load(); }
-        else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Submit failed (mandatory invoice number + date, or the invoice is no longer Draft)."; }
+        var resp = await Api.PostAsync<InvoiceDetailDto, SubmitInvoiceRequest>(
+            $"api/invoices/{Id}/submit", new SubmitInvoiceRequest(acknowledgeMissingAttachments));
+
+        // (1) Success.
+        if (resp?.Success == true)
+        {
+            showAttachConfirm = false; showSubmit = false;
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invoice submitted" });
+            await Load();
+        }
+        // (2) Warning attachments missing — 200 ConfirmationRequired, nothing committed. Confirm to proceed.
+        else if (resp?.ConfirmationRequired == true)
+        {
+            attachConfirmMessage = string.IsNullOrEmpty(resp.ConfirmationMessage)
+                ? "One or more required attachments were not uploaded, do you wish to proceed?"
+                : resp.ConfirmationMessage!;
+            attachMissing = resp.MissingAttachments ?? new();
+            showSubmit = false;
+            showAttachConfirm = true;
+        }
+        // (3) Blocking error (incl. mandatory-missing 400) — show on whichever dialog is open.
+        else
+        {
+            dialogError = resp?.Errors?.FirstOrDefault() ?? "Submit failed (mandatory invoice number + date, a missing mandatory attachment, or the invoice is no longer Draft).";
+            if (showAttachConfirm) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Submit failed", Detail = dialogError }); }
+        }
         busy = false;
     }
 
