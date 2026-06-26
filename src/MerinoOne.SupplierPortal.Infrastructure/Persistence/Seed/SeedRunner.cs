@@ -39,6 +39,12 @@ public static class SeedRunner
         logger?.LogInformation("Seed: TenantSeeder");
         await TenantSeeder.SeedAsync(ctx, ct);
 
+        // R4 (2026-06-26) — TSD R4 Addendum Component 5. Runs AFTER TenantSeeder so the tenant + tenant-admin
+        // seccode (the owner of these tenant-wide config masters) exist. Seeds AttachmentEntity / AttachmentType
+        // only — no AttachmentRequirementPolicy (absence = Optional).
+        logger?.LogInformation("Seed: AttachmentGovernanceSeeder");
+        await AttachmentGovernanceSeeder.SeedAsync(ctx, ct);
+
         // Light scope tagging (suppliers/masters/config/UserCompanyMaps + ensure flag OFF) runs BEFORE the
         // volume backfill so suppliers carry company 2000 when the heavy pass later joins on them.
         logger?.LogInformation("Seed: ScopeBackfillSeeder (light)");

@@ -66,6 +66,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<UserCompanyMap> UserCompanyMaps => Set<UserCompanyMap>();
 
     public DbSet<Item> Items => Set<Item>();
+    public DbSet<SupplierItem> SupplierItems => Set<SupplierItem>();
     public DbSet<ItemGroup> ItemGroups => Set<ItemGroup>();
     public DbSet<Unit> Units => Set<Unit>();
     public DbSet<DeliveryTerm> DeliveryTerms => Set<DeliveryTerm>();
@@ -105,6 +106,9 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<Payment> Payments => Set<Payment>();
 
     public DbSet<DocumentUpload> DocumentUploads => Set<DocumentUpload>();
+    public DbSet<AttachmentType> AttachmentTypes => Set<AttachmentType>();
+    public DbSet<AttachmentEntity> AttachmentEntities => Set<AttachmentEntity>();
+    public DbSet<AttachmentRequirementPolicy> AttachmentRequirementPolicies => Set<AttachmentRequirementPolicy>();
     public DbSet<CommunicationMessage> CommunicationMessages => Set<CommunicationMessage>();
 
     public DbSet<InforEndpointMap> InforEndpointMaps => Set<InforEndpointMap>();

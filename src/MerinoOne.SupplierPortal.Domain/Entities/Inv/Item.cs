@@ -29,4 +29,9 @@ public class Item : AuditableEntity, ICompanyScoped
     // capture). NOT NULL with a named default in the migration so existing rows are safe.
     public bool IsSerialized { get; set; }
     public bool IsLotControlled { get; set; }
+
+    // R4 (2026-06-26) — TSD R4 Addendum §3.2, Component 4 (Over-Ship Tolerance). The always-present fallback
+    // over-ship ceiling (%). NOT NULL DEFAULT 0 (strict) guarantees every item resolves to a defined value;
+    // SupplierItem.OverShipTolerancePct (nullable) overrides this when present (two-tier resolution §7.1).
+    public decimal OverShipTolerancePct { get; set; }
 }

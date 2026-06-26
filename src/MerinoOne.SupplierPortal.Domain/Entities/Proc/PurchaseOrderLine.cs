@@ -28,4 +28,11 @@ public class PurchaseOrderLine : AuditableEntity
     // unshared source company). FK → proc.Tax RESTRICT.
     public Guid? TaxId { get; set; }
     public Tax? Tax { get; set; }
+
+    // R4 (2026-06-26) — TSD R4 Addendum §3.1, Component 1 (ASN Quantity Tracking). CUMULATIVE shipped quantity
+    // across ALL non-cancelled ASN lines for this PO line (= Σ AsnLine.ShippedQty). This is a maintained
+    // denormalisation written transactionally by the ASN create/cancel atomic guard — NEVER read-then-written.
+    // The nominal balance (orderQty − shippedQtyToDate) is DERIVED at query time and never persisted.
+    // DISTINCT from AsnLine.ShippedQty, which is "this ASN's ship qty" — the two must never be summed together.
+    public decimal ShippedQtyToDate { get; set; }
 }

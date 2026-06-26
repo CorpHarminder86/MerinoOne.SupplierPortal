@@ -22,7 +22,7 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         b.Property(x => x.AcknowledgmentAt).HasColumnName("acknowledgmentAt").HasColumnType("datetime2");
         b.Property(x => x.AcceptedAt).HasColumnName("acceptedAt").HasColumnType("datetime2");
         b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
-        b.Property(x => x.ProposedDeliveryDate).HasColumnName("proposedDeliveryDate").HasColumnType("datetime2");
+        // R4 (2026-06-26) — D2: proposedDeliveryDate mapping REMOVED (column dropped by migration 2b).
         b.Property(x => x.Version).HasColumnName("version");
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
@@ -75,6 +75,13 @@ public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseO
         // R4 (2026-06-22) — Addendum A2: link taxCode to the proc.Tax master (keep the snapshot strings).
         b.Property(x => x.TaxId).HasColumnName("taxId").HasColumnType("uniqueidentifier");
 
+        // R4 (2026-06-26) — TSD R4 Addendum §3.1: CUMULATIVE shipped qty across non-cancelled ASN lines for
+        // this PO line (= Σ AsnLine.shippedQty). DISTINCT from AsnLine.shippedQty (this ASN's qty) — never sum
+        // the two. NOT NULL DEFAULT 0 (EF-auto-named default); backfilled in migration Up() so existing rows
+        // read the correct balance. The ASN create/cancel atomic guard maintains it transactionally.
+        b.Property(x => x.ShippedQtyToDate).HasColumnName("shippedQtyToDate").HasColumnType("decimal(18,4)")
+            .HasDefaultValue(0m);
+
         b.HasOne(x => x.PurchaseOrder).WithMany(p => p.Lines).HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_PurchaseOrderLine_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId)
@@ -112,6 +119,8 @@ public class PurchaseOrderNegotiationConfiguration : IEntityTypeConfiguration<Pu
         b.Property(x => x.SubmittedAt).HasColumnName("submittedAt").HasColumnType("datetime2");
         b.Property(x => x.ReviewedAt).HasColumnName("reviewedAt").HasColumnType("datetime2");
         b.Property(x => x.ReviewedBy).HasColumnName("reviewedBy").HasMaxLength(100);
+        // R4 (2026-06-26) — Phase 6 / UC-PO-04 48h-SLA buyer-nudge dedupe stamp (null until SlaNudgeWorker nudges).
+        b.Property(x => x.NudgeSentAt).HasColumnName("nudgeSentAt").HasColumnType("datetime2");
         b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
         b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
 

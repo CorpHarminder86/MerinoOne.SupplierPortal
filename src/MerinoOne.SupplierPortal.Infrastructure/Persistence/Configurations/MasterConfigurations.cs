@@ -3,6 +3,7 @@ using MerinoOne.SupplierPortal.Domain.Entities.Inv;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using SupplierEntity = MerinoOne.SupplierPortal.Domain.Entities.Supplier.Supplier;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Configurations;
 
@@ -23,6 +24,11 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
         b.Property(x => x.IsSerialized).HasColumnName("isSerialized").HasColumnType("bit").HasDefaultValue(false);
         b.Property(x => x.IsLotControlled).HasColumnName("isLotControlled").HasColumnType("bit").HasDefaultValue(false);
 
+        // R4 (2026-06-26) — TSD R4 Addendum §3.2: always-present over-ship tolerance floor. NOT NULL DEFAULT 0
+        // (strict) so every item resolves to a defined value; SupplierItem overrides it when present (§7.1).
+        b.Property(x => x.OverShipTolerancePct).HasColumnName("overShipTolerancePct").HasColumnType("decimal(5,2)")
+            .HasDefaultValue(0m);
+
         b.HasOne(x => x.ItemGroup).WithMany().HasForeignKey(x => x.ItemGroupId)
             .HasConstraintName("FK_Item_ItemGroup_itemGroupId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId)
@@ -35,6 +41,38 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
         b.HasIndex(x => new { x.TenantId, x.TenantEntityId }).HasDatabaseName("IX_Item_tenant_company");
         b.HasIndex(x => x.ItemGroupId).HasDatabaseName("IX_Item_itemGroupId");
         b.HasIndex(x => x.UnitId).HasDatabaseName("IX_Item_unitId");
+    }
+}
+
+// R4 (2026-06-26) — TSD R4 Addendum §3.3, Component 4 (Over-Ship Tolerance). Supplier-item tolerance override
+// master. Aggregate root (seccode RLS + rowVersion + tenant scope via the convention). One row per
+// (supplierId, itemId). overShipTolerancePct NULLABLE — NULL inherits Item.overShipTolerancePct (the fallback
+// hinges on this). FKs Restrict (cross-aggregate masters).
+public class SupplierItemConfiguration : IEntityTypeConfiguration<SupplierItem>
+{
+    public void Configure(EntityTypeBuilder<SupplierItem> b)
+    {
+        b.ApplyBaseEntityConvention("SupplierItem", "inv", "supplierItem");
+        b.Property(x => x.SupplierId).HasColumnName("supplierId");
+        b.Property(x => x.ItemId).HasColumnName("itemId");
+        // NULLABLE: NULL ⇒ inherit inv.Item.overShipTolerancePct; 0 ⇒ explicit "no over-ship". Do NOT default.
+        b.Property(x => x.OverShipTolerancePct).HasColumnName("overShipTolerancePct").HasColumnType("decimal(5,2)");
+
+        b.HasOne(x => x.Supplier).WithMany().HasForeignKey(x => x.SupplierId)
+            .HasConstraintName("FK_SupplierItem_Supplier_supplierId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId)
+            .HasConstraintName("FK_SupplierItem_Item_itemId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_SupplierItem_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        // One tolerance row per (supplier, item). Filtered on isDeleted=0 so a soft-deleted row never blocks
+        // re-creating the same pair (matches the filtered-unique pattern elsewhere in this codebase).
+        b.HasIndex(x => new { x.SupplierId, x.ItemId })
+            .HasDatabaseName("UQ_SupplierItem_supplier_item").IsUnique()
+            .HasFilter("[isDeleted] = 0");
+        b.HasIndex(x => x.ItemId).HasDatabaseName("IX_SupplierItem_itemId");
+        // Composite scope index — the always-on tenant + company business-data filter scans this path.
+        b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_SupplierItem_tenant_company");
     }
 }
 

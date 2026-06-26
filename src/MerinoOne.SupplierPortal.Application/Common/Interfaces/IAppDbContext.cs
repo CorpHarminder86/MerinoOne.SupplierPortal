@@ -40,6 +40,7 @@ public interface IAppDbContext
     DbSet<UserCompanyMap> UserCompanyMaps { get; }
 
     DbSet<Item> Items { get; }
+    DbSet<SupplierItem> SupplierItems { get; }
     DbSet<ItemGroup> ItemGroups { get; }
     DbSet<Unit> Units { get; }
     DbSet<DeliveryTerm> DeliveryTerms { get; }
@@ -79,6 +80,9 @@ public interface IAppDbContext
     DbSet<Payment> Payments { get; }
 
     DbSet<DocumentUpload> DocumentUploads { get; }
+    DbSet<AttachmentType> AttachmentTypes { get; }
+    DbSet<AttachmentEntity> AttachmentEntities { get; }
+    DbSet<AttachmentRequirementPolicy> AttachmentRequirementPolicies { get; }
     DbSet<CommunicationMessage> CommunicationMessages { get; }
 
     DbSet<InforEndpointMap> InforEndpointMaps { get; }
