@@ -236,6 +236,14 @@ public class AsnSerialLotTests
             .FirstAsync(p => p.PoNumber == poNumber && p.TenantId == IntegrationTestFixture.TenantId);
         var serialLineId = po.Lines.Single(l => l.PositionNo == 10).Id;
         var lotLineId = po.Lines.Single(l => l.PositionNo == 20).Id;
+
+        // R4 (2026-06-26) — Phase 2 PO confirmation gate (§6.2): a Released PO under the default AcceptToShip mode
+        // BLOCKS ASN creation. These serial/lot tests exercise the ASN capture path, not the gate, so confirm the PO
+        // (→ Accepted) here as the supplier would before shipping, keeping the ship-gate open.
+        po.PoStatus = PoStatus.Accepted;
+        po.AcceptedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
         return new PoCtx(po.Id, serialLineId, lotLineId, poNumber);
     }
 

@@ -1,7 +1,10 @@
+using System.Net;
 using FluentValidation;
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Integration;
+using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -39,7 +42,7 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
     }
 }
 
-public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IRequestHandler<UpsertPurchaseOrdersCommand, UpsertResultDto>
+public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOutboxDispatcher outbox) : IRequestHandler<UpsertPurchaseOrdersCommand, UpsertResultDto>
 {
     public Task<UpsertResultDto> Handle(UpsertPurchaseOrdersCommand request, CancellationToken ct)
     {
@@ -70,10 +73,12 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
             var supCodes = recs.Where(r => string.IsNullOrWhiteSpace(r.ErpSupplierCode) && !string.IsNullOrWhiteSpace(r.SupplierCode))
                 .Select(r => r.SupplierCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
+            // R4 (2026-06-26) — §6.3/§6.4 + §3.4/D1: also pull PoConfirmationMode (drives the AutoAccept auto-stamp at
+            // ingest, §6.2/UC-PO-10) and LegalName (for the material-change supplier notification, §14).
             var matchedSuppliers = await db.Suppliers.IgnoreQueryFilters()
                 .Where(s => !s.IsDeleted && s.TenantId == tenantId
                     && (supCodes.Contains(s.SupplierCode) || (s.ErpCode != null && erpCodes.Contains(s.ErpCode))))
-                .Select(s => new { s.SupplierCode, s.ErpCode, s.Id, s.SeccodeId }).ToListAsync(token);
+                .Select(s => new { s.SupplierCode, s.ErpCode, s.Id, s.SeccodeId, s.PoConfirmationMode, s.LegalName }).ToListAsync(token);
 
             var supByCode = matchedSuppliers
                 .GroupBy(s => s.SupplierCode, StringComparer.OrdinalIgnoreCase)
@@ -81,6 +86,24 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
             var supByErp = matchedSuppliers.Where(s => !string.IsNullOrWhiteSpace(s.ErpCode))
                 .GroupBy(s => s.ErpCode!, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            // R4 (2026-06-26) — §14: the supplier notification recipient is the supplier's PRIMARY contact email
+            // (mirrors ApproveSupplierCommand's primary-contact resolution). Batch-load one email per matched
+            // supplier so a material PO change can enqueue an EmailOutbox row without a per-PO round-trip; null when
+            // the supplier has no contact (the notification is then skipped — see EnqueueMaterialChangeNotification).
+            var matchedSupplierIds = matchedSuppliers.Select(s => s.Id).Distinct().ToList();
+            var contactRows = matchedSupplierIds.Count == 0
+                ? new List<(Guid SupplierId, string Email, bool IsPrimary, DateTime CreatedOn)>()
+                : (await db.SupplierContacts.IgnoreQueryFilters()
+                    .Where(c => !c.IsDeleted && matchedSupplierIds.Contains(c.SupplierId) && c.Email != null && c.Email != "")
+                    .Select(c => new { c.SupplierId, c.Email, c.IsPrimary, c.CreatedOn }).ToListAsync(token))
+                    .Select(c => (c.SupplierId, c.Email, c.IsPrimary, c.CreatedOn)).ToList();
+            var emailBySupplier = contactRows
+                .GroupBy(c => c.SupplierId)
+                .ToDictionary(
+                    g => g.Key,
+                    // Prefer the primary contact, else the oldest contact (same precedence as ApproveSupplierCommand).
+                    g => g.OrderByDescending(c => c.IsPrimary).ThenBy(c => c.CreatedOn).First().Email);
 
             // Master resolution maps (resolve-or-leave-null; keep snapshot strings).
             var curCodes = recs.Where(r => !string.IsNullOrWhiteSpace(r.CurrencyCode)).Select(r => r.CurrencyCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -130,14 +153,42 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
 
                 if (existing.TryGetValue(poNum, out var po))
                 {
+                    // R4 (2026-06-26) — §6.3/§6.4 (UC-PO-06/07, UC-ASN-08). Snapshot the BEFORE line state (qty / price /
+                    // delivery date / cumulative) so we can (a) decide whether this re-push is MATERIAL and (b) render the
+                    // supplier diff ("100→120; 60 remaining") AFTER the in-place upsert overwrites the line. The cumulative
+                    // (ShippedQtyToDate) is read from the snapshot — SyncLines NEVER touches it (preserved across a qty
+                    // revision, §5.2 / DI-01).
+                    var beforeSnap = po.Lines.Where(l => !l.IsDeleted)
+                        .Select(l => new PoLineChangeSnapshot(l.PositionNo, l.SequenceNo, l.OrderQty, l.PriceUnit, l.Price, l.DeliveryDate, l.ShippedQtyToDate))
+                        .ToList();
+                    var isMaterial = PoMaterialChange.IsMaterial(po.Lines.Where(l => !l.IsDeleted).ToList(), rec.Lines);
+
                     po.SupplierId = sup.Id; po.SeccodeId = sup.SeccodeId;
                     po.TenantId = tenantId; po.TenantEntityId = sourceId;
-                    po.PoType = poType; po.PoDate = rec.PoDate; po.PoStatus = poStatus;
+                    po.PoType = poType; po.PoDate = rec.PoDate;
                     po.PaymentTerms = rec.PaymentTerms; po.DeliveryTerms = rec.DeliveryTerms;
                     po.CurrencyId = curId; po.CurrencyCode = rec.CurrencyCode?.Trim();
                     po.Notes = rec.Notes; po.ErpSyncId = rec.ErpSyncId ?? po.ErpSyncId;
+                    // §6.4 — a MATERIAL change ALWAYS bumps version AND resets PoStatus → Released (re-arms the
+                    // confirmation gate so new/draft ASNs re-block, UC-ASN-08). A NON-MATERIAL change (notes / internal
+                    // ref) bumps version ONLY — the supplier is not frozen mid-fulfilment (UC-PO-07). We deliberately do
+                    // NOT blindly take the inbound PoStatus on an existing PO: ERP "Modify" pushes carry whatever status
+                    // string, but the gate semantics are driven by the material diff, not the literal push status. (A
+                    // brand-new PO below DOES take the pushed status.)
+                    po.PoStatus = isMaterial ? PoStatus.Released : po.PoStatus;
                     po.Version += 1; po.UpdatedBy = "infor:inbound"; po.UpdatedOn = now;
                     SyncLines(db, po, rec, itemMap, taxMap, now);
+
+                    if (isMaterial)
+                    {
+                        // §14 — notify the supplier with the diff + revised ship balance (best-effort email outbox row).
+                        EnqueueMaterialChangeNotification(db, po, sup.LegalName,
+                            emailBySupplier.TryGetValue(sup.Id, out var em) ? em : null,
+                            PoMaterialChange.DescribeDiff(beforeSnap, rec.Lines), now);
+                        // §6.2 / UC-PO-10 — re-released material PO: AutoAccept suppliers are auto-stamped Accepted again.
+                        await AutoAcceptIfConfiguredAsync(db, po, sup.PoConfirmationMode, tenantId, now, token);
+                    }
+
                     results.Add(new RowResult(poNum, RowOutcome.Updated, null));
                 }
                 else
@@ -153,11 +204,75 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec) : IR
                     };
                     foreach (var l in rec.Lines) po2.Lines.Add(NewLine(l, itemMap, taxMap, now));
                     db.PurchaseOrders.Add(po2);
+                    // §6.2 / UC-PO-01/10 — a NEW PO that lands Released: AutoAccept suppliers are auto-stamped Accepted +
+                    // acceptedAt at ingest (ship-gate open immediately, no manual step); Acknowledge/AcceptToShip stay at
+                    // Released (the supplier must confirm).
+                    await AutoAcceptIfConfiguredAsync(db, po2, sup.PoConfirmationMode, tenantId, now, token);
                     results.Add(new RowResult(poNum, RowOutcome.Inserted, null));
                 }
             }
             return results;
         }
+    }
+
+    // R4 (2026-06-26) — §6.2 / D1 / UC-PO-01/10. Auto-stamp the PO Accepted + acknowledged at ingest when (and only
+    // when) it lands as Released for a supplier in PoConfirmationMode.AutoAccept, and enqueue the acceptance to ERP via
+    // the Increment-0 outbox (the row participates in the inbound executor's transaction — same flush/commit). This
+    // inlines ApplyAutoPoReleaseCommand's logic at the ingest call site (the flag-gated standalone command's caveat is
+    // removed for the ingest path). Acknowledge/AcceptToShip suppliers are left at Released — they must confirm manually.
+    private async Task AutoAcceptIfConfiguredAsync(
+        IAppDbContext db, PurchaseOrder po, PoConfirmationMode mode, Guid tenantId, DateTime now, CancellationToken token)
+    {
+        if (mode != PoConfirmationMode.AutoAccept) return;
+        if (po.PoStatus != PoStatus.Released) return;   // only auto-stamp a Released PO (gate-open transition).
+
+        po.AcknowledgmentAt ??= now;
+        po.AcceptedAt = now;
+        po.PoStatus = PoStatus.Accepted;
+        po.UpdatedBy ??= "infor:inbound";
+        po.UpdatedOn = now;
+
+        // ONE deterministic-keyed acceptance enqueued (the post-commit dispatcher posts it to ERP; the "accept" key
+        // dedupes a re-released PO). Po.Id is the persisted Guid (set for new POs above, already present for updates).
+        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, tenantId, po.PoNumber, "accept");
+        await outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, null, token);
+    }
+
+    // R4 (2026-06-26) — §6.3/§14. Enqueue a supplier EmailOutbox row carrying the material-change diff + revised ship
+    // balance. Best-effort: with no resolvable contact email the notification is skipped (the PO reset + audit still
+    // stand). The row commits in the inbound executor's transaction (same SaveChanges as the PO reset).
+    private static void EnqueueMaterialChangeNotification(
+        IAppDbContext db, PurchaseOrder po, string supplierLegalName, string? toEmail, string diff, DateTime now)
+    {
+        if (string.IsNullOrWhiteSpace(toEmail)) return;
+
+        var subject = $"PO {po.PoNumber} revised — please re-confirm";
+        var body = $"""
+<!DOCTYPE html>
+<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
+  <h2 style="color:#0f3b5e;">Purchase Order {WebUtility.HtmlEncode(po.PoNumber)} was revised</h2>
+  <p>Dear {WebUtility.HtmlEncode(supplierLegalName)},</p>
+  <p>Infor LN amended this purchase order. The changes below are material, so the order is back to
+     <b>Released</b> and requires your re-confirmation before further shipments can be created:</p>
+  <p style="background:#fef3c7;padding:10px 14px;border-radius:6px;">{WebUtility.HtmlEncode(diff)}</p>
+  <p>Please review the revised order quantities / delivery dates and re-acknowledge or re-accept the PO on the portal.</p>
+</body></html>
+""";
+
+        db.EmailOutbox.Add(new EmailOutbox
+        {
+            Id = Guid.NewGuid(),
+            TenantId = po.TenantId,
+            TemplateKey = "PoRevised",
+            ToEmail = toEmail!.Trim(),
+            Subject = subject,
+            HtmlBody = body,
+            Status = EmailOutboxStatus.Pending,
+            AttemptCount = 0,
+            NextAttemptAt = now,
+            CreatedBy = "infor:inbound",
+            CreatedOn = now,
+        });
     }
 
     // Upsert lines by their natural key (PositionNo, SequenceNo): update the matched line, add new ones (does not

@@ -32,8 +32,12 @@ public static class ProcureToPayFlow
     /// <summary>
     /// Pushes a single-line PO (qty 10 @ price-unit 100, a plain non-serial/non-lot item) for a fresh tagged
     /// supplier, and returns the persisted ids. Grants the Supplier-role user read+write on the new seccode.
+    /// By default the PO is CONFIRMED to Accepted (ship-gate open) so the lifecycle suites can ship immediately;
+    /// pass <paramref name="confirm"/>=false to leave it at the ingested PoStatus (used by the gate suite to drive
+    /// the supplier confirmation flow itself).
     /// </summary>
-    public static async Task<Setup> SeedPoAsync(IntegrationTestFixture fx, decimal orderQty = 10m, decimal priceUnit = 100m)
+    public static async Task<Setup> SeedPoAsync(
+        IntegrationTestFixture fx, decimal orderQty = 10m, decimal priceUnit = 100m, bool confirm = true)
     {
         var tag = Guid.NewGuid().ToString("N")[..8];
 
@@ -67,6 +71,18 @@ public static class ProcureToPayFlow
         var po = await db.PurchaseOrders.IgnoreQueryFilters().Include(p => p.Lines)
             .FirstAsync(p => p.PoNumber == poNumber && p.TenantId == IntegrationTestFixture.TenantId);
         var line = po.Lines.Single(l => l.PositionNo == positionNo);
+
+        // R4 (2026-06-26) — Phase 2 PO confirmation gate (§6.2): a Released PO under the default AcceptToShip mode
+        // BLOCKS ASN creation. The procure-to-pay lifecycle suites are about the ASN→invoice→GRN→payment chain, not
+        // the gate, so confirm the PO (→ Accepted, stamping acceptedAt) here as the supplier would before shipping —
+        // this keeps the ship-gate open for SimpleAsn(). (The gate itself is covered by PoConfirmationPolicyTests +
+        // the dedicated gate integration suite, which pass confirm:false to drive the supplier confirmation flow.)
+        if (confirm)
+        {
+            po.PoStatus = PoStatus.Accepted;
+            po.AcceptedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
 
         return new Setup(tag, supplier, po.Id, poNumber, line.Id, positionNo, item.ItemCode, orderQty, priceUnit);
     }

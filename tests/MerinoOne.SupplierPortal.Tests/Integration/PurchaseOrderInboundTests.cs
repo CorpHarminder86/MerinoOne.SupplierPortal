@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
+using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
 using MerinoOne.SupplierPortal.Tests.Infrastructure;
@@ -289,6 +290,393 @@ public class PurchaseOrderInboundTests
 
         Task<HttpResponseMessage> inbound_PostAsync(PushPurchaseOrdersRequest body) =>
             _fx.CreateInboundClient().PostAsJsonAsync("/api/integration/inbound/purchase-orders", body);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════════
+    // Phase 3 — PO-Change Sync Hardening (TSD R4 Addendum §5 / §6.3 / §6.4; UC-PO-06/07, UC-ASN-08/10, DI-01/03).
+    // ════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// DI-01 — the in-place PO-line upsert PRESERVES shipped history across a qty revision. A line carrying
+    /// shippedQtyToDate=80 plus a linked AsnLine survives a re-push that changes orderQty: the PO line keeps the
+    /// SAME id (no delete-recreate), the cumulative is untouched (80), and the AsnLine FK still resolves to it.
+    /// </summary>
+    [SkippableFact]
+    public async Task PoSync_PreservesShippedQty_AndFks()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poNumber = $"PO-DI01-{tag}";
+
+        // Push the PO (orderQty 100), then seed shippedQtyToDate=80 + a linked AsnLine directly so we can prove the
+        // upsert leaves both intact across a qty revision.
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        Guid poLineId, asnLineId;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var line = await db.PurchaseOrderLines.IgnoreQueryFilters()
+                .FirstAsync(l => l.PurchaseOrder!.PoNumber == poNumber && l.PositionNo == 10);
+            poLineId = line.Id;
+            line.ShippedQtyToDate = 80m;
+
+            var asn = new Asn
+            {
+                Id = Guid.NewGuid(), AsnNumber = $"ASN-DI01-{tag}", SupplierId = supplier.SupplierId,
+                ExpectedDeliveryDate = DateTime.UtcNow.Date.AddDays(1), AsnStatus = AsnStatus.Submitted,
+                SeccodeId = supplier.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+            };
+            db.Asns.Add(asn);
+            var asnLine = new AsnLine
+            {
+                Id = Guid.NewGuid(), AsnId = asn.Id, PurchaseOrderLineId = poLineId, ShippedQty = 80m,
+                PositionNo = 10, SequenceNo = 1, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+            };
+            db.AsnLines.Add(asnLine);
+            asnLineId = asnLine.Id;
+            await db.SaveChangesAsync();
+        }
+
+        // Re-push the SAME line (same position 10 / seq 1) with orderQty 100→120 — an in-place UPDATE.
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 120, PriceUnit: 1, Price: 120) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            // Still exactly one line for the PO, with the SAME id (NOT delete-recreated).
+            var lines = await db.PurchaseOrderLines.IgnoreQueryFilters()
+                .Where(l => l.PurchaseOrder!.PoNumber == poNumber && !l.IsDeleted).ToListAsync();
+            lines.Should().HaveCount(1, because: "the upsert updates in place — it never delete-recreates a line");
+            var line = lines[0];
+            line.Id.Should().Be(poLineId, because: "the matched line keeps its id (the AsnLine FK depends on it)");
+            line.OrderQty.Should().Be(120m, because: "the qty revision was applied in place");
+            line.ShippedQtyToDate.Should().Be(80m, because: "the cumulative is preserved across a qty revision (DI-01)");
+
+            // The AsnLine FK still resolves to the same PO line.
+            var asnLine = await db.AsnLines.IgnoreQueryFilters().FirstAsync(a => a.Id == asnLineId);
+            asnLine.PurchaseOrderLineId.Should().Be(poLineId, because: "the AsnLine FK was not orphaned by the re-push");
+        }
+    }
+
+    /// <summary>
+    /// UC-PO-06 / §6.3-§6.4 — a MATERIAL ERP modify (order qty change) on a confirmed PO updates the line IN PLACE,
+    /// resets PoStatus → Released (re-arming the gate, UC-ASN-08), and bumps version.
+    /// </summary>
+    [SkippableFact]
+    public async Task MaterialModify_UpdatesInPlace_ResetsToReleased()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-MAT-{tag}";
+
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        Guid poLineId;
+        int versionAfterAccept;
+        // Move the PO to Accepted (a confirmed PO) so the reset-to-Released is observable.
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var po = await db.PurchaseOrders.IgnoreQueryFilters().Include(p => p.Lines).FirstAsync(p => p.PoNumber == poNumber);
+            po.PoStatus = PoStatus.Accepted;
+            po.AcceptedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            poLineId = po.Lines.First(l => l.PositionNo == 10).Id;
+            versionAfterAccept = po.Version;
+        }
+
+        // MATERIAL re-push: orderQty 100→150 on the same line.
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 150, PriceUnit: 1, Price: 150) },
+                PoStatus: nameof(PoStatus.Accepted), CurrencyCode: "INR"),   // pushed status is ignored on a material modify
+        }));
+
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var po = await db.PurchaseOrders.IgnoreQueryFilters().Include(p => p.Lines).FirstAsync(p => p.PoNumber == poNumber);
+            po.PoStatus.Should().Be(PoStatus.Released, because: "a material modify re-arms the confirmation gate (UC-PO-06)");
+            po.Version.Should().BeGreaterThan(versionAfterAccept, because: "a material modify bumps version");
+            var line = po.Lines.Single(l => l.PositionNo == 10);
+            line.Id.Should().Be(poLineId, because: "the line was updated in place (not delete-recreated)");
+            line.OrderQty.Should().Be(150m, because: "the qty change was applied in place");
+        }
+    }
+
+    /// <summary>
+    /// UC-PO-07 / §6.4 — a NON-material ERP modify (notes only) bumps version but does NOT reset confirmation: a
+    /// supplier mid-fulfilment is not frozen.
+    /// </summary>
+    [SkippableFact]
+    public async Task NonMaterialModify_DoesNotResetConfirmation()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-NONMAT-{tag}";
+
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        int versionAfterAccept;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var po = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.PoNumber == poNumber);
+            po.PoStatus = PoStatus.Accepted;
+            po.AcceptedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            versionAfterAccept = po.Version;
+        }
+
+        // NON-material re-push: SAME qty/price/date; only the header notes + item description differ.
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", ItemDescription: "renamed", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR", Notes: "internal ref updated"),
+        }));
+
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var po = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.PoNumber == poNumber);
+            po.PoStatus.Should().Be(PoStatus.Accepted, because: "a non-material modify must NOT reset confirmation (UC-PO-07)");
+            po.Version.Should().BeGreaterThan(versionAfterAccept, because: "a non-material modify still bumps version");
+        }
+    }
+
+    /// <summary>
+    /// UC-ASN-10 / §5.3 — an ERP downward revision below the already-shipped cumulative (orderQty 100→60 with 80
+    /// shipped) sets the over-shipped flag on the PO-line read model AND auto-blocks further ASNs (the atomic guard
+    /// reads orderQty live).
+    /// </summary>
+    [SkippableFact]
+    public async Task DownwardRevision_BelowShipped_FlagsAndBlocks()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poNumber = $"PO-DOWN-{tag}";
+
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                PoStatus: nameof(PoStatus.Accepted), CurrencyCode: "INR"),
+        }));
+
+        Guid poId, poLineId;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var po = await db.PurchaseOrders.IgnoreQueryFilters().Include(p => p.Lines).FirstAsync(p => p.PoNumber == poNumber);
+            poId = po.Id;
+            var line = po.Lines.First(l => l.PositionNo == 10);
+            poLineId = line.Id;
+            line.ShippedQtyToDate = 80m;   // 80 already shipped against the order of 100.
+            // The inbound push set Accepted on insert, but enum-reset rules only matter for an existing material modify;
+            // keep it Accepted so the read-back focuses on the over-ship flag.
+            po.PoStatus = PoStatus.Accepted;
+            await db.SaveChangesAsync();
+        }
+
+        // ERP downward revision: orderQty 100→60 (below the 80 shipped). Material → resets to Released; that's fine —
+        // the flag + guard are what UC-ASN-10 asserts.
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 60, PriceUnit: 1, Price: 60) },
+                PoStatus: nameof(PoStatus.Accepted), CurrencyCode: "INR"),
+        }));
+
+        // The PO-line read model flags the over-shipped line (balance MAX(0,…)=0, ShippedQtyToDate 80 > OrderQty 60).
+        var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var detail = (await Read<PurchaseOrderDetailDto>(await supplierClient.GetAsync($"/api/purchase-orders/{poId}"))).Data!;
+        var lineDto = detail.Lines.Single(l => l.PositionNo == 10);
+        lineDto.OrderQty.Should().Be(60m);
+        lineDto.ShippedQtyToDate.Should().Be(80m, because: "the cumulative is preserved across the downward revision");
+        lineDto.Balance.Should().Be(0m, because: "balance is MAX(0, orderQty − shippedQtyToDate)");
+        lineDto.IsOverShippedQtyReduced.Should().BeTrue(because: "orderQty 60 < shippedQtyToDate 80 (UC-ASN-10)");
+
+        // Further ASNs are auto-blocked: the atomic guard (orderQty×factor − shippedQtyToDate ≥ shipQty) fails because
+        // 60 − 80 < anything positive. Move the PO back to Accepted so the confirmation GATE doesn't pre-empt the
+        // quantity guard, then assert the create is rejected.
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var po = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.Id == poId);
+            po.PoStatus = PoStatus.Accepted;
+            await db.SaveChangesAsync();
+        }
+
+        // Enable the over-ship guard for this tenant so the ceiling rejection fires (default-off rollout flag, D3).
+        await using var guardOn = await _fx.EnableOverShipGuardAsync();
+
+        var createBody = new
+        {
+            purchaseOrderId = poId,
+            expectedDeliveryDate = DateTime.UtcNow.Date.AddDays(1),
+            lines = new[] { new { purchaseOrderLineId = poLineId, shippedQty = 1m } },
+        };
+        var createResp = await supplierClient.PostAsJsonAsync("/api/asns", createBody);
+        createResp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "the order was revised below the shipped cumulative — the atomic guard blocks any further ASN (UC-ASN-10)");
+    }
+
+    /// <summary>
+    /// UC-PO-01/10 / §6.2 / D1 — AutoAccept ingest wiring. A NEW PO that lands as Released for a supplier in
+    /// PoConfirmationMode.AutoAccept is AUTO-STAMPED Accepted + acceptedAt at ingest (immediately shippable, no
+    /// manual step) AND the acceptance is enqueued to the ERP outbox. An AcceptToShip supplier stays at Released.
+    /// </summary>
+    [SkippableFact]
+    public async Task AutoAccept_ingest_autostamps_accepted_and_enqueues_acceptance()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+
+        // Supplier A — AutoAccept; Supplier B — AcceptToShip (control). Set A's mode directly (the supplier-settings
+        // UI is Phase 5; the ingest only reads the column).
+        var supAuto = await _fx.CreateSupplierAsync($"A{tag}", IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId);
+        var supManual = await _fx.CreateSupplierAsync($"M{tag}", IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId);
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var a = await db.Suppliers.IgnoreQueryFilters().FirstAsync(x => x.Id == supAuto.SupplierId);
+            a.PoConfirmationMode = PoConfirmationMode.AutoAccept;
+            await db.SaveChangesAsync();
+        }
+
+        var poAuto = $"PO-AUTO-{tag}";
+        var poManual = $"PO-MAN-{tag}";
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poAuto, supAuto.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 10) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+            new PoRecord(poManual, supManual.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 10) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var autoPo = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.PoNumber == poAuto);
+            autoPo.PoStatus.Should().Be(PoStatus.Accepted, because: "AutoAccept suppliers are auto-stamped Accepted at ingest (UC-PO-10)");
+            autoPo.AcceptedAt.Should().NotBeNull(because: "acceptedAt is stamped at the auto-accept");
+            autoPo.AcknowledgmentAt.Should().NotBeNull(because: "the auto-accept also stamps acknowledged");
+
+            // The ERP acceptance was enqueued to the outbox.
+            var enqueued = await db.OutboxMessages.IgnoreQueryFilters()
+                .AnyAsync(m => m.EntityId == autoPo.Id && m.TransactionType == "PoAccept");
+            enqueued.Should().BeTrue(because: "the auto-accept enqueues a PoAccept to the ERP outbox");
+
+            var manualPo = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.PoNumber == poManual);
+            manualPo.PoStatus.Should().Be(PoStatus.Released, because: "AcceptToShip suppliers stay at Released — the supplier must confirm (UC-PO-01)");
+            manualPo.AcceptedAt.Should().BeNull();
+        }
+    }
+
+    /// <summary>
+    /// UC-PO-06 / §14 — a material modify enqueues a supplier notification (EmailOutbox) carrying the diff + revised
+    /// ship balance. The recipient is the supplier's primary contact email.
+    /// </summary>
+    [SkippableFact]
+    public async Task MaterialModify_enqueues_supplier_notification()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var contactEmail = $"contact-{tag}@example.com";
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.SupplierContacts.Add(new MerinoOne.SupplierPortal.Domain.Entities.Supplier.SupplierContact
+            {
+                Id = Guid.NewGuid(), SupplierId = supplier.SupplierId, ContactName = "Primary", Email = contactEmail,
+                IsPrimary = true, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var poNumber = $"PO-NOTIFY-{tag}";
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        // MATERIAL re-push (qty 100→120) → one EmailOutbox row to the primary contact.
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 120, PriceUnit: 1, Price: 120) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db2 = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var mail = await db2.EmailOutbox.IgnoreQueryFilters()
+            .Where(m => m.ToEmail == contactEmail && m.TemplateKey == "PoRevised")
+            .OrderByDescending(m => m.CreatedOn).FirstOrDefaultAsync();
+        mail.Should().NotBeNull(because: "a material modify enqueues a supplier notification (§14)");
+        mail!.Subject.Should().Contain(poNumber);
+        mail.HtmlBody.Should().Contain("100→120", because: "the notification carries the qty diff");
+    }
+
+    // Pushes a PO body. A fresh Idempotency-Key per push (default a new GUID) ensures a re-push with an
+    // IDENTICAL canonical body (e.g. a notes-only change that the line digest does not capture) is processed by
+    // the handler rather than short-circuited by the canonical-hash dedup — mirrors a distinct ERP delivery.
+    private async Task PushAsync(PushPurchaseOrdersRequest body, string? idempotencyKey = null)
+    {
+        var client = _fx.CreateInboundClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey ?? Guid.NewGuid().ToString("N"));
+        var resp = await client.PostAsJsonAsync("/api/integration/inbound/purchase-orders", body);
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var r = await Read<UpsertResultDto>(resp);
+        r.Data!.Failed.Should().Be(0,
+            because: r.Data.Rows.Count > 0 ? string.Join(" | ", r.Data.Rows.Select(x => $"{x.Code}/{x.Outcome}/{x.Error}")) : "no failures expected");
     }
 
     private static async Task<Result<T>> Read<T>(HttpResponseMessage resp)

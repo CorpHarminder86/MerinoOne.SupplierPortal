@@ -1,6 +1,9 @@
+using MerinoOne.SupplierPortal.Application.SystemSettings;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Inv;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
+using MerinoOne.SupplierPortal.Domain.Entities.Settings;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -127,5 +130,56 @@ public static class ProcureToPayHarness
             });
         }
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// R4 (2026-06-26) — D3. Flips the tenant-wide <c>Fulfilment.EnforceOverShipGuard</c> setting ON (the over-ship
+    /// CEILING REJECTION is off by default as a rollout control) and invalidates the singleton settings cache, so
+    /// the ASN create/update guard rejects over-ship/below-shipped attempts. Returns a disposable that restores the
+    /// setting to OFF + re-invalidates. ALWAYS pair the enable with the returned disposable (serial collection
+    /// execution guarantees no other test observes the ON state).
+    /// </summary>
+    public static async Task<IAsyncDisposable> EnableOverShipGuardAsync(this IntegrationTestFixture fx)
+    {
+        await SetOverShipGuardAsync(fx, enabled: true);
+        return new OverShipGuardScope(fx);
+    }
+
+    private static async Task SetOverShipGuardAsync(IntegrationTestFixture fx, bool enabled)
+    {
+        using var scope = fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var setting = await db.SystemSettings.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Category == FulfilmentKeys.Category && s.SettingKey == FulfilmentKeys.EnforceOverShipGuard);
+        var value = enabled ? "true" : "false";
+        if (setting is null)
+        {
+            db.SystemSettings.Add(new SystemSetting
+            {
+                Id = Guid.NewGuid(),
+                Category = FulfilmentKeys.Category, SettingKey = FulfilmentKeys.EnforceOverShipGuard, SettingValue = value,
+                IsActive = true, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+            });
+        }
+        else
+        {
+            setting.SettingValue = value;
+            setting.IsActive = true;
+            setting.UpdatedBy = "seed";
+            setting.UpdatedOn = DateTime.UtcNow;
+        }
+        await db.SaveChangesAsync();
+
+        // Drop the cached singleton snapshot so the next read re-reads the new value.
+        foreach (var inv in fx.Factory.Services.GetServices<ISettingsCacheInvalidator>())
+            inv.InvalidateCategory(FulfilmentKeys.Category);
+    }
+
+    private sealed class OverShipGuardScope : IAsyncDisposable
+    {
+        private readonly IntegrationTestFixture _fx;
+        public OverShipGuardScope(IntegrationTestFixture fx) => _fx = fx;
+        public async ValueTask DisposeAsync() => await SetOverShipGuardAsync(_fx, enabled: false);
     }
 }
