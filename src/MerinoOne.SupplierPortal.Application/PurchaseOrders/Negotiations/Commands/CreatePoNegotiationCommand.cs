@@ -38,6 +38,7 @@ public class CreatePoNegotiationCommandValidator : AbstractValidator<CreatePoNeg
         {
             line.RuleFor(l => l.PurchaseOrderLineId).NotEmpty();
             line.RuleFor(l => l.NegotiatedQty).GreaterThan(0).WithMessage("Negotiated quantity must be greater than zero.");
+            line.RuleFor(l => l.NegotiatedPrice).GreaterThanOrEqualTo(0).WithMessage("Negotiated price cannot be negative.");
         });
     }
 }
@@ -103,7 +104,8 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
 
             var qtyChanged = poLine.OrderQty != input.NegotiatedQty;
             var dateChanged = poLine.DeliveryDate != input.NegotiatedDeliveryDate;
-            if (!qtyChanged && !dateChanged) continue;   // no-op line — drop it.
+            var priceChanged = poLine.PriceUnit != input.NegotiatedPrice;
+            if (!qtyChanged && !dateChanged && !priceChanged) continue;   // no-op line — drop it.
 
             negotiation.Lines.Add(new PurchaseOrderNegotiationLine
             {
@@ -116,6 +118,8 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
                 NegotiatedQty = input.NegotiatedQty,
                 OriginalDeliveryDate = poLine.DeliveryDate,
                 NegotiatedDeliveryDate = input.NegotiatedDeliveryDate,
+                OriginalPrice = poLine.PriceUnit,
+                NegotiatedPrice = input.NegotiatedPrice,
                 CreatedBy = actor,
                 CreatedOn = now,
             });

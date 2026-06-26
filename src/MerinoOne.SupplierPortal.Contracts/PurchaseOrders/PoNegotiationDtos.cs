@@ -16,13 +16,14 @@ namespace MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 // ---------------- Request bodies ----------------
 
 /// <summary>
-/// A single proposed line delta in a create request. Only lines whose qty OR delivery date actually
-/// differ from the live PO line are persisted (the handler drops no-op lines).
+/// A single proposed line delta in a create request. Only lines whose qty, delivery date OR unit price
+/// actually differ from the live PO line are persisted (the handler drops no-op lines).
 /// </summary>
 public record PoNegotiationLineInput(
     Guid PurchaseOrderLineId,
     decimal NegotiatedQty,
-    DateTime? NegotiatedDeliveryDate);
+    DateTime? NegotiatedDeliveryDate,
+    decimal NegotiatedPrice);
 
 /// <summary>
 /// Supplier raises a PO negotiation. At least one line must differ from the PO (else 400). The PO must be
@@ -59,7 +60,9 @@ public record PoNegotiationLineDto(
     decimal OriginalQty,
     decimal NegotiatedQty,
     DateTime? OriginalDeliveryDate,
-    DateTime? NegotiatedDeliveryDate);
+    DateTime? NegotiatedDeliveryDate,
+    decimal OriginalPrice,
+    decimal NegotiatedPrice);
 
 /// <summary>Full negotiation detail: header + delta lines (each carrying the original → negotiated diff).</summary>
 public record PoNegotiationDto(

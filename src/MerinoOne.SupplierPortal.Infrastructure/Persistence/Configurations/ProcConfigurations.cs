@@ -148,6 +148,8 @@ public class PurchaseOrderNegotiationLineConfiguration : IEntityTypeConfiguratio
         b.Property(x => x.NegotiatedQty).HasColumnName("negotiatedQty").HasColumnType("decimal(18,4)");
         b.Property(x => x.OriginalDeliveryDate).HasColumnName("originalDeliveryDate").HasColumnType("datetime2");
         b.Property(x => x.NegotiatedDeliveryDate).HasColumnName("negotiatedDeliveryDate").HasColumnType("datetime2");
+        b.Property(x => x.OriginalPrice).HasColumnName("originalPrice").HasColumnType("decimal(18,4)");
+        b.Property(x => x.NegotiatedPrice).HasColumnName("negotiatedPrice").HasColumnType("decimal(18,4)");
 
         b.HasOne(x => x.PurchaseOrderNegotiation).WithMany(p => p.Lines).HasForeignKey(x => x.PurchaseOrderNegotiationId)
             .HasConstraintName("FK_PurchaseOrderNegotiationLine_PurchaseOrderNegotiation_PurchaseOrderNegotiationId")

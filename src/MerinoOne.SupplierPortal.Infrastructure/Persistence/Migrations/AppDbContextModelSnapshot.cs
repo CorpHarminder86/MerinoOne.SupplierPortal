@@ -6141,6 +6141,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("negotiatedDeliveryDate");
 
+                    b.Property<decimal>("NegotiatedPrice")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("negotiatedPrice");
+
                     b.Property<decimal>("NegotiatedQty")
                         .HasColumnType("decimal(18,4)")
                         .HasColumnName("negotiatedQty");
@@ -6148,6 +6152,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("OriginalDeliveryDate")
                         .HasColumnType("datetime2")
                         .HasColumnName("originalDeliveryDate");
+
+                    b.Property<decimal>("OriginalPrice")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("originalPrice");
 
                     b.Property<decimal>("OriginalQty")
                         .HasColumnType("decimal(18,4)")

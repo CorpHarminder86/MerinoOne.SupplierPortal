@@ -193,12 +193,14 @@ else
                             <td style="padding:6px 4px;">@line.ItemDescription</td>
                             @if (negotiating && edits.TryGetValue(line.Id, out var edit))
                             {
-                                @* Editable Qty (req 3) — all other columns stay read-only. *@
+                                @* Editable Qty + Price Unit (req 3 + price addendum) — all other columns stay read-only. *@
                                 <td style="padding:6px 4px;text-align:right;">
                                     <input type="number" step="0.001" min="0" class="rz-textbox" style="width:90px;padding:4px 6px;text-align:right;font-family:Inter,monospace;" @bind="edit.Qty" />
                                 </td>
                                 <td style="padding:6px 4px;">@line.OrderUnit</td>
-                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.PriceUnit.ToString("0.00")</td>
+                                <td style="padding:6px 4px;text-align:right;">
+                                    <input type="number" step="0.01" min="0" class="rz-textbox" style="width:100px;padding:4px 6px;text-align:right;font-family:Inter,monospace;" @bind="edit.Price" />
+                                </td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.NetAmount.ToString("0.00")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountPct == 0 ? "—" : line.DiscountPct.ToString("0.##"))</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : line.DiscountAmount.ToString("0.00"))</td>
@@ -404,9 +406,11 @@ else
     {
         public decimal OriginalQty;
         public DateTime? OriginalDate;
+        public decimal OriginalPrice;
         public decimal Qty;
         public DateTime? DeliveryDate;
-        public bool Changed => Qty != OriginalQty || DeliveryDate != OriginalDate;
+        public decimal Price;
+        public bool Changed => Qty != OriginalQty || DeliveryDate != OriginalDate || Price != OriginalPrice;
     }
     private bool negotiating = false;
     private string negotiationNotes = string.Empty;
@@ -438,7 +442,7 @@ else
         negotiationNotes = string.Empty;
         edits = detail.Lines.ToDictionary(
             l => l.Id,
-            l => new LineEdit { OriginalQty = l.OrderQty, OriginalDate = l.DeliveryDate, Qty = l.OrderQty, DeliveryDate = l.DeliveryDate });
+            l => new LineEdit { OriginalQty = l.OrderQty, OriginalDate = l.DeliveryDate, OriginalPrice = l.PriceUnit, Qty = l.OrderQty, DeliveryDate = l.DeliveryDate, Price = l.PriceUnit });
         negotiating = true;
     }
 
@@ -456,11 +460,12 @@ else
         if (detail is null) return;
         var changed = edits
             .Where(kv => kv.Value.Changed)
-            .Select(kv => new PoNegotiationLineInput(kv.Key, kv.Value.Qty, kv.Value.DeliveryDate))
+            .Select(kv => new PoNegotiationLineInput(kv.Key, kv.Value.Qty, kv.Value.DeliveryDate, kv.Value.Price))
             .ToList();
 
-        if (changed.Count == 0) { negotiationError = "Change at least one line's quantity or delivery date before submitting."; return; }
+        if (changed.Count == 0) { negotiationError = "Change at least one line's quantity, delivery date or price before submitting."; return; }
         if (changed.Any(l => l.NegotiatedQty <= 0)) { negotiationError = "Negotiated quantity must be greater than zero."; return; }
+        if (changed.Any(l => l.NegotiatedPrice < 0)) { negotiationError = "Negotiated price cannot be negative."; return; }
 
         busy = true; negotiationError = string.Empty;
         var req = new CreatePoNegotiationRequest(detail.Id, string.IsNullOrWhiteSpace(negotiationNotes) ? null : negotiationNotes.Trim(), changed);

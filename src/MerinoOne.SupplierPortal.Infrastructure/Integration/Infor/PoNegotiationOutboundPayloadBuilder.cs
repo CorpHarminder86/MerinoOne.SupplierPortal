@@ -69,6 +69,8 @@ internal static class PoNegotiationOutboundPayloadBuilder
                     negotiatedQty = l.NegotiatedQty,
                     originalDeliveryDate = l.OriginalDeliveryDate?.ToString("o"),
                     negotiatedDeliveryDate = l.NegotiatedDeliveryDate?.ToString("o"),
+                    originalPrice = l.OriginalPrice,
+                    negotiatedPrice = l.NegotiatedPrice,
                 })
                 .ToList(),
         };

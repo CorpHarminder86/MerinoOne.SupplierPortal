@@ -38,6 +38,9 @@ internal static class PoNegotiationHistory
 
             if (line.OriginalDeliveryDate != line.NegotiatedDeliveryDate)
                 db.AuditEntries.Add(Row(po, $"{label} · Delivery", Date(line.OriginalDeliveryDate), Date(line.NegotiatedDeliveryDate), actor, now));
+
+            if (line.OriginalPrice != line.NegotiatedPrice)
+                db.AuditEntries.Add(Row(po, $"{label} · Price", Num(line.OriginalPrice), Num(line.NegotiatedPrice), actor, now));
         }
     }
 

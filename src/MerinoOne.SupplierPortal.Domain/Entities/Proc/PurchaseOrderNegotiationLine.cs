@@ -34,4 +34,10 @@ public class PurchaseOrderNegotiationLine : AuditableEntity
 
     /// <summary>The delivery date the supplier is proposing.</summary>
     public DateTime? NegotiatedDeliveryDate { get; set; }
+
+    /// <summary>The PO line unit price (PriceUnit) at submit time — original snapshot for the buyer diff.</summary>
+    public decimal OriginalPrice { get; set; }
+
+    /// <summary>The unit price the supplier is proposing.</summary>
+    public decimal NegotiatedPrice { get; set; }
 }

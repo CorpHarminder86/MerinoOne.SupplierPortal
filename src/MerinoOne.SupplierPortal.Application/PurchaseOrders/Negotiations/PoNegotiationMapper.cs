@@ -42,5 +42,7 @@ public static class PoNegotiationMapper
             l.OriginalQty,
             l.NegotiatedQty,
             l.OriginalDeliveryDate,
-            l.NegotiatedDeliveryDate);
+            l.NegotiatedDeliveryDate,
+            l.OriginalPrice,
+            l.NegotiatedPrice);
 }

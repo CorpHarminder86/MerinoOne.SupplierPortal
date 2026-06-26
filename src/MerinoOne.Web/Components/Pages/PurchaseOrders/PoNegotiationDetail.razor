@@ -101,6 +101,8 @@ else
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Original Qty</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Negotiated Qty</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Original Price</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Negotiated Price</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Original Delivery</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Negotiated Delivery</th>
                         </tr>
@@ -109,6 +111,7 @@ else
                     @foreach (var ln in detail.Lines.OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo))
                     {
                         var qtyChanged = ln.NegotiatedQty != ln.OriginalQty;
+                        var priceChanged = ln.NegotiatedPrice != ln.OriginalPrice;
                         var dateChanged = ln.NegotiatedDeliveryDate != ln.OriginalDeliveryDate;
                         <tr style="border-bottom:1px solid var(--mer-line-soft);">
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PositionNo</td>
@@ -116,6 +119,8 @@ else
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);@(qtyChanged ? "text-decoration:line-through;" : "")">@ln.OriginalQty.ToString("0.###")</td>
                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:@(qtyChanged ? "700" : "400");color:@(qtyChanged ? "var(--mer-green-dark)" : "var(--mer-ink-700)");background:@(qtyChanged ? "var(--mer-green-50)" : "transparent");">@ln.NegotiatedQty.ToString("0.###")</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);@(priceChanged ? "text-decoration:line-through;" : "")">@ln.OriginalPrice.ToString("0.00")</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:@(priceChanged ? "700" : "400");color:@(priceChanged ? "var(--mer-green-dark)" : "var(--mer-ink-700)");background:@(priceChanged ? "var(--mer-green-50)" : "transparent");">@ln.NegotiatedPrice.ToString("0.00")</td>
                             <td style="padding:6px 4px;font-family:Inter,monospace;color:var(--mer-ink-500);@(dateChanged ? "text-decoration:line-through;" : "")">@(ln.OriginalDeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                             <td style="padding:6px 4px;font-family:Inter,monospace;font-weight:@(dateChanged ? "700" : "400");color:@(dateChanged ? "var(--mer-green-dark)" : "var(--mer-ink-700)");background:@(dateChanged ? "var(--mer-green-50)" : "transparent");">@(ln.NegotiatedDeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                         </tr>
