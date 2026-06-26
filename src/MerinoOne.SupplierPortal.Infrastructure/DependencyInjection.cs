@@ -2,6 +2,7 @@ using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Application.SystemSettings;
 using MerinoOne.SupplierPortal.Application.SystemSettings.EmailConfig;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Registry;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Scope;
 using MerinoOne.SupplierPortal.Application.SystemSettings.SupplierInvite;
@@ -114,6 +115,12 @@ public static class DependencyInjection
         // Async drain. Hosted service so it starts with the host and stops cleanly on shutdown.
         services.AddHostedService<EmailOutboxWorker>();
 
+        // R4 (2026-06-26) — Phase 6 / UC-PO-04: 48h negotiation-SLA buyer nudge. BackgroundService (mirrors
+        // EmailOutboxWorker) — polls Fulfilment:SlaNudgeIntervalMinutes (default 30), finds Submitted negotiations
+        // older than Fulfilment:SlaNudgeHours (default 48) with NudgeSentAt null, enqueues a buyer reminder + stamps
+        // NudgeSentAt to dedupe.
+        services.AddHostedService<SlaNudgeWorker>();
+
         // Cryptographically-strong numeric OTP generator (invite + MFA flows).
         services.AddSingleton<IOtpCodeGenerator, OtpCodeGenerator>();
 
@@ -144,8 +151,10 @@ public static class DependencyInjection
         // ISettingsCategorySeed so SettingsSeedRegistry enumerates them.
         services.AddSingleton<EmailConfigSeed>();
         services.AddSingleton<SupplierInviteSeed>();
+        services.AddSingleton<FulfilmentSeed>();
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<EmailConfigSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<SupplierInviteSeed>());
+        services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<FulfilmentSeed>());
         services.AddSingleton<SettingsSeedRegistry>();
 
         // Cached readers — singleton so the cache persists across requests; expose both the
@@ -157,6 +166,11 @@ public static class DependencyInjection
         services.AddSingleton<SupplierInviteSettingsService>();
         services.AddSingleton<ISupplierInviteSettings>(sp => sp.GetRequiredService<SupplierInviteSettingsService>());
         services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<SupplierInviteSettingsService>());
+
+        // R4 (2026-06-26) — Decision D3: the over-ship-guard rollout flag (Fulfilment.EnforceOverShipGuard).
+        services.AddSingleton<FulfilmentSettingsService>();
+        services.AddSingleton<IFulfilmentSettings>(sp => sp.GetRequiredService<FulfilmentSettingsService>());
+        services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<FulfilmentSettingsService>());
 
         // Scope-filter rollout gate — singleton so the request DbContext reads the flag with zero DB I/O
         // (no re-entrancy during query-filter evaluation). Invalidated like the other cached readers.

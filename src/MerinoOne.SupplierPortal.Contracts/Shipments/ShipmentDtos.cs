@@ -78,6 +78,10 @@ public record AsnLineLotDto(string LotNo, decimal Qty, DateOnly? ExpiryDate, str
 // building the ASN. PoPositionNo retained for back-compat (= PositionNo). PoNumber added (multi-PO lines).
 // R4 (2026-06-23) — Serial/Lot capture: SerialNumbers (serialized items) + Lots (lot-controlled items), at
 // most one populated per line (serialized XOR lot-controlled). Trailing optional so existing callers stay valid.
+// R4 (2026-06-26) — Addendum §7.3 / DI-04: the PO line's cumulative ShippedQtyToDate plus the two DERIVED
+// figures the UI shows SEPARATELY — Balance (nominal: MAX(0, orderQty − shippedQtyToDate)) and OverShipAllowance
+// (tolerance-adjusted ceiling headroom: MAX(0, orderQty×(1+tol/100) − shippedQtyToDate)). None are persisted;
+// they are computed at build time so "balance 0 with an accepted over-ship allowance" never looks inconsistent.
 public record AsnLineDto(
     Guid Id,
     Guid PurchaseOrderLineId,
@@ -94,7 +98,10 @@ public record AsnLineDto(
     string? BatchNumber,
     DateTime? ExpiryDate,
     IReadOnlyList<string>? SerialNumbers = null,
-    IReadOnlyList<AsnLineLotDto>? Lots = null);
+    IReadOnlyList<AsnLineLotDto>? Lots = null,
+    decimal ShippedQtyToDate = 0,
+    decimal Balance = 0,
+    decimal OverShipAllowance = 0);
 
 // R4 (2026-06-22) — Module 3: ASN attachments reuse the existing Contracts.Suppliers.DocumentAttachmentDto
 // (structurally identical; ownerEntityType='Asn', DocumentType.AsnAttachment). No duplicate type introduced
@@ -126,7 +133,11 @@ public record CreateAsnRequest(
     List<CreateAsnLineRequest> Lines,
     // R4 (2026-06-23) — deferred attachments: files uploaded during creation go to ownerEntityType='Staging' under
     // this client-generated key; CreateAsn rebinds them onto the new ASN (AsnAttachmentRebinder). Trailing optional.
-    Guid? StagingKey = null);
+    Guid? StagingKey = null,
+    // R4 (2026-06-26) — §6.5 / UC-PO-09: admin gate-override reason. When the PO confirmation gate would BLOCK ASN
+    // creation, a caller holding PurchaseOrder.OverrideGate may supply a non-empty reason to proceed anyway (audited).
+    // Empty reason or missing permission → the normal block. Trailing optional.
+    string? OverrideReason = null);
 
 // R4 (2026-06-23) — Serial/Lot capture: Serials (serialized item) + Lots (lot-controlled item) — at most one
 // populated per line. The other is ignored by the handler based on the line's Item flag. Used by BOTH Create
@@ -149,6 +160,15 @@ public record UpdateAsnRequest(
     string? DriverPhone,
     string? Notes,
     List<CreateAsnLineRequest> Lines);
+
+// R4 (2026-06-26) — §6.5 / UC-PO-09: optional submit-time admin gate-override reason. When the PO confirmation
+// gate would BLOCK draft submission, a caller holding PurchaseOrder.OverrideGate may supply a non-empty reason to
+// proceed (audited). Empty reason or missing permission → the normal block.
+// R4 (2026-06-26) — Phase 4 / §8.3 / UC-ATT-03: AcknowledgeMissingAttachments confirms proceeding past any
+// Warning-level attachment requirement. First submit (false) with a missing Warning attachment returns a 200
+// carrying ConfirmationRequired=true + the warning list; the client re-submits with true to proceed (the skip is
+// audited). Mandatory-missing always blocks (400) regardless of this flag.
+public record SubmitAsnRequest(string? OverrideReason = null, bool AcknowledgeMissingAttachments = false);
 
 // R4 (2026-06-22) — Migration 0021 exposed: GrnStatus (ERP-owned receipt status), GrnApprovedAt, IssueReported
 // (ERP remark), and the deterministic GRN→Invoice link (InvoiceId + denormalised InvoiceNumber). Added as

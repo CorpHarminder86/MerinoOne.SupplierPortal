@@ -47,18 +47,23 @@ public record PurchaseOrderDetailDto(
     DateTime? AcknowledgmentAt,
     DateTime? AcceptedAt,
     string? RejectionReason,
-    DateTime? ProposedDeliveryDate,
     int Version,
     string? BuyerName,
     string? ErpSyncId,
     string? Notes,
     List<PurchaseOrderLineDto> Lines,
-    // R4 (2026-06-22): the owning supplier's PO-response behaviour ("Manual" | "Auto"), joined from
-    // Supplier.PoResponseMode — replaces the UI's second GET /api/suppliers/{supplierId} per PO detail.
-    // Trailing optional positional — defaults to "Manual".
-    string PoResponseMode = "Manual",
+    // R4 (2026-06-22): the owning supplier's PO-confirmation mode (R4: "AutoAccept" | "AcknowledgeToShip" |
+    // "AcceptToShip"), joined from Supplier.PoConfirmationMode — replaces the UI's second GET per PO detail. Field
+    // name kept as PoResponseMode for contract stability (the UI rename is Phase 5). Default "AcceptToShip".
+    string PoResponseMode = "AcceptToShip",
     // PO header total = sum of each line's NetAmount (Price − DiscountAmount). Display-only (derived, not stored).
-    decimal TotalAmount = 0);
+    decimal TotalAmount = 0,
+    // R4 (2026-06-26) — Phase 5b / D1, D2: the owning supplier's action toggles, joined from
+    // Supplier.AllowNegotiate / Supplier.AllowReject. They gate the PO-detail affordances: AllowReject=false hides
+    // Reject/Decline; AllowNegotiate=false hides the Negotiation action. Trailing optional (default true) so older
+    // positional callers stay valid and a missing value never hides an action it shouldn't.
+    bool AllowNegotiate = true,
+    bool AllowReject = true);
 
 public record PurchaseOrderLineDto(
     Guid Id,
@@ -83,13 +88,27 @@ public record PurchaseOrderLineDto(
     bool IsSerialized = false,
     bool IsLotControlled = false,
     // Line net amount = Price (extended line amount) − DiscountAmount. The PO header TotalAmount is the sum of these.
-    decimal NetAmount = 0);
+    decimal NetAmount = 0,
+    // R4 (2026-06-26) — Addendum §7.3 / DI-04 (ASN quantity tracking). The PO-line-picker the ASN wizard reads:
+    // ShippedQtyToDate is the maintained cumulative; Balance is the nominal remaining (MAX(0, orderQty −
+    // shippedQtyToDate)); OverShipAllowance is the tolerance-adjusted ceiling headroom (MAX(0, orderQty×(1+tol/100)
+    // − shippedQtyToDate)). Derived at query time, never persisted. Surfaced SEPARATELY so a 0 balance with an
+    // accepted over-ship allowance does not read inconsistent.
+    decimal ShippedQtyToDate = 0,
+    decimal Balance = 0,
+    decimal OverShipAllowance = 0,
+    // R4 (2026-06-26) — Addendum §5.3 / UC-ASN-10 (Phase 3, downward revision below shipped). True when an ERP
+    // revision dropped orderQty BELOW the quantity already shipped (ShippedQtyToDate > OrderQty) — the line is
+    // "over-shipped / qty reduced below shipped". Balance is already MAX(0,…) so it reads 0; this flag tells the
+    // buyer/supplier the order shrank under the shipped cumulative. The atomic ASN guard auto-blocks further ASNs
+    // on such a line (it reads orderQty live, revision-safe), so this is a display/exception signal, not a gate.
+    bool IsOverShippedQtyReduced = false);
 
 public record AcknowledgePoRequest(string? Notes = null);
-public record AcceptPoRequest(DateTime? ProposedDate, string? Notes = null);
+// R4 (2026-06-26) — D2: accept is accept-only (the ProposedDate field is removed — counter-proposals go through
+// PO negotiation). ProposePoDateRequest + ApproveProposalRequest retired with their endpoints.
+public record AcceptPoRequest(string? Notes = null);
 public record RejectPoRequest(string Reason);
-public record ProposePoDateRequest(DateTime ProposedDate);
-public record ApproveProposalRequest(string? Comment = null);
 
 public record DeliveryScheduleListItemDto(
     Guid Id,

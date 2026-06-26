@@ -52,6 +52,8 @@ public static class AsnDtoBuilder
 
         // Lines join their PO line for item/qty + owning PO number. Projected to an intermediate row first so the
         // serial/lot children (loaded separately below) can be merged in by line id without an N+1 per line.
+        // R4 (2026-06-26) — also carry the PO line's cumulative ShippedQtyToDate + the PO's supplier/company so the
+        // derived Balance + OverShipAllowance (§7.3 / DI-04) can be computed per line below.
         var lineRows = await (from al in db.AsnLines
                               join pol in db.PurchaseOrderLines on al.PurchaseOrderLineId equals pol.Id
                               join po in db.PurchaseOrders on pol.PurchaseOrderId equals po.Id
@@ -63,17 +65,76 @@ public static class AsnDtoBuilder
                                   al.PurchaseOrderLineId,
                                   pol.PurchaseOrderId,
                                   po.PoNumber,
+                                  PoSupplierId = po.SupplierId,
+                                  PoCompany = po.TenantEntityId,
                                   PoPositionNo = pol.PositionNo,
                                   al.PositionNo,
                                   al.SequenceNo,
                                   pol.ItemCode,
+                                  pol.ItemId,
                                   pol.ItemDescription,
                                   pol.OrderUnit,
                                   pol.OrderQty,
+                                  pol.ShippedQtyToDate,
                                   al.ShippedQty,
                                   al.BatchNumber,
                                   al.ExpiryDate,
                               }).ToListAsync(ct);
+
+        // R4 (2026-06-26) — resolve the per-line over-ship tolerance (§7.1 SupplierItem ?? Item) so the derived
+        // OverShipAllowance can be surfaced. Items are company-scoped with natural key (TenantEntityId, Code) and
+        // the PO line's ItemId is often null — resolve the Item by ItemId OR by (company, ItemCode), then the
+        // SupplierItem override by (supplierId, resolvedItemId). IgnoreQueryFilters mirrors the create path
+        // (Item may live in an unshared source company; SupplierItem is tenant/seccode-owned but the read is a
+        // build-time projection, not a mutation).
+        var tolItemCodes = lineRows.Select(r => r.ItemCode).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
+        var tolCompanies = lineRows.Select(r => r.PoCompany).Distinct().ToList();
+        var itemTolRows = await db.Items.IgnoreQueryFilters()
+            .Where(i => !i.IsDeleted && tolCompanies.Contains(i.TenantEntityId) && tolItemCodes.Contains(i.Code))
+            .Select(i => new { i.Id, i.TenantEntityId, i.Code, i.OverShipTolerancePct })
+            .ToListAsync(ct);
+        // (company, codeLower) -> (itemId, itemTol)
+        var itemTolByCompanyCode = itemTolRows
+            .GroupBy(i => (i.TenantEntityId, Code: i.Code.ToLowerInvariant()))
+            .ToDictionary(g => g.Key, g => (g.First().Id, g.First().OverShipTolerancePct));
+        var itemTolById = itemTolRows
+            .GroupBy(i => i.Id)
+            .ToDictionary(g => g.Key, g => g.First().OverShipTolerancePct);
+
+        // Resolve each line's Item id (explicit or by company+code) up front so SupplierItem overrides can be batched.
+        Guid? ResolveItemId(Guid? itemId, Guid? company, string? code)
+        {
+            if (itemId is { } id) return id;
+            if (!string.IsNullOrWhiteSpace(code)
+                && itemTolByCompanyCode.TryGetValue((company, code!.ToLowerInvariant()), out var hit))
+                return hit.Id;
+            return null;
+        }
+
+        var supplierItemKeys = lineRows
+            .Select(r => (r.PoSupplierId, ItemId: ResolveItemId(r.ItemId, r.PoCompany, r.ItemCode)))
+            .Where(k => k.ItemId is not null)
+            .Distinct()
+            .ToList();
+        var supplierIdsForTol = supplierItemKeys.Select(k => k.PoSupplierId).Distinct().ToList();
+        var itemIdsForTol = supplierItemKeys.Select(k => k.ItemId!.Value).Distinct().ToList();
+        var supplierItemTol = (await db.SupplierItems.IgnoreQueryFilters()
+                .Where(si => !si.IsDeleted && supplierIdsForTol.Contains(si.SupplierId) && itemIdsForTol.Contains(si.ItemId))
+                .Select(si => new { si.SupplierId, si.ItemId, si.OverShipTolerancePct })
+                .ToListAsync(ct))
+            .ToDictionary(si => (si.SupplierId, si.ItemId), si => si.OverShipTolerancePct);
+
+        // Per-line resolved tolerance %: SupplierItem override (non-null) ?? Item floor ?? 0 (no resolvable item).
+        decimal ResolveTolerancePct(Guid supplierId, Guid? company, Guid? itemIdRaw, string? code)
+        {
+            var itemId = ResolveItemId(itemIdRaw, company, code);
+            if (itemId is null) return 0m;
+            decimal? itemTol = itemTolById.TryGetValue(itemId.Value, out var it) ? it : null;
+            decimal? siTol = supplierItemTol.TryGetValue((supplierId, itemId.Value), out var st) ? st : null;
+            // siTol may itself be null (SupplierItem row exists but value NULL → inherit). itemTol is NOT NULL when
+            // the item resolved; if neither resolved, fall back to 0.
+            return siTol ?? itemTol ?? 0m;
+        }
 
         // R4 (2026-06-23) — Serial/Lot capture children for these lines (so read/lock view + wizard reload show them).
         var asnLineIds = lineRows.Select(r => r.Id).ToList();
@@ -92,13 +153,21 @@ public static class AsnDtoBuilder
             .GroupBy(l => l.AsnLineId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<AsnLineLotDto>)g.Select(x => x.Dto).ToList());
 
-        var lines = lineRows.Select(r => new AsnLineDto(
-                r.Id, r.PurchaseOrderLineId, r.PurchaseOrderId, r.PoNumber,
-                r.PoPositionNo, r.PositionNo, r.SequenceNo,
-                r.ItemCode, r.ItemDescription, r.OrderUnit, r.OrderQty,
-                r.ShippedQty, r.BatchNumber, r.ExpiryDate,
-                serialsByLine.TryGetValue(r.Id, out var sl) ? sl : null,
-                lotsGrouped.TryGetValue(r.Id, out var ll) ? ll : null))
+        var lines = lineRows.Select(r =>
+            {
+                // §7.3 / DI-04 — nominal balance + tolerance-adjusted over-ship allowance, computed (never persisted).
+                var tolPct = ResolveTolerancePct(r.PoSupplierId, r.PoCompany, r.ItemId, r.ItemCode);
+                var balance = Math.Max(0m, r.OrderQty - r.ShippedQtyToDate);
+                var overShipAllowance = Math.Max(0m, (r.OrderQty * Policies.OverShipTolerance.Factor(tolPct)) - r.ShippedQtyToDate);
+                return new AsnLineDto(
+                    r.Id, r.PurchaseOrderLineId, r.PurchaseOrderId, r.PoNumber,
+                    r.PoPositionNo, r.PositionNo, r.SequenceNo,
+                    r.ItemCode, r.ItemDescription, r.OrderUnit, r.OrderQty,
+                    r.ShippedQty, r.BatchNumber, r.ExpiryDate,
+                    serialsByLine.TryGetValue(r.Id, out var sl) ? sl : null,
+                    lotsGrouped.TryGetValue(r.Id, out var ll) ? ll : null,
+                    r.ShippedQtyToDate, balance, overShipAllowance);
+            })
             .ToList();
 
         // The auto-created draft invoice (1:1 with the ASN via asnId).

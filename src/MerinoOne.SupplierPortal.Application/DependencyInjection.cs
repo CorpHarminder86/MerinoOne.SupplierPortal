@@ -50,6 +50,12 @@ public static class DependencyInjection
         // Scoped — ctor-inject the per-request IAppDbContext / ICurrentUser / IOutboxDispatcher.
         services.AddScoped<Suppliers.ChangeRequests.SupplierChangeApplier>();
         services.AddScoped<Suppliers.ChangeRequests.SupplierChangePushService>();
+
+        // R4 Phase 4 — Attachment Requirement Governance (TSD R4 Addendum §8). The two-tier policy evaluator +
+        // the shared submit guard (mandatory-block / warning-confirm / skip-audit) called by the ASN / Invoice /
+        // Supplier submit handlers. Scoped — ctor-inject the per-request IAppDbContext / ICurrentUser.
+        services.AddScoped<Common.Interfaces.IAttachmentPolicyEvaluator, Documents.AttachmentPolicyEvaluator>();
+        services.AddScoped<Documents.AttachmentSubmitGuard>();
         return services;
     }
 }
