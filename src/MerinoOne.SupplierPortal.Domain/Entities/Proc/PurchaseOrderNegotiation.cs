@@ -37,6 +37,14 @@ public class PurchaseOrderNegotiation : BaseAggregateRoot
     public DateTime? ReviewedAt { get; set; }
     public string? ReviewedBy { get; set; }
 
+    /// <summary>
+    /// R4 (2026-06-26) — Phase 6 / UC-PO-04. Dedupe stamp for the 48h negotiation-SLA buyer nudge. NULL until the
+    /// <c>SlaNudgeWorker</c> BackgroundService enqueues the one-time "negotiation awaiting your review" reminder to the
+    /// buyer (resolved via the PO's <c>BuyerUserId</c>); stamped UTC-now on enqueue so the worker never nudges the same
+    /// Submitted negotiation twice. Reset implicitly when a new negotiation row is raised (each negotiation is its own row).
+    /// </summary>
+    public DateTime? NudgeSentAt { get; set; }
+
     public string? RejectionReason { get; set; }
     public string? Notes { get; set; }
 
