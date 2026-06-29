@@ -311,16 +311,26 @@
                         <tbody>
                         @foreach (var ln in lines)
                         {
-                            <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                            var full = FullyShipped(ln);     // ceiling reached (no over-ship headroom) → row read-only
+                            var over = OverAllowance(ln);    // entered qty exceeds the order qty + tolerance ceiling
+                            <tr style="border-bottom:1px solid var(--mer-line-soft);@(full ? "background:var(--mer-ink-50);" : "")">
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PoNumber</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@ln.PositionNo</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@(ln.SequenceNo?.ToString() ?? "—")</td>
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
-                                <td style="padding:6px 4px;">@BalanceCell(ln)</td>
-                                <td style="padding:6px 4px;text-align:right;"><input type="number" step="0.001" class="rz-textbox" style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;" @bind="ln.ShippedQty" /></td>
-                                <td style="padding:6px 4px;"><input type="text" class="rz-textbox" style="width:120px;padding:4px 6px;" @bind="ln.BatchNumber" /></td>
-                                <td style="padding:6px 4px;"><input type="date" class="rz-textbox" style="width:130px;padding:4px 6px;" @bind="ln.ExpiryDate" /></td>
+                                <td style="padding:6px 4px;">@BalanceCell(ln) @if (full) { <span class="tlg-status tlg-status--active" style="margin-left:6px;font-size:10px;">Fully shipped</span> }</td>
+                                <td style="padding:6px 4px;text-align:right;">
+                                    <input type="number" step="0.001" min="0" max="@ln.OverShipAllowance.ToString("0.###")" class="rz-textbox"
+                                           style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;@(over ? "border:1px solid var(--mer-red);" : "")"
+                                           @bind="ln.ShippedQty" @bind:event="oninput" @onblur="() => OnShipQtyBlur(ln)" disabled="@full" title="@(full ? "Line fully shipped — no remaining ship capacity" : null)" />
+                                    @if (over)
+                                    {
+                                        <div style="font-size:10.5px;color:var(--mer-red);margin-top:2px;white-space:nowrap;">Max @ln.OverShipAllowance.ToString("0.###")</div>
+                                    }
+                                </td>
+                                <td style="padding:6px 4px;"><input type="text" class="rz-textbox" style="width:120px;padding:4px 6px;" @bind="ln.BatchNumber" disabled="@full" /></td>
+                                <td style="padding:6px 4px;"><input type="date" class="rz-textbox" style="width:130px;padding:4px 6px;" @bind="ln.ExpiryDate" disabled="@full" /></td>
                             </tr>
                         }
                         </tbody>
@@ -614,6 +624,38 @@
     </div>
 }
 
+@* ---------------- Over-ship validation dialog (§7 — ship qty exceeds order qty + tolerance) ---------------- *@
+@if (showOverShip)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="warning" data-size="md" style="width:560px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">production_quantity_limits</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">ASN · Over-ship</div>
+                    <h2 class="merino-dialog__title">Ship quantity exceeds the allowance</h2>
+                    <p class="merino-dialog__subtitle">Reduce these lines to within the order qty + over-ship tolerance before continuing.</p>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showOverShip = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--mer-ink-700);">
+                    @foreach (var l in lines.Where(OverAllowance))
+                    {
+                        <li style="margin-bottom:4px;"><b style="font-family:Inter,monospace;">@l.ItemCode</b> (PO @l.PoNumber · pos @l.PositionNo) — entered <b style="color:var(--mer-red);">@l.ShippedQty.ToString("0.###")</b>, max allowed <b>@l.OverShipAllowance.ToString("0.###")</b></li>
+                    }
+                </ul>
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="() => showOverShip = false">OK, I'll fix it</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
 @* ---------------- PO confirmation-gate override dialog (§6.5 / UC-PO-09) ---------------- *@
 @if (showGateOverride)
 {
@@ -750,6 +792,7 @@
     // gate message, surface it; a caller with PurchaseOrder.OverrideGate can supply a reason to re-submit past it.
     private bool showGateOverride = false;
     private string gateBlockMessage = string.Empty;
+    private bool showOverShip = false;
     private string gateOverrideReason = string.Empty;
     private string gateOverrideError = string.Empty;
     // Which operation triggered the gate block, so the override re-runs the same path.
@@ -795,6 +838,16 @@
         3 => expectedDeliveryDate.HasValue,
         _ => true
     };
+
+    // R4 (2026-06-27) — client-side over-ship UX: restrict the supplier as soon as the entered ship qty exceeds the
+    // order qty + over-ship tolerance ceiling (OverShipAllowance), instead of only failing at submit; and lock a row
+    // that has no remaining ship capacity. The server atomic guard (behind Fulfilment.EnforceOverShipGuard) remains
+    // the authoritative check.
+    private static bool OverAllowance(LineRow l) => l.ShippedQty > l.OverShipAllowance;
+    private static bool FullyShipped(LineRow l) => l.OverShipAllowance <= 0;
+
+    // Surface the over-ship dialog the moment the Ship Qty field loses focus (not only on Next).
+    private void OnShipQtyBlur(LineRow l) { if (OverAllowance(l)) showOverShip = true; }
 
     // Reload whenever the route id changes — Blazor REUSES this component across /asns/new -> /asns/{id}
     // (the save-draft navigation), so OnInitializedAsync (once-only) would leave detail=null => "ASN not found".
@@ -1025,7 +1078,12 @@
 
     private void GoStep(int s) { if (s <= currentStep) currentStep = s; }
     private void PrevStep() { if (currentStep > 1) currentStep--; }
-    private void NextStep() { if (currentStep < 4 && CanProceed) currentStep++; }
+    private void NextStep()
+    {
+        // Over-ship: surface a dialog naming the offending lines rather than silently disabling Next (§7 guard).
+        if (currentStep == 2 && lines.Any(OverAllowance)) { showOverShip = true; return; }
+        if (currentStep < 4 && CanProceed) currentStep++;
+    }
     private string StepLabel(int s) => s switch { 1 => "PO(s)", 2 => "Lines", 3 => "Shipment", 4 => "Review", _ => "" };
 
     // ---- Save draft (create or update) ----
@@ -1306,8 +1364,10 @@
     private const int SerialBoxCap = 200;
 
     // The step-2 capture sections render only for shipped lines of the matching Item type.
-    private List<LineRow> SerialLines => lines.Where(l => l.IsSerialized && l.ShippedQty > 0).ToList();
-    private List<LineRow> LotLines => lines.Where(l => l.IsLotControlled && l.ShippedQty > 0).ToList();
+    // Only capture serials/lots for VALID lines — a ship qty over the over-ship allowance is rejected, so we must
+    // not generate N serial/lot boxes from an invalid qty (the line shows "Max N" + Next is blocked until fixed).
+    private List<LineRow> SerialLines => lines.Where(l => l.IsSerialized && l.ShippedQty > 0 && !OverAllowance(l)).ToList();
+    private List<LineRow> LotLines => lines.Where(l => l.IsLotControlled && l.ShippedQty > 0 && !OverAllowance(l)).ToList();
 
     // Grow the per-line serial slot list to N so the indexed @bind targets exist (boxes start empty).
     private static void EnsureSerialSlots(LineRow line, int need)
@@ -1372,8 +1432,8 @@
 
     // True only if EVERY serialized/lot line currently passes — gates Next on step 2 and the final submit.
     private bool SerialLotCaptureValid =>
-        lines.Where(l => l.IsSerialized && l.ShippedQty > 0).All(l => SerialLineValid(l, out _))
-        && lines.Where(l => l.IsLotControlled && l.ShippedQty > 0).All(l => LotLineValid(l, out _));
+        lines.Where(l => l.IsSerialized && l.ShippedQty > 0 && !OverAllowance(l)).All(l => SerialLineValid(l, out _))
+        && lines.Where(l => l.IsLotControlled && l.ShippedQty > 0 && !OverAllowance(l)).All(l => LotLineValid(l, out _));
 
     private class LineRow
     {

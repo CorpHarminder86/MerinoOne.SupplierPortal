@@ -29,21 +29,25 @@ public record GetAttachmentPoliciesQuery(string EntityCode, Guid? SupplierId) : 
 public class GetAttachmentPoliciesQueryHandler : IRequestHandler<GetAttachmentPoliciesQuery, List<AttachmentPolicyDto>>
 {
     private readonly IAppDbContext _db;
-    public GetAttachmentPoliciesQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetAttachmentPoliciesQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<List<AttachmentPolicyDto>> Handle(GetAttachmentPoliciesQuery request, CancellationToken ct)
     {
+        // Tenant-wide config masters (seeded under the tenant-admin seccode) — read tenant-scoped, bypassing the
+        // caller's seccode RLS which would otherwise return empty for an admin with no SecRight on the config seccode.
+        var tid = _user.TenantId;
         var entityCode = request.EntityCode.Trim();
-        var entity = await _db.AttachmentEntities
-            .Where(e => e.Code == entityCode)
+        var entity = await _db.AttachmentEntities.IgnoreQueryFilters()
+            .Where(e => e.Code == entityCode && !e.IsDeleted && (tid == null || e.TenantId == tid))
             .Select(e => new { e.Id, e.Code })
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("AttachmentEntity", entityCode);
 
         // Tenant defaults (supplierId NULL) + (when given) THIS supplier's overrides. Join the type for code/name.
         var rows = await (
-            from p in _db.AttachmentRequirementPolicies
-            join t in _db.AttachmentTypes on p.AttachmentTypeId equals t.Id
+            from p in _db.AttachmentRequirementPolicies.IgnoreQueryFilters().Where(x => !x.IsDeleted && (tid == null || x.TenantId == tid))
+            join t in _db.AttachmentTypes.IgnoreQueryFilters().Where(x => !x.IsDeleted && (tid == null || x.TenantId == tid)) on p.AttachmentTypeId equals t.Id
             where p.AttachmentEntityId == entity.Id
                   && (p.SupplierId == null || p.SupplierId == request.SupplierId)
             select new
@@ -110,22 +114,29 @@ public class UpsertAttachmentPolicyCommandHandler : IRequestHandler<UpsertAttach
         var typeCode = b.AttachmentTypeCode.Trim();
         var requirement = Enum.Parse<AttachmentRequirement>(b.Requirement, ignoreCase: true);
 
-        var entity = await _db.AttachmentEntities.FirstOrDefaultAsync(e => e.Code == entityCode, ct)
+        // Config masters are owned by the tenant-admin config seccode (the caller holds no SecRight on it), so the
+        // seccode RLS would return "not found". Resolve tenant-scoped with IgnoreQueryFilters (same as the reads).
+        var tid = _user.TenantId;
+        var entity = await _db.AttachmentEntities.IgnoreQueryFilters()
+                         .FirstOrDefaultAsync(e => e.Code == entityCode && !e.IsDeleted && (tid == null || e.TenantId == tid), ct)
                      ?? throw new NotFoundException("AttachmentEntity", entityCode);
-        var type = await _db.AttachmentTypes.FirstOrDefaultAsync(t => t.Code == typeCode, ct)
+        var type = await _db.AttachmentTypes.IgnoreQueryFilters()
+                       .FirstOrDefaultAsync(t => t.Code == typeCode && !t.IsDeleted && (tid == null || t.TenantId == tid), ct)
                    ?? throw new NotFoundException("AttachmentType", typeCode);
 
         if (b.SupplierId is Guid sid)
         {
-            var supplierExists = await _db.Suppliers.AnyAsync(s => s.Id == sid, ct);
+            var supplierExists = await _db.Suppliers.IgnoreQueryFilters().AnyAsync(s => s.Id == sid && !s.IsDeleted, ct);
             if (!supplierExists) throw new NotFoundException("Supplier", sid);
         }
 
         // Upsert by the D5 unique: (entity, type) for a tenant default, (supplier, entity, type) for an override.
-        var row = await _db.AttachmentRequirementPolicies.FirstOrDefaultAsync(
+        var row = await _db.AttachmentRequirementPolicies.IgnoreQueryFilters().FirstOrDefaultAsync(
             p => p.AttachmentEntityId == entity.Id
                  && p.AttachmentTypeId == type.Id
-                 && p.SupplierId == b.SupplierId, ct);
+                 && p.SupplierId == b.SupplierId
+                 && !p.IsDeleted
+                 && (tid == null || p.TenantId == tid), ct);
 
         if (row is null)
         {
@@ -167,9 +178,11 @@ public class UpsertAttachmentPolicyCommandHandler : IRequestHandler<UpsertAttach
     private async Task<AttachmentRequirement> ResolveEffectiveAsync(Guid entityId, Guid typeId, CancellationToken ct)
     {
         // No supplier context on a tenant-default upsert — effective = the tenant default itself.
-        var tenant = await _db.AttachmentRequirementPolicies
+        var tid = _user.TenantId;
+        var tenant = await _db.AttachmentRequirementPolicies.IgnoreQueryFilters()
             .Where(p => p.AttachmentEntityId == entityId && p.AttachmentTypeId == typeId
-                        && p.SupplierId == null && p.IsActive)
+                        && p.SupplierId == null && p.IsActive && !p.IsDeleted
+                        && (tid == null || p.TenantId == tid))
             .Select(p => (AttachmentRequirement?)p.Requirement)
             .FirstOrDefaultAsync(ct);
         return tenant ?? AttachmentRequirement.Optional;
@@ -183,11 +196,14 @@ public record DeleteAttachmentPolicyCommand(Guid Id) : IRequest<Unit>;
 public class DeleteAttachmentPolicyCommandHandler : IRequestHandler<DeleteAttachmentPolicyCommand, Unit>
 {
     private readonly IAppDbContext _db;
-    public DeleteAttachmentPolicyCommandHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public DeleteAttachmentPolicyCommandHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<Unit> Handle(DeleteAttachmentPolicyCommand request, CancellationToken ct)
     {
-        var row = await _db.AttachmentRequirementPolicies.FirstOrDefaultAsync(p => p.Id == request.Id, ct)
+        var tid = _user.TenantId;
+        var row = await _db.AttachmentRequirementPolicies.IgnoreQueryFilters()
+                      .FirstOrDefaultAsync(p => p.Id == request.Id && !p.IsDeleted && (tid == null || p.TenantId == tid), ct)
                   ?? throw new NotFoundException("AttachmentRequirementPolicy", request.Id);
         // Soft-delete (interceptor); a removed row reverts to the tenant default / Optional fallback.
         _db.AttachmentRequirementPolicies.Remove(row);

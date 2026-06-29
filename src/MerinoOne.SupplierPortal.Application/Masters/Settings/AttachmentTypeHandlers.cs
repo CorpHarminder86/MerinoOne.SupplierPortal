@@ -51,11 +51,14 @@ public record GetAttachmentTypesQuery(bool? IsActive = null) : IRequest<List<Att
 public class GetAttachmentTypesQueryHandler : IRequestHandler<GetAttachmentTypesQuery, List<AttachmentTypeDto>>
 {
     private readonly IAppDbContext _db;
-    public GetAttachmentTypesQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetAttachmentTypesQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<List<AttachmentTypeDto>> Handle(GetAttachmentTypesQuery request, CancellationToken ct)
     {
-        var q = _db.AttachmentTypes.AsQueryable();
+        // Tenant-wide config master — read tenant-scoped, bypassing the caller's seccode RLS (see GetEntities).
+        var tid = _user.TenantId;
+        var q = _db.AttachmentTypes.IgnoreQueryFilters().Where(t => !t.IsDeleted && (tid == null || t.TenantId == tid));
         if (request.IsActive.HasValue) q = q.Where(t => t.IsActive == request.IsActive.Value);
         return await q.OrderBy(t => t.Code)
             .Select(t => new AttachmentTypeDto(t.Id, t.Seq, t.Code, t.Name, t.IsActive, t.CreatedOn))
@@ -83,8 +86,11 @@ public class CreateAttachmentTypeCommandHandler : IRequestHandler<CreateAttachme
     public async Task<AttachmentTypeDto> Handle(CreateAttachmentTypeCommand request, CancellationToken ct)
     {
         var code = request.Body.Code.Trim();
+        var tid = _user.TenantId;
         // Unique per tenant (the filtered UQ allows re-adding a soft-deleted code; the runtime check mirrors it).
-        var exists = await _db.AttachmentTypes.AnyAsync(t => t.Code == code, ct);
+        // Tenant-scoped IgnoreQueryFilters — the config rows are owned by the config seccode, not the caller.
+        var exists = await _db.AttachmentTypes.IgnoreQueryFilters()
+            .AnyAsync(t => t.Code == code && !t.IsDeleted && (tid == null || t.TenantId == tid), ct);
         if (exists) throw new ConflictException($"Attachment type with code '{code}' already exists.");
 
         var seccodeId = await SettingsSeccodeResolver.ResolveAttachmentConfigSeccodeAsync(_db, _user.TenantId, ct);
@@ -122,7 +128,9 @@ public class UpdateAttachmentTypeCommandHandler : IRequestHandler<UpdateAttachme
 
     public async Task<AttachmentTypeDto> Handle(UpdateAttachmentTypeCommand request, CancellationToken ct)
     {
-        var t = await _db.AttachmentTypes.FirstOrDefaultAsync(x => x.Id == request.Id, ct)
+        var tid = _user.TenantId;
+        var t = await _db.AttachmentTypes.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(x => x.Id == request.Id && !x.IsDeleted && (tid == null || x.TenantId == tid), ct)
                 ?? throw new NotFoundException("AttachmentType", request.Id);
 
         // Code is immutable (it aligns with DocumentUpload.documentType); only Name / IsActive are editable.
@@ -142,11 +150,15 @@ public record GetAttachmentEntitiesQuery(bool? IsActive = null) : IRequest<List<
 public class GetAttachmentEntitiesQueryHandler : IRequestHandler<GetAttachmentEntitiesQuery, List<AttachmentEntityDto>>
 {
     private readonly IAppDbContext _db;
-    public GetAttachmentEntitiesQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetAttachmentEntitiesQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<List<AttachmentEntityDto>> Handle(GetAttachmentEntitiesQuery request, CancellationToken ct)
     {
-        var q = _db.AttachmentEntities.AsQueryable();
+        // Tenant-wide config master (seeded under the tenant-admin seccode) — read tenant-scoped, bypassing the
+        // caller's seccode RLS (no admin owns a SecRight on the config seccode, so the plain filter returned empty).
+        var tid = _user.TenantId;
+        var q = _db.AttachmentEntities.IgnoreQueryFilters().Where(e => !e.IsDeleted && (tid == null || e.TenantId == tid));
         if (request.IsActive.HasValue) q = q.Where(e => e.IsActive == request.IsActive.Value);
         return await q.OrderBy(e => e.Code)
             .Select(e => new AttachmentEntityDto(e.Id, e.Seq, e.Code, e.Name, e.IsActive, e.CreatedOn))

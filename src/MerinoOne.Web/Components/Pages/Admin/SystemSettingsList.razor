@@ -36,6 +36,9 @@
                 <button type="button" class="settings-rail__item @(category == "InforConnection" ? "active" : null)" @onclick="@(() => SelectCategory("InforConnection"))">
                     <span class="material-symbols-outlined">cloud_sync</span> Infor CloudSuite
                 </button>
+                <button type="button" class="settings-rail__item @(category == "Fulfilment" ? "active" : null)" @onclick="@(() => SelectCategory("Fulfilment"))">
+                    <span class="material-symbols-outlined">local_shipping</span> Fulfilment
+                </button>
             </aside>
 
             <main class="rz-card settings-panel">
@@ -112,6 +115,19 @@
                             </button>
                         </div>
                     }
+                    else if (category == "Fulfilment")
+                    {
+                        <h2 class="settings-section__title">Fulfilment controls</h2>
+                        <p class="settings-section__sub">Over-ship enforcement for ASN shipments (TSD R4 §7 · Decision D3).</p>
+
+                        @RenderToggleRow("EnforceOverShipGuard", "When ON, an ASN ship qty exceeding order qty + over-ship tolerance is REJECTED. Enable only after item / supplier-item tolerances are seeded. The cumulative shipped qty is always tracked regardless of this flag.", fulfil.EnforceOverShipGuard, v => fulfil.EnforceOverShipGuard = v, "EnforceOverShipGuard")
+
+                        <div class="settings-actions">
+                            <button type="button" class="rz-button rz-primary settings-btn--primary" disabled="@busy" @onclick="SaveFulfilment">
+                                <span class="material-symbols-outlined">save</span> @(busy ? "Saving…" : "Save changes")
+                            </button>
+                        </div>
+                    }
                 }
             </main>
         </div>
@@ -165,6 +181,7 @@
     private const string EmailCategory = "EmailConfig";
     private const string InviteCategory = "SupplierInvite";
     private const string InforCategory = "InforConnection";
+    private const string FulfilmentCategory = "Fulfilment";
     private const string PasswordMask = "********";
 
     private string category = EmailCategory;
@@ -176,10 +193,12 @@
     private readonly EmailForm email = new();
     private readonly InviteForm invite = new();
     private readonly InforForm infor = new();
+    private readonly FulfilForm fulfil = new();
 
     // Track original values per key so Save only sends changed rows.
     private Dictionary<string, string> originalEmail = new();
     private Dictionary<string, string> originalInvite = new();
+    private Dictionary<string, string> originalFulfil = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -228,6 +247,11 @@
             invite.ExpiryDays = ParseInt(Pick(rows, "ExpiryDays", "7"), 7);
             originalInvite = SnapshotInvite();
         }
+        else if (cat == FulfilmentCategory)
+        {
+            fulfil.EnforceOverShipGuard = ParseBool(Pick(rows, "EnforceOverShipGuard", "false"), false);
+            originalFulfil = SnapshotFulfil();
+        }
         loading = false;
         StateHasChanged();
     }
@@ -251,6 +275,11 @@
     private Dictionary<string, string> SnapshotInvite() => new()
     {
         ["ExpiryDays"] = invite.ExpiryDays.ToString(),
+    };
+
+    private Dictionary<string, string> SnapshotFulfil() => new()
+    {
+        ["EnforceOverShipGuard"] = fulfil.EnforceOverShipGuard.ToString().ToLowerInvariant(),
     };
 
     private async Task SaveEmail()
@@ -311,6 +340,33 @@
                 Show("Settings saved.", ok: true);
                 Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
                 await LoadCategory(InviteCategory);
+            }
+            else
+            {
+                Show(string.Join(" ", failures), ok: false);
+            }
+        }
+        finally { busy = false; }
+    }
+
+    private async Task SaveFulfilment()
+    {
+        busy = true; banner = null;
+        try
+        {
+            var current = SnapshotFulfil();
+            var failures = new List<string>();
+            foreach (var (key, value) in current)
+            {
+                if (originalFulfil.TryGetValue(key, out var prev) && prev == value) continue;
+                if (!await SaveOne(FulfilmentCategory, key, value, failures)) break;
+            }
+
+            if (failures.Count == 0)
+            {
+                Show("Settings saved.", ok: true);
+                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+                await LoadCategory(FulfilmentCategory);
             }
             else
             {
@@ -577,6 +633,11 @@
     private class InviteForm
     {
         public int ExpiryDays { get; set; } = 7;
+    }
+
+    private class FulfilForm
+    {
+        public bool EnforceOverShipGuard { get; set; } = false;
     }
 
     private class InforForm
