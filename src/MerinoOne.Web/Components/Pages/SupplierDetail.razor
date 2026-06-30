@@ -508,6 +508,20 @@ else
                 </div>
             }
         </div>
+
+        @* R5 (§13 / §13.7) — the reusable policy-driven Attachment Panel on the Supplier entity (EntityCode="Supplier").
+           It covers the entity's FLAT, UNCONDITIONAL attachment-requirement policy rows. The existing "Uploaded documents"
+           card above stays as-is: the conditional onboarding rules (e.g. GST cert only if a GSTIN was entered) remain in
+           code until conditional policy lands (§13.7). Renders nothing when no Supplier-entity policy rows exist. Read-only
+           here: the shared /api/document-uploads/attach endpoint currently only accepts ownerEntityType
+           Asn/SupplierLicense/Staging (see hand-off note), so Supplier-master uploads are a backend gap — the panel still
+           lists/views/downloads any Supplier-tagged documents the read-model returns. *@
+        <div style="margin-top:16px;">
+            <AttachmentPanel EntityCode="Supplier"
+                             EntityId="@detail.Id"
+                             Editable="false"
+                             SupplierId="@detail.Id" />
+        </div>
         }
     </div>
 

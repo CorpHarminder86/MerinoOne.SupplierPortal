@@ -158,29 +158,14 @@
                 }
             </div>
 
-            <div class="rz-card" style="padding:20px;">
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Attachments (@detail.Attachments.Count)</h3>
-                @if (detail.Attachments.Count == 0)
-                {
-                    <div style="font-size:12px;color:var(--mer-ink-400);">No attachments.</div>
-                }
-                else
-                {
-                    <div style="display:flex;flex-direction:column;gap:6px;">
-                        @foreach (var a in detail.Attachments)
-                        {
-                            var att = a;
-                            <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 10px;background:var(--mer-surface);">
-                                <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-blue);">@AttachIcon(att.ContentType)</span>
-                                <div style="flex:1;min-width:0;">
-                                    <div style="font-size:12px;font-weight:600;color:var(--mer-ink-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@att.FileName">@att.FileName</div>
-                                    <div style="font-size:10.5px;color:var(--mer-ink-500);font-family:Inter,monospace;">@($"{att.SizeBytes / 1024d:0.#}") KB</div>
-                                </div>
-                                <button type="button" @onclick="() => PreviewAttachment(att)" title="Preview" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>
-                            </div>
-                        }
-                    </div>
-                }
+            @* R5 (§13.5) — read-only Attachment Panel on the locked view (PendingApproval shows it to the supplier as
+               read-only AND to the buyer who is deciding; Submitted+ shows it view-only to everyone). The panel renders
+               nothing when no policy rows exist for the ASN entity. Editable=false ⇒ no upload/remove affordances. *@
+            <div>
+                <AttachmentPanel EntityCode="Asn"
+                                 EntityId="@detail.Id"
+                                 Editable="false"
+                                 SupplierId="@detail.SupplierId" />
             </div>
         </div>
 
@@ -560,66 +545,27 @@
                 <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:12px;display:block;">Notes</label>
                 <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="notes"></textarea>
 
-                @* ---------------- Attachments ---------------- *@
+                @* ---------------- Attachments (R5 §13 — policy-driven Attachment Panel) ----------------
+                   The reusable panel renders slots from the server read-model (one per active AttachmentRequirementPolicy
+                   row) and performs upload/remove via the existing /api/document-uploads/attach + DELETE endpoints. It is
+                   a THIN CLIENT: it DISPLAYS the requirement badge but never enforces — the Mandatory/Warning block fires
+                   only at Send-for-Approval (the server AttachmentSubmitGuard, §13.6). No policy rows → it renders nothing.
+                   A brand-new ASN has no id yet, so the panel shows a "save the draft to attach" hint per slot (§13.2);
+                   once saved (Draft) it is live and editable while Draft/Rejected (§13.5). *@
                 <div style="margin-top:18px;border-top:1px solid var(--mer-line-soft);padding-top:14px;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachments</label>
-                        @if (IsNew && selectedSupplierId == Guid.Empty)
-                        {
-                            <span style="font-size:11px;color:var(--mer-ink-500);">Choose a supplier first.</span>
-                        }
-                        else
-                        {
-                            <div style="display:flex;align-items:center;gap:8px;">
-                                @* R4 (2026-06-26) — §8.5 / §3.6: optional document-type tag from the active attachment-type
-                                   master. Tagging an attachment lets the §8.3 policy evaluator recognise it as present. *@
-                                @if (attachmentTypes.Count > 0)
-                                {
-                                    <select class="rz-dropdown" style="padding:6px 10px;font-size:12px;" @bind="selectedAttachType">
-                                        <option value="AsnAttachment">Document type…</option>
-                                        @foreach (var t in attachmentTypes)
-                                        {
-                                            <option value="@t.Code">@t.Name</option>
-                                        }
-                                    </select>
-                                }
-                                <label class="doc-uploader__choose" style="position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;">
-                                    <span class="material-symbols-outlined" style="font-size:14px;">upload</span>
-                                    @(attachUploading ? "Uploading…" : "Add file")
-                                    <InputFile OnChange="OnAsnFileSelectedAsync" accept=".pdf,.jpg,.jpeg,.png" disabled="@attachUploading"
-                                               style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
-                                </label>
-                            </div>
-                        }
-                    </div>
-                    @* R5 (§13.5) — attachments are editable while Draft OR Rejected; they lock once the ASN is sent for
-                       approval (PendingApproval) and stay read-only thereafter. The editable wizard only renders for
-                       Draft/Rejected (IsLocked=false), so reaching this branch already implies the edit affordance is allowed. *@
-                    <p style="font-size:11px;color:var(--mer-ink-500);margin-bottom:8px;">PDF or image, up to 5 MB. Attachments are editable while the ASN is Draft or Rejected, and lock once it is sent for approval.</p>
-
-                    @if (attachments.Count == 0)
+                    @if (IsNew && selectedSupplierId == Guid.Empty)
                     {
-                        <div style="font-size:12px;color:var(--mer-ink-400);padding:8px 0;">No attachments yet.</div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachments</label>
+                        <p style="font-size:11px;color:var(--mer-ink-500);margin-top:6px;">Choose a supplier first.</p>
                     }
                     else
                     {
-                        <div style="display:flex;flex-direction:column;gap:6px;">
-                            @foreach (var a in attachments)
-                            {
-                                var att = a;
-                                <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 10px;background:var(--mer-surface);">
-                                    <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-blue);">@AttachIcon(att.ContentType)</span>
-                                    <div style="flex:1;min-width:0;">
-                                        <div style="font-size:12px;font-weight:600;color:var(--mer-ink-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@att.FileName">@att.FileName</div>
-                                        <div style="font-size:10.5px;color:var(--mer-ink-500);font-family:Inter,monospace;">@($"{att.SizeBytes / 1024d:0.#}") KB</div>
-                                    </div>
-                                    <button type="button" @onclick="() => PreviewAttachment(att)" title="Preview" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>
-                                    <button type="button" @onclick="() => DeleteAttachment(att)" title="Remove" disabled="@attachUploading" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:17px;">delete</span></button>
-                                </div>
-                            }
-                        </div>
+                        <AttachmentPanel EntityCode="Asn"
+                                         EntityId="@(Id ?? Guid.Empty)"
+                                         Editable="@(CanWrite)"
+                                         SupplierId="@attachSupplierId"
+                                         OnChanged="OnPanelChanged" />
                     }
-                    @if (!string.IsNullOrEmpty(attachError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@attachError</div> }
                 </div>
             }
             else if (currentStep == 4)
@@ -878,8 +824,6 @@
     </div>
 }
 
-<DocumentPreviewer Doc="_previewDoc" OnClose="() => _previewDoc = null" />
-
 @code {
     [Parameter] public Guid? Id { get; set; }
     // R4 #6 — "Create ASN from selected POs" on the PO list deep-links here with ?pos=id1,id2 (comma-separated).
@@ -890,7 +834,6 @@
     private bool savingDraft = false;
     private int currentStep = 1;
     private string submitError = string.Empty;
-    private const long MaxAttachBytes = 5L * 1024 * 1024;
 
     // PO selection (multi). R4 #6 — supplier-first + server-side PO autocomplete (no load-all): a single supplier
     // can own thousands of POs, so we pick the supplier first, then SEARCH that supplier's open POs by number.
@@ -914,18 +857,11 @@
     private string? driverPhone;
     private string? notes;
 
-    // Attachments — for an existing Draft ASN we attach directly (ownerEntityType='Asn', ownerEntityId=asnId).
-    // CreateAsnRequest carries no StagingKey, so a brand-new ASN must be saved as a Draft first; the attachment
-    // affordance unlocks once a real asnId exists (and the ASN is still Draft / not IsLocked).
+    // Attachments — R5 (§13): the reusable AttachmentPanel now OWNS upload/list/remove (slots from the policy
+    // read-model, files via /api/document-uploads/attach + DELETE). The page keeps only a lightweight count of the
+    // ASN's attachments (for the step-4 review summary), refreshed from the by-asn list endpoint on panel changes.
     private readonly List<DocumentAttachmentDto> attachments = new();
-    private bool attachUploading;
-    private string attachError = string.Empty;
     private Guid attachSupplierId;
-    // R4 (2026-06-26) — §3.6 / §8.5: the active attachment-type catalogue for the optional document-type picker.
-    // Best-effort (Settings.Read); empty list (e.g. a supplier user without the permission) simply hides the picker
-    // and attachments default to the AsnAttachment type. selectedAttachType is the code passed to /attach.
-    private List<AttachmentTypeDto> attachmentTypes = new();
-    private string selectedAttachType = "AsnAttachment";
     // R4 (2026-06-23) — deferred-upload staging key for create-mode attachments (rebound onto the ASN by CreateAsn).
     private Guid _stagingKey = Guid.NewGuid();
 
@@ -952,8 +888,6 @@
     private string rejectReason = string.Empty;
     private string approveError = string.Empty;
     private string rejectError = string.Empty;
-
-    private DocumentPreviewer.DocumentDescriptor? _previewDoc;
 
     private bool IsNew => !Id.HasValue;
     private bool IsLocked => detail?.IsLocked == true;
@@ -1015,18 +949,19 @@
             _loadedId = Id;
             _loadedNew = IsNew;
             currentStep = 1;
-            await LoadAttachmentTypes();
             await Reload();
         }
     }
 
-    // Best-effort: the active attachment-type catalogue feeds the optional document-type picker. A caller without
-    // Settings.Read gets an empty list (the picker hides), so this never blocks the ASN flow.
-    private async Task LoadAttachmentTypes()
+    // R5 (§13) — the AttachmentPanel raises this after every upload/remove. Refresh the lightweight count the
+    // step-4 review summary shows from the by-asn list endpoint (the panel owns the actual files + their display).
+    private async Task OnPanelChanged()
     {
-        if (attachmentTypes.Count > 0) return;
-        var resp = await Api.GetAsync<List<AttachmentTypeDto>>("api/settings/attachment-types?isActive=true");
-        attachmentTypes = resp?.Data ?? new();
+        if (!Id.HasValue) return;
+        var resp = await Api.GetAsync<List<DocumentAttachmentDto>>($"api/document-uploads/by-asn/{Id.Value}");
+        attachments.Clear();
+        if (resp?.Data is { } docs) attachments.AddRange(docs);
+        StateHasChanged();
     }
 
     private async Task Reload()
@@ -1441,55 +1376,8 @@
         busy = false;
     }
 
-    // ---- Attachments (direct attach against a Draft ASN) ----
-    private async Task OnAsnFileSelectedAsync(InputFileChangeEventArgs e)
-    {
-        attachError = string.Empty;
-        if (attachSupplierId == Guid.Empty) { attachError = "Choose a supplier first."; return; }
-        if (!IsNew && !Id.HasValue) { attachError = "Save the draft first, then add attachments."; return; }
-        var file = e.File;
-        if (file is null) return;
-        if (file.Size > MaxAttachBytes) { attachError = $"File exceeds 5 MB ({(file.Size / 1024d / 1024d):0.0} MB)."; return; }
-
-        attachUploading = true;
-        StateHasChanged();
-        try
-        {
-            using var content = new MultipartFormDataContent();
-            var streamContent = new StreamContent(file.OpenReadStream(MaxAttachBytes));
-            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
-                string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
-            content.Add(streamContent, "file", file.Name);
-            // Create mode → stage under _stagingKey; CreateAsn rebinds to the new ASN. Draft → attach directly.
-            content.Add(new StringContent(IsNew ? "Staging" : "Asn"), "ownerEntityType");
-            content.Add(new StringContent((IsNew ? _stagingKey : Id!.Value).ToString()), "ownerEntityId");
-            content.Add(new StringContent(attachSupplierId.ToString()), "supplierId");
-            // R4 (2026-06-26) — §3.6: tag with the chosen active master code (validated server-side); defaults to AsnAttachment.
-            content.Add(new StringContent(string.IsNullOrWhiteSpace(selectedAttachType) ? "AsnAttachment" : selectedAttachType), "documentType");
-
-            var resp = await Api.PostMultipartAsync<DocumentAttachmentDto>("api/document-uploads/attach", content);
-            if (resp?.Success == true && resp.Data is not null) attachments.Add(resp.Data);
-            else attachError = resp?.Errors?.FirstOrDefault() ?? "Upload failed (the ASN must be Draft).";
-        }
-        catch (Exception ex) { attachError = $"Upload failed: {ex.Message}"; }
-        finally { attachUploading = false; StateHasChanged(); }
-    }
-
-    private async Task DeleteAttachment(DocumentAttachmentDto att)
-    {
-        attachError = string.Empty;
-        var resp = await Api.DeleteAsync($"api/document-uploads/{att.Id}");
-        if (resp?.Success == true) attachments.Remove(att);
-        else attachError = resp?.Errors?.FirstOrDefault() ?? "Failed to remove attachment.";
-    }
-
-    private void PreviewAttachment(DocumentAttachmentDto att) =>
-        _previewDoc = new DocumentPreviewer.DocumentDescriptor(att.Id, att.FileName, att.ContentType, att.SizeBytes / 1024, att.PreviewUrl);
-
-    private static string AttachIcon(string contentType) =>
-        contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? "image"
-        : string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase) ? "picture_as_pdf"
-        : "description";
+    // R5 (§13) — attachment upload/list/remove moved into the reusable AttachmentPanel (Components/Shared).
+    // OnPanelChanged (above) keeps the page's review-summary count in sync; the panel handles the rest.
 
     // R4 (2026-06-26) — §7.3 / §5.3 / DI-04: render the nominal balance + the over-ship allowance SEPARATELY, plus
     // the "qty reduced below shipped" exception flag. Shared shape for the wizard (LineRow) and the locked view

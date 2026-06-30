@@ -30,6 +30,26 @@ public static class AttachmentRequirementResolver
         string TypeCode, string TypeName, Guid? SupplierId, AttachmentRequirement Requirement);
 
     /// <summary>
+    /// R5 (2026-06-30) — TSD R5 Addendum §13.8, Component 9 (Attachment Panel read-model). Collapses the flat D5
+    /// policy rows to ONE effective row per (entity, type) — supplier override wins over tenant default — WITHOUT
+    /// the missing-split. The panel read-model uses this to badge each slot with the same effective requirement
+    /// the enforcement evaluator would resolve; the missing-and-required split (<see cref="Resolve"/>) is the
+    /// enforcement concern and is deliberately NOT applied here (the read-model never enforces).
+    /// </summary>
+    /// <param name="policies">Active policy rows for the (tenant, entity): tenant defaults + this supplier's overrides.</param>
+    public static IReadOnlyList<PolicyRow> ResolveEffective(IEnumerable<PolicyRow> policies) =>
+        policies
+            .GroupBy(p => p.TypeCode, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var supplierRow = g.FirstOrDefault(p => p.SupplierId.HasValue);
+                return supplierRow.TypeCode is not null
+                    ? supplierRow                                   // supplier override wins
+                    : g.First(p => !p.SupplierId.HasValue);         // else the tenant default
+            })
+            .ToList();
+
+    /// <summary>
     /// Resolves the effective requirement per (entity, type) — supplier override wins over tenant default — then
     /// splits the missing-and-required types into Mandatory / Warning by display name.
     /// </summary>
@@ -43,20 +63,9 @@ public static class AttachmentRequirementResolver
             presentTypeCodes.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()),
             StringComparer.OrdinalIgnoreCase);
 
-        // Collapse to one effective row per type code: supplier override beats tenant default. Group by the
-        // type code (case-insensitive) so a supplier-override row and a tenant-default row for the same type
-        // resolve to a single effective requirement (supplier wins).
-        var byType = policies
-            .GroupBy(p => p.TypeCode, StringComparer.OrdinalIgnoreCase)
-            .Select(g =>
-            {
-                var supplierRow = g.FirstOrDefault(p => p.SupplierId.HasValue);
-                var effective = supplierRow.TypeCode is not null
-                    ? supplierRow                                   // supplier override wins
-                    : g.First(p => !p.SupplierId.HasValue);         // else the tenant default
-                return effective;
-            })
-            .ToList();
+        // Collapse to one effective row per type code: supplier override beats tenant default (shared with the
+        // panel read-model's ResolveEffective so badge + enforcement agree).
+        var byType = ResolveEffective(policies);
 
         var missingMandatory = new List<string>();
         var missingWarning = new List<string>();

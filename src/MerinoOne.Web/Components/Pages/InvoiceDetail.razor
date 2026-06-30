@@ -213,6 +213,19 @@ else
                 </table>
             }
         </div>
+
+        @* R5 (§13 / §13.7) — the reusable policy-driven Attachment Panel on the Invoice entity. Same component as the
+           ASN screen, keyed by EntityCode="Invoice". Renders nothing when no AttachmentRequirementPolicy rows exist for
+           the Invoice entity. Read-only here: the shared /api/document-uploads/attach endpoint currently only accepts
+           ownerEntityType Asn/SupplierLicense/Staging (see hand-off note), so Invoice uploads are a backend gap — the
+           panel still lists/views/downloads any Invoice-tagged documents the read-model returns. Enforcement (if/when
+           an Invoice attachment policy exists) stays at the invoice-submit site (§13.7), not in the panel. *@
+        <div style="margin-top:16px;">
+            <AttachmentPanel EntityCode="Invoice"
+                             EntityId="@detail.Id"
+                             Editable="false"
+                             SupplierId="@detail.SupplierId" />
+        </div>
         }
     </div>
 

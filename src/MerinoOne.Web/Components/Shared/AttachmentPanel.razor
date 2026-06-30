@@ -1,0 +1,313 @@
+@*
+    R5 (TSD R5 Addendum §13) — Component 9: the reusable, policy-driven Attachment Panel.
+
+    A THIN CLIENT. It renders the slots a server read-model hands it
+    (GET /api/attachments/panel?entity=&id=) and performs upload / remove via the EXISTING
+    document-uploads API. It does NOT enforce Mandatory/Warning/Optional — enforcement lives at
+    the host's submit site (for ASN that is Send-for-Approval, which calls the server
+    AttachmentSubmitGuard). The badge here is DISPLAY ONLY; the panel never blocks or decides.
+
+    Contract:
+      - Empty slot list  => render NOTHING (§13.2 "no policy → no control").
+      - One slot per policy descriptor; badge colour = requirement (Mandatory red / Warning amber /
+        Optional grey), exactly matching MerinoOne_ASN_Attachment_Control_Mockup.html.
+      - Multiple files per slot (§13.4). Each file: name + size/uploaded-by/when + view + download +
+        remove (remove only when Editable).
+      - Editable (host-decided): upload affordance (click + drag-drop). Read-only + empty slot =>
+        "No file uploaded" (§13.3).
+      - EntityId == Guid.Empty (entity not saved yet): subtle "save the draft to attach" hint per
+        slot instead of the dropzone (§13.2).
+
+    Upload posts to /api/document-uploads/attach with (ownerEntityType=EntityCode,
+    ownerEntityId=EntityId, supplierId=SupplierId, documentType=slot.TypeCode); on success it
+    re-fetches the panel + raises OnChanged. Remove DELETEs /api/document-uploads/{id} then
+    re-fetches. The API decides what is permitted (state lock, role, owner-type support) — the panel
+    surfaces whatever error it returns.
+
+    Usage:
+        <AttachmentPanel EntityCode="Asn" EntityId="@asnId" Editable="@CanEditAttachments"
+                         SupplierId="@supplierId" OnChanged="OnAttachmentsChanged" />
+*@
+
+@inject ApiClient Api
+
+@if (_loaded && _slots.Count > 0)
+{
+    var totalFiles = _slots.Sum(s => s.Documents.Count);
+    <div class="att-panel">
+        <div class="att-panel__head">
+            <div style="flex:1;">
+                <div class="att-panel__title">Attachments</div>
+                <div class="att-panel__sub">
+                    @(Editable
+                        ? "Upload the documents required for this record."
+                        : "Documents attached to this record.")
+                </div>
+            </div>
+            <span class="att-panel__count">@totalFiles file@(totalFiles == 1 ? "" : "s")</span>
+        </div>
+
+        <div class="att-panel__body">
+            @foreach (var slot in _slots)
+            {
+                var s = slot;
+                var reqClass = "att-req--" + s.Requirement.ToLowerInvariant();
+                var busyOnSlot = _busyType == s.TypeCode;
+                var over = _dragType == s.TypeCode;
+                <div class="att-slot">
+                    <div class="att-slot__head">
+                        <span class="att-slot__name">@s.TypeName</span>
+                        <span class="att-req @reqClass"><span class="att-req__dot"></span>@s.Requirement</span>
+                        <div style="flex:1;"></div>
+                        <span class="att-slot__count">@s.Documents.Count file@(s.Documents.Count == 1 ? "" : "s")</span>
+                    </div>
+
+                    @if (s.Documents.Count > 0)
+                    {
+                        <div class="att-filelist">
+                            @foreach (var doc in s.Documents)
+                            {
+                                var d = doc;
+                                <div class="att-file">
+                                    <div class="att-file__ic"><span class="material-symbols-outlined" style="font-size:18px;">@FileIcon(d.MimeType)</span></div>
+                                    <div class="att-file__meta">
+                                        <div class="att-file__fn" title="@d.FileName">@d.FileName</div>
+                                        <div class="att-file__fm">@FmtSize(d.SizeBytes)@(string.IsNullOrEmpty(d.UploadedBy) ? "" : $" · {d.UploadedBy}") · @d.UploadedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                                    </div>
+                                    <div class="att-file__acts">
+                                        <button type="button" class="att-iconbtn" title="View" @onclick="() => PreviewFile(d)"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>
+                                        <a class="att-iconbtn" href="@d.DownloadUrl" download="@d.FileName" title="Download"><span class="material-symbols-outlined" style="font-size:17px;">download</span></a>
+                                        @if (Editable)
+                                        {
+                                            <button type="button" class="att-iconbtn att-iconbtn--danger" title="Remove" disabled="@busyOnSlot" @onclick="() => RemoveFile(s, d)"><span class="material-symbols-outlined" style="font-size:17px;">delete</span></button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @if (Editable)
+                    {
+                        @if (EntityId == Guid.Empty)
+                        {
+                            <div class="att-hint">Save the draft to attach files to this slot.</div>
+                        }
+                        else
+                        {
+                            <label class="att-drop @(over ? "att-drop--over" : "")"
+                                   @ondragover="() => _dragType = s.TypeCode" @ondragover:preventDefault="true"
+                                   @ondragleave="() => _dragType = null" @ondragleave:preventDefault="true"
+                                   @ondrop:preventDefault="true">
+                                @if (busyOnSlot)
+                                {
+                                    <span class="material-symbols-outlined att-drop__spin" style="font-size:22px;">progress_activity</span>
+                                    <div class="att-drop__t">Uploading…</div>
+                                }
+                                else
+                                {
+                                    <span class="material-symbols-outlined" style="font-size:22px;">upload</span>
+                                    <div class="att-drop__t">Drop files or click to upload</div>
+                                    <div class="att-drop__s">PDF, JPG or PNG · multiple files allowed</div>
+                                }
+                                <InputFile multiple accept=".pdf,.jpg,.jpeg,.png" disabled="@(busyOnSlot)"
+                                           OnChange="@((InputFileChangeEventArgs e) => UploadFiles(s, e))"
+                                           style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
+                            </label>
+                        }
+                    }
+                    else if (s.Documents.Count == 0)
+                    {
+                        <div class="att-empty-ro">No file uploaded</div>
+                    }
+
+                    @if (_slotErrors.TryGetValue(s.TypeCode, out var slotErr) && !string.IsNullOrEmpty(slotErr))
+                    {
+                        <div class="att-error">@slotErr</div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <DocumentPreviewer Doc="_previewDoc" OnClose="() => _previewDoc = null" />
+}
+
+<style>
+    .att-panel { background:var(--mer-surface); border:1px solid var(--mer-line); border-radius:var(--mer-radius-lg); box-shadow:var(--mer-shadow-sm); overflow:hidden; }
+    .att-panel__head { display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--mer-line); }
+    .att-panel__title { font-size:1rem; font-weight:700; color:var(--mer-blue-darker); }
+    .att-panel__sub { font-size:11.5px; color:var(--mer-ink-500); margin-top:1px; }
+    .att-panel__count { background:var(--mer-blue-50); color:var(--mer-blue-700); padding:2px 9px; border-radius:999px; font:600 11px Inter,monospace; }
+    .att-panel__body { padding:14px 16px; display:flex; flex-direction:column; gap:12px; }
+
+    .att-slot { border:1px solid var(--mer-line); border-radius:var(--mer-radius-md); overflow:hidden; }
+    .att-slot__head { display:flex; align-items:center; gap:10px; padding:9px 12px; background:var(--mer-ink-50); border-bottom:1px solid var(--mer-line); }
+    .att-slot__name { font-size:13px; font-weight:600; color:var(--mer-ink-900); }
+    .att-slot__count { font:600 11px Inter,monospace; color:var(--mer-ink-500); }
+
+    .att-req { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font:700 10.5px 'Plus Jakarta Sans',sans-serif; letter-spacing:.02em; }
+    .att-req__dot { width:6px; height:6px; border-radius:50%; }
+    .att-req--mandatory { background:var(--mer-red-50); color:var(--mer-red); }
+    .att-req--mandatory .att-req__dot { background:var(--mer-red); }
+    .att-req--warning { background:var(--mer-amber-50); color:var(--mer-amber-800); }
+    .att-req--warning .att-req__dot { background:#C77E12; }
+    .att-req--optional { background:var(--mer-ink-100); color:var(--mer-ink-500); }
+    .att-req--optional .att-req__dot { background:var(--mer-ink-400); }
+
+    .att-filelist { display:flex; flex-direction:column; }
+    .att-file { display:flex; align-items:center; gap:10px; padding:9px 12px; border-bottom:1px solid var(--mer-line-soft); }
+    .att-file:last-child { border-bottom:0; }
+    .att-file__ic { flex-shrink:0; width:30px; height:30px; border-radius:7px; background:var(--mer-blue-50); color:var(--mer-blue); display:flex; align-items:center; justify-content:center; }
+    .att-file__meta { flex:1; min-width:0; }
+    .att-file__fn { font-size:12.5px; font-weight:600; color:var(--mer-ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .att-file__fm { font-size:11px; color:var(--mer-ink-500); font-family:Inter,monospace; }
+    .att-file__acts { display:flex; gap:2px; flex-shrink:0; }
+    .att-iconbtn { border:0; background:transparent; width:30px; height:30px; border-radius:var(--mer-radius); color:var(--mer-ink-500); cursor:pointer; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:background var(--mer-transition),color var(--mer-transition); }
+    .att-iconbtn:hover { background:var(--mer-ink-100); color:var(--mer-ink-700); }
+    .att-iconbtn--danger:hover { background:var(--mer-red-50); color:var(--mer-red); }
+    .att-iconbtn:disabled { opacity:.5; cursor:default; }
+
+    .att-drop { position:relative; margin:10px 12px; border:1.5px dashed var(--mer-ink-300); border-radius:var(--mer-radius-md); padding:16px; display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center; cursor:pointer; color:var(--mer-ink-500); transition:.15s; }
+    .att-drop:hover, .att-drop--over { border-color:var(--mer-blue); background:var(--mer-blue-50); color:var(--mer-blue-deep); }
+    .att-drop__t { font-size:12.5px; font-weight:600; color:var(--mer-ink-700); }
+    .att-drop:hover .att-drop__t, .att-drop--over .att-drop__t { color:var(--mer-blue-deep); }
+    .att-drop__s { font-size:11px; }
+    .att-drop__spin { animation:att-spin 1s linear infinite; }
+    @@keyframes att-spin { to { transform:rotate(360deg); } }
+
+    .att-empty-ro { padding:12px; font-size:12px; color:var(--mer-ink-400); font-style:italic; }
+    .att-hint { margin:10px 12px; padding:10px 12px; border:1px dashed var(--mer-ink-300); border-radius:var(--mer-radius-md); font-size:12px; color:var(--mer-ink-500); background:var(--mer-ink-50); }
+    .att-error { margin:0 12px 10px; background:var(--mer-red-50); color:var(--mer-red); padding:8px 12px; border-radius:var(--mer-radius); font-size:12px; }
+</style>
+
+@code {
+    /// <summary>The owning entity's discriminator — "Asn" | "Invoice" | "Supplier". Keys both the read-model
+    /// (GET /attachments/panel?entity=) and the upload owner (ownerEntityType on /attach).</summary>
+    [Parameter, EditorRequired] public string EntityCode { get; set; } = string.Empty;
+
+    /// <summary>The owning entity instance id. Guid.Empty ⇒ the entity is not saved yet: slots still render
+    /// from policy but show a "save the draft to attach" hint instead of the dropzone (§13.2).</summary>
+    [Parameter, EditorRequired] public Guid EntityId { get; set; }
+
+    /// <summary>Host-decided edit state (per §13.5: ASN Draft/Rejected → supplier editable; PendingApproval+ →
+    /// read-only). Drives the upload + remove affordances ONLY — it is not an enforcement gate.</summary>
+    [Parameter] public bool Editable { get; set; }
+
+    /// <summary>Owning supplier id, stamped on the upload (the /attach endpoint canWrite-gates against the
+    /// supplier's seccode). For entity=Supplier this IS the entity id; the read-model resolves it server-side.</summary>
+    [Parameter] public Guid? SupplierId { get; set; }
+
+    /// <summary>Raised after every successful upload/remove so the host can refresh its own attachment count.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private const long MaxBytes = 5L * 1024 * 1024;
+
+    private List<AttachmentPanelSlotDto> _slots = new();
+    private bool _loaded;
+    private string? _busyType;          // TypeCode currently mid upload/remove (drives per-slot busy UI)
+    private string? _dragType;          // TypeCode the user is dragging over (drives dropzone highlight)
+    private readonly Dictionary<string, string> _slotErrors = new(StringComparer.Ordinal);
+    private DocumentPreviewer.DocumentDescriptor? _previewDoc;
+
+    // Re-fetch whenever the entity identity changes (host may reuse this component across draft→saved).
+    private string? _loadedKey;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{EntityCode}:{EntityId}";
+        if (_loadedKey != key)
+        {
+            _loadedKey = key;
+            await LoadPanel();
+        }
+    }
+
+    private async Task LoadPanel()
+    {
+        // EntityId.Empty still loads the slot descriptors (policy is entity-keyed, not instance-keyed) so the
+        // "save draft to attach" hint can render per slot. The server returns the policy slots with empty docs.
+        var idForQuery = EntityId;
+        var resp = await Api.GetAsync<List<AttachmentPanelSlotDto>>(
+            $"api/attachments/panel?entity={Uri.EscapeDataString(EntityCode)}&id={idForQuery}");
+        _slots = resp?.Data ?? new();
+        _loaded = true;
+        StateHasChanged();
+    }
+
+    private async Task UploadFiles(AttachmentPanelSlotDto slot, InputFileChangeEventArgs e)
+    {
+        _slotErrors.Remove(slot.TypeCode);
+        if (EntityId == Guid.Empty) { _slotErrors[slot.TypeCode] = "Save the draft first, then attach files."; return; }
+
+        var files = e.GetMultipleFiles(maximumFileCount: 20);
+        if (files.Count == 0) return;
+
+        _busyType = slot.TypeCode;
+        StateHasChanged();
+        try
+        {
+            foreach (var file in files)
+            {
+                if (file.Size > MaxBytes)
+                {
+                    _slotErrors[slot.TypeCode] = $"{file.Name} exceeds {MaxBytes / 1024 / 1024} MB.";
+                    continue;
+                }
+                using var content = new MultipartFormDataContent();
+                var streamContent = new StreamContent(file.OpenReadStream(MaxBytes));
+                streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                    string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
+                content.Add(streamContent, "file", file.Name);
+                content.Add(new StringContent(EntityCode), "ownerEntityType");
+                content.Add(new StringContent(EntityId.ToString()), "ownerEntityId");
+                if (SupplierId is { } sup) content.Add(new StringContent(sup.ToString()), "supplierId");
+                content.Add(new StringContent(slot.TypeCode), "documentType");
+
+                var resp = await Api.PostMultipartAsync<DocumentAttachmentDto>("api/document-uploads/attach", content);
+                if (resp?.Success != true)
+                {
+                    _slotErrors[slot.TypeCode] = resp?.Errors?.FirstOrDefault() ?? "Upload failed.";
+                }
+            }
+        }
+        catch (Exception ex) { _slotErrors[slot.TypeCode] = $"Upload failed: {ex.Message}"; }
+        finally { _busyType = null; }
+
+        await LoadPanel();
+        if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+    }
+
+    private async Task RemoveFile(AttachmentPanelSlotDto slot, AttachmentPanelDocumentDto doc)
+    {
+        _slotErrors.Remove(slot.TypeCode);
+        _busyType = slot.TypeCode;
+        StateHasChanged();
+        try
+        {
+            var resp = await Api.DeleteAsync($"api/document-uploads/{doc.Id}");
+            if (resp?.Success != true)
+                _slotErrors[slot.TypeCode] = resp?.Errors?.FirstOrDefault() ?? "Failed to remove the file.";
+        }
+        catch (Exception ex) { _slotErrors[slot.TypeCode] = $"Remove failed: {ex.Message}"; }
+        finally { _busyType = null; }
+
+        await LoadPanel();
+        if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+    }
+
+    private void PreviewFile(AttachmentPanelDocumentDto d) =>
+        _previewDoc = new DocumentPreviewer.DocumentDescriptor(
+            d.Id, d.FileName, d.MimeType ?? "application/octet-stream",
+            (long)Math.Ceiling(d.SizeBytes / 1024d), d.DownloadUrl);
+
+    private static string FileIcon(string? mime) =>
+        (mime ?? "").StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? "image"
+        : string.Equals(mime, "application/pdf", StringComparison.OrdinalIgnoreCase) ? "picture_as_pdf"
+        : "description";
+
+    private static string FmtSize(long b) =>
+        b < 1024 ? $"{b} B"
+        : b < 1024 * 1024 ? $"{b / 1024d:0} KB"
+        : $"{b / (1024d * 1024d):0.0} MB";
+}
