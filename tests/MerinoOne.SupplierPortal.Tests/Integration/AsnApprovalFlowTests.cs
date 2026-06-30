@@ -180,6 +180,41 @@ public class AsnApprovalFlowTests : IAsyncLifetime
         (await ShippedToDate(setup.PoLineId)).Should().Be(10m, because: "the over-ship guard consumes balance at Submit (§10.4)");
     }
 
+    // ── §20 — Approve notifies the submitting supplier (audit/notification touchpoint) ───────────────────
+    [SkippableFact]
+    public async Task Approve_notifies_the_submitting_supplier()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var (asnId, _, supplierClient) = await NewDraftWithBuyerAsync(orderQty: 10m);
+        await SendOkAsync(supplierClient, asnId);
+
+        // Give the submitting supplier user an e-mail so the best-effort notification enqueues a row.
+        const string supplierEmail = "supplier-approve@test.com";
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var u = await db.AppUsers.IgnoreQueryFilters()
+                .FirstAsync(x => x.UserCode == SecurityTestHarness.Users.Supplier);
+            u.Email = supplierEmail;
+            await db.SaveChangesAsync();
+        }
+
+        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        var approve = await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
+        approve.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(approve));
+
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var mail = await db.EmailOutbox.IgnoreQueryFilters()
+                .Where(m => m.ToEmail == supplierEmail && m.TemplateKey == "AsnApproval" && m.Subject.Contains("approved"))
+                .OrderByDescending(m => m.CreatedOn)
+                .FirstOrDefaultAsync();
+            mail.Should().NotBeNull(because: "Approve notifies the supplier who submitted the ASN (§20)");
+        }
+    }
+
     // ── UC-AP-04 — Reject returns to supplier (mandatory reason; no balance consumed) ────────────────────
     [SkippableFact]
     public async Task UC_AP_04_reject_returns_to_supplier()

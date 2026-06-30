@@ -88,6 +88,23 @@ public static class AsnApprovalSupport
             SupplierRejectedBody(asn.AsnNumber, reason), now));
     }
 
+    /// <summary>R5 §20 — best-effort: notify the supplier user who submitted the ASN that the buyer APPROVED it
+    /// (and it was submitted). Mirrors the reject notification; <paramref name="submittedBy"/> is the approval's
+    /// SubmittedBy (the supplier user who sent it for approval).</summary>
+    public static async Task NotifySupplierApprovedAsync(
+        IAppDbContext db, Asn asn, string submittedBy, DateTime now, CancellationToken ct)
+    {
+        var email = await db.AppUsers.IgnoreQueryFilters()
+            .Where(u => u.UserCode == submittedBy && !u.IsDeleted && u.Email != null && u.Email != "")
+            .Select(u => u.Email)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(email)) return;
+
+        db.EmailOutbox.Add(BuildOutbox(asn.TenantId, email!.Trim(),
+            $"ASN {asn.AsnNumber} was approved",
+            SupplierApprovedBody(asn.AsnNumber), now));
+    }
+
     private static EmailOutbox BuildOutbox(Guid? tenantId, string to, string subject, string body, DateTime now)
         => new()
         {
@@ -119,6 +136,15 @@ public static class AsnApprovalSupport
   <h2 style="color:#0f3b5e;">ASN {WebUtility.HtmlEncode(asnNumber)} returned for changes</h2>
   <p>Your advance shipment notice <b>{WebUtility.HtmlEncode(asnNumber)}</b> was rejected by the buyer and returned to Draft for editing.</p>
   <p><b>Reason:</b> {WebUtility.HtmlEncode(reason)}</p>
+</body></html>
+""";
+
+    private static string SupplierApprovedBody(string asnNumber) => $"""
+<!DOCTYPE html>
+<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
+  <h2 style="color:#0f3b5e;">ASN {WebUtility.HtmlEncode(asnNumber)} approved</h2>
+  <p>Your advance shipment notice <b>{WebUtility.HtmlEncode(asnNumber)}</b> was approved by the buyer and has been submitted.</p>
+  <p>No further action is required.</p>
 </body></html>
 """;
 }

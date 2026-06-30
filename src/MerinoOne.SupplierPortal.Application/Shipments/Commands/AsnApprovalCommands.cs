@@ -155,6 +155,11 @@ public class ApproveAsnCommandHandler : IRequestHandler<ApproveAsnCommand, AsnDe
         approval.UpdatedBy = _user.UserCode;
         approval.UpdatedOn = now;
 
+        // R5 §20 — notify the supplier (the user who sent it for approval) that the buyer approved it. Staged on the
+        // SAME context BEFORE the executor's SaveChanges, so the email row commits in the executor's transaction and
+        // rolls back with it on a UC-AP-05 submit failure (no false "approved" email if the shipment can't proceed).
+        await AsnApprovalSupport.NotifySupplierApprovedAsync(_db, asn, approval.SubmittedBy, now, ct);
+
         // The submit path: consumes balance (over-ship guard, §10.4), flips Submitted, draft invoice + outbox.
         // The approval mutation above is tracked on the same context and commits inside the executor's SaveChanges
         // + transaction — so a guard 0-row failure (UC-AP-05) throws BEFORE commit and rolls the approval back too.
