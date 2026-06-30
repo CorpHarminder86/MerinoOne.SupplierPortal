@@ -70,8 +70,11 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         return (asnId, setup.Supplier.SupplierId, setup.Supplier.SeccodeId, client);
     }
 
+    // R5 (§10.3) — the attachment-requirement check MOVED from Submit to Send-for-Approval. A successful pass now
+    // leaves the ASN PendingApproval (not Submitted). Mandatory-block / Warning-confirm / Optional-silent behaviour
+    // is UNCHANGED — only the firing site moves.
     private async Task<HttpResponseMessage> SubmitAsync(HttpClient client, Guid asnId, bool ack = false)
-        => await client.PostAsJsonAsync($"/api/asns/{asnId}/submit", new SubmitAsnRequest(null, ack));
+        => await client.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest(ack));
 
     // ── UC-ATT-01 — all mandatory present → proceeds ──────────────────────────────────────────────────
     [SkippableFact]
@@ -89,7 +92,7 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         var resp = await SubmitAsync(client, asnId);
         resp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(resp));
         var body = await Read<AsnDetailDto>(resp);
-        body.Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
+        body.Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
         body.ConfirmationRequired.Should().BeFalse();
     }
 
@@ -138,7 +141,7 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         // Re-submit WITH ack → proceeds; skip audited.
         var second = await SubmitAsync(client, asnId, ack: true);
         second.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(second));
-        (await Read<AsnDetailDto>(second)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
+        (await Read<AsnDetailDto>(second)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
 
         (await _fx.CountWarningSkipAuditAsync(AsnEntity, asnId))
             .Should().BeGreaterThanOrEqualTo(1, because: "the acknowledged warning skip is audited (§8.4)");
@@ -158,7 +161,7 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         resp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(resp));
         var body = await Read<AsnDetailDto>(resp);
         body.ConfirmationRequired.Should().BeFalse();
-        body.Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
+        body.Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
     }
 
     // ── UC-ATT-05 — mandatory + warning both missing → mandatory first (no warning prompt yet) ──────────
@@ -199,7 +202,7 @@ public class AttachmentGovernanceTests : IAsyncLifetime
 
         var resp = await SubmitAsync(client, asnId);
         resp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(resp));
-        (await Read<AsnDetailDto>(resp)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
+        (await Read<AsnDetailDto>(resp)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
     }
 
     // ── UC-ATT-07 — policy changed AFTER submit → submitted ASN unaffected ──────────────────────────────
@@ -212,11 +215,11 @@ public class AttachmentGovernanceTests : IAsyncLifetime
 
         var resp = await SubmitAsync(client, asnId);
         resp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(resp));
-        (await Read<AsnDetailDto>(resp)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
+        (await Read<AsnDetailDto>(resp)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
 
-        // Admin tightens the policy AFTER submission → the already-Submitted ASN is untouched (no retroactivity).
+        // Admin tightens the policy AFTER send-for-approval → the already-PendingApproval ASN is untouched (no retroactivity).
         await SeedWorkedExampleAsync();
-        await AssertStatus(asnId, AsnStatus.Submitted);
+        await AssertStatus(asnId, AsnStatus.PendingApproval);
     }
 
     // ── D5 — supplier override WINS (PackingSlip relaxed to Optional; TestCertificate still Mandatory) ──
@@ -245,7 +248,7 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         ok.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(ok));
         var okBody = await Read<AsnDetailDto>(ok);
         okBody.ConfirmationRequired.Should().BeFalse(because: "PackingSlip is Optional for this supplier (override wins)");
-        okBody.Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
+        okBody.Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────

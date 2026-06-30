@@ -4742,6 +4742,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
 
+                    b.Property<Guid?>("ShipToAddressId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("shipToAddressId");
+
                     b.Property<DateTime?>("SubmittedAt")
                         .HasColumnType("datetime2")
                         .HasColumnName("submittedAt");
@@ -4806,6 +4810,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
 
+                    b.HasIndex("ShipToAddressId")
+                        .HasDatabaseName("IX_Asn_shipTo");
+
                     b.HasIndex("SupplierId")
                         .HasDatabaseName("IX_Asn_supplierId");
 
@@ -4813,6 +4820,132 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_Asn_tenant_company");
 
                     b.ToTable("Asn", "proc");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnApproval", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("asnApprovalId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<Guid>("AsnId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("asnId");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DecisionBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("decisionBy");
+
+                    b.Property<DateTime?>("DecisionOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("decisionOn");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("reason");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion")
+                        .HasColumnName("rowVersion");
+
+                    b.Property<Guid>("SeccodeId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("seccodeId");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("asnApprovalSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("SubmittedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("submittedBy");
+
+                    b.Property<DateTime>("SubmittedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("submittedOn");
+
+                    b.Property<Guid?>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_AsnApproval");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("AsnId")
+                        .HasDatabaseName("IX_AsnApproval_asn");
+
+                    b.HasIndex("SeccodeId");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AsnApproval_asnApprovalSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_AsnApproval_tenant_company");
+
+                    b.ToTable("AsnApproval", "proc");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnLine", b =>
@@ -4852,6 +4985,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("DeletedOn")
                         .HasColumnType("datetime2")
                         .HasColumnName("deletedOn");
+
+                    b.Property<Guid?>("DeliveryScheduleId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("deliveryScheduleId");
 
                     b.Property<DateTime?>("ExpiryDate")
                         .HasColumnType("datetime2")
@@ -4905,6 +5042,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
                     b.HasIndex("AsnId");
+
+                    b.HasIndex("DeliveryScheduleId");
 
                     b.HasIndex("ItemId");
 
@@ -9110,9 +9249,38 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasConstraintName("FK_Asn_Seccode_SeccodeId");
 
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.CompanyAddress", "ShipToAddress")
+                        .WithMany()
+                        .HasForeignKey("ShipToAddressId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_Asn_CompanyAddress_shipToAddressId");
+
                     b.Navigation("Owner");
 
                     b.Navigation("PurchaseOrder");
+
+                    b.Navigation("ShipToAddress");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnApproval", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.Asn", "Asn")
+                        .WithMany()
+                        .HasForeignKey("AsnId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_AsnApproval_Asn_asnId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Seccode", "Owner")
+                        .WithMany()
+                        .HasForeignKey("SeccodeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_AsnApproval_Seccode_SeccodeId");
+
+                    b.Navigation("Asn");
+
+                    b.Navigation("Owner");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.AsnLine", b =>
@@ -9123,6 +9291,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("FK_AsnLine_Asn_AsnId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.DeliverySchedule", "DeliverySchedule")
+                        .WithMany()
+                        .HasForeignKey("DeliveryScheduleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_AsnLine_DeliverySchedule_deliveryScheduleId");
 
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Inv.Item", "Item")
                         .WithMany()
@@ -9138,6 +9312,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_AsnLine_PurchaseOrderLine_PurchaseOrderLineId");
 
                     b.Navigation("Asn");
+
+                    b.Navigation("DeliverySchedule");
 
                     b.Navigation("Item");
 

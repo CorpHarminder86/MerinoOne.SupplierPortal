@@ -40,7 +40,9 @@ public class GrnAutoPostPaymentChainTests
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
         // 1. PO inbound + supplier-side ASN create/submit (auto-creates the draft invoice).
+        // R5 — submit is now reached through Send-for-Approval → buyer Approve (the draft invoice is created there).
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
 
         var createResp = await supplierClient.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
@@ -49,7 +51,7 @@ public class GrnAutoPostPaymentChainTests
         var asnId = asn.Id;
         var asnNumber = asn.AsnNumber;
 
-        var asnSubmitResp = await supplierClient.PostAsync($"/api/asns/{asnId}/submit", null);
+        var asnSubmitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asnId);
         asnSubmitResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(asnSubmitResp));
         var draftInvoiceId = (await Read<AsnDetailDto>(asnSubmitResp)).Data!.DraftInvoiceId!.Value;
 

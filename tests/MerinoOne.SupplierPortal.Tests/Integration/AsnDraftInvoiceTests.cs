@@ -35,6 +35,7 @@ public class AsnDraftInvoiceTests
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
 
         var create = ProcureToPayFlow.SimpleAsn(setup);
@@ -42,7 +43,8 @@ public class AsnDraftInvoiceTests
         createResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createResp));
         var asnId = (await Read<AsnDetailDto>(createResp)).Data!.Id;
 
-        var submitResp = await supplierClient.PostAsync($"/api/asns/{asnId}/submit", null);
+        // R5 — submit through Send-for-Approval → buyer Approve (the draft invoice is created at the submit step).
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asnId);
         submitResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(submitResp));
         var submitted = await Read<AsnDetailDto>(submitResp);
         submitted.Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));

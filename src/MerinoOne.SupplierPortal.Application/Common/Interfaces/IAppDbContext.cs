@@ -78,6 +78,8 @@ public interface IAppDbContext
     DbSet<AsnLineSerial> AsnLineSerials { get; }
     DbSet<AsnLineLot> AsnLineLots { get; }
     DbSet<AsnPurchaseOrder> AsnPurchaseOrders { get; }
+    // R5 (TSD R5 Addendum §4.6 / Component 6) — ASN approval sessions.
+    DbSet<AsnApproval> AsnApprovals { get; }
     DbSet<GoodsReceipt> GoodsReceipts { get; }
     DbSet<Invoice> Invoices { get; }
     DbSet<InvoiceLine> InvoiceLines { get; }

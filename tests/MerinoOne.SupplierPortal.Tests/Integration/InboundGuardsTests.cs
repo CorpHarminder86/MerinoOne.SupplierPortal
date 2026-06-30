@@ -44,12 +44,14 @@ public class InboundGuardsTests
 
         // Build a fresh chain: PO inbound + supplier ASN (so a GRN can link), then create a covering GRN inbound.
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
 
         var asnCreate = await supplierClient.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
         asnCreate.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(asnCreate));
         var asn = (await Read<MerinoOne.SupplierPortal.Contracts.Shipments.AsnDetailDto>(asnCreate)).Data!;
-        var asnSubmit = await supplierClient.PostAsync($"/api/asns/{asn.Id}/submit", null);
+        // R5 — submit via Send-for-Approval → buyer Approve.
+        var asnSubmit = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asn.Id);
         asnSubmit.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(asnSubmit));
 
         var inbound = _fx.CreateInboundClient();

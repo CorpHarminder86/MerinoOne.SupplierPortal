@@ -1,5 +1,6 @@
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
+using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -285,15 +286,28 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
 
+        // R5 (TSD R5 Addendum §4.5 / §9) — ship-to grouping key. The ASN header is grouped by
+        // (supplierId, shipToAddressId) in the R5 creation flow; PurchaseOrderId is deprecated as
+        // the primary grouping key (kept nullable for back-compat — made nullable in migration 0019).
+        // Nullable here: backfill is deferred (§21 migration step 4). NOT NULL is enforced at the
+        // application layer for all R5 ASNs created from the Delivery Schedule grid.
+        b.Property(x => x.ShipToAddressId).HasColumnName("shipToAddressId").HasColumnType("uniqueidentifier");
+
         b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_Asn_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_Asn_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+        // FK → admin.CompanyAddress RESTRICT (a resolved ship-to must not be removed from under historical ASNs).
+        b.HasOne(x => x.ShipToAddress).WithMany().HasForeignKey(x => x.ShipToAddressId)
+            .HasConstraintName("FK_Asn_CompanyAddress_shipToAddressId").OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => x.AsnNumber).HasDatabaseName("UQ_Asn_asnNumber").IsUnique();
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_Asn_supplierId");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Asn_tenant_company");
+        // R5 (TSD R5 Addendum §4.5) — ship-to look-up: supports ASN header queries filtered by ship-to
+        // address (the always-on ship-to filter in the ASN creation and review screens).
+        b.HasIndex(x => x.ShipToAddressId).HasDatabaseName("IX_Asn_shipTo");
     }
 }
 
@@ -336,12 +350,19 @@ public class AsnLineConfiguration : IEntityTypeConfiguration<AsnLine>
         b.Property(x => x.PositionNo).HasColumnName("positionNo");
         b.Property(x => x.SequenceNo).HasColumnName("sequenceNo");
 
+        // R5 (TSD R5 Addendum §4.5 / §9.2) — back-link to the originating Delivery Schedule line.
+        // Nullable: legacy lines (pre-R5 PO-picker flow) have no schedule; R5 lines carry the scheduleId.
+        b.Property(x => x.DeliveryScheduleId).HasColumnName("deliveryScheduleId").HasColumnType("uniqueidentifier");
+
         b.HasOne(x => x.Asn).WithMany(a => a.Lines).HasForeignKey(x => x.AsnId)
             .HasConstraintName("FK_AsnLine_Asn_AsnId").OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)
             .HasConstraintName("FK_AsnLine_PurchaseOrderLine_PurchaseOrderLineId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId)
             .HasConstraintName("FK_AsnLine_Item_ItemId").OnDelete(DeleteBehavior.Restrict);
+        // FK → proc.DeliverySchedule RESTRICT (a schedule must not be removed while shipment lines reference it).
+        b.HasOne(x => x.DeliverySchedule).WithMany().HasForeignKey(x => x.DeliveryScheduleId)
+            .HasConstraintName("FK_AsnLine_DeliverySchedule_deliveryScheduleId").OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -639,5 +660,53 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         b.HasIndex("TenantId", "TenantEntityId", nameof(Payment.InvoiceId), nameof(Payment.PaymentReference))
             .HasDatabaseName("UX_Payment_tenant_invoice_paymentReference").IsUnique()
             .HasFilter("[isDeleted] = 0 AND [paymentReference] IS NOT NULL");
+    }
+}
+
+// R5 (TSD R5 Addendum §4.6 / Component 6) — ASN approval session.
+// One row per Send-for-Approval action on an ASN. The same ASN may have multiple sessions across its
+// lifecycle (Draft → PendingApproval → Rejected → Draft → PendingApproval → Approved).
+//
+// Aggregate root: carries seccode (RLS) + rowVersion + tenant scope columns via BaseAggregateRoot.
+// The RLS seccode is the same scope as the parent ASN so the buyer's query filter resolves cleanly.
+//
+// Indexes:
+//   UX_AsnApproval_asnApprovalSeq — clustered (ApplyBaseEntityConvention)
+//   IX_AsnApproval_asn            — (asnId) — look up all sessions for an ASN
+//
+// FK: asnId → proc.Asn CASCADE (approval rows deleted when the ASN is hard-deleted; soft-delete is
+// the normal path and is governed by the isDeleted global filter like every other entity).
+public class AsnApprovalConfiguration : IEntityTypeConfiguration<AsnApproval>
+{
+    public void Configure(EntityTypeBuilder<AsnApproval> b)
+    {
+        b.ApplyBaseEntityConvention("AsnApproval", "proc", "asnApproval");
+
+        b.Property(x => x.AsnId).HasColumnName("asnId");
+
+        // String-persisted enum (no DB CHECK — C# enum is the guard). Max 20 chars per §4.6 DDL.
+        b.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20).IsRequired();
+
+        b.Property(x => x.SubmittedBy).HasColumnName("submittedBy").HasMaxLength(100).IsRequired();
+        b.Property(x => x.SubmittedOn).HasColumnName("submittedOn").HasColumnType("datetime2");
+        b.Property(x => x.DecisionBy).HasColumnName("decisionBy").HasMaxLength(100);
+        b.Property(x => x.DecisionOn).HasColumnName("decisionOn").HasColumnType("datetime2");
+
+        // nvarchar(2000) per §4.6 DDL. Mandatory on rejection; null while Pending or on Approval.
+        b.Property(x => x.Reason).HasColumnName("reason").HasMaxLength(2000);
+
+        // FK → proc.Asn CASCADE: approval sessions are a child projection of the ASN aggregate.
+        b.HasOne(x => x.Asn).WithMany().HasForeignKey(x => x.AsnId)
+            .HasConstraintName("FK_AsnApproval_Asn_asnId").OnDelete(DeleteBehavior.Cascade);
+
+        // FK for seccode RLS (every BaseAggregateRoot must register this).
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_AsnApproval_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        // IX_AsnApproval_asn — all approval sessions for an ASN (latest = the live one).
+        b.HasIndex(x => x.AsnId).HasDatabaseName("IX_AsnApproval_asn");
+
+        // Composite scope index — the always-on tenant + company business-data filter scans this path.
+        b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_AsnApproval_tenant_company");
     }
 }

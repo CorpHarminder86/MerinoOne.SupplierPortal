@@ -34,7 +34,21 @@
             <p class="tl-sub">@HeaderSubtitle</p>
         </div>
         <div class="tl-header__actions">
-            @if (!IsNew && detail != null && !IsLocked && CanWrite)
+            @* R5 (§10.2) — buyer decision actions on a PendingApproval ASN. Any mapped PO buyer may decide (Phase 1);
+               the server gate (AsnApprovalGate) is authoritative, so we only gate the affordance on Asn.Approve. *@
+            @if (!IsNew && detail != null && CanApprove && detail.AsnStatus == "PendingApproval")
+            {
+                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenRejectDialog" disabled="@busy">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject…
+                </button>
+                <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApproveDialog" disabled="@busy">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                </button>
+            }
+            @* Cancel — supplier-side, available on any of the supplier's active states (Draft / Rejected / PendingApproval).
+               A Rejected ASN renders the editable wizard (IsLocked=false); a PendingApproval ASN renders the read-only
+               view (IsLocked=true) but the supplier can still withdraw it via Cancel, so this is gated on status, not IsLocked. *@
+            @if (!IsNew && detail != null && CanWrite && CanCancel)
             {
                 <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenCancelDialog" disabled="@busy">
                     <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span> Cancel ASN
@@ -43,6 +57,61 @@
             <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="BackToList">Close</button>
         </div>
     </header>
+
+    @* ---------------- R5 (§10.2) approval-session banners (shown in BOTH the editable + read-only branches) ---------------- *@
+    @if (!IsNew && detail != null && !loading)
+    {
+        @* Rejection banner — a Rejected ASN renders the editable wizard; the supplier needs the buyer's reason in view
+           while they fix it. Saving an edit returns the ASN to Draft (server flips Rejected→Draft). *@
+        @if (detail.AsnStatus == "Rejected")
+        {
+            <div class="rz-card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:flex-start;gap:12px;background:var(--mer-red-50);border:1px solid var(--mer-red);">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--mer-red);">gpp_bad</span>
+                <div style="flex:1;">
+                    <div style="font-size:13px;font-weight:700;color:var(--mer-red);">Returned by the buyer</div>
+                    <div style="font-size:12.5px;color:var(--mer-ink-700);white-space:pre-wrap;margin-top:2px;">@(string.IsNullOrWhiteSpace(detail.Approval?.Reason) ? "No reason was recorded." : detail.Approval!.Reason)</div>
+                    @if (detail.Approval is { } ra)
+                    {
+                        <div style="font-size:11px;color:var(--mer-ink-500);font-family:Inter,monospace;margin-top:6px;">
+                            @(string.IsNullOrEmpty(ra.DecisionBy) ? "" : $"by {ra.DecisionBy} ")@(ra.DecisionOn?.ToString("· yyyy-MM-dd HH:mm"))
+                        </div>
+                    }
+                    <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">Edit the lines / details below and send it for approval again. Saving any change returns the ASN to <b>Draft</b>.</div>
+                </div>
+            </div>
+        }
+        @* PendingApproval banner — visible to supplier (status, read-only) and buyer (deciding). Shows the submitted-by/on. *@
+        else if (detail.AsnStatus == "PendingApproval" && detail.Approval is { } pa)
+        {
+            <div class="rz-card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:flex-start;gap:12px;background:var(--mer-amber-50);border:1px solid var(--mer-amber-800);">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--mer-amber-800);">hourglass_top</span>
+                <div style="flex:1;">
+                    <div style="font-size:13px;font-weight:700;color:var(--mer-amber-800);">Awaiting buyer approval</div>
+                    <div style="font-size:12px;color:var(--mer-ink-700);font-family:Inter,monospace;margin-top:2px;">
+                        Sent by @(string.IsNullOrEmpty(pa.SubmittedBy) ? "—" : pa.SubmittedBy) · @pa.SubmittedOn.ToString("yyyy-MM-dd HH:mm")
+                    </div>
+                    @if (CanApprove)
+                    {
+                        <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">Review the lines, attachments and shipment details below, then <b>Approve</b> (submits the shipment) or <b>Reject</b> with a reason.</div>
+                    }
+                    else
+                    {
+                        <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">The ASN is read-only until the buyer decides. You can cancel it if it was sent in error.</div>
+                    }
+                </div>
+            </div>
+        }
+        @* Approved/submitted note (the approval session that led to Submitted) — small provenance line on the locked view. *@
+        else if (detail.Approval is { Status: "Approved" } ap && (detail.AsnStatus == "Submitted" || detail.AsnStatus == "InTransit" || detail.AsnStatus == "Delivered"))
+        {
+            <div class="rz-card" style="padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;background:var(--mer-green-50);border:1px solid var(--mer-green);">
+                <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-green-dark);">verified</span>
+                <div style="font-size:12px;color:var(--mer-ink-700);font-family:Inter,monospace;">
+                    Approved@(string.IsNullOrEmpty(ap.DecisionBy) ? "" : $" by {ap.DecisionBy}")@(ap.DecisionOn?.ToString(" · yyyy-MM-dd HH:mm")) · sent by @(string.IsNullOrEmpty(ap.SubmittedBy) ? "—" : ap.SubmittedBy)
+                </div>
+            </div>
+        }
+    }
 
     @if (loading)
     {
@@ -523,7 +592,10 @@
                             </div>
                         }
                     </div>
-                    <p style="font-size:11px;color:var(--mer-ink-500);margin-bottom:8px;">PDF or image, up to 5 MB. Attachments are editable only while the ASN is Draft.</p>
+                    @* R5 (§13.5) — attachments are editable while Draft OR Rejected; they lock once the ASN is sent for
+                       approval (PendingApproval) and stay read-only thereafter. The editable wizard only renders for
+                       Draft/Rejected (IsLocked=false), so reaching this branch already implies the edit affordance is allowed. *@
+                    <p style="font-size:11px;color:var(--mer-ink-500);margin-bottom:8px;">PDF or image, up to 5 MB. Attachments are editable while the ASN is Draft or Rejected, and lock once it is sent for approval.</p>
 
                     @if (attachments.Count == 0)
                     {
@@ -566,13 +638,16 @@
                 @if (IsNew)
                 {
                     <div style="background:var(--mer-blue-50);color:var(--mer-blue-darker);padding:10px 12px;border-radius:6px;font-size:12px;margin-top:12px;">
-                        This saves a <b>Draft</b> ASN. You can add attachments and submit it from the draft.
+                        This saves a <b>Draft</b> ASN. You can add attachments and send it for approval from the draft.
                     </div>
                 }
                 else
                 {
+                    @* R5 (§10.1/§10.2) — the supplier no longer submits directly. "Send for approval" moves the ASN to
+                       PendingApproval (running the §10.3 attachment check here) for a buyer to Approve (which submits)
+                       or Reject. The shipment is locked while it awaits the decision. *@
                     <div style="background:var(--mer-blue-50);color:var(--mer-blue-darker);padding:10px 12px;border-radius:6px;font-size:12px;margin-top:12px;">
-                        Submitting locks this ASN (header, lines and attachments become read-only) and creates a draft invoice spanning its PO(s).
+                        Sending for approval locks this ASN (header, lines and attachments become read-only) and routes it to the PO buyer(s). On <b>Approve</b> the shipment is submitted and a draft invoice spanning its PO(s) is created.
                     </div>
                 }
 
@@ -590,7 +665,10 @@
                         <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="SaveDraft" disabled="@busy">@(busy && savingDraft ? "Saving…" : (IsNew ? "Save draft" : "Save changes"))</button>
                         @if (!IsNew)
                         {
-                            <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Submit" disabled="@busy">@(busy && !savingDraft ? "Submitting…" : "Submit ASN")</button>
+                            @* R5 (§10.2) — replaces the old direct Submit. Sends Draft/Rejected → PendingApproval. *@
+                            <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="SendForApproval" disabled="@busy">
+                                <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">send</span> @(busy && !savingDraft ? "Sending…" : "Send for approval")
+                            </button>
                         }
                     }
                     else
@@ -741,6 +819,65 @@
     </div>
 }
 
+@* ---------------- R5 (§10.2) buyer Approve dialog ---------------- *@
+@if (showApprove && detail != null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="success" data-size="md" style="width:540px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">task_alt</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">ASN · Approval</div>
+                    <h2 class="merino-dialog__title">Approve @detail.AsnNumber?</h2>
+                    <p class="merino-dialog__subtitle">Approving submits the shipment — it consumes the line balances, creates the draft invoice, and posts to the ERP outbox.</p>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showApprove = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="font-size:13px;color:var(--mer-ink-700);">Confirm you have reviewed the lines, attachments and shipment details. This cannot be undone.</p>
+                @if (!string.IsNullOrEmpty(approveError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:10px;white-space:pre-wrap;">@approveError</div> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApprove = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApprove" disabled="@busy">@(busy ? "Approving…" : "Approve & submit")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@* ---------------- R5 (§10.2) buyer Reject dialog (reason required) ---------------- *@
+@if (showReject && detail != null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="danger" data-size="md" style="width:540px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">cancel</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">ASN · Approval</div>
+                    <h2 class="merino-dialog__title">Reject @detail.AsnNumber</h2>
+                    <p class="merino-dialog__subtitle">The ASN returns to the supplier to edit and re-send. No balance is consumed.</p>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showReject = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Reason (required)</label>
+                <textarea class="rz-textbox" rows="4" style="width:100%;padding:8px 10px;font-family:inherit;" placeholder="Tell the supplier what to fix" @bind="rejectReason"></textarea>
+                @if (!string.IsNullOrEmpty(rejectError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@rejectError</div> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showReject = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="danger" @onclick="DoReject" disabled="@busy">@(busy ? "Rejecting…" : "Reject ASN")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
 <DocumentPreviewer Doc="_previewDoc" OnClose="() => _previewDoc = null" />
 
 @code {
@@ -802,8 +939,6 @@
     private bool showOverShip = false;
     private string gateOverrideReason = string.Empty;
     private string gateOverrideError = string.Empty;
-    // Which operation triggered the gate block, so the override re-runs the same path.
-    private bool gateFromSubmit = false;
 
     // R4 (2026-06-26) — §8.3 / UC-ATT-03: missing-Warning-attachment confirm. The first submit returns a 200 with
     // ConfirmationRequired=true; on confirm we re-submit with AcknowledgeMissingAttachments=true.
@@ -811,12 +946,25 @@
     private string attachConfirmMessage = string.Empty;
     private List<string> attachMissing = new();
 
+    // R5 (§10.2) — buyer Approve / Reject dialog state.
+    private bool showApprove = false;
+    private bool showReject = false;
+    private string rejectReason = string.Empty;
+    private string approveError = string.Empty;
+    private string rejectError = string.Empty;
+
     private DocumentPreviewer.DocumentDescriptor? _previewDoc;
 
     private bool IsNew => !Id.HasValue;
     private bool IsLocked => detail?.IsLocked == true;
     private bool CanWrite => Token.IsSupplier || Token.HasPermission("Asn.Write");
     private bool CanOverrideGate => Token.HasPermission("PurchaseOrder.OverrideGate");
+    // R5 (§10.2) — buyer decision permission. Asn.Approve is seeded to SuperAdmin/Admin/Buyer (not Supplier). The
+    // server AsnApprovalGate additionally asserts the caller is a MAPPED PO buyer; we only gate the affordance here.
+    private bool CanApprove => Token.HasPermission("Asn.Approve");
+    // Cancel is supplier-side and valid on any of the supplier's active states (Draft / Rejected / PendingApproval).
+    // Submitted/InTransit/Delivered/Cancelled are terminal-for-cancel here (the read-only view hides it via this flag).
+    private bool CanCancel => detail?.AsnStatus is "Draft" or "Rejected" or "PendingApproval";
 
     // The gate block message names the required action; the API stamps it under the "poStatus" error key. Match the
     // stable prefix so we route it to the override dialog rather than the generic error banner.
@@ -1116,31 +1264,35 @@
         busy = false; savingDraft = false;
     }
 
-    // ---- Submit (Draft -> Submitted), surface the draft invoice link ----
-    private async Task Submit()
+    // ---- R5 (§10.2) Send for approval (Draft/Rejected -> PendingApproval) ----
+    // Replaces the old direct Submit. The supplier persists pending edits (an edit on a Rejected ASN flips it back to
+    // Draft server-side), then POSTs /send-for-approval. The §10.3 attachment-requirement check runs server-side here:
+    // a missing Mandatory blocks (400), a missing Warning returns ConfirmationRequired (two-step, same UX as R4 submit).
+    private async Task SendForApproval()
     {
         if (IsNew) { await SaveDraft(); return; }
         busy = true; savingDraft = false; submitError = string.Empty;
 
-        // Block the obvious serial/lot failures before the round-trip (the backend re-enforces on submit).
+        // Block the obvious serial/lot failures before the round-trip (the backend re-enforces at Approve/Submit).
         if (!SerialLotCaptureValid)
         {
-            submitError = "Fix the serial/lot capture before submitting: every serialized line needs one serial per unit, and every lot line's quantities must sum to the shipped quantity (no duplicates).";
+            submitError = "Fix the serial/lot capture before sending: every serialized line needs one serial per unit, and every lot line's quantities must sum to the shipped quantity (no duplicates).";
             busy = false; currentStep = 2; return;
         }
 
-        // Persist any pending header/line edits first (submit validates the stored ASN).
+        // Persist any pending header/line edits first (send-for-approval validates the stored ASN; a save on a Rejected
+        // ASN returns it to Draft).
         var lineReqs = BuildLineRequests();
         var upd = new UpdateAsnRequest(expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
         var saveResp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", upd);
         if (saveResp?.Success != true)
         {
-            submitError = saveResp?.Errors?.FirstOrDefault() ?? "Could not save before submit.";
+            submitError = saveResp?.Errors?.FirstOrDefault() ?? "Could not save before sending for approval.";
             busy = false;
             return;
         }
 
-        await SubmitAsnAsync(overrideReason: null, acknowledgeMissingAttachments: false);
+        await SendForApprovalAsync(acknowledgeMissingAttachments: false);
         busy = false;
     }
 
@@ -1164,33 +1316,33 @@
             return;
         }
         var err = resp?.Errors?.FirstOrDefault();
-        if (IsGateBlock(err)) { OpenGateOverride(err!, fromSubmit: false); }
+        if (IsGateBlock(err)) { OpenGateOverride(err!); }
         else { submitError = err ?? "Failed to create ASN."; }
     }
 
-    // ---- Submit (Draft -> Submitted) — handles the gate block AND the §8.3 Warning-attachment confirm two-step. ----
-    private async Task SubmitAsnAsync(string? overrideReason, bool acknowledgeMissingAttachments)
+    // ---- R5 (§10.2/§10.3) Send-for-approval — handles the §13.6 Warning-attachment confirm two-step. ----
+    // Note: the PO confirmation gate + over-ship guard NO LONGER fire here (§10.4) — they moved to the buyer's
+    // Approve (the final Submit). So the only two-step on this path is the Warning-attachment confirm.
+    private async Task SendForApprovalAsync(bool acknowledgeMissingAttachments)
     {
-        var body = new SubmitAsnRequest(
-            string.IsNullOrWhiteSpace(overrideReason) ? null : overrideReason.Trim(),
-            acknowledgeMissingAttachments);
-        var resp = await Api.PostAsync<AsnDetailDto, SubmitAsnRequest>($"api/asns/{Id}/submit", body);
+        var body = new SendForApprovalRequest(acknowledgeMissingAttachments);
+        var resp = await Api.PostAsync<AsnDetailDto, SendForApprovalRequest>($"api/asns/{Id}/send-for-approval", body);
 
-        // (1) Success — submitted.
+        // (1) Success — now PendingApproval.
         if (resp?.Success == true && resp.Data != null)
         {
-            showGateOverride = false; showAttachConfirm = false;
+            showAttachConfirm = false;
             detail = resp.Data;
             attachments.Clear();
             attachments.AddRange(resp.Data.Attachments);
-            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN submitted", Detail = resp.Data.DraftInvoiceId.HasValue ? "A draft invoice was created." : string.Empty });
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Sent for approval", Detail = "The PO buyer(s) will review and approve or reject this ASN." });
+            await Reload();   // re-render in the locked/read-only PendingApproval view
             return;
         }
 
         // (2) Warning attachments missing — 200 ConfirmationRequired, nothing committed. Show the confirm dialog.
         if (resp?.ConfirmationRequired == true)
         {
-            showGateOverride = false;
             attachConfirmMessage = string.IsNullOrEmpty(resp.ConfirmationMessage)
                 ? "One or more required attachments were not uploaded, do you wish to proceed?"
                 : resp.ConfirmationMessage!;
@@ -1199,16 +1351,16 @@
             return;
         }
 
-        // (3) Gate block — route to the override dialog (mandatory-missing + every other 400 = a blocking error).
-        var err = resp?.Errors?.FirstOrDefault();
-        if (IsGateBlock(err)) { OpenGateOverride(err!, fromSubmit: true); }
-        else { submitError = err ?? "Submit failed (over-ship, lot/serial or mixed-currency check, missing mandatory attachment, or the ASN is no longer Draft)."; }
+        // (3) Blocking error — missing Mandatory attachment, not-Draft, etc.
+        submitError = resp?.Errors?.FirstOrDefault()
+            ?? "Could not send for approval (a mandatory attachment may be missing, or the ASN is no longer Draft/Rejected).";
     }
 
-    private void OpenGateOverride(string message, bool fromSubmit)
+    // The PO confirmation-gate override dialog only fires on CREATE now (§6.5 / UC-PO-09) — §10.4 moved the submit-time
+    // gate to the buyer's Approve, so send-for-approval never hits it.
+    private void OpenGateOverride(string message)
     {
         gateBlockMessage = message;
-        gateFromSubmit = fromSubmit;
         gateOverrideReason = string.Empty;
         gateOverrideError = string.Empty;
         showAttachConfirm = false;
@@ -1219,26 +1371,61 @@
     {
         if (string.IsNullOrWhiteSpace(gateOverrideReason)) { gateOverrideError = "A reason is required to override the gate."; return; }
         busy = true; gateOverrideError = string.Empty; submitError = string.Empty;
-        if (gateFromSubmit)
+        // Only the create path can reach the gate now (§10.4 moved the submit-time gate to the buyer's Approve).
+        var lineReqs = BuildLineRequests();
+        await CreateDraftAsync(lineReqs, gateOverrideReason);
+        busy = false;
+    }
+
+    // Re-send acknowledging the missing Warning attachments (§13.6 / §10.3 two-step).
+    private async Task ConfirmSubmitWithMissingAttachments()
+    {
+        busy = true; submitError = string.Empty;
+        await SendForApprovalAsync(acknowledgeMissingAttachments: true);
+        busy = false;
+    }
+
+    // ============================ R5 (§10.2) buyer Approve / Reject ============================
+    private void OpenApproveDialog() { approveError = string.Empty; showApprove = true; }
+    private void OpenRejectDialog() { rejectReason = string.Empty; rejectError = string.Empty; showReject = true; }
+
+    // Approve runs the SUBMIT path server-side: the over-ship atomic guard consumes balance, the ASN flips to
+    // Submitted and a draft invoice is created. If the balance was lost after approval (UC-AP-05) Submit fails and the
+    // ASN stays PendingApproval — we surface that message in the dialog.
+    private async Task DoApprove()
+    {
+        busy = true; approveError = string.Empty;
+        var resp = await Api.PostAsync<AsnDetailDto, ApproveAsnRequest>($"api/asns/{Id}/approve", new ApproveAsnRequest());
+        if (resp?.Success == true && resp.Data != null)
         {
-            await SubmitAsnAsync(gateOverrideReason, acknowledgeMissingAttachments: false);
+            showApprove = false;
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN approved", Detail = resp.Data.DraftInvoiceId.HasValue ? "The shipment was submitted and a draft invoice created." : "The shipment was submitted." });
+            await Reload();
         }
         else
         {
-            var lineReqs = BuildLineRequests();
-            await CreateDraftAsync(lineReqs, gateOverrideReason);
+            approveError = resp?.Errors?.FirstOrDefault() ?? "Could not approve (the shipment balance may have changed, or you are not a mapped buyer for this ASN).";
         }
         busy = false;
     }
 
-    // Re-submit acknowledging the missing Warning attachments (§8.3). Carries the gate reason if the gate was also
-    // overridden earlier in this submit attempt.
-    private async Task ConfirmSubmitWithMissingAttachments()
+    // Reject needs a mandatory reason; no balance was consumed so there is no reversal. The ASN returns to Rejected and
+    // the supplier is notified (best-effort, server-side).
+    private async Task DoReject()
     {
-        busy = true; submitError = string.Empty;
-        await SubmitAsnAsync(
-            overrideReason: string.IsNullOrWhiteSpace(gateOverrideReason) ? null : gateOverrideReason,
-            acknowledgeMissingAttachments: true);
+        if (string.IsNullOrWhiteSpace(rejectReason)) { rejectError = "A reason is required to reject."; return; }
+        busy = true; rejectError = string.Empty;
+        var resp = await Api.PostAsync<AsnDetailDto, RejectAsnRequest>($"api/asns/{Id}/reject", new RejectAsnRequest(rejectReason.Trim()));
+        if (resp?.Success == true)
+        {
+            showReject = false;
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "ASN rejected", Detail = "The supplier can edit and re-send it for approval." });
+            await Reload();
+        }
+        else
+        {
+            rejectError = resp?.Errors?.FirstOrDefault() ?? "Could not reject (it may no longer be PendingApproval, or you are not a mapped buyer).";
+        }
         busy = false;
     }
 
@@ -1346,8 +1533,9 @@
     private string StatusClass(string status) => status switch
     {
         "Delivered" => "tlg-status--active",
-        "Submitted" or "InTransit" => "tlg-status--pending",
-        "Cancelled" => "tlg-status--danger",
+        // R5 (§10.1) — PendingApproval sits between Draft and Submitted; treated like the other in-flight states.
+        "Submitted" or "InTransit" or "PendingApproval" => "tlg-status--pending",
+        "Cancelled" or "Rejected" => "tlg-status--danger",
         _ => "tlg-status--info"
     };
 

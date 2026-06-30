@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
+using MerinoOne.SupplierPortal.Contracts.Shipments;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
@@ -688,14 +689,16 @@ public class PurchaseOrderInboundTests
         lineDto.Balance.Should().Be(0m, because: "balance is MAX(0, orderQty − shippedQtyToDate)");
         lineDto.IsOverShippedQtyReduced.Should().BeTrue(because: "orderQty 60 < shippedQtyToDate 80 (UC-ASN-10)");
 
-        // Further ASNs are auto-blocked: the atomic guard (orderQty×factor − shippedQtyToDate ≥ shipQty) fails because
-        // 60 − 80 < anything positive. Move the PO back to Accepted so the confirmation GATE doesn't pre-empt the
-        // quantity guard, then assert the create is rejected.
+        // R5 (§10.4) — the over-ship atomic guard MOVED to final Submit (Approve→Submit). So a further ASN can still
+        // be saved as a Draft (no guard at create), but the guard (orderQty×factor − shippedQtyToDate ≥ shipQty) fails
+        // at submit because 60 − 80 < anything positive. Move the PO back to Accepted so the confirmation GATE doesn't
+        // pre-empt the quantity guard, assign a buyer for the approve step, then drive create → submit-via-approval.
         using (var s = _fx.Factory.Services.CreateScope())
         {
             var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
             var po = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.Id == poId);
             po.PoStatus = PoStatus.Accepted;
+            po.BuyerUserId = SecurityTestHarness.BuyerUserId;   // for the Approve→Submit gate.
             await db.SaveChangesAsync();
         }
 
@@ -709,8 +712,13 @@ public class PurchaseOrderInboundTests
             lines = new[] { new { purchaseOrderLineId = poLineId, shippedQty = 1m } },
         };
         var createResp = await supplierClient.PostAsJsonAsync("/api/asns", createBody);
-        createResp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            because: "the order was revised below the shipped cumulative — the atomic guard blocks any further ASN (UC-ASN-10)");
+        createResp.StatusCode.Should().Be(HttpStatusCode.OK,
+            because: "the Draft create does NOT consume / does NOT guard (the guard moved to Submit, §10.4)");
+        var asnId = (await Read<AsnDetailDto>(createResp)).Data!.Id;
+
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asnId);
+        submitResp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "the order was revised below the shipped cumulative — the atomic guard blocks the ASN at Submit (UC-ASN-10)");
     }
 
     /// <summary>

@@ -86,28 +86,67 @@ Returns: AsnDetailDto on success; 404 if not found; 409 if not Draft. Requires *
         return Result<AsnDetailDto>.Ok(data, HttpContext.TraceIdentifier);
     }
 
-    [HttpPost("{id:guid}/submit")]
+    [HttpPost("from-schedule")]
     [Authorize(Policy = "Asn.Write")]
-    [EndpointSummary("Submit ASN")]
-    [EndpointDescription(@"Submits a DRAFT ASN (Draft -> Submitted). In ONE transaction: enforces the PO confirmation
-gate per covered PO; validates over-ship, lot/serial (per Item flags) and the single-currency guard; stamps
-submittedAt/by + erpSyncId; creates EXACTLY ONE draft Invoice spanning all the ASN's POs; enqueues the ASN->ERP
-post on the outbox (dispatched post-commit). Locks the ASN (and its attachments) against further edits.
-Body:
-- **body**: Optional SubmitAsnRequest — OverrideReason, used only by a caller holding PurchaseOrder.OverrideGate to
-  ship despite a blocking PO confirmation gate (audited); AcknowledgeMissingAttachments confirms proceeding past a
-  Warning-level attachment requirement (§8.3).
-Attachment governance (§8.3): a missing MANDATORY attachment blocks (400, message names the types). A missing
-WARNING attachment on the first call returns 200 with **confirmationRequired=true** + confirmationMessage +
-missingAttachments (NOT an error, nothing committed); re-submit with AcknowledgeMissingAttachments=true to proceed
-(the skip is audited).
-Returns: AsnDetailDto (Submitted, with DraftInvoiceId) on success; 200 confirmationRequired on a Warning skip; 400 on
-validation / gate block / mandatory-missing; 409 if not Draft. Requires **Asn.Write**.")]
-    public async Task<Result<AsnDetailDto>> Submit(Guid id, [FromBody] SubmitAsnRequest? body, CancellationToken ct)
+    [EndpointSummary("Create ASN from delivery schedules (Draft)")]
+    [EndpointDescription(@"R5 §9 — supplier creates a DRAFT ASN from selected Delivery Schedule lines. All selected
+schedules must share ONE ship-to (cross-ship-to is blocked, UC-AS-02) and ONE supplier; lines may span multiple POs
+(UC-AS-01). The header is grouped by (supplier, ship-to); each schedule becomes an AsnLine referencing its
+purchaseOrderLineId + deliveryScheduleId, ship qty defaulted to the line's remaining balance (editable, §9.2).
+NO balance is consumed at create — the over-ship guard runs only at final Submit (Approve).
+Returns: AsnDetailDto (Draft) on success; 400 on cross-ship-to / multi-supplier / invariant; 404 if a schedule is
+missing. Requires **Asn.Write**.")]
+    public async Task<Result<AsnDetailDto>> CreateFromSchedule([FromBody] CreateAsnFromScheduleRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new CreateAsnFromScheduleCommand(body), ct);
+        return Result<AsnDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("{id:guid}/send-for-approval")]
+    [Authorize(Policy = "Asn.Write")]
+    [EndpointSummary("Send ASN for approval")]
+    [EndpointDescription(@"R5 §10.2/§10.3 — supplier sends a DRAFT ASN for buyer approval (Draft -> PendingApproval).
+Runs the attachment-requirement check HERE (moved from Submit): a missing MANDATORY attachment blocks (400, names
+the types); a missing WARNING attachment on the first call returns 200 with **confirmationRequired=true** +
+missingAttachments (nothing committed) — re-send with AcknowledgeMissingAttachments=true to proceed (the skip is
+audited). Creates an AsnApproval (Pending) routed to the ASN's distinct PO buyer(s).
+Returns: AsnDetailDto (PendingApproval) on success; 200 confirmationRequired on a Warning skip; 400 on
+mandatory-missing; 409 if not Draft. Requires **Asn.Write**.")]
+    public async Task<Result<AsnDetailDto>> SendForApproval(Guid id, [FromBody] SendForApprovalRequest? body, CancellationToken ct)
     {
         var outcome = await _mediator.Send(
-            new SubmitAsnCommand(id, body?.OverrideReason, body?.AcknowledgeMissingAttachments ?? false), ct);
+            new SendForApprovalCommand(id, body?.AcknowledgeMissingAttachments ?? false), ct);
         return outcome.ToResult(HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("{id:guid}/approve")]
+    [Authorize(Policy = "Asn.Approve")]
+    [EndpointSummary("Approve ASN (buyer)")]
+    [EndpointDescription(@"R5 §10.2/§10.4 — a mapped PO buyer approves a PendingApproval ASN. Any ONE of the ASN's PO
+buyers may approve (Phase 1). On approve the system runs the SUBMIT path: the over-ship atomic guard consumes
+balance, the ASN flips to Submitted, the draft Invoice + ERP outbox post are created — exactly as the R4 submit did.
+If the balance was lost after approval (UC-AP-05) the guard returns 0 rows and Submit fails (400, over-ship message)
+while the ASN stays PendingApproval.
+Returns: AsnDetailDto (Submitted, with DraftInvoiceId) on success; 400 on over-ship/serial-lot; 403 if not a mapped
+buyer; 409 if not PendingApproval. Requires **Asn.Approve**.")]
+    public async Task<Result<AsnDetailDto>> Approve(Guid id, [FromBody] ApproveAsnRequest? body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new ApproveAsnCommand(id, body?.OverrideReason), ct);
+        return Result<AsnDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("{id:guid}/reject")]
+    [Authorize(Policy = "Asn.Approve")]
+    [EndpointSummary("Reject ASN (buyer)")]
+    [EndpointDescription(@"R5 §10.2 — a mapped PO buyer rejects a PendingApproval ASN with a MANDATORY reason
+(PendingApproval -> Rejected). No balance was consumed, so no reversal is needed; the supplier edits the ASN
+(returning it to Draft) and re-raises. The supplier is notified with the reason (best-effort).
+Returns: AsnDetailDto (Rejected) on success; 400 if reason missing; 403 if not a mapped buyer; 409 if not
+PendingApproval. Requires **Asn.Approve**.")]
+    public async Task<Result<AsnDetailDto>> Reject(Guid id, [FromBody] RejectAsnRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new RejectAsnCommand(id, body.Reason), ct);
+        return Result<AsnDetailDto>.Ok(data, HttpContext.TraceIdentifier);
     }
 
     [HttpPost("{id:guid}/cancel")]

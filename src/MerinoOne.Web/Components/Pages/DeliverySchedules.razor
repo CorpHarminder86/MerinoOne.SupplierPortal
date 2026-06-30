@@ -24,13 +24,19 @@
             <p class="tl-sub">Open PO lines ready to ship — pick lines here to raise an ASN</p>
         </div>
         <div class="tl-header__actions">
-            @* Phase 4 will wire multi-select → Create ASN. For this phase the affordance is a disabled placeholder
-               so the surface reads correctly without enabling selection. *@
-            <button class="rz-button rz-primary" disabled
-                    style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:not-allowed;opacity:.55;"
-                    title="Select lines to create an ASN — coming in the next phase">
-                <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">local_shipping</span> Create ASN
-            </button>
+            @* R5 Phase 4 (§9.1) — multi-select → Create ASN. Enabled once ≥1 line is selected. Selection is constrained
+               to a SINGLE ship-to in the UI (§9.1 / UC-AS-02): the first selected line fixes the ship-to and rows for
+               other ship-tos are disabled; the server invariant (§9.3) is the authoritative fallback. *@
+            @if (CanCreateAsn)
+            {
+                <button class="rz-button rz-primary"
+                        style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:@(selected.Count == 0 ? "not-allowed" : "pointer");opacity:@(selected.Count == 0 ? ".55" : "1");"
+                        disabled="@(selected.Count == 0)"
+                        title="@(selected.Count == 0 ? "Select one or more lines sharing a single ship-to" : $"Create an ASN from {selected.Count} selected line(s)")"
+                        @onclick="OpenCreateAsn">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">local_shipping</span> Create ASN@(selected.Count > 0 ? $" ({selected.Count})" : "")
+                </button>
+            }
         </div>
     </header>
 
@@ -97,6 +103,24 @@
         }
     </div>
 
+    @* R5 Phase 4 (§9.1) — single-ship-to selection banner. Once a line is selected the ship-to is locked and rows
+       for other ship-tos are disabled, so the supplier can only build a single-ship-to ASN. The banner names the
+       locked ship-to + the selection count, and offers a quick Clear. *@
+    @if (CanCreateAsn && selected.Count > 0)
+    {
+        <div class="rz-card" style="padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;background:var(--mer-blue-50);border:1px solid var(--mer-blue);">
+            <span class="material-symbols-outlined" style="font-size:20px;color:var(--mer-blue);">checklist</span>
+            <div style="flex:1;font-size:12.5px;color:var(--mer-blue-darker);">
+                <b>@selected.Count</b> line(s) selected · ship-to <b>@(selectedShipToName ?? "—")</b>
+                <span style="color:var(--mer-ink-500);"> — rows with a different ship-to are locked until you clear the selection.</span>
+            </div>
+            <button type="button" @onclick="ClearSelection"
+                    style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--mer-blue);border-radius:6px;padding:6px 10px;color:var(--mer-blue);cursor:pointer;font-size:12px;">
+                <span class="material-symbols-outlined" style="font-size:15px;">close</span> Clear
+            </button>
+        </div>
+    }
+
     @if (loading)
     {
         <div class="tl-empty">Loading…</div>
@@ -110,8 +134,16 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 140px 70px 1.4fr 130px 100px 110px 110px 1fr 130px 110px; --tl-min-width: 1320px;">
+        var gridStyle = $"--tl-cols: {(CanCreateAsn ? "44px " : "")}140px 70px 1.4fr 130px 100px 110px 110px 1fr 130px 110px; --tl-min-width: {(CanCreateAsn ? "1364px" : "1320px")};";
+        <div class="tl-grid-wrapper" style="@gridStyle">
             <div class="tlg-header">
+                @if (CanCreateAsn)
+                {
+                    <div class="tlg-col" style="display:flex;align-items:center;justify-content:center;">
+                        <input type="checkbox" title="Select all selectable rows on this page" checked="@AllSelectableSelected"
+                               @onchange="ToggleSelectAll" />
+                    </div>
+                }
                 <div class="tlg-col">PO #</div>
                 <div class="tlg-col tlg-col--num">Line</div>
                 <div class="tlg-col">Item</div>
@@ -125,23 +157,40 @@
             </div>
             @foreach (var r in grid.Page.Items)
             {
-                <div class="tlg-row">
-                    <div class="tlg-col tlg-code">@r.PoNumber</div>
-                    <div class="tlg-col tlg-col--num">@r.PositionNo</div>
+                var row = r;
+                var isSelected = selected.ContainsKey(row.Id);
+                // Row is selectable when it has remaining balance to ship AND (no selection yet OR it matches the
+                // locked ship-to). §9.1: cross-ship-to rows are disabled, not silently dropped.
+                var shipToBlocked = selectedShipToId.HasValue && row.ShipToAddressId != selectedShipToId.Value;
+                var noBalance = row.RemainingToShip <= 0;
+                var selectable = CanCreateAsn && !noBalance && !shipToBlocked;
+                var rowStyle = (isSelected ? "background:var(--mer-blue-50);" : "")
+                    + (CanCreateAsn && !selectable && !isSelected ? "opacity:.55;" : "");
+                <div class="tlg-row" style="@rowStyle">
+                    @if (CanCreateAsn)
+                    {
+                        <div class="tlg-col" style="display:flex;align-items:center;justify-content:center;">
+                            <input type="checkbox" checked="@isSelected" disabled="@(!selectable && !isSelected)"
+                                   title="@(noBalance ? "Nothing left to ship on this line" : shipToBlocked ? "Different ship-to — clear the selection to pick this one" : null)"
+                                   @onchange="() => ToggleRow(row)" />
+                        </div>
+                    }
+                    <div class="tlg-col tlg-code">@row.PoNumber</div>
+                    <div class="tlg-col tlg-col--num">@row.PositionNo</div>
                     <div class="tlg-col tlg-name">
-                        <span style="font-weight:600;color:var(--mer-blue-darker);">@r.ItemCode</span>
-                        @if (!string.IsNullOrWhiteSpace(r.ItemDescription))
+                        <span style="font-weight:600;color:var(--mer-blue-darker);">@row.ItemCode</span>
+                        @if (!string.IsNullOrWhiteSpace(row.ItemDescription))
                         {
-                            <span style="color:var(--mer-ink-500);"> — @r.ItemDescription</span>
+                            <span style="color:var(--mer-ink-500);"> — @row.ItemDescription</span>
                         }
                     </div>
-                    <div class="tlg-col tlg-name">@(string.IsNullOrEmpty(r.SupplierName) ? "—" : r.SupplierName)</div>
-                    <div class="tlg-col tlg-col--num tlg-code">@r.OrderQty.ToString("N2") <span style="color:var(--mer-ink-500);">@r.OrderUnit</span></div>
-                    <div class="tlg-col tlg-col--num tlg-code">@r.ShippedQtyToDate.ToString("N2")</div>
-                    <div class="tlg-col tlg-col--num tlg-code" style="font-weight:600;color:@(r.RemainingToShip > 0 ? "var(--mer-blue-darker)" : "var(--mer-ink-400)");">@r.RemainingToShip.ToString("N2")</div>
-                    <div class="tlg-col">@(string.IsNullOrEmpty(r.ShipToAddressName) ? "—" : r.ShipToAddressName)</div>
-                    <div class="tlg-col tlg-code">@r.DeliveryDate.ToString("yyyy-MM-dd")</div>
-                    <div class="tlg-col"><span class="tlg-status @StatusClass(r.Status)">@r.Status</span></div>
+                    <div class="tlg-col tlg-name">@(string.IsNullOrEmpty(row.SupplierName) ? "—" : row.SupplierName)</div>
+                    <div class="tlg-col tlg-col--num tlg-code">@row.OrderQty.ToString("N2") <span style="color:var(--mer-ink-500);">@row.OrderUnit</span></div>
+                    <div class="tlg-col tlg-col--num tlg-code">@row.ShippedQtyToDate.ToString("N2")</div>
+                    <div class="tlg-col tlg-col--num tlg-code" style="font-weight:600;color:@(row.RemainingToShip > 0 ? "var(--mer-blue-darker)" : "var(--mer-ink-400)");">@row.RemainingToShip.ToString("N2")</div>
+                    <div class="tlg-col">@(string.IsNullOrEmpty(row.ShipToAddressName) ? "—" : row.ShipToAddressName)</div>
+                    <div class="tlg-col tlg-code">@row.DeliveryDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(row.Status)">@row.Status</span></div>
                 </div>
             }
         </div>
@@ -149,6 +198,41 @@
         <Pager Page="page" PageSize="PageSize" TotalCount="grid.Page.TotalCount" PageChanged="OnPageChanged" />
     }
 </div>
+
+@* ---------------- Create-ASN dialog (§9.2 — header metadata before the draft is raised) ---------------- *@
+@if (showCreateAsn)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" data-size="md" style="width:560px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">local_shipping</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Delivery schedules</div>
+                    <h2 class="merino-dialog__title">Create ASN from @selected.Count line(s)</h2>
+                    <p class="merino-dialog__subtitle">Ship-to <b>@(selectedShipToName ?? "—")</b>. A Draft ASN is raised; you set ship quantities, capture, and attachments on the ASN, then send it for approval.</p>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showCreateAsn = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Expected delivery date *</label>
+                <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;margin-top:4px;" @bind="createExpectedDate" />
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:12px;display:block;">Carrier (optional)</label>
+                <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;margin-top:4px;" @bind="createCarrier" />
+                @if (!string.IsNullOrEmpty(createAsnError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;white-space:pre-wrap;">@createAsnError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showCreateAsn = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="DoCreateAsn" disabled="@(creating || !createExpectedDate.HasValue)">@(creating ? "Creating…" : "Create draft ASN")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
 
 @code {
     private DeliveryScheduleGridDto? grid;
@@ -278,6 +362,98 @@
     }
 
     private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+
+    // ============================ R5 Phase 4 (§9) — multi-select → Create ASN ============================
+
+    // Only the ASN-creating actors get the selection column at all. Same gate as the "New ASN" affordance on the
+    // ASN list (supplier acts for themselves; an internal Buyer/Admin has Asn.Write). A read-only user sees no
+    // checkboxes — the grid stays a pure read surface for them.
+    private bool CanCreateAsn => Token.IsSupplier || Token.HasPermission("Asn.Write");
+
+    // Selected schedule rows, keyed by DeliverySchedule.Id (the id CreateAsnFromScheduleCommand consumes). We keep the
+    // whole DTO so the dialog can show the ship-to label + count without a re-fetch, and so a selection survives
+    // paging (the checkbox reflects membership in this map, not a per-page list).
+    private readonly Dictionary<Guid, DeliveryScheduleDto> selected = new();
+
+    // §9.1 single-ship-to lock: the first selected line fixes the ship-to; every other row for a different ship-to is
+    // disabled until the selection is cleared. Null when nothing is selected.
+    private Guid? selectedShipToId => selected.Values.Select(s => (Guid?)s.ShipToAddressId).FirstOrDefault();
+    private string? selectedShipToName => selected.Values.Select(s => s.ShipToAddressName).FirstOrDefault();
+
+    // "Select all" reflects only the rows on THIS page that are currently selectable (have balance + match the locked
+    // ship-to) plus those already selected — so the header box never claims to cover disabled rows.
+    private IEnumerable<DeliveryScheduleDto> SelectablePageRows =>
+        grid?.Page.Items.Where(r => r.RemainingToShip > 0
+            && (!selectedShipToId.HasValue || r.ShipToAddressId == selectedShipToId.Value)) ?? Enumerable.Empty<DeliveryScheduleDto>();
+
+    private bool AllSelectableSelected =>
+        SelectablePageRows.Any() && SelectablePageRows.All(r => selected.ContainsKey(r.Id));
+
+    private void ToggleRow(DeliveryScheduleDto row)
+    {
+        if (selected.Remove(row.Id)) return;                 // deselect
+        if (row.RemainingToShip <= 0) return;                // nothing to ship
+        if (selectedShipToId.HasValue && row.ShipToAddressId != selectedShipToId.Value) return; // cross-ship-to guard
+        selected[row.Id] = row;
+    }
+
+    private void ToggleSelectAll()
+    {
+        var pageRows = SelectablePageRows.ToList();
+        if (pageRows.All(r => selected.ContainsKey(r.Id)))
+            foreach (var r in pageRows) selected.Remove(r.Id);     // all selected → clear this page
+        else
+            foreach (var r in pageRows) selected[r.Id] = r;        // else select the selectable page rows
+    }
+
+    private void ClearSelection() => selected.Clear();
+
+    // ---- Create-ASN dialog ----
+    private bool showCreateAsn;
+    private bool creating;
+    private DateTime? createExpectedDate = DateTime.Today.AddDays(7);
+    private string? createCarrier;
+    private string createAsnError = string.Empty;
+
+    private void OpenCreateAsn()
+    {
+        if (selected.Count == 0) return;
+        createAsnError = string.Empty;
+        createExpectedDate ??= DateTime.Today.AddDays(7);
+        showCreateAsn = true;
+    }
+
+    private async Task DoCreateAsn()
+    {
+        if (selected.Count == 0 || !createExpectedDate.HasValue) return;
+        creating = true; createAsnError = string.Empty;
+
+        // §9.1 client-side single-ship-to assertion (defence: the lock should already guarantee this). The server
+        // §9.3 invariant is the authoritative fallback and its reject message is surfaced verbatim below.
+        if (selected.Values.Select(s => s.ShipToAddressId).Distinct().Count() > 1)
+        {
+            createAsnError = "All selected lines must share a single ship-to. Clear the selection and pick lines for one ship-to.";
+            creating = false; return;
+        }
+
+        var req = new CreateAsnFromScheduleRequest(
+            ScheduleIds: selected.Keys.ToList(),
+            ExpectedDeliveryDate: createExpectedDate.Value,
+            CarrierName: string.IsNullOrWhiteSpace(createCarrier) ? null : createCarrier.Trim());
+
+        var resp = await Api.PostAsync<AsnDetailDto, CreateAsnFromScheduleRequest>("api/asns/from-schedule", req);
+        if (resp?.Success == true && resp.Data != null)
+        {
+            showCreateAsn = false;
+            selected.Clear();
+            // §9.2 — land on the new Draft ASN's detail so the supplier sets ship quantities / capture / attachments.
+            Nav.NavigateToRoute($"/asns/{resp.Data.Id}");
+            return;
+        }
+        // Surface the server's reject (cross-ship-to / multi-supplier / invariant) verbatim — the UI guard's fallback.
+        createAsnError = resp?.Errors?.FirstOrDefault() ?? "Could not create the ASN from the selected schedules.";
+        creating = false;
+    }
 
     private string StatusClass(string status) => status switch
     {

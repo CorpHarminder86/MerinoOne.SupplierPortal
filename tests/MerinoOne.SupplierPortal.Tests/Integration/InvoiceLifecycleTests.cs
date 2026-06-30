@@ -70,13 +70,15 @@ public class InvoiceLifecycleTests
     private async Task<(HttpClient Client, Guid DraftInvoiceId, string Tag)> CreateDraftInvoiceAsync()
     {
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
         var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
 
         var createResp = await client.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
         createResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createResp));
         var asnId = (await Read<AsnDetailDto>(createResp)).Data!.Id;
 
-        var submitResp = await client.PostAsync($"/api/asns/{asnId}/submit", null);
+        // R5 — submit via Send-for-Approval → buyer Approve (the auto-created draft invoice surfaces at submit).
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, client, asnId);
         submitResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(submitResp));
         var draftInvoiceId = (await Read<AsnDetailDto>(submitResp)).Data!.DraftInvoiceId!.Value;
 

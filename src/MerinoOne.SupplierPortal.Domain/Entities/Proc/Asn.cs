@@ -1,4 +1,5 @@
 using MerinoOne.SupplierPortal.Domain.Common;
+using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Enums;
 
 namespace MerinoOne.SupplierPortal.Domain.Entities.Proc;
@@ -10,8 +11,21 @@ public class Asn : BaseAggregateRoot
     // R4 (2026-06-22) — Module 3 (Q1 multi-PO). An ASN may now span multiple POs, so the legacy single
     // scalar FK is NULLABLE and retained only for back-compat: new multi-PO ASNs use the AsnPurchaseOrder
     // junction below. Existing single-PO rows keep this FK; backend may migrate them into junction rows.
+    // R5 (TSD R5 Addendum §4.5) — DEPRECATED as the primary grouping key. PO linkage moves to AsnLine
+    // (via purchaseOrderLineId). Retained nullable for back-compat; never set on new ASNs created from
+    // Delivery Schedule. The column and FK stay; the column was made nullable in migration 0019.
     public Guid? PurchaseOrderId { get; set; }
     public PurchaseOrder? PurchaseOrder { get; set; }
+
+    // R5 (TSD R5 Addendum §4.5 / §9) — ship-to grouping key. Every AsnLine under this ASN references a
+    // PO line whose PurchaseOrder.shipToAddressId == this value; cross-ship-to lines are rejected at
+    // selection time and at persist-time (the invariant in §9.3). Nullable while backfill is in progress
+    // (existing ASNs have no ship-to); NOT NULL once backfill is complete and enforced via the application
+    // layer for all new ASNs. FK → admin.CompanyAddress RESTRICT (a resolved ship-to must not be removed
+    // out from under a historical ASN).
+    public Guid? ShipToAddressId { get; set; }
+    public CompanyAddress? ShipToAddress { get; set; }
+
     public Guid SupplierId { get; set; }
     public DateTime ExpectedDeliveryDate { get; set; }
     public string? TimeWindow { get; set; }

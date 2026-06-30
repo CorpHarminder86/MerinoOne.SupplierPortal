@@ -16,12 +16,15 @@ using Xunit;
 namespace MerinoOne.SupplierPortal.Tests.Integration;
 
 /// <summary>
-/// ASN serial/lot capture + submit validation through the REAL host. A PO with a serialized line + a lot line
-/// is pushed inbound; the supplier client then creates an ASN, captures serials/lots, and submits. The happy
-/// path persists the children (read back on GET); the negatives (serial count != qty, Σ lot != qty, duplicate
-/// serial / lot within a line) are 400s. A save-as-draft round-trips on GET (not 404).
+/// R5 — ASN serial/lot capture + submit validation through the REAL host. A PO with a serialized line + a lot line
+/// is pushed inbound; the supplier client then creates an ASN, captures serials/lots, and submits THROUGH the new
+/// Send-for-Approval → buyer Approve chain (the supplier-only `/submit` is gone — §10). The serial/lot validation
+/// still runs at the submit step (now inside Approve→Submit). The happy path persists the children (read back on
+/// GET); the negatives (serial count != qty, Σ lot != qty, duplicate serial / lot within a line) are 400s. A
+/// save-as-draft round-trips on GET (not 404).
 ///
-/// <para>Runs with the scope gate OFF (money path). Each test owns a fresh tagged PO + supplier.</para>
+/// <para>Runs with the scope gate OFF (money path). Each test owns a fresh tagged PO + supplier; the PO is assigned
+/// the fixture Buyer so the approve gate resolves.</para>
 /// </summary>
 [Collection(IntegrationCollection.Name)]
 public class AsnSerialLotTests
@@ -65,7 +68,7 @@ public class AsnSerialLotTests
         created.Success.Should().BeTrue();
         var asnId = created.Data!.Id;
 
-        var submitResp = await supplierClient.PostAsync($"/api/asns/{asnId}/submit", null);
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asnId);
         submitResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(submitResp));
         var submitted = await Read<AsnDetailDto>(submitResp);
         submitted.Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
@@ -121,7 +124,8 @@ public class AsnSerialLotTests
         var create = SingleSerialLineAsn(ctx, shippedQty: 3, serials: new[] { "X-1", "X-2" });
         var asnId = (await Read<AsnDetailDto>(await PostOk(supplierClient, create))).Data!.Id;
 
-        var submitResp = await supplierClient.PostAsync($"/api/asns/{asnId}/submit", null);
+        // Submit via Approve→Submit: the serial count check runs there now and blocks (400).
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asnId);
         submitResp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
             because: "a serialized line must carry exactly ShippedQty serials");
         (await Read<AsnDetailDto>(submitResp)).Errors.Should().Contain(e => e.Contains("serial"));
@@ -148,7 +152,7 @@ public class AsnSerialLotTests
             });
         var asnId = (await Read<AsnDetailDto>(await PostOk(supplierClient, create))).Data!.Id;
 
-        var submitResp = await supplierClient.PostAsync($"/api/asns/{asnId}/submit", null);
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asnId);
         submitResp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
             because: "Σ(lot qty) must equal ShippedQty for a lot-controlled line");
         (await Read<AsnDetailDto>(submitResp)).Errors.Should().Contain(e => e.Contains("lot", StringComparison.OrdinalIgnoreCase));
@@ -243,6 +247,8 @@ public class AsnSerialLotTests
         // (→ Accepted) here as the supplier would before shipping, keeping the ship-gate open.
         po.PoStatus = PoStatus.Accepted;
         po.AcceptedAt = DateTime.UtcNow;
+        // R5 — assign the fixture Buyer so the Approve→Submit gate resolves for these tests.
+        po.BuyerUserId = SecurityTestHarness.BuyerUserId;
         await db.SaveChangesAsync();
 
         return new PoCtx(po.Id, serialLineId, lotLineId, poNumber);

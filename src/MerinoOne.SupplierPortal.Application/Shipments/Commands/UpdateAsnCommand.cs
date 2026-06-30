@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Shipments;
 using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
@@ -54,8 +55,9 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         var asn = await _db.Asns.FirstOrDefaultAsync(a => a.Id == request.Id, ct)
                   ?? throw new NotFoundException("Asn", request.Id);
 
-        if (asn.AsnStatus != AsnStatus.Draft)
-            throw new ConflictException($"ASN is '{asn.AsnStatus}'; only Draft ASNs can be edited.");
+        // R5 (§10.1) — editable in Draft OR Rejected (a rejected ASN returns to the supplier for edit). Editing a
+        // Rejected ASN moves it back to Draft (it must be re-sent for approval afterwards).
+        AsnLifecycle.AssertCanEdit(asn.AsnStatus);
 
         var body = request.Body;
         var now = DateTime.UtcNow;
@@ -81,31 +83,17 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         var itemCompany = asn.TenantEntityId;
         var lineItemCodes = poLines.Values.Select(l => l.ItemCode).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
         var itemFlagRows = await _db.Items.IgnoreQueryFilters()
-            // R4 (2026-06-26) — also pull OverShipTolerancePct for the §4.3 delta guard.
             .Where(i => i.TenantEntityId == itemCompany && !i.IsDeleted && lineItemCodes.Contains(i.Code))
-            .Select(i => new { i.Code, i.Id, i.IsSerialized, i.IsLotControlled, i.OverShipTolerancePct })
+            .Select(i => new { i.Code, i.Id, i.IsSerialized, i.IsLotControlled })
             .ToListAsync(ct);
         var itemFlags = itemFlagRows.ToDictionary(i => i.Code, i => i, StringComparer.OrdinalIgnoreCase);
 
-        // R4 (2026-06-26) — Addendum §7.1: SupplierItem overrides for the resolved (supplierId, itemId) pairs so the
-        // delta guard can compute the tolerance-adjusted ceiling for any POSITIVE net change to a PO line's ship qty.
-        var resolvedItemIds = poLines.Values
-            .Select(l => l.ItemId ?? (!string.IsNullOrWhiteSpace(l.ItemCode) && itemFlags.TryGetValue(l.ItemCode, out var fr) ? fr.Id : (Guid?)null))
-            .Where(id => id is not null).Select(id => id!.Value).Distinct().ToList();
-        var supplierItemTol = (await _db.SupplierItems.IgnoreQueryFilters()
-                .Where(si => !si.IsDeleted && si.SupplierId == asn.SupplierId && resolvedItemIds.Contains(si.ItemId))
-                .Select(si => new { si.ItemId, si.OverShipTolerancePct })
-                .ToListAsync(ct))
-            .ToDictionary(si => si.ItemId, si => si.OverShipTolerancePct);
+        // R5 (TSD R5 Addendum §10.4) — NO over-ship tolerance resolution / no balance delta at update; a Draft (or
+        // Rejected→Draft) ASN does NOT consume shippedQtyToDate. The atomic guard moved to final Submit.
 
-        decimal ResolveLineTolerancePct(PurchaseOrderLine pol)
-        {
-            var flags = !string.IsNullOrWhiteSpace(pol.ItemCode) && itemFlags.TryGetValue(pol.ItemCode, out var f) ? f : null;
-            var itemId = pol.ItemId ?? flags?.Id;
-            decimal? siTol = itemId is { } id && supplierItemTol.TryGetValue(id, out var st) ? st : null;
-            var itemTol = flags?.OverShipTolerancePct ?? 0m;
-            return siTol ?? itemTol;   // SupplierItem(non-null) wins; else inherit Item floor.
-        }
+        // R5 (§10.1) — editing a Rejected ASN returns it to Draft (must be re-sent for approval afterwards).
+        if (asn.AsnStatus == AsnStatus.Rejected)
+            asn.AsnStatus = AsnStatus.Draft;
 
         // Header fields.
         asn.ExpectedDeliveryDate = body.ExpectedDeliveryDate;
@@ -122,15 +110,8 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         // Replace lines (soft-delete the old, insert the new — re-snapshotting position/sequence).
         var existingLines = await _db.AsnLines.Where(l => l.AsnId == asn.Id).ToListAsync(ct);
 
-        // R4 (2026-06-26) — Addendum §4.3 — cumulative DELTA. A Draft edit fully replaces the line set, so the
-        // correct adjustment to each PO line's ShippedQtyToDate is the NET change: Σ(new ship qty for that PO line)
-        // − Σ(old ship qty for that PO line). The old contributions are captured HERE before the replace; the new
-        // contributions are summed from body.Lines. delta>0 may need the flag-gated ceiling check; delta<0 (or =0)
-        // is a plain decrement / no-op. The cumulative is adjusted with a single ExecuteUpdateAsync per PO line in
-        // the transaction below — never a C# read-then-write (DI-02).
-        var oldQtyByPoLine = existingLines
-            .GroupBy(l => l.PurchaseOrderLineId)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.ShippedQty));
+        // R5 (TSD R5 Addendum §10.4) — NO cumulative delta. A Draft/Rejected edit replaces the line set but does
+        // NOT touch shippedQtyToDate (no consumption until final Submit), so there is no old/new balance reconcile.
 
         // R4 (2026-06-23) — Serial/Lot capture: also replace the children of the lines being removed. Soft-delete
         // the existing serial/lot rows for the old lines so the new capture set fully supersedes the old one.
@@ -215,71 +196,9 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         }
         asn.PurchaseOrderId = newPoIds.Count == 1 ? newPoIds[0] : null;
 
-        // R4 (2026-06-26) — apply the cumulative DELTA per PO line, then persist, in ONE transaction so a ceiling
-        // rejection rolls back every delta already applied. Net delta = new − old over the union of touched PO lines.
-        var newQtyByPoLine = body.Lines
-            .GroupBy(l => l.PurchaseOrderLineId)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.ShippedQty));
-        var deltaPoLineIds = oldQtyByPoLine.Keys.Union(newQtyByPoLine.Keys).Distinct().ToList();
-        var enforceGuard = _fulfilment.EnforceOverShipGuard;
-
-        await using var tx = await _db.BeginTransactionAsync(ct);
-
-        foreach (var poLineId in deltaPoLineIds)
-        {
-            var oldQty = oldQtyByPoLine.TryGetValue(poLineId, out var o) ? o : 0m;
-            var newQty = newQtyByPoLine.TryGetValue(poLineId, out var n) ? n : 0m;
-            var delta = newQty - oldQty;
-            if (delta == 0m) continue;   // no net change for this PO line.
-
-            if (delta > 0m && enforceGuard)
-            {
-                // Net INCREASE with the guard ON — the ceiling must still hold for the added amount. Reading OrderQty
-                // + ShippedQtyToDate LIVE: removing the old contribution and adding the new is equivalent to testing
-                // OrderQty*factor − ShippedQtyToDate >= delta (single conditional UPDATE; revision/concurrency-safe).
-                var pol = poLines[poLineId];
-                var factor = OverShipTolerance.Factor(ResolveLineTolerancePct(pol));
-
-                // R4 (2026-06-30) — rounded-allowance consistency (mirrors CreateAsnCommand). When a rounding mode is
-                // active, reject the net increase against the SAME rounded cap the DTO/client showed. The live-SQL
-                // ceiling below stays UNROUNDED (non-linear flooring isn't SQL-translatable) as the concurrency-safe net.
-                var rounding = _fulfilment.OverShipAllowanceRounding;
-                if (rounding != OverShipRoundingMode.None)
-                {
-                    var roundedCap = OverShipTolerance.RoundAllowance(
-                        Math.Max(0m, (pol.OrderQty * factor) - pol.ShippedQtyToDate), rounding);
-                    if (delta > roundedCap)
-                        throw new ValidationException(new Dictionary<string, string[]>
-                        {
-                            ["shippedQty"] = new[] { "Ship qty exceeds order qty plus over-ship tolerance." }
-                        });
-                }
-
-                var affected = await _db.PurchaseOrderLines
-                    .Where(l => l.Id == poLineId
-                                && (l.OrderQty * factor) - l.ShippedQtyToDate >= delta)
-                    .ExecuteUpdateAsync(s => s.SetProperty(
-                        l => l.ShippedQtyToDate, l => l.ShippedQtyToDate + delta), ct);
-
-                if (affected == 0)
-                    throw new ValidationException(new Dictionary<string, string[]>
-                    {
-                        ["shippedQty"] = new[] { "Ship qty exceeds order qty plus over-ship tolerance." }
-                    });
-            }
-            else
-            {
-                // Net DECREASE (plain decrement) OR a net increase with the guard OFF (unconditional add). Either way
-                // the cumulative is maintained by a single ExecuteUpdateAsync (positive or negative delta).
-                await _db.PurchaseOrderLines
-                    .Where(l => l.Id == poLineId)
-                    .ExecuteUpdateAsync(s => s.SetProperty(
-                        l => l.ShippedQtyToDate, l => l.ShippedQtyToDate + delta), ct);
-            }
-        }
-
+        // R5 (TSD R5 Addendum §10.4) — persist the replaced line set; NO balance consumption (Draft/Rejected do
+        // not touch shippedQtyToDate). The atomic over-ship guard runs once at final Submit (AsnSubmitExecutor).
         await _db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
 
         return await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct, _fulfilment.OverShipAllowanceRounding);
     }

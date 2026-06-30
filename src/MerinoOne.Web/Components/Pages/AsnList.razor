@@ -28,6 +28,9 @@
         <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="Reload">
             <option value="">All statuses</option>
             <option value="Draft">Draft</option>
+            @* R5 (§10.1) — the two new approval-flow states surfaced in the list filter. *@
+            <option value="PendingApproval">Pending Approval</option>
+            <option value="Rejected">Rejected</option>
             <option value="Submitted">Submitted</option>
             <option value="InTransit">In Transit</option>
             <option value="Delivered">Delivered</option>
@@ -101,8 +104,9 @@
     private string StatusClass(string status) => status switch
     {
         "Delivered" => "tlg-status--active",
-        "Submitted" or "InTransit" => "tlg-status--pending",
-        "Cancelled" => "tlg-status--danger",
+        // R5 (§10.1) — PendingApproval is in-flight like Submitted/InTransit; Rejected is a danger state like Cancelled.
+        "Submitted" or "InTransit" or "PendingApproval" => "tlg-status--pending",
+        "Cancelled" or "Rejected" => "tlg-status--danger",
         _ => "tlg-status--info"
     };
 }

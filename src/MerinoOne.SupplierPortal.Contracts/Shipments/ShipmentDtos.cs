@@ -76,8 +76,20 @@ public record AsnListItemDto(
     DateTime? SubmittedAt,
     DateTime CreatedOn);
 
+// R5 (TSD R5 Addendum §10.2 / §4.6) — the latest approval session for an ASN, surfaced on the detail DTO.
+// Null when the ASN has never been sent for approval. Status is Pending | Approved | Rejected.
+public record AsnApprovalDto(
+    Guid Id,
+    string Status,
+    string SubmittedBy,
+    DateTime SubmittedOn,
+    string? DecisionBy,
+    DateTime? DecisionOn,
+    string? Reason);
+
 // R4 (2026-06-22) — Module 3. Nullable PO header (multi-PO), covered-PO list, draft/submit lifecycle fields,
 // the auto-created draft invoice link (set after submit), and the ASN attachments.
+// R5 (TSD R5 Addendum §4.5 / §10) — ShipToAddressId/Name (the §9 grouping key) + the latest Approval session.
 public record AsnDetailDto(
     Guid Id,
     int Seq,
@@ -103,7 +115,12 @@ public record AsnDetailDto(
     Guid? DraftInvoiceId,
     bool IsLocked,
     List<AsnLineDto> Lines,
-    IReadOnlyList<Suppliers.DocumentAttachmentDto> Attachments);
+    IReadOnlyList<Suppliers.DocumentAttachmentDto> Attachments,
+    // R5 — the ship-to grouping key (set for schedule-built ASNs; null for legacy PO-picker ASNs) + its label,
+    // and the latest approval session (null until first Send-for-Approval).
+    Guid? ShipToAddressId = null,
+    string? ShipToAddressName = null,
+    AsnApprovalDto? Approval = null);
 
 /// <summary>One covered PO on a (possibly multi-PO) ASN.</summary>
 public record AsnPurchaseOrderDto(
@@ -224,6 +241,35 @@ public record UpdateAsnRequest(
 // carrying ConfirmationRequired=true + the warning list; the client re-submits with true to proceed (the skip is
 // audited). Mandatory-missing always blocks (400) regardless of this flag.
 public record SubmitAsnRequest(string? OverrideReason = null, bool AcknowledgeMissingAttachments = false);
+
+// R5 (TSD R5 Addendum §9) — create an ASN from selected Delivery Schedule lines. All selected schedules must
+// share ONE shipToAddressId (cross-ship-to is blocked, UC-AS-02) and ONE supplier; lines MAY span multiple POs
+// (UC-AS-01). The header is grouped by (supplierId, shipToAddressId); each schedule → one AsnLine referencing its
+// purchaseOrderLineId + deliveryScheduleId, ship qty defaulted to the line's remaining balance (editable, §9.2).
+// ShipQtyByScheduleId optionally overrides the defaulted balance per schedule (keyed by deliveryScheduleId).
+public record CreateAsnFromScheduleRequest(
+    IReadOnlyList<Guid> ScheduleIds,
+    DateTime ExpectedDeliveryDate,
+    string? TimeWindow = null,
+    string? CarrierName = null,
+    string? TrackingNumber = null,
+    string? VehicleNumber = null,
+    string? DriverName = null,
+    string? DriverPhone = null,
+    string? Notes = null,
+    IReadOnlyDictionary<Guid, decimal>? ShipQtyByScheduleId = null,
+    Guid? StagingKey = null);
+
+// R5 (TSD R5 Addendum §10.2) — supplier sends a Draft ASN for buyer approval. The attachment-requirement check
+// runs here (§10.3); a Warning skip is confirmed via AcknowledgeMissingAttachments (two-step, same as R4 submit).
+public record SendForApprovalRequest(bool AcknowledgeMissingAttachments = false);
+
+// R5 (TSD R5 Addendum §10.2) — buyer rejects a PendingApproval ASN. Reason is MANDATORY.
+public record RejectAsnRequest(string Reason);
+
+// R5 (TSD R5 Addendum §10.2) — buyer approves a PendingApproval ASN → runs the submit path. OverrideReason is the
+// optional admin PO-confirmation-gate override carried through to the submit step (UC-PO-09 parity).
+public record ApproveAsnRequest(string? OverrideReason = null);
 
 // R4 (2026-06-22) — Migration 0021 exposed: GrnStatus (ERP-owned receipt status), GrnApprovedAt, IssueReported
 // (ERP remark), and the deterministic GRN→Invoice link (InvoiceId + denormalised InvoiceNumber). Added as

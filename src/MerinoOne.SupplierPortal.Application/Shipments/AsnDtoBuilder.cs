@@ -15,8 +15,12 @@ namespace MerinoOne.SupplierPortal.Application.Shipments;
 /// </summary>
 public static class AsnDtoBuilder
 {
-    /// <summary>True once the ASN is past Draft — Update / attachment-mutation are rejected.</summary>
-    public static bool IsLocked(AsnStatus status) => status != AsnStatus.Draft;
+    /// <summary>
+    /// R5 — True once the ASN is locked against supplier edits / attachment-mutation. Editable states are Draft
+    /// and Rejected (a rejected ASN returns to the supplier for edit, §10.1); PendingApproval / Submitted /
+    /// InTransit / Delivered / Cancelled are locked.
+    /// </summary>
+    public static bool IsLocked(AsnStatus status) => status is not (AsnStatus.Draft or AsnStatus.Rejected);
 
     public static async Task<AsnDetailDto> BuildAsync(IAppDbContext db, Guid asnId, CancellationToken ct,
         Policies.OverShipRoundingMode rounding = Policies.OverShipRoundingMode.None)
@@ -180,6 +184,22 @@ public static class AsnDtoBuilder
 
         var attachments = await BuildAttachmentsAsync(db, asnId, ct);
 
+        // R5 — the ship-to grouping key label (set on schedule-built ASNs) + the latest approval session.
+        string? shipToName = null;
+        if (a.ShipToAddressId is { } shipToId)
+            shipToName = await db.CompanyAddresses.AsNoTracking()
+                .Where(ca => ca.Id == shipToId)
+                .Select(ca => ca.AddressName)
+                .FirstOrDefaultAsync(ct);
+
+        var approval = await db.AsnApprovals.AsNoTracking()
+            .Where(ap => ap.AsnId == asnId && !ap.IsDeleted)
+            .OrderByDescending(ap => ap.SubmittedOn)
+            .Select(ap => new AsnApprovalDto(
+                ap.Id, ap.Status.ToString(), ap.SubmittedBy, ap.SubmittedOn,
+                ap.DecisionBy, ap.DecisionOn, ap.Reason))
+            .FirstOrDefaultAsync(ct);
+
         return new AsnDetailDto(
             a.Id, a.Seq, a.AsnNumber,
             a.PurchaseOrderId, headerPoNumber,
@@ -191,7 +211,8 @@ public static class AsnDtoBuilder
             a.AsnStatus.ToString(), a.Notes,
             a.SubmittedAt, a.SubmittedBy, a.ErpSyncId, a.ErpCode,
             draftInvoiceId, IsLocked(a.AsnStatus),
-            lines, attachments);
+            lines, attachments,
+            a.ShipToAddressId, shipToName, approval);
     }
 
     public static async Task<IReadOnlyList<DocumentAttachmentDto>> BuildAttachmentsAsync(

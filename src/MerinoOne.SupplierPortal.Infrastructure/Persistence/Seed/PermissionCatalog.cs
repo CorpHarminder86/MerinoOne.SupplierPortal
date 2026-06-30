@@ -32,6 +32,8 @@ public static class PermissionCatalog
         new PermissionSeed("DeliverySchedule.Approve",     "Approve delivery schedule", "Shipment",       "Approve or reject a delivery schedule"),
         new PermissionSeed("Asn.Read",                     "View ASNs",                 "Shipment",       "View ASNs"),
         new PermissionSeed("Asn.Write",                    "Create/update ASN",         "Shipment",       "Create or update ASNs"),
+        // R5 (TSD R5 Addendum §10.2) — buyer approval of a PendingApproval ASN (approve→submit / reject+reason).
+        new PermissionSeed("Asn.Approve",                  "Approve/reject ASN",        "Shipment",       "Approve or reject an ASN sent for buyer approval"),
         new PermissionSeed("GoodsReceipt.Read",            "View GRNs",                 "Shipment",       "View goods-receipt (GRN) data"),
         new PermissionSeed("Invoice.Read",                 "View invoices",             "Invoice",        "View invoices"),
         new PermissionSeed("Invoice.Submit",               "Submit invoice",            "Invoice",        "Submit an invoice"),
@@ -96,6 +98,7 @@ public static class PermissionCatalog
         ["DeliverySchedule.Approve"]      = new[] { "SuperAdmin","Buyer" },
         ["Asn.Read"]                      = new[] { "SuperAdmin","Admin","Buyer","Finance","Supplier","ReadOnly" },
         ["Asn.Write"]                     = new[] { "SuperAdmin","Supplier" },
+        ["Asn.Approve"]                   = new[] { "SuperAdmin","Admin","Buyer" },
         ["GoodsReceipt.Read"]             = new[] { "SuperAdmin","Admin","Buyer","Finance","Supplier","ReadOnly" },
         ["Invoice.Read"]                  = new[] { "SuperAdmin","Admin","Buyer","Finance","Supplier","ReadOnly" },
         ["Invoice.Submit"]                = new[] { "SuperAdmin","Supplier" },

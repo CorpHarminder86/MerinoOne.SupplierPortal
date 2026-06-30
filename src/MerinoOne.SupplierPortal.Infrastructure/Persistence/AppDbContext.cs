@@ -103,6 +103,8 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<AsnLineSerial> AsnLineSerials => Set<AsnLineSerial>();
     public DbSet<AsnLineLot> AsnLineLots => Set<AsnLineLot>();
     public DbSet<AsnPurchaseOrder> AsnPurchaseOrders => Set<AsnPurchaseOrder>();
+    // R5 (TSD R5 Addendum §4.6 / Component 6) — ASN approval sessions.
+    public DbSet<AsnApproval> AsnApprovals => Set<AsnApproval>();
     public DbSet<GoodsReceipt> GoodsReceipts => Set<GoodsReceipt>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();

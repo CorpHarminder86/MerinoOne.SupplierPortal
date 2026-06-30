@@ -231,19 +231,25 @@ public class PoConfirmationGateTests
 
         // Confirmed PO → save a Draft ASN (gate open at create).
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx);   // Accepted
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
         var createResp = await supplierClient.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
         createResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createResp));
         var asnId = (await Read<AsnDetailDto>(createResp)).Data!.Id;
 
-        // A mid-fulfilment ERP material modify resets the PO to Released since the draft was saved.
+        // Send for approval (the gate is NOT checked here — only at the buyer Approve/Submit step).
+        var send = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
+        send.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(send));
+
+        // A mid-fulfilment ERP material modify resets the PO to Released after the ASN was sent for approval.
         await SetPoStatusAsync(setup.PoId, PoStatus.Released);
 
-        // Submission of the draft is now BLOCKED (the gate is re-evaluated on Draft → Submitted, UC-ASN-08).
-        var submitResp = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/submit", new SubmitAsnRequest());
+        // R5 — the buyer Approve runs the submit path; the gate is re-evaluated there and BLOCKS (UC-ASN-08).
+        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        var submitResp = await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
         submitResp.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await Body(submitResp));
         (await Read<AsnDetailDto>(submitResp)).Errors.Should().Contain(e => e.Contains("Accept"));
-        await AssertAsnStatus(asnId, AsnStatus.Draft);   // not flipped.
+        await AssertAsnStatus(asnId, AsnStatus.PendingApproval);   // submit rolled back; approval not flipped.
     }
 
     // ── UC-ASN-09 — InFlightAsn_UnaffectedByModify (already-Submitted is never re-blocked) ───────────────
@@ -253,12 +259,13 @@ public class PoConfirmationGateTests
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx);   // Accepted
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
         var createResp = await supplierClient.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
         var asnId = (await Read<AsnDetailDto>(createResp)).Data!.Id;
 
-        // Submit while the gate is open → Submitted.
-        var submitResp = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/submit", new SubmitAsnRequest());
+        // Submit (via Send-for-Approval → Approve) while the gate is open → Submitted.
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asnId);
         submitResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(submitResp));
         await AssertAsnStatus(asnId, AsnStatus.Submitted);
 
@@ -286,16 +293,21 @@ public class PoConfirmationGateTests
         createBlocked.StatusCode.Should().Be(HttpStatusCode.BadRequest,
             because: "the gate is enforced at create (DI-05)");
 
-        // (b) SUBMIT is gated: a Draft created while Accepted is blocked on submit once the PO resets to Released.
+        // (b) SUBMIT is gated: a Draft created while Accepted is blocked on the Approve→Submit step once the PO
+        //     resets to Released. The gate runs in the submit executor (reached via buyer Approve).
         var confirmed = await ProcureToPayFlow.SeedPoAsync(_fx);   // Accepted
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, confirmed.PoId);
         var createOk = await supplierClient.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(confirmed));
         createOk.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createOk));
         var asnId = (await Read<AsnDetailDto>(createOk)).Data!.Id;
 
+        var sendOk = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
+        sendOk.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(sendOk));
         await SetPoStatusAsync(confirmed.PoId, PoStatus.Released);
-        var submitBlocked = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/submit", new SubmitAsnRequest());
+        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        var submitBlocked = await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
         submitBlocked.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            because: "the gate is also enforced at submit (DI-05)");
+            because: "the gate is also enforced at the Approve→Submit step (DI-05)");
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────

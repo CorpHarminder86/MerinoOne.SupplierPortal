@@ -49,13 +49,15 @@ public class OutboundPayloadSyncLogTests
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
 
         var createResp = await supplierClient.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
         createResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createResp));
         var asn = (await Read<AsnDetailDto>(createResp)).Data!;
 
-        var submitResp = await supplierClient.PostAsync($"/api/asns/{asn.Id}/submit", null);
+        // R5 — submit through Send-for-Approval → buyer Approve (the AsnPost outbox is enqueued at the submit step).
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asn.Id);
         submitResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(submitResp));
         (await Read<AsnDetailDto>(submitResp)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
 

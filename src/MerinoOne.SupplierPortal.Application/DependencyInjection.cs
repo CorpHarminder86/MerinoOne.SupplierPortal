@@ -42,8 +42,12 @@ public static class DependencyInjection
         services.AddScoped<AsnAttachmentRebinder>();
 
         // R4 Module 4 — single source of truth for the ONE draft invoice spanning an ASN's POs (Q1b). Used by
-        // SubmitAsnCommand (auto) and CreateInvoiceFromAsnCommand (manual). Scoped (per-request IAppDbContext).
+        // the ASN submit path (AsnSubmitExecutor, via Approve) and CreateInvoiceFromAsnCommand (manual). Scoped.
         services.AddScoped<Invoices.DraftInvoiceFromAsnFactory>();
+
+        // R5 (TSD R5 Addendum §10.2 / §10.4) — the shared ASN final-submit executor. The over-ship atomic guard
+        // lives here now (moved from ASN create); the Approve→Submit path reuses it. Scoped (per-request context).
+        services.AddScoped<Shipments.AsnSubmitExecutor>();
 
         // R4 Module 2 — supplier change-management. Typed per-target appliers (Add/Edit/Delete onto the live
         // supplier rows inside the approve transaction) + the post-commit per-line ERP push (Increment-0 outbox).

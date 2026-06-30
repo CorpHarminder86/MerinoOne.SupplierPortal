@@ -122,44 +122,14 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
         var itemCompany = pos[0].TenantEntityId;
         var lineItemCodes = poLines.Values.Select(l => l.ItemCode).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
         var itemFlagRows = await _db.Items.IgnoreQueryFilters()
-            // R4 (2026-06-26) — also pull OverShipTolerancePct (the Item-master floor) for the §4.3 atomic guard.
             .Where(i => i.TenantEntityId == itemCompany && !i.IsDeleted && lineItemCodes.Contains(i.Code))
-            .Select(i => new { i.Code, i.Id, i.IsSerialized, i.IsLotControlled, i.OverShipTolerancePct })
+            .Select(i => new { i.Code, i.Id, i.IsSerialized, i.IsLotControlled })
             .ToListAsync(ct);
         var itemFlags = itemFlagRows.ToDictionary(i => i.Code, i => i, StringComparer.OrdinalIgnoreCase);
 
-        // R4 (2026-06-26) — Addendum §7.1, Component 4 (Over-Ship Tolerance). Load the SupplierItem overrides for the
-        // resolved (supplierId, itemId) pairs so the per-line guard can compute factor = 1 + ResolveOverShipTolerance/100.
-        // The PO line's ItemId is often null → resolve via the company+code Item match (flags?.Id) just like serial/lot.
-        var resolvedItemIds = poLines.Values
-            .Select(l => l.ItemId ?? (!string.IsNullOrWhiteSpace(l.ItemCode) && itemFlags.TryGetValue(l.ItemCode, out var fr) ? fr.Id : (Guid?)null))
-            .Where(id => id is not null).Select(id => id!.Value).Distinct().ToList();
-        var supplierItemTol = (await _db.SupplierItems.IgnoreQueryFilters()
-                .Where(si => !si.IsDeleted && si.SupplierId == supplierId && resolvedItemIds.Contains(si.ItemId))
-                .Select(si => new { si.ItemId, si.OverShipTolerancePct })
-                .ToListAsync(ct))
-            .ToDictionary(si => si.ItemId, si => si.OverShipTolerancePct);
-
-        // Resolve the effective over-ship tolerance % for a PO line: SupplierItem override (non-null) ?? Item floor
-        // (§7.1/§7.2). NULL SupplierItem row OR no row → inherit the Item floor; an explicit 0 caps at "no over-ship".
-        decimal ResolveLineTolerancePct(PurchaseOrderLine pol)
-        {
-            var flags = !string.IsNullOrWhiteSpace(pol.ItemCode) && itemFlags.TryGetValue(pol.ItemCode, out var f) ? f : null;
-            var itemId = pol.ItemId ?? flags?.Id;
-            decimal? siTol = itemId is { } id && supplierItemTol.TryGetValue(id, out var st) ? st : null;
-            var itemTol = flags?.OverShipTolerancePct ?? 0m;   // Item.* is NOT NULL when resolved; 0 if no Item.
-            return siTol ?? itemTol;                            // SupplierItem(non-null) wins; else inherit Item.
-        }
-
-        // Aggregate the requested ship qty per PO line — the guard increments once per PO line by the total this ASN
-        // adds (a single PO line may appear on more than one requested ASN line in theory; sum so the cumulative is
-        // maintained exactly once per line in one statement, never read-then-written).
-        var shipQtyByPoLine = body.Lines
-            .GroupBy(l => l.PurchaseOrderLineId)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.ShippedQty));
-
-        // D3 — the over-ship CEILING REJECTION is gated by the tenant flag; the cumulative increment ALWAYS runs.
-        var enforceGuard = _fulfilment.EnforceOverShipGuard;
+        // R5 (TSD R5 Addendum §10.4) — NO over-ship tolerance resolution / no balance consumption at create; the
+        // authoritative atomic guard (which needs the tolerance factor) now runs ONCE at final Submit
+        // (AsnSubmitExecutor). The create path only persists the Draft + its serial/lot capture.
 
         var now = DateTime.UtcNow;
         var asnId = Guid.NewGuid();
@@ -271,68 +241,11 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
         PoConfirmationGateEnforcer.Enforce(
             _db, pos, supplier.PoConfirmationMode, body.OverrideReason, _user, asnId, asnNumber, now);
 
-        // R4 (2026-06-26) — Addendum §4.3 / §9 / DI-02,03 — atomic cumulative-shipped guard. Wrap the per-PO-line
-        // cumulative UPDATE(s) and the ASN persist in ONE explicit transaction so a ceiling rejection on any line
-        // rolls back every increment already applied (no partial cumulative drift). The cumulative is maintained by
-        // a SINGLE conditional ExecuteUpdateAsync per line that reads OrderQty + ShippedQtyToDate LIVE inside the
-        // UPDATE — never a C# read-then-write (concurrency-safe per UC-ASN-06, revision-safe per UC-ASN-10/DI-03).
-        await using var tx = await _db.BeginTransactionAsync(ct);
-
-        foreach (var (poLineId, shipQty) in shipQtyByPoLine)
-        {
-            var pol = poLines[poLineId];
-            var factor = OverShipTolerance.Factor(ResolveLineTolerancePct(pol));
-
-            int affected;
-            if (enforceGuard)
-            {
-                // R4 (2026-06-30) — rounded-allowance consistency. When a rounding mode is active, reject against the
-                // SAME rounded cap the DTO/client showed. The live-SQL ceiling below stays UNROUNDED — flooring is
-                // non-linear (Floor(q×f) ≠ q×Floor(f)) and EF can't translate Math.Floor into the UPDATE — so it
-                // remains the concurrency-safe outer net (always ≥ the Floor cap, never wrongly rejects). The snapshot
-                // OrderQty/ShippedQtyToDate here match the displayed cap, so displayed cap == enforced cap.
-                var rounding = _fulfilment.OverShipAllowanceRounding;
-                if (rounding != OverShipRoundingMode.None)
-                {
-                    var roundedCap = OverShipTolerance.RoundAllowance(
-                        Math.Max(0m, (pol.OrderQty * factor) - pol.ShippedQtyToDate), rounding);
-                    if (shipQty > roundedCap)
-                        throw new ValidationException(new Dictionary<string, string[]>
-                        {
-                            ["shippedQty"] = new[] { "Ship qty exceeds order qty plus over-ship tolerance." }
-                        });
-                }
-
-                // Flag ON — single conditional UPDATE: increment ONLY if the tolerance-adjusted ceiling still holds.
-                // OrderQty + ShippedQtyToDate are read LIVE inside the statement (revision-safe, concurrency-safe).
-                affected = await _db.PurchaseOrderLines
-                    .Where(l => l.Id == poLineId
-                                && (l.OrderQty * factor) - l.ShippedQtyToDate >= shipQty)
-                    .ExecuteUpdateAsync(s => s.SetProperty(
-                        l => l.ShippedQtyToDate, l => l.ShippedQtyToDate + shipQty), ct);
-
-                if (affected == 0)
-                    throw new ValidationException(new Dictionary<string, string[]>
-                    {
-                        ["shippedQty"] = new[] { "Ship qty exceeds order qty plus over-ship tolerance." }
-                    });
-            }
-            else
-            {
-                // Flag OFF — plain unconditional increment (NO ceiling rejection). The cumulative is STILL maintained
-                // (balance/reconciliation depend on it); only the rejection is gated by the flag (D3).
-                affected = await _db.PurchaseOrderLines
-                    .Where(l => l.Id == poLineId)
-                    .ExecuteUpdateAsync(s => s.SetProperty(
-                        l => l.ShippedQtyToDate, l => l.ShippedQtyToDate + shipQty), ct);
-
-                if (affected == 0)
-                    throw new NotFoundException("PurchaseOrderLine", poLineId);
-            }
-        }
-
+        // R5 (TSD R5 Addendum §10.4) — NO balance consumption at create. A Draft ASN does NOT touch
+        // shippedQtyToDate; the authoritative atomic over-ship guard moved to final Submit (the Approve→Submit
+        // path in AsnSubmitExecutor). The advisory over-ship allowance is still surfaced read-only on the DTO
+        // (AsnDtoBuilder), but the create path never rejects/consumes — Submit is the single point of truth.
         await _db.SaveChangesAsync(ct);   // ASN + junction + lines + rebound attachments. NO ERP post (Draft only).
-        await tx.CommitAsync(ct);
 
         return await AsnDtoBuilder.BuildAsync(_db, asnId, ct, _fulfilment.OverShipAllowanceRounding);
     }
