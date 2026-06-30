@@ -1,0 +1,505 @@
+@page "/settings/companies"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+@* R5 (TSD R5 Addendum §5 / §5.2 — Component 1, Company Master). Admin master-detail screen under Settings.
+   Top: the Company list (the customer / buying entity keyed 1:1 to a tenantEntityId). Name is the only editable
+   field; deactivate toggles IsActive via PUT. Selecting a company loads its CompanyAddress list (the named,
+   ERP-mappable ship-to addresses). The address form reuses the supplier address field set (AddressType +
+   Line1/Line2/City/State/Country/Pincode) extended with addressName (REQUIRED) and erpCode (optional, unique per
+   company — the server + filtered unique index enforce it; the duplicate error is surfaced inline). Settings.Write. *@
+
+<PageTitle>Companies</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Companies</h1>
+                <span class="tl-count-chip">@(companies?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Customer (buying-entity) master + named ship-to addresses · Settings → System</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (CanWrite)
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewCompany">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add company
+                </button>
+            }
+        </div>
+    </header>
+
+    @if (!CanWrite)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+            <div>You do not have permission to manage companies.</div>
+        </div>
+    }
+    else
+    {
+        @* ---------------- Companies list ---------------- *@
+        @if (companiesLoading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (companies == null || companies.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">domain</span>
+                <div>No companies defined.</div>
+            </div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 1.6fr 90px 110px; --tl-min-width: 560px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Name</div>
+                    <div class="tlg-col">Active</div>
+                    <div class="tlg-col tlg-col--actions">Actions</div>
+                </div>
+                @foreach (var c in companies)
+                {
+                    var company = c;
+                    <div class="tlg-row @(selectedCompany?.Id == company.Id ? "tlg-row--selected" : "")"
+                         style="cursor:pointer;@(selectedCompany?.Id == company.Id ? "background:rgba(46,91,183,.08);" : "")"
+                         @onclick="() => SelectCompany(company)">
+                        <div class="tlg-col tlg-desc" style="font-weight:600;color:var(--mer-blue-darker);">@company.Name</div>
+                        <div class="tlg-col"><span class="tlg-status @(company.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(company.IsActive ? "Yes" : "No")</span></div>
+                        <div class="tlg-col tlg-col--actions">
+                            <button @onclick="() => OpenEditCompany(company)" @onclick:stopPropagation="true" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Rename / toggle active">
+                                <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                            </button>
+                            @if (company.IsActive)
+                            {
+                                <button @onclick="() => DeactivateCompany(company)" @onclick:stopPropagation="true" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            @* ---------------- Addresses for the selected company ---------------- *@
+            @if (selectedCompany != null)
+            {
+                <div class="rz-card" style="padding:20px;margin-top:18px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                        <div>
+                            <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">
+                                Ship-to addresses · @selectedCompany.Name (@(addresses?.Count ?? 0))
+                            </h3>
+                            <p style="color:var(--mer-ink-500);font-size:12px;">Each address has a mandatory name (the ship-to label) and an optional ERP ship-to code, unique within the company.</p>
+                        </div>
+                        <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewAddress">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add_location_alt</span> Add address
+                        </button>
+                    </div>
+
+                    @if (addressesLoading)
+                    {
+                        <div class="tl-empty">Loading…</div>
+                    }
+                    else if (addresses == null || addresses.Count == 0)
+                    {
+                        <div class="tl-empty">
+                            <span class="material-symbols-outlined" style="font-size:32px;">location_off</span>
+                            <div>No addresses for this company yet.</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 110px 1.6fr 90px 110px; --tl-min-width: 920px;">
+                            <div class="tlg-header">
+                                <div class="tlg-col">Address name</div>
+                                <div class="tlg-col">ERP code</div>
+                                <div class="tlg-col">Type</div>
+                                <div class="tlg-col">Address</div>
+                                <div class="tlg-col">Active</div>
+                                <div class="tlg-col tlg-col--actions">Actions</div>
+                            </div>
+                            @foreach (var a in addresses)
+                            {
+                                var addr = a;
+                                <div class="tlg-row">
+                                    <div class="tlg-col tlg-desc" style="font-weight:600;color:var(--mer-blue-darker);">@addr.AddressName</div>
+                                    <div class="tlg-col tlg-code">@(string.IsNullOrEmpty(addr.ErpCode) ? "—" : addr.ErpCode)</div>
+                                    <div class="tlg-col">@addr.AddressType</div>
+                                    <div class="tlg-col" style="font-size:12px;color:var(--mer-ink-700);">@FormatLine(addr)</div>
+                                    <div class="tlg-col"><span class="tlg-status @(addr.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(addr.IsActive ? "Yes" : "No")</span></div>
+                                    <div class="tlg-col tlg-col--actions">
+                                        <button @onclick="() => OpenEditAddress(addr)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit">
+                                            <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                                        </button>
+                                        @if (addr.IsActive)
+                                        {
+                                            <button @onclick="() => DeactivateAddress(addr)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
+                                                <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        }
+    }
+</div>
+
+@* ---------------- Company add/edit dialog ---------------- *@
+@if (showCompanyDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">domain</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Company</div>
+                    <h2 class="merino-dialog__title">@(editingCompanyId.HasValue ? "Edit company" : "New company")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showCompanyDialog = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Company name *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="companyFormName" placeholder="e.g. Merino Industries Ltd." />
+                    </div>
+                    @if (editingCompanyId.HasValue)
+                    {
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" @bind="companyFormActive" /> Active
+                        </label>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(companyError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@companyError</div> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showCompanyDialog = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="SaveCompany" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@* ---------------- Address add/edit dialog (supplier address field set + addressName / erpCode) ---------------- *@
+@if (showAddressDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" data-size="md" style="width:640px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">location_on</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Ship-to address · @selectedCompany?.Name</div>
+                    <h2 class="merino-dialog__title">@(editingAddressId.HasValue ? "Edit address" : "New address")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showAddressDialog = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Address name / ship-to label *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.AddressName" placeholder="e.g. Bhiwandi DC" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">ERP ship-to code</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="af.ErpCode" placeholder="e.g. DC-BHIWANDI-01" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Address type *</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="af.AddressType">
+                            @foreach (var t in AddressTypes)
+                            {
+                                <option value="@t">@t</option>
+                            }
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Country *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.Country" placeholder="India" />
+                    </div>
+                    <div style="grid-column:1 / span 2;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Address line 1 *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.AddressLine1" />
+                    </div>
+                    <div style="grid-column:1 / span 2;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Address line 2</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.AddressLine2" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">City *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.City" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">State *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.State" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Pincode</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="af.Pincode" />
+                    </div>
+                    @if (editingAddressId.HasValue)
+                    {
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;align-self:end;padding-bottom:8px;">
+                            <input type="checkbox" @bind="af.IsActive" /> Active
+                        </label>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(addressError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;">@addressError</div> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showAddressDialog = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="SaveAddress" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool CanWrite => Token.HasPermission("Settings.Write");
+    private bool busy;
+
+    // Address types mirror the supplier address control (Register.razor) + the §4.2 "Plant" option.
+    private static readonly string[] AddressTypes = { "Registered", "Billing", "Shipping", "Plant", "Other" };
+
+    // ---- Companies ----
+    private List<CompanyMasterDto>? companies;
+    private bool companiesLoading = true;
+    private CompanyMasterDto? selectedCompany;
+
+    private bool showCompanyDialog;
+    private Guid? editingCompanyId;
+    private string companyFormName = string.Empty;
+    private bool companyFormActive = true;
+    private string companyError = string.Empty;
+
+    // ---- Addresses (for the selected company) ----
+    private List<CompanyAddressDto>? addresses;
+    private bool addressesLoading;
+
+    private bool showAddressDialog;
+    private Guid? editingAddressId;
+    private readonly AddressForm af = new();
+    private string addressError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanWrite) { companiesLoading = false; return; }
+        await LoadCompanies();
+    }
+
+    private async Task LoadCompanies()
+    {
+        companiesLoading = true;
+        var resp = await Api.GetAsync<List<CompanyMasterDto>>("api/settings/companies");
+        companies = resp?.Data ?? new();
+        // Keep the current selection if it still exists; otherwise drop it.
+        if (selectedCompany != null)
+            selectedCompany = companies.FirstOrDefault(c => c.Id == selectedCompany.Id);
+        companiesLoading = false;
+    }
+
+    private async Task SelectCompany(CompanyMasterDto c)
+    {
+        selectedCompany = c;
+        await LoadAddresses();
+    }
+
+    private async Task LoadAddresses()
+    {
+        if (selectedCompany == null) { addresses = null; return; }
+        addressesLoading = true;
+        addresses = null;
+        StateHasChanged();
+        var resp = await Api.GetAsync<List<CompanyAddressDto>>($"api/settings/companies/{selectedCompany.Id}/addresses");
+        addresses = resp?.Data ?? new();
+        addressesLoading = false;
+    }
+
+    // ---- Company CRUD ----
+    private void OpenNewCompany()
+    {
+        editingCompanyId = null;
+        companyFormName = string.Empty;
+        companyFormActive = true;
+        companyError = string.Empty;
+        showCompanyDialog = true;
+    }
+
+    private void OpenEditCompany(CompanyMasterDto c)
+    {
+        editingCompanyId = c.Id;
+        companyFormName = c.Name;
+        companyFormActive = c.IsActive;
+        companyError = string.Empty;
+        showCompanyDialog = true;
+    }
+
+    private async Task SaveCompany()
+    {
+        companyError = string.Empty;
+        if (string.IsNullOrWhiteSpace(companyFormName)) { companyError = "Company name is required."; return; }
+        busy = true;
+        ApiResult<CompanyMasterDto>? resp;
+        if (editingCompanyId.HasValue)
+            resp = await Api.PutAsync<CompanyMasterDto, UpdateCompanyMasterRequest>($"api/settings/companies/{editingCompanyId}", new UpdateCompanyMasterRequest(companyFormName.Trim(), companyFormActive));
+        else
+            resp = await Api.PostAsync<CompanyMasterDto, CreateCompanyMasterRequest>("api/settings/companies", new CreateCompanyMasterRequest(companyFormName.Trim()));
+
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+            showCompanyDialog = false;
+            await LoadCompanies();
+        }
+        else { companyError = resp?.Errors?.FirstOrDefault() ?? "Failed to save company."; }
+        busy = false;
+    }
+
+    private async Task DeactivateCompany(CompanyMasterDto c)
+    {
+        if (!await Dialog.ConfirmDeactivateAsync(c.Name, "COMPANY")) return;
+        busy = true;
+        var resp = await Api.PutAsync<CompanyMasterDto, UpdateCompanyMasterRequest>($"api/settings/companies/{c.Id}", new UpdateCompanyMasterRequest(c.Name, false));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" });
+            await LoadCompanies();
+        }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+    // ---- Address CRUD ----
+    private void OpenNewAddress()
+    {
+        editingAddressId = null;
+        af.Reset();
+        addressError = string.Empty;
+        showAddressDialog = true;
+    }
+
+    private void OpenEditAddress(CompanyAddressDto a)
+    {
+        editingAddressId = a.Id;
+        af.AddressName = a.AddressName;
+        af.ErpCode = a.ErpCode ?? string.Empty;
+        af.AddressType = a.AddressType;
+        af.AddressLine1 = a.AddressLine1;
+        af.AddressLine2 = a.AddressLine2 ?? string.Empty;
+        af.City = a.City;
+        af.State = a.State;
+        af.Pincode = a.Pincode ?? string.Empty;
+        af.Country = a.Country;
+        af.IsActive = a.IsActive;
+        addressError = string.Empty;
+        showAddressDialog = true;
+    }
+
+    private async Task SaveAddress()
+    {
+        addressError = string.Empty;
+        if (selectedCompany == null) { addressError = "Select a company first."; return; }
+        if (string.IsNullOrWhiteSpace(af.AddressName)) { addressError = "Address name is required."; return; }
+        if (string.IsNullOrWhiteSpace(af.AddressType)) { addressError = "Address type is required."; return; }
+        if (string.IsNullOrWhiteSpace(af.AddressLine1)) { addressError = "Address line 1 is required."; return; }
+        if (string.IsNullOrWhiteSpace(af.City)) { addressError = "City is required."; return; }
+        if (string.IsNullOrWhiteSpace(af.State)) { addressError = "State is required."; return; }
+
+        var erp = string.IsNullOrWhiteSpace(af.ErpCode) ? null : af.ErpCode.Trim();
+        var line2 = string.IsNullOrWhiteSpace(af.AddressLine2) ? null : af.AddressLine2.Trim();
+        var pincode = string.IsNullOrWhiteSpace(af.Pincode) ? null : af.Pincode.Trim();
+        var country = string.IsNullOrWhiteSpace(af.Country) ? null : af.Country.Trim();
+
+        busy = true;
+        ApiResult<CompanyAddressDto>? resp;
+        if (editingAddressId.HasValue)
+        {
+            var req = new UpdateCompanyAddressRequest(af.AddressName.Trim(), erp, af.AddressType, af.AddressLine1.Trim(), line2, af.City.Trim(), af.State.Trim(), pincode, country, af.IsActive);
+            resp = await Api.PutAsync<CompanyAddressDto, UpdateCompanyAddressRequest>($"api/settings/company-addresses/{editingAddressId}", req);
+        }
+        else
+        {
+            var req = new CreateCompanyAddressRequest(selectedCompany.Id, af.AddressName.Trim(), erp, af.AddressType, af.AddressLine1.Trim(), line2, af.City.Trim(), af.State.Trim(), pincode, country);
+            resp = await Api.PostAsync<CompanyAddressDto, CreateCompanyAddressRequest>("api/settings/company-addresses", req);
+        }
+
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+            showAddressDialog = false;
+            await LoadAddresses();
+        }
+        else
+        {
+            // Surface the server's validation message cleanly — including the duplicate-erpCode-per-company error
+            // backstopped by UQ_CompanyAddress_company_erp (§4.2 / UC-CM-03).
+            addressError = resp?.Errors?.FirstOrDefault() ?? "Failed to save address.";
+        }
+        busy = false;
+    }
+
+    private async Task DeactivateAddress(CompanyAddressDto a)
+    {
+        if (!await Dialog.ConfirmDeactivateAsync(a.AddressName, "ADDRESS")) return;
+        busy = true;
+        var req = new UpdateCompanyAddressRequest(a.AddressName, a.ErpCode, a.AddressType, a.AddressLine1, a.AddressLine2, a.City, a.State, a.Pincode, a.Country, false);
+        var resp = await Api.PutAsync<CompanyAddressDto, UpdateCompanyAddressRequest>($"api/settings/company-addresses/{a.Id}", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" });
+            await LoadAddresses();
+        }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+
+    private static string FormatLine(CompanyAddressDto a)
+    {
+        var parts = new List<string> { a.AddressLine1 };
+        if (!string.IsNullOrWhiteSpace(a.AddressLine2)) parts.Add(a.AddressLine2!);
+        parts.Add($"{a.City}, {a.State}{(string.IsNullOrWhiteSpace(a.Pincode) ? "" : " " + a.Pincode)}");
+        parts.Add(a.Country);
+        return string.Join(" · ", parts);
+    }
+
+    private sealed class AddressForm
+    {
+        public string AddressName { get; set; } = string.Empty;
+        public string ErpCode { get; set; } = string.Empty;
+        public string AddressType { get; set; } = "Shipping";
+        public string AddressLine1 { get; set; } = string.Empty;
+        public string AddressLine2 { get; set; } = string.Empty;
+        public string City { get; set; } = string.Empty;
+        public string State { get; set; } = string.Empty;
+        public string Pincode { get; set; } = string.Empty;
+        public string Country { get; set; } = "India";
+        public bool IsActive { get; set; } = true;
+
+        public void Reset()
+        {
+            AddressName = string.Empty;
+            ErpCode = string.Empty;
+            AddressType = "Shipping";
+            AddressLine1 = string.Empty;
+            AddressLine2 = string.Empty;
+            City = string.Empty;
+            State = string.Empty;
+            Pincode = string.Empty;
+            Country = "India";
+            IsActive = true;
+        }
+    }
+}

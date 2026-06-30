@@ -90,6 +90,16 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
         // PO header total = sum of line net amounts (Price − DiscountAmount). Derived, not persisted.
         var totalAmount = lines.Sum(l => l.NetAmount);
 
+        // R5 (§6.1) — CustomerName is DERIVED live from the Company master by the PO's tenantEntityId (reflects
+        // company renames live; never stored on the PO). IgnoreQueryFilters because the read may run under a supplier
+        // principal who does not own the Company's config seccode; scoped by (tenantId, tenantEntityId). The ship-to
+        // displayed below is the POINT-IN-TIME snapshot off po.ShipTo (the owned VO), not the live address.
+        var customerName = await _db.Companies.IgnoreQueryFilters()
+            .Where(c => !c.IsDeleted && c.TenantId == row.po.TenantId && c.TenantEntityId == row.po.TenantEntityId)
+            .Select(c => c.Name)
+            .FirstOrDefaultAsync(ct);
+        var shipTo = row.po.ShipTo;
+
         return new PurchaseOrderDetailDto(
             row.po.Id, row.po.Seq, row.po.PoNumber,
             row.po.SupplierId, row.s.LegalName, row.s.SupplierCode,
@@ -107,6 +117,16 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
             totalAmount,
             // R4 (2026-06-26) — Phase 5b / D1, D2: the action toggles drive the PO-detail Reject / Negotiation gating.
             row.s.AllowNegotiate,
-            row.s.AllowReject);
+            row.s.AllowReject,
+            // R5 (§6.1) — derived customer name + the point-in-time ship-to snapshot (display-only).
+            customerName,
+            shipTo?.AddressName,
+            shipTo?.ErpCode,
+            shipTo?.Line1,
+            shipTo?.Line2,
+            shipTo?.City,
+            shipTo?.State,
+            shipTo?.Pincode,
+            shipTo?.Country);
     }
 }

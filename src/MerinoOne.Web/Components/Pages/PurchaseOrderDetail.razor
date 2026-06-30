@@ -99,6 +99,9 @@ else
             <div class="rz-card" style="padding:20px;">
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Order details</h3>
                 <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
+                    @* R5 (TSD R5 Addendum §6.1 — Component 2): CustomerName is DERIVED live (PO.tenantEntityId →
+                       Company.name), display-only and reflects company renames. *@
+                    <dt style="color:var(--mer-ink-500);">Customer</dt><dd>@(string.IsNullOrEmpty(detail.CustomerName) ? "—" : detail.CustomerName)</dd>
                     <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
                     <dt style="color:var(--mer-ink-500);">Buyer</dt><dd>@(detail.BuyerName ?? "—")</dd>
                     <dt style="color:var(--mer-ink-500);">PO Date</dt><dd style="font-family:Inter,monospace;">@detail.PoDate.ToString("yyyy-MM-dd")</dd>
@@ -121,9 +124,44 @@ else
                 </dl>
             </div>
 
-            <div class="rz-card" style="padding:20px;">
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Notes</h3>
-                <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@(string.IsNullOrEmpty(detail.Notes) ? "No notes." : detail.Notes)</p>
+            <div style="display:flex;flex-direction:column;gap:16px;">
+                @* R5 (TSD R5 Addendum §6.1 — Component 2): the ship-to is the POINT-IN-TIME snapshot copied onto the
+                   PO at inbound resolution (the ShipTo* fields), NOT the live company address — so later edits to the
+                   company address do not change historical POs. Display-only. Legacy POs with no resolved ship-to
+                   render a subtle "no ship-to" placeholder rather than an empty card. *@
+                <div class="rz-card" style="padding:20px;">
+                    <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Ship-to</h3>
+                    @if (HasShipTo)
+                    {
+                        <div style="display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--mer-ink-900);">
+                            <div style="font-weight:600;color:var(--mer-blue-darker);">
+                                @detail.ShipToAddressName
+                                @if (!string.IsNullOrEmpty(detail.ShipToErpCode))
+                                {
+                                    <span class="tlg-status tlg-status--info" style="margin-left:6px;font-family:Inter,monospace;">@detail.ShipToErpCode</span>
+                                }
+                            </div>
+                            @if (!string.IsNullOrEmpty(detail.ShipToLine1))
+                            {
+                                <div>@detail.ShipToLine1@(string.IsNullOrEmpty(detail.ShipToLine2) ? "" : $", {detail.ShipToLine2}")</div>
+                            }
+                            <div style="color:var(--mer-ink-700);">@ShipToCityLine</div>
+                            @if (!string.IsNullOrEmpty(detail.ShipToCountry))
+                            {
+                                <div style="color:var(--mer-ink-700);">@detail.ShipToCountry</div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p style="font-size:13px;color:var(--mer-ink-500);">— no ship-to</p>
+                    }
+                </div>
+
+                <div class="rz-card" style="padding:20px;">
+                    <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Notes</h3>
+                    <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@(string.IsNullOrEmpty(detail.Notes) ? "No notes." : detail.Notes)</p>
+                </div>
             </div>
         </div>
 
@@ -349,6 +387,25 @@ else
     // AutoAccept (AcceptToShip / AcknowledgeToShip both require a manual Ack/Accept/Reject affordance). Defaults to
     // the non-AutoAccept branch so a missing/empty value never hides the manual actions.
     private bool ManualResponse => !string.Equals(detail?.PoResponseMode, "AutoAccept", StringComparison.OrdinalIgnoreCase);
+
+    // R5 (TSD R5 Addendum §6.1 — Component 2): the ship-to snapshot is considered present when any snapshot field is
+    // populated. Legacy POs (resolved before R5, or never resolved) carry all-null ShipTo* and render "no ship-to".
+    private bool HasShipTo => detail != null && (
+        !string.IsNullOrEmpty(detail.ShipToAddressName) ||
+        !string.IsNullOrEmpty(detail.ShipToLine1) ||
+        !string.IsNullOrEmpty(detail.ShipToCity) ||
+        !string.IsNullOrEmpty(detail.ShipToErpCode));
+
+    // "City, State Pincode" — each segment dropped when blank so a sparse snapshot does not read with stray commas.
+    private string ShipToCityLine
+    {
+        get
+        {
+            if (detail == null) return string.Empty;
+            var cityState = string.Join(", ", new[] { detail.ShipToCity, detail.ShipToState }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            return string.IsNullOrEmpty(detail.ShipToPincode) ? cityState : $"{cityState} {detail.ShipToPincode}".Trim();
+        }
+    }
 
     private void TabOverview() => tab = "overview";
     private void TabHistory() => tab = "history";

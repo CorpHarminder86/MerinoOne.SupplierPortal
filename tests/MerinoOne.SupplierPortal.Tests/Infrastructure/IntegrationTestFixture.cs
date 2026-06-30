@@ -40,9 +40,16 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     public const int ApiKeyPrefixLength = 12; // matches ApiKeyAuthenticationHandler.PrefixLength
     public const string CompanyCode = "2000";
 
+    // R5 (TSD R5 Addendum §6.2) — the inbound PO ship-to CODE the tests push. Resolves to the seeded
+    // admin.CompanyAddress.erpCode below; the resolution populates PurchaseOrder.shipToAddressId + the snapshot.
+    public const string ShipToErpCode = "DC-TEST-01";
+
     // Deterministic ids (kept stable so the seed is idempotent across runs).
     public static readonly Guid TenantId      = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public static readonly Guid CompanyId     = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    // R5 — the admin.Company (customer master, 1:1 to the TenantEntity CompanyId) + its ship-to address.
+    public static readonly Guid ShipToCompanyId = Guid.Parse("2c000000-0000-0000-0000-000000000001");
+    public static readonly Guid ShipToAddressId = Guid.Parse("2c000000-0000-0000-0000-000000000002");
     public static readonly Guid SupplierId    = Guid.Parse("33333333-3333-3333-3333-333333333333");
     public static readonly Guid SeccodeId     = Guid.Parse("44444444-4444-4444-4444-444444444444");
     public static readonly Guid ApiKeyId      = Guid.Parse("55555555-5555-5555-5555-555555555555");
@@ -187,6 +194,28 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
                 Id = SeccodeId, SeccodeType = SeccodeType.G, Name = "IntTest supplier seccode",
                 SupplierId = SupplierId, TenantId = TenantId, TenantEntityId = CompanyId,
                 CreatedBy = "seed", CreatedOn = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // --- Company master (R5 §4.1) + ship-to address (R5 §4.2) -----------------------------------------
+        // The customer/buying-entity master 1:1 to the TenantEntity (CompanyId), plus one ship-to address whose
+        // erpCode (ShipToErpCode) the inbound PO push resolves against. Owned by the supplier seccode (type G) so
+        // the FK is valid under the system-principal seed; the always-on filters are bypassed at read time anyway.
+        if (!await db.Companies.IgnoreQueryFilters().AnyAsync(c => c.Id == ShipToCompanyId))
+        {
+            db.Companies.Add(new Company
+            {
+                Id = ShipToCompanyId, TenantId = TenantId, TenantEntityId = CompanyId,
+                Name = "IntTest Customer 2000", IsActive = true, SeccodeId = SeccodeId,
+                CreatedBy = "seed", CreatedOn = now
+            });
+            db.CompanyAddresses.Add(new CompanyAddress
+            {
+                Id = ShipToAddressId, CompanyId = ShipToCompanyId, AddressName = "IntTest DC",
+                ErpCode = ShipToErpCode, AddressType = "Shipping", AddressLine1 = "1 Test Estate",
+                City = "Mumbai", State = "Maharashtra", Pincode = "400001", Country = "India",
+                IsActive = true, CreatedBy = "seed", CreatedOn = now
             });
             await db.SaveChangesAsync();
         }

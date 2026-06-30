@@ -45,6 +45,12 @@ public static class SeedRunner
         logger?.LogInformation("Seed: AttachmentGovernanceSeeder");
         await AttachmentGovernanceSeeder.SeedAsync(ctx, ct);
 
+        // R5 (TSD R5 Addendum §4.1–4.2 / Component 1). Runs AFTER TenantSeeder so the tenant + tenant-admin seccode
+        // exist. Seeds one admin.Company per tenant company (1:1 to tenantEntityId) + one ship-to CompanyAddress
+        // carrying an erpCode, so inbound PO ship-to resolution (§6.2) has a code to resolve against.
+        logger?.LogInformation("Seed: CompanySeeder");
+        await CompanySeeder.SeedAsync(ctx, ct);
+
         // Light scope tagging (suppliers/masters/config/UserCompanyMaps + ensure flag OFF) runs BEFORE the
         // volume backfill so suppliers carry company 2000 when the heavy pass later joins on them.
         logger?.LogInformation("Seed: ScopeBackfillSeeder (light)");

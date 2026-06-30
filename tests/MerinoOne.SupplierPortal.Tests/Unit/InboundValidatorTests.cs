@@ -145,9 +145,10 @@ public class InboundValidatorTests
     private static UpsertPurchaseOrdersCommand PoCmd(params PoRecord[] orders)
         => new(new PushPurchaseOrdersRequest("2000", orders), NoBoundCompanies, null);
 
-    private static PoRecord Po(string? supplierCode = null, string? erpSupplierCode = null)
+    // R5 — ShipToAddress is now REQUIRED; supply a valid one so the supplier-identity one-of rule is isolated.
+    private static PoRecord Po(string? supplierCode = null, string? erpSupplierCode = null, string shipToAddress = "DC-TEST-01")
         => new(PoNumber: "PO-1", SupplierCode: supplierCode, PoDate: DateTime.UtcNow.Date,
-               Lines: Array.Empty<PoLineRecord>(), ErpSupplierCode: erpSupplierCode);
+               Lines: Array.Empty<PoLineRecord>(), ShipToAddress: shipToAddress, ErpSupplierCode: erpSupplierCode);
 
     [Fact] // flow 2
     public void Po_with_only_supplierCode_passes()
@@ -184,5 +185,13 @@ public class InboundValidatorTests
         var result = new UpsertPurchaseOrdersCommandValidator().Validate(PoCmd(Po(supplierCode: "   ", erpSupplierCode: " ")));
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.ErrorMessage.Contains("Either supplierCode or erpSupplierCode is required"));
+    }
+
+    [Fact] // R5 (§6.3) — ShipToAddress is required on the inbound PO.
+    public void Po_with_blank_shipToAddress_is_rejected()
+    {
+        var result = new UpsertPurchaseOrdersCommandValidator()
+            .Validate(PoCmd(Po(supplierCode: "S0001", shipToAddress: "  ")));
+        result.IsValid.Should().BeFalse(because: "shipToAddress is mandatory");
     }
 }

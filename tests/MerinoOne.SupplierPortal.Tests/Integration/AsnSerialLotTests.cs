@@ -225,6 +225,7 @@ public class AsnSerialLotTests
                     new PoLineRecord(PositionNo: 20, SequenceNo: 2, ItemCode: lotItem.ItemCode,
                         OrderUnit: "KG", OrderQty: 100, PriceUnit: 1, Price: 5),
                 },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         });
         var poResp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", poBody);

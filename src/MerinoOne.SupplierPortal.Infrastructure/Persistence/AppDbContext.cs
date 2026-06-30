@@ -65,6 +65,10 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<TenantEntity> TenantEntities => Set<TenantEntity>();
     public DbSet<UserCompanyMap> UserCompanyMaps => Set<UserCompanyMap>();
 
+    // R5 (TSD R5 Addendum §4.1–4.2) — Company Master + its named ship-to addresses (admin config masters).
+    public DbSet<Company> Companies => Set<Company>();
+    public DbSet<CompanyAddress> CompanyAddresses => Set<CompanyAddress>();
+
     public DbSet<Item> Items => Set<Item>();
     public DbSet<SupplierItem> SupplierItems => Set<SupplierItem>();
     public DbSet<ItemGroup> ItemGroups => Set<ItemGroup>();

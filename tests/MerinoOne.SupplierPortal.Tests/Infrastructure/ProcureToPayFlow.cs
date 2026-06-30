@@ -60,6 +60,7 @@ public static class ProcureToPayFlow
                     new PoLineRecord(PositionNo: positionNo, SequenceNo: 1, ItemCode: item.ItemCode,
                         OrderUnit: "EA", OrderQty: orderQty, PriceUnit: priceUnit, Price: priceUnit * orderQty),
                 },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         });
         var poResp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", poBody);

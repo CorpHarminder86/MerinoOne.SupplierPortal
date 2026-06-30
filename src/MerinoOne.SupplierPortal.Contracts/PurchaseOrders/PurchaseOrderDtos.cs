@@ -63,7 +63,20 @@ public record PurchaseOrderDetailDto(
     // Reject/Decline; AllowNegotiate=false hides the Negotiation action. Trailing optional (default true) so older
     // positional callers stay valid and a missing value never hides an action it shouldn't.
     bool AllowNegotiate = true,
-    bool AllowReject = true);
+    bool AllowReject = true,
+    // R5 (TSD R5 Addendum §6.1 — Component 2) — display-only. CustomerName is DERIVED live (PO.tenantEntityId →
+    // Company.name); it reflects company renames live and is NOT stored on the PO. The ShipTo* fields are the
+    // POINT-IN-TIME snapshot read from the owned po.ShipTo value object (what the header renders), NOT the live
+    // address — so later edits to the company address do not change historical POs. All null until a PO is resolved.
+    string? CustomerName = null,
+    string? ShipToAddressName = null,
+    string? ShipToErpCode = null,
+    string? ShipToLine1 = null,
+    string? ShipToLine2 = null,
+    string? ShipToCity = null,
+    string? ShipToState = null,
+    string? ShipToPincode = null,
+    string? ShipToCountry = null);
 
 public record PurchaseOrderLineDto(
     Guid Id,

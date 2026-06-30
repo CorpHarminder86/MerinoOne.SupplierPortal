@@ -39,6 +39,11 @@ public interface IAppDbContext
     DbSet<TenantEntity> TenantEntities { get; }
     DbSet<UserCompanyMap> UserCompanyMaps { get; }
 
+    // R5 (TSD R5 Addendum §4.1–4.2 / Component 1) — Company Master: the customer (buying entity) keyed 1:1 to
+    // tenantEntityId, with its named, ERP-mappable ship-to addresses. Admin config masters (Settings-gated).
+    DbSet<Company> Companies { get; }
+    DbSet<CompanyAddress> CompanyAddresses { get; }
+
     DbSet<Item> Items { get; }
     DbSet<SupplierItem> SupplierItems { get; }
     DbSet<ItemGroup> ItemGroups { get; }

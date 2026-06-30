@@ -161,4 +161,91 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
         await _mediator.Send(new DeleteAttachmentPolicyCommand(id), ct);
         return Result.Ok(HttpContext.TraceIdentifier);
     }
+
+    // ============================ Company Master (R5 §5 / §6.1 — Component 1) ============================
+    // The CUSTOMER (buying entity) the supplier ships to, plus its named, ERP-mappable ship-to addresses. Admin
+    // config masters (one Company per active company, 1:1 to tenantEntityId). erpCode resolves the inbound PO
+    // ship-to (§6.2). Routes live under /api/settings/companies so they do NOT collide with the existing
+    // /api/companies TenantEntity selector (a different concept).
+
+    [HttpGet("companies")]
+    [Authorize(Policy = "Settings.Read")]
+    [EndpointSummary("Company master list")]
+    [EndpointDescription(@"The tenant's Company master rows (the customers / buying entities; 1:1 to tenantEntityId). The customer name shown on the PO header derives from this.
+Filters / params:
+- **isActive**: Optional — true active only, false inactive only, omit for all.
+Returns: List<CompanyMasterDto> { id, seq, tenantEntityId, name, isActive, createdOn }. Requires permission **Settings.Read**.")]
+    public async Task<Result<List<CompanyMasterDto>>> ListCompanyMasters([FromQuery] bool? isActive, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetCompaniesQuery(isActive), ct);
+        return Result<List<CompanyMasterDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("companies")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Create company master")]
+    [EndpointDescription(@"Creates the Company master row for the active company (tenantEntityId is the active company; one Company per buying entity).
+Body:
+- **body**: CreateCompanyMasterRequest { name }.
+Returns: CompanyMasterDto; 400 on validation; 409 if a Company already exists for the active company. Requires permission **Settings.Write**.")]
+    public async Task<Result<CompanyMasterDto>> CreateCompanyMaster([FromBody] CreateCompanyMasterRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new CreateCompanyCommand(body), ct);
+        return Result<CompanyMasterDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("companies/{id:guid}")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Update company master")]
+    [EndpointDescription(@"Renames a Company master row and/or toggles its active flag (no hard delete — deactivate via isActive=false).
+Filters / params:
+- **id**: Required — Company GUID.
+- **body**: UpdateCompanyMasterRequest { name, isActive }.
+Returns: CompanyMasterDto; 404 if not found. Requires permission **Settings.Write**.")]
+    public async Task<Result<CompanyMasterDto>> UpdateCompanyMaster(Guid id, [FromBody] UpdateCompanyMasterRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpdateCompanyCommand(id, body), ct);
+        return Result<CompanyMasterDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpGet("companies/{companyId:guid}/addresses")]
+    [Authorize(Policy = "Settings.Read")]
+    [EndpointSummary("Company address list")]
+    [EndpointDescription(@"The named, ERP-mappable ship-to addresses under a Company.
+Filters / params:
+- **companyId**: Required — owning Company GUID.
+- **isActive**: Optional — true active only, false inactive only, omit for all.
+Returns: List<CompanyAddressDto> { id, seq, companyId, addressName, erpCode, addressType, addressLine1/2, city, state, pincode, country, isActive, createdOn }; 404 unknown company. Requires permission **Settings.Read**.")]
+    public async Task<Result<List<CompanyAddressDto>>> ListCompanyAddresses(Guid companyId, [FromQuery] bool? isActive, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetCompanyAddressesQuery(companyId, isActive), ct);
+        return Result<List<CompanyAddressDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("company-addresses")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Create company address")]
+    [EndpointDescription(@"Creates a ship-to address under a Company. AddressName is REQUIRED; ErpCode is OPTIONAL but must be unique within the company when present (the inbound PO ship-to resolves against it).
+Body:
+- **body**: CreateCompanyAddressRequest { companyId, addressName, erpCode?, addressType, addressLine1, addressLine2?, city, state, pincode?, country? }.
+Returns: CompanyAddressDto; 400 on validation; 404 unknown company; 409 if the erpCode collides within the company. Requires permission **Settings.Write**.")]
+    public async Task<Result<CompanyAddressDto>> CreateCompanyAddress([FromBody] CreateCompanyAddressRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new CreateCompanyAddressCommand(body), ct);
+        return Result<CompanyAddressDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("company-addresses/{id:guid}")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Update company address")]
+    [EndpointDescription(@"Edits a ship-to address (deactivate via isActive=false — kept for historical POs, removed from new ship-to resolution). ErpCode stays unique per company when present.
+Filters / params:
+- **id**: Required — CompanyAddress GUID.
+- **body**: UpdateCompanyAddressRequest { addressName, erpCode?, addressType, addressLine1, addressLine2?, city, state, pincode?, country?, isActive }.
+Returns: CompanyAddressDto; 404 if not found; 409 if the erpCode collides within the company. Requires permission **Settings.Write**.")]
+    public async Task<Result<CompanyAddressDto>> UpdateCompanyAddress(Guid id, [FromBody] UpdateCompanyAddressRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpdateCompanyAddressCommand(id, body), ct);
+        return Result<CompanyAddressDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
 }

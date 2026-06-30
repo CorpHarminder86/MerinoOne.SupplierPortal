@@ -49,12 +49,21 @@ public record PoLineRecord(
 /// (it is the ERP's authoritative identity); when NEITHER is supplied the row is rejected — at least one is
 /// required. PoType / PoStatus are enum NAMEs (default Material / Released). Currency / payment-term /
 /// delivery-term resolve by code against the resolved company (FK + snapshot).
+/// <para>R5 (TSD R5 Addendum §6.2/§6.3) — <see cref="ShipToAddress"/> is the ERP ship-to CODE and is
+/// <b>REQUIRED</b>: it resolves to the <c>CompanyAddress.erpCode</c> of the PO's company (by
+/// <c>tenantEntityId</c>). If it does not resolve to an active address, the PO row is HARD-FAILED (not
+/// created/updated). <see cref="ErpStatus"/> is the RAW ERP status, stored on the PO for tracking only — the
+/// portal PoStatus resolution via the PoStatusMapping master is Phase 2; this phase only records the raw value
+/// (the existing material-change PoStatus logic is unchanged).</para>
 /// </summary>
 public record PoRecord(
     string PoNumber,
     string? SupplierCode,
     DateTime PoDate,
     IReadOnlyList<PoLineRecord> Lines,
+    /// <summary>R5 (§6.2/§6.3) — REQUIRED ERP ship-to CODE; resolves to <c>CompanyAddress.erpCode</c> within the PO's
+    /// company. Unresolvable (no company / no matching active address) → the PO row is hard-failed.</summary>
+    string ShipToAddress,
     string? PoType = null,
     string? PoStatus = null,
     string? PaymentTerms = null,
@@ -66,7 +75,10 @@ public record PoRecord(
     string? ErpSyncId = null,
     /// <summary>ERP supplier code (matched against <c>Supplier.ErpCode</c>). Takes priority over
     /// <see cref="SupplierCode"/> when both are supplied. One of the two is required.</summary>
-    string? ErpSupplierCode = null);
+    string? ErpSupplierCode = null,
+    /// <summary>R5 (§4.8/§6.3) — raw ERP status (e.g. 'Released', 'modified'). Stored on the PO for tracking/audit
+    /// only; the portal PoStatus is NOT resolved from it in this phase (PoStatusMapping is Phase 2).</summary>
+    string? ErpStatus = null);
 
 /// <summary>Inbound PO push body. See <see cref="PushGrnStatusRequest"/> for company semantics.</summary>
 public record PushPurchaseOrdersRequest(

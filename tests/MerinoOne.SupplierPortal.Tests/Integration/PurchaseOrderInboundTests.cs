@@ -76,6 +76,7 @@ public class PurchaseOrderInboundTests
                         OrderUnit: "KG", OrderQty: 40, PriceUnit: 1, Price: 25,
                         DiscountPct: 5m, TaxCode: taxCode, TaxDescription: "GST 18%"),
                 },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released),
                 CurrencyCode: "INR"),
         });
@@ -139,6 +140,89 @@ public class PurchaseOrderInboundTests
     }
 
     /// <summary>
+    /// UC-PS-01 (R5 §6.2) — a valid ship-to code resolves: the PO persists with shipToAddressId set + the
+    /// point-in-time snapshot columns populated from the seeded CompanyAddress (addressName / erpCode / city / …),
+    /// and the read model surfaces the derived CustomerName + the snapshot.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_resolves_shipTo_and_snapshots()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poNumber = $"PO-SHIPTO-{tag}";
+
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 10) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR", ErpStatus: "Released"),
+        }));
+
+        Guid poId;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var po = await db.PurchaseOrders.IgnoreQueryFilters()
+                .FirstAsync(p => p.PoNumber == poNumber && p.TenantId == IntegrationTestFixture.TenantId);
+            poId = po.Id;
+            po.ShipToAddressId.Should().Be(IntegrationTestFixture.ShipToAddressId,
+                because: "the ship-to code resolved to the seeded CompanyAddress FK");
+            po.ErpStatus.Should().Be("Released", because: "the raw ERP status is stored (tracking only)");
+            po.ShipTo.Should().NotBeNull(because: "the point-in-time ship-to snapshot is captured at resolution");
+            po.ShipTo!.ErpCode.Should().Be(IntegrationTestFixture.ShipToErpCode);
+            po.ShipTo!.AddressName.Should().Be("IntTest DC");
+            po.ShipTo!.City.Should().Be("Mumbai");
+        }
+
+        // Read model: derived CustomerName (Company.name) + the snapshot fields (display-only).
+        var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var detail = (await Read<PurchaseOrderDetailDto>(await supplierClient.GetAsync($"/api/purchase-orders/{poId}"))).Data!;
+        detail.CustomerName.Should().Be("IntTest Customer 2000", because: "customer name derives from Company.name by tenantEntityId");
+        detail.ShipToAddressName.Should().Be("IntTest DC");
+        detail.ShipToErpCode.Should().Be(IntegrationTestFixture.ShipToErpCode);
+        detail.ShipToCity.Should().Be("Mumbai");
+        detail.ShipToState.Should().Be("Maharashtra");
+    }
+
+    /// <summary>
+    /// UC-PS-02 (R5 §6.2) — an unresolvable ship-to code HARD-FAILS that PO row: Failed=1, the PO is NOT persisted.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_unresolvable_shipTo_hard_fails()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-BADSHIP-{tag}";
+
+        var body = new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 10) },
+                ShipToAddress: $"NO-SUCH-DC-{tag}",
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        });
+        var resp = await _fx.CreateInboundClient().PostAsJsonAsync("/api/integration/inbound/purchase-orders", body);
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var r = await Read<UpsertResultDto>(resp);
+        r.Data!.Failed.Should().Be(1, because: "the ship-to code does not resolve to an active CompanyAddress (UC-PS-02)");
+        r.Data!.Inserted.Should().Be(0);
+        r.Data!.Rows.Single().Error.Should().Contain("Ship-to code", because: "the failure carries the offending code");
+
+        using var s = _fx.Factory.Services.CreateScope();
+        var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.PurchaseOrders.IgnoreQueryFilters().AnyAsync(p => p.PoNumber == poNumber))
+            .Should().BeFalse(because: "a PO with an unresolvable ship-to is never created");
+    }
+
+    /// <summary>
     /// Supplier-identity resolution on the inbound PO push (erpSupplierCode / supplierCode). Covers all four
     /// flows: (1) erpSupplierCode only → resolve by Supplier.ErpCode; (2) supplierCode only → resolve by code
     /// [covered by the test above]; (3) BOTH → erpSupplierCode WINS; (4) NEITHER → 400, nothing persists.
@@ -178,6 +262,7 @@ public class PurchaseOrderInboundTests
                         new PoLineRecord(PositionNo: 10, SequenceNo: 1, ItemCode: $"ITM-{tag}",
                             OrderUnit: "EA", OrderQty: 1, PriceUnit: 1, Price: 1),
                     },
+                    ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                     PoStatus: nameof(PoStatus.Released),
                     CurrencyCode: "INR",
                     ErpSupplierCode: erpSupplierCode),
@@ -253,6 +338,7 @@ public class PurchaseOrderInboundTests
                         new PoLineRecord(PositionNo: positionNo, SequenceNo: sequenceNo, ItemCode: $"ITM-{tag}",
                             OrderUnit: "EA", OrderQty: qty, PriceUnit: price, Price: price, DiscountAmount: discountAmount),
                     },
+                    ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                     PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR")
             });
 
@@ -314,6 +400,7 @@ public class PurchaseOrderInboundTests
                 new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                     new[] { new PoLineRecord(PositionNo: 10, SequenceNo: seq, ItemCode: $"ITM-{tag}",
                         OrderUnit: "EA", OrderQty: orderQty, PriceUnit: 1, Price: 1, AdditionalQty: additionalQty) },
+                    ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                     PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
             });
 
@@ -377,6 +464,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
 
@@ -412,6 +500,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 120, PriceUnit: 1, Price: 120) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
 
@@ -451,6 +540,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
 
@@ -473,6 +563,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 150, PriceUnit: 1, Price: 150) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Accepted), CurrencyCode: "INR"),   // pushed status is ignored on a material modify
         }));
 
@@ -506,6 +597,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
 
@@ -525,6 +617,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", ItemDescription: "renamed", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR", Notes: "internal ref updated"),
         }));
 
@@ -557,6 +650,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Accepted), CurrencyCode: "INR"),
         }));
 
@@ -581,6 +675,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 60, PriceUnit: 1, Price: 60) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Accepted), CurrencyCode: "INR"),
         }));
 
@@ -648,9 +743,11 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poAuto, supAuto.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 10) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
             new PoRecord(poManual, supManual.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 10) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
 
@@ -703,6 +800,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 100, PriceUnit: 1, Price: 100) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
 
@@ -711,6 +809,7 @@ public class PurchaseOrderInboundTests
         {
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 120, PriceUnit: 1, Price: 120) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
 

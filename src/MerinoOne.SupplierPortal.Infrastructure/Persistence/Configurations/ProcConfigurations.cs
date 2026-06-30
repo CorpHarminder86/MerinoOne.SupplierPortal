@@ -1,3 +1,4 @@
+using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -31,6 +32,26 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         b.Property(x => x.CurrencyId).HasColumnName("currencyId").HasColumnType("uniqueidentifier");
         b.Property(x => x.CurrencyCode).HasColumnName("currencyCode").HasMaxLength(10);
 
+        // R5 (TSD R5 Addendum §4.3 / §6) — ship-to FK (nullable this phase; backfill later) + §4.8 raw ERP status.
+        b.Property(x => x.ShipToAddressId).HasColumnName("shipToAddressId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.ErpStatus).HasColumnName("erpStatus").HasMaxLength(50);
+
+        // R5 (TSD R5 Addendum §4.3) — point-in-time ship-to snapshot as an OWNED VALUE OBJECT mapped onto the
+        // eight shipTo* columns ON THE PurchaseOrder table (one VO, one copy mapper, no separate table).
+        // IsRequired(false) keeps the owned columns nullable (no PO is forced to have a snapshot in this phase).
+        b.OwnsOne(x => x.ShipTo, s =>
+        {
+            s.Property(p => p.AddressName).HasColumnName("shipToAddressName").HasMaxLength(150);
+            s.Property(p => p.ErpCode).HasColumnName("shipToErpCode").HasMaxLength(50);
+            s.Property(p => p.Line1).HasColumnName("shipToLine1").HasMaxLength(300);
+            s.Property(p => p.Line2).HasColumnName("shipToLine2").HasMaxLength(300);
+            s.Property(p => p.City).HasColumnName("shipToCity").HasMaxLength(100);
+            s.Property(p => p.State).HasColumnName("shipToState").HasMaxLength(100);
+            s.Property(p => p.Pincode).HasColumnName("shipToPincode").HasMaxLength(20);
+            s.Property(p => p.Country).HasColumnName("shipToCountry").HasMaxLength(100);
+        });
+        b.Navigation(x => x.ShipTo).IsRequired(false);
+
         b.ToTable(t => t.HasCheckConstraint("CK_PurchaseOrder_poType", "[poType] IN ('Material','Service')"));
 
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
@@ -42,12 +63,18 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         b.HasOne(x => x.Currency).WithMany().HasForeignKey(x => x.CurrencyId)
             .HasConstraintName("FK_PurchaseOrder_Currency_CurrencyId").OnDelete(DeleteBehavior.Restrict);
 
+        // R5 (TSD R5 Addendum §4.3) — ship-to FK → admin.CompanyAddress, RESTRICT (a resolved ship-to must not
+        // be cascade-removed out from under historical POs). The snapshot above is what the header renders.
+        b.HasOne(x => x.ShipToAddress).WithMany().HasForeignKey(x => x.ShipToAddressId)
+            .HasConstraintName("FK_PurchaseOrder_CompanyAddress_shipToAddressId").OnDelete(DeleteBehavior.Restrict);
+
         b.HasIndex(x => x.PoNumber).HasDatabaseName("UQ_PurchaseOrder_poNumber").IsUnique();
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_PurchaseOrder_supplierId");
         b.HasIndex(x => x.PoStatus).HasDatabaseName("IX_PurchaseOrder_poStatus");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_PurchaseOrder_tenant_company");
         b.HasIndex(x => x.CurrencyId).HasDatabaseName("IX_PurchaseOrder_currencyId");
+        b.HasIndex(x => x.ShipToAddressId).HasDatabaseName("IX_PurchaseOrder_shipTo");
     }
 }
 

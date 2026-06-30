@@ -37,6 +37,9 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
             o.RuleFor(r => r)
                 .Must(r => !string.IsNullOrWhiteSpace(r.SupplierCode) || !string.IsNullOrWhiteSpace(r.ErpSupplierCode))
                 .WithMessage("Either supplierCode or erpSupplierCode is required.");
+            // R5 (§6.2/§6.3) — the ERP ship-to code is mandatory on the inbound PO. (Resolution to an active
+            // CompanyAddress.erpCode happens in the handler; an unresolvable code is hard-failed per-row there.)
+            o.RuleFor(r => r.ShipToAddress).NotEmpty().MaximumLength(50);
             o.RuleFor(r => r.Lines).NotNull();
             // R4 (2026-06-30) — orderQty is an absolute qty (>= 0); additionalQty is a signed delta (may be
             // negative to reduce). They are MUTUALLY EXCLUSIVE on a line: send orderQty to REPLACE the absolute
@@ -64,8 +67,10 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
         // NOTE: an identical repeated cumulative-add push hashes the SAME — the ERP must vary the Idempotency-Key /
         // erpSyncId per intentional add, else a deliberate second identical delta is deduped (an accidental retry is
         // correctly deduped).
+        // R5 — ShipToAddress + ErpStatus are part of the canonical digest so a ship-to re-point or a raw-status change
+        // hashes differently and is NOT short-circuited as a duplicate by the no-header idempotency fallback.
         var canonical = recs.Select(r =>
-            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|" +
+            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.ShipToAddress?.Trim()}|{r.ErpStatus?.Trim()}|" +
             string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.ItemCode}/{l.OrderQty}/{l.AdditionalQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}")));
         var codes = recs.Select(r => r.PoNumber.Trim());
         return exec.ExecuteAsync(TransactionalInboundEntity.Po, request.Body.CompanyCode, request.BoundCompanyIds,
@@ -142,9 +147,38 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                     .ToListAsync(token))
                 .ToDictionary(p => p.PoNumber, StringComparer.OrdinalIgnoreCase);
 
+            // R5 (§6.2/§6.3) — ship-to resolution. All rows in a payload share the ONE resolved company (sourceId =
+            // PO.tenantEntityId), so batch-load that company + its ACTIVE, non-deleted ship-to addresses up front
+            // (no per-row DB round-trip — mirrors the supplier/item/tax batch-loads). The inbound code resolves to
+            // CompanyAddress.erpCode case-insensitively (§6.2). On a resolution MISS the PO row is hard-failed below.
+            var shipToCompanyId = await db.Companies.IgnoreQueryFilters()
+                .Where(c => !c.IsDeleted && c.TenantId == tenantId && c.TenantEntityId == sourceId)
+                .Select(c => (Guid?)c.Id).FirstOrDefaultAsync(token);
+            var addressByErpCode = new Dictionary<string, CompanyAddress>(StringComparer.OrdinalIgnoreCase);
+            if (shipToCompanyId is Guid companyId)
+            {
+                var addresses = await db.CompanyAddresses.IgnoreQueryFilters()
+                    .Where(a => !a.IsDeleted && a.IsActive && a.CompanyId == companyId && a.ErpCode != null)
+                    .ToListAsync(token);
+                foreach (var a in addresses)
+                    addressByErpCode[a.ErpCode!.Trim()] = a;   // last-wins (the filtered UQ makes erpCode unique anyway).
+            }
+
             foreach (var rec in recs)
             {
                 var poNum = rec.PoNumber.Trim();
+
+                // R5 (§6.2) — resolve the ship-to BEFORE any supplier/qty/persist work so a miss leaves the PO
+                // untouched (mirrors the supplier-not-found / qty-reject early-outs). HARD-FAIL on a miss: no company
+                // for the tenant entity, or no matching ACTIVE address erpCode → the PO is NOT created/updated.
+                // TODO R5 Phase 2: also write a SyncLog Failed row here (§12) — the SyncLog entity doesn't exist yet.
+                var shipToCode = rec.ShipToAddress.Trim();
+                if (shipToCompanyId is null || !addressByErpCode.TryGetValue(shipToCode, out var shipToAddress))
+                {
+                    results.Add(new RowResult(poNum, RowOutcome.Failed,
+                        $"Ship-to code '{shipToCode}' not found for tenant entity {sourceId}"));
+                    continue;
+                }
 
                 // erpSupplierCode wins when present (flows 1 & 3); else supplierCode (flow 2); neither = reject (flow 4).
                 var erp = rec.ErpSupplierCode?.Trim();
@@ -199,6 +233,12 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                     // string, but the gate semantics are driven by the material diff, not the literal push status. (A
                     // brand-new PO below DOES take the pushed status.)
                     po.PoStatus = isMaterial ? PoStatus.Released : po.PoStatus;
+                    // R5 (§6.2/§6.3) — re-snapshot the ship-to (it may have been re-pointed) + record the RAW erpStatus.
+                    // Store the raw value ONLY — do NOT resolve PoStatus from it (PoStatusMapping is Phase 2; the
+                    // PoStatus logic above stays exactly as-is). Snapshot copy uses the single factory (ShipToSnapshot.From).
+                    po.ShipToAddressId = shipToAddress.Id;
+                    po.ShipTo = ShipToSnapshot.From(shipToAddress);
+                    po.ErpStatus = rec.ErpStatus;
                     po.Version += 1; po.UpdatedBy = "infor:inbound"; po.UpdatedOn = now;
                     SyncLines(db, po, rec, resolvedQty, itemMap, taxMap, now);
 
@@ -228,6 +268,10 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                         PaymentTerms = rec.PaymentTerms, DeliveryTerms = rec.DeliveryTerms,
                         CurrencyId = curId, CurrencyCode = rec.CurrencyCode?.Trim(),
                         Notes = rec.Notes, ErpSyncId = rec.ErpSyncId, Version = 1,
+                        // R5 (§6.2/§6.3) — resolved ship-to FK + point-in-time snapshot (single copy point) + raw erpStatus.
+                        ShipToAddressId = shipToAddress.Id,
+                        ShipTo = ShipToSnapshot.From(shipToAddress),
+                        ErpStatus = rec.ErpStatus,
                         CreatedBy = "infor:inbound", CreatedOn = now
                     };
                     // One stored line per positionNo (seq forced to 1 in Apply); the resolved qty is the absolute total.
