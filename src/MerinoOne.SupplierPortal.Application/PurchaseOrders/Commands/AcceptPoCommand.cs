@@ -25,10 +25,11 @@ public class AcceptPoCommandHandler : IRequestHandler<AcceptPoCommand, Unit>
 {
     private readonly IAppDbContext _db;
     private readonly IOutboxDispatcher _outbox;
+    private readonly DeliverySchedules.DeliveryScheduleFactory _schedules;
 
-    public AcceptPoCommandHandler(IAppDbContext db, IOutboxDispatcher outbox)
+    public AcceptPoCommandHandler(IAppDbContext db, IOutboxDispatcher outbox, DeliverySchedules.DeliveryScheduleFactory schedules)
     {
-        _db = db; _outbox = outbox;
+        _db = db; _outbox = outbox; _schedules = schedules;
     }
 
     public async Task<Unit> Handle(AcceptPoCommand request, CancellationToken ct)
@@ -53,7 +54,11 @@ public class AcceptPoCommandHandler : IRequestHandler<AcceptPoCommand, Unit>
         var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "accept");
         await _outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, null, ct);
 
-        await _db.SaveChangesAsync(ct);   // PO state + outbox row in one transaction; dispatch is post-commit.
+        // R5 (§8.1) — AcceptToShip becomes shippable ON Accepted: stage the per-line delivery schedules so they
+        // commit in the SAME transaction as the state change + outbox row. Idempotent (the helper upserts).
+        await _schedules.EnsureDeliverySchedulesAsync(po.Id, ct);
+
+        await _db.SaveChangesAsync(ct);   // PO state + outbox row + schedules in one transaction; dispatch is post-commit.
         return Unit.Value;
     }
 }

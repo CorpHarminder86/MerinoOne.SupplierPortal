@@ -34,14 +34,16 @@ public class ApplyAutoPoReleaseCommandHandler : IRequestHandler<ApplyAutoPoRelea
     private readonly IOutboxDispatcher _outbox;
     private readonly IConfiguration _config;
     private readonly ILogger<ApplyAutoPoReleaseCommandHandler> _logger;
+    private readonly DeliverySchedules.DeliveryScheduleFactory _schedules;
 
     public ApplyAutoPoReleaseCommandHandler(
         IAppDbContext db,
         IOutboxDispatcher outbox,
         IConfiguration config,
-        ILogger<ApplyAutoPoReleaseCommandHandler> logger)
+        ILogger<ApplyAutoPoReleaseCommandHandler> logger,
+        DeliverySchedules.DeliveryScheduleFactory schedules)
     {
-        _db = db; _outbox = outbox; _config = config; _logger = logger;
+        _db = db; _outbox = outbox; _config = config; _logger = logger; _schedules = schedules;
     }
 
     public async Task<Unit> Handle(ApplyAutoPoReleaseCommand request, CancellationToken ct)
@@ -72,6 +74,10 @@ public class ApplyAutoPoReleaseCommandHandler : IRequestHandler<ApplyAutoPoRelea
         // dedupes a re-released PO. No LN HTTP inside this txn.
         var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "accept"); // tenant-qualified (review B2)
         await _outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, null, ct);
+
+        // R5 (§8.1) — AutoAccept becomes shippable on Released (auto-stamped to Accepted here): stage the per-line
+        // delivery schedules in the SAME transaction. Idempotent (the helper upserts on the line key).
+        await _schedules.EnsureDeliverySchedulesAsync(po.Id, ct);
 
         await _db.SaveChangesAsync(ct);
         _logger.LogInformation("Auto-released PO {PoNumber} (supplier in AutoAccept mode): acknowledged + accepted + acceptance enqueued.", po.PoNumber);

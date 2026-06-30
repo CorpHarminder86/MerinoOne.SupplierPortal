@@ -203,23 +203,60 @@ public class PurchaseOrderNegotiationLineConfiguration : IEntityTypeConfiguratio
     }
 }
 
+// R5 (TSD R5 Addendum §4.4 / §8) — replaces the pre-R5 delivery-schedule entity. The old schedule (with
+// ProposedDate / TimeWindow / VehicleInfo / ScheduleStatus) is retired; this aggregate is the R5 per-line
+// delivery commitment (one per PO line, created when a PO becomes shippable).
+//
+// Indexes:
+//   UX_DeliverySchedule_deliveryScheduleSeq  — clustered (applied by ApplyBaseEntityConvention)
+//   IX_DeliverySchedule_shipTo_date          — (shipToAddressId, deliveryDate) — supports the ASN creation
+//                                              filter (Component 3, §7) and the schedule grid sort (§8.3)
+//   UQ_DeliverySchedule_line                 — UNIQUE FILTERED on (purchaseOrderLineId) WHERE isDeleted=0
+//                                              (one active schedule per line in Phase 1; Phase 2 relaxes for
+//                                              multi-schedule splits)
+//
+// All FKs Restrict — a PO or line soft-delete must not cascade-wipe the schedule.
 public class DeliveryScheduleConfiguration : IEntityTypeConfiguration<DeliverySchedule>
 {
     public void Configure(EntityTypeBuilder<DeliverySchedule> b)
     {
         b.ApplyBaseEntityConvention("DeliverySchedule", "proc", "deliverySchedule");
-        b.Property(x => x.PurchaseOrderId).HasColumnName("purchaseOrderId");
-        b.Property(x => x.ProposedDate).HasColumnName("proposedDate").HasColumnType("datetime2");
-        b.Property(x => x.TimeWindow).HasColumnName("timeWindow").HasMaxLength(50);
-        b.Property(x => x.VehicleInfo).HasColumnName("vehicleInfo").HasMaxLength(200);
-        b.Property(x => x.ScheduleStatus).HasColumnName("scheduleStatus").HasConversion<string>().HasMaxLength(30);
-        b.Property(x => x.ApprovedBy).HasColumnName("approvedBy").HasMaxLength(100);
-        b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
 
+        b.Property(x => x.PurchaseOrderId).HasColumnName("purchaseOrderId");
+        b.Property(x => x.PurchaseOrderLineId).HasColumnName("purchaseOrderLineId");
+        b.Property(x => x.ShipToAddressId).HasColumnName("shipToAddressId");
+
+        b.Property(x => x.ScheduledQty).HasColumnName("scheduledQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.DeliveryDate).HasColumnName("deliveryDate").HasColumnType("datetime2");
+
+        // String-persisted enum (no DB CHECK — C# enum is the guard). Max 20 chars per §4.4 DDL.
+        b.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20);
+
+        // FK → proc.PurchaseOrder RESTRICT (header linkage)
         b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
-            .HasConstraintName("FK_DeliverySchedule_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Cascade);
+            .HasConstraintName("FK_DeliverySchedule_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
+
+        // FK → proc.PurchaseOrderLine RESTRICT (the unique-filtered key per Phase 1)
+        b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)
+            .HasConstraintName("FK_DeliverySchedule_PurchaseOrderLine_PurchaseOrderLineId").OnDelete(DeleteBehavior.Restrict);
+
+        // FK → admin.CompanyAddress RESTRICT (= PO ship-to; used as ASN grouping key — §9.1)
+        b.HasOne(x => x.ShipToAddress).WithMany().HasForeignKey(x => x.ShipToAddressId)
+            .HasConstraintName("FK_DeliverySchedule_CompanyAddress_ShipToAddressId").OnDelete(DeleteBehavior.Restrict);
+
+        // Seccode RLS FK (tenant + owner) — every BaseAggregateRoot must register this.
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_DeliverySchedule_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        // IX_DeliverySchedule_shipTo_date — ASN creation filter + schedule grid sort path
+        b.HasIndex(x => new { x.ShipToAddressId, x.DeliveryDate })
+            .HasDatabaseName("IX_DeliverySchedule_shipTo_date");
+
+        // UQ_DeliverySchedule_line — one active schedule per PO line (Phase 1).
+        // FILTERED on isDeleted=0 so a soft-deleted schedule never blocks re-creating a fresh one.
+        b.HasIndex(x => x.PurchaseOrderLineId)
+            .HasDatabaseName("UQ_DeliverySchedule_line").IsUnique()
+            .HasFilter("[isDeleted] = 0");
     }
 }
 

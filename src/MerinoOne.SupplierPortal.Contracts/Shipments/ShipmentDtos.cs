@@ -1,17 +1,60 @@
 namespace MerinoOne.SupplierPortal.Contracts.Shipments;
 
+/// <summary>
+/// R5 (TSD R5 Addendum §4.4 / §8.3) — grid read-model for proc.DeliverySchedule. One row per PO line, joined to
+/// the PO line so the grid renders PO number, position, item, order qty + ship-to without a second round-trip.
+/// Supersedes the pre-R5 shape (ProposedDate / TimeWindow / VehicleInfo / ScheduleStatus / ApprovedBy /
+/// RejectionReason removed).
+///
+/// <para><b>RemainingToShip is DERIVED</b> from the R4 line balance — <c>MAX(0, orderQty − shippedQtyToDate)</c> —
+/// computed in the projection; the schedule carries no shipped ledger of its own (§4.4). <c>ScheduledQty</c> is the
+/// schedule's own committed qty (= line.orderQty at creation, refreshed on material Modify).</para>
+/// </summary>
 public record DeliveryScheduleDto(
     Guid Id,
     int Seq,
     Guid PurchaseOrderId,
     string PoNumber,
-    DateTime ProposedDate,
-    string? TimeWindow,
-    string? VehicleInfo,
-    string ScheduleStatus,
-    string? ApprovedBy,
-    string? RejectionReason,
+    Guid PurchaseOrderLineId,
+    int PositionNo,
+    string ItemCode,
+    string? ItemDescription,
+    string OrderUnit,
+    decimal OrderQty,
+    decimal ShippedQtyToDate,
+    decimal RemainingToShip,
+    Guid ShipToAddressId,
+    string? ShipToAddressName,
+    Guid SupplierId,
+    string? SupplierName,
+    decimal ScheduledQty,
+    DateTime DeliveryDate,
+    string Status,
     DateTime CreatedOn);
+
+/// <summary>
+/// R5 (TSD R5 Addendum §7 / §8.3) — delivery-schedule grid filter/sort request. All filters are optional;
+/// the grid sorts PO → Line → DeliveryDate ASC. <c>DeliveryDateFrom/To</c> are an inclusive day range.
+/// </summary>
+public record DeliveryScheduleFilterRequest(
+    int Page = 1,
+    int PageSize = 50,
+    Guid? SupplierId = null,
+    Guid? ShipToAddressId = null,
+    Guid? PurchaseOrderId = null,
+    DateTime? DeliveryDateFrom = null,
+    DateTime? DeliveryDateTo = null,
+    string? Status = null);
+
+/// <summary>
+/// R5 (TSD R5 Addendum §7) — the paged grid plus the "auto-hide ship-to" signal. <c>DistinctShipToCount</c> is the
+/// number of distinct ship-to addresses across the schedule rows the supplier can see (BEFORE the ship-to filter is
+/// applied); the UI hides the Ship-To filter when it is ≤ 1 (only one ship-to to choose from).
+/// </summary>
+public record DeliveryScheduleGridDto(
+    PurchaseOrders.PagedResult<DeliveryScheduleDto> Page,
+    int DistinctShipToCount,
+    bool ShowShipToFilter);
 
 // R4 (2026-06-22) — Module 3. Reshaped for multi-PO ASNs (Q1): PurchaseOrderId/PoNumber are NULLABLE now
 // (set for single-PO back-compat, null for multi-PO). PurchaseOrders carries the full covered-PO list, and
@@ -114,12 +157,17 @@ public record AsnLineDto(
 // (structurally identical; ownerEntityType='Asn', DocumentType.AsnAttachment). No duplicate type introduced
 // (avoids the cross-namespace ambiguity in the Blazor global-usings).
 
+// Pre-R5 request types — kept for source-compatibility while handlers are rewritten for R5.
+// Backend-developer will replace these with the R5 create/upsert request shapes (§8 — no manual
+// propose/approve; schedules are created by the Application layer when a PO becomes shippable).
+[Obsolete("Pre-R5 shape — replaced by R5 DeliverySchedule creation via PO-shippable trigger (§8).")]
 public record ProposeDeliveryScheduleRequest(
     Guid PurchaseOrderId,
     DateTime ProposedDate,
     string? TimeWindow,
     string? VehicleInfo);
 
+[Obsolete("Pre-R5 shape — no manual approve/reject in R5; status is always Approved at creation.")]
 public record ApproveDeliveryScheduleRequest(bool Approve, string? RejectionReason);
 
 // R4 (2026-06-22) — Module 3 (Q1 multi-PO). PurchaseOrderIds is the authoritative covered-PO list. The legacy

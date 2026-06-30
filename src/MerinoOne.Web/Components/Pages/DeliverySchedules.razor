@@ -1,0 +1,289 @@
+@page "/delivery-schedules"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+
+@* R5 (TSD R5 Addendum §7 / §8.3 — Component 4, Delivery Schedule grid). The supplier's ASN-creation surface:
+   one row per open PO line, showing PO number + position + item + order qty + ship-to + remaining-to-ship,
+   sorted PO → Line → Delivery date ASC. Read-only in this phase; Phase 4 layers multi-select → Create ASN on top.
+   Permission: DeliverySchedule.Read (supplier-facing). All hex via var(--mer-*) tokens; Merino .tl-page shell.
+
+   Filters (§7): supplier, ship-to, PO, delivery-date range, status. The Ship-To filter AUTO-HIDES when only one
+   ship-to is present — the backend computes DistinctShipToCount + ShowShipToFilter across the supplier's visible
+   schedules (BEFORE the ship-to filter), exactly mirroring the single-supplier filter auto-hide on PurchaseOrderList. *@
+
+<PageTitle>Delivery Schedules</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Delivery Schedules</h1>
+                <span class="tl-count-chip">@(grid?.Page.TotalCount ?? 0)</span>
+            </div>
+            <p class="tl-sub">Open PO lines ready to ship — pick lines here to raise an ASN</p>
+        </div>
+        <div class="tl-header__actions">
+            @* Phase 4 will wire multi-select → Create ASN. For this phase the affordance is a disabled placeholder
+               so the surface reads correctly without enabling selection. *@
+            <button class="rz-button rz-primary" disabled
+                    style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:not-allowed;opacity:.55;"
+                    title="Select lines to create an ASN — coming in the next phase">
+                <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">local_shipping</span> Create ASN
+            </button>
+        </div>
+    </header>
+
+    <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        @* Supplier filter — only when the signed-in user can act for more than one supplier (multi-mapped
+           supplier login / internal user). Single-supplier users don't need it; the grid is seccode-scoped. *@
+        @if (suppliers.Count > 1)
+        {
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:220px;" @bind="supplierFilter" @bind:after="OnSupplierChanged">
+                <option value="">All suppliers</option>
+                @foreach (var s in suppliers)
+                {
+                    <option value="@s.Id">@s.LegalName (@s.SupplierCode)</option>
+                }
+            </select>
+        }
+
+        @* Ship-To filter — AUTO-HIDDEN when only one ship-to is present (backend ShowShipToFilter / DistinctShipToCount
+           ≤ 1). Mirrors the single-supplier auto-hide above: render only when there is more than one to pick. *@
+        @if (showShipToFilter && shipToOptions.Count > 1)
+        {
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:200px;" @bind="shipToFilter" @bind:after="OnFilterChanged">
+                <option value="">All ship-to</option>
+                @foreach (var st in shipToOptions)
+                {
+                    <option value="@st.Id">@st.Name</option>
+                }
+            </select>
+        }
+
+        @* PO filter — the backend accepts a PO id (purchaseOrderId), not free text, so this is a dropdown built
+           from the visible POs (collected in the same unfiltered sweep as the ship-to options). *@
+        @if (poOptions.Count > 1)
+        {
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:160px;" @bind="poFilter" @bind:after="OnFilterChanged">
+                <option value="">All POs</option>
+                @foreach (var po in poOptions)
+                {
+                    <option value="@po.Id">@po.Number</option>
+                }
+            </select>
+        }
+
+        <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:6px;">
+            From
+            <input type="date" class="rz-textbox" style="padding:7px 10px;" @bind="dateFrom" @bind:after="OnFilterChanged" />
+        </label>
+        <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:6px;">
+            To
+            <input type="date" class="rz-textbox" style="padding:7px 10px;" @bind="dateTo" @bind:after="OnFilterChanged" />
+        </label>
+
+        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="OnFilterChanged">
+            <option value="">All statuses</option>
+            <option value="Approved">Approved</option>
+        </select>
+
+        @if (HasActiveFilter)
+        {
+            <button type="button" @onclick="ClearFilters"
+                    style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--mer-ink-300);border-radius:6px;padding:7px 12px;color:var(--mer-ink-600);cursor:pointer;font-size:12px;">
+                <span class="material-symbols-outlined" style="font-size:15px;">close</span> Clear
+            </button>
+        }
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (grid == null || grid.Page.Items.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">event</span>
+            <div>No delivery schedules match.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 140px 70px 1.4fr 130px 100px 110px 110px 1fr 130px 110px; --tl-min-width: 1320px;">
+            <div class="tlg-header">
+                <div class="tlg-col">PO #</div>
+                <div class="tlg-col tlg-col--num">Line</div>
+                <div class="tlg-col">Item</div>
+                <div class="tlg-col">Supplier</div>
+                <div class="tlg-col tlg-col--num">Order qty</div>
+                <div class="tlg-col tlg-col--num">Shipped</div>
+                <div class="tlg-col tlg-col--num">Remaining</div>
+                <div class="tlg-col">Ship-to</div>
+                <div class="tlg-col">Delivery date</div>
+                <div class="tlg-col">Status</div>
+            </div>
+            @foreach (var r in grid.Page.Items)
+            {
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code">@r.PoNumber</div>
+                    <div class="tlg-col tlg-col--num">@r.PositionNo</div>
+                    <div class="tlg-col tlg-name">
+                        <span style="font-weight:600;color:var(--mer-blue-darker);">@r.ItemCode</span>
+                        @if (!string.IsNullOrWhiteSpace(r.ItemDescription))
+                        {
+                            <span style="color:var(--mer-ink-500);"> — @r.ItemDescription</span>
+                        }
+                    </div>
+                    <div class="tlg-col tlg-name">@(string.IsNullOrEmpty(r.SupplierName) ? "—" : r.SupplierName)</div>
+                    <div class="tlg-col tlg-col--num tlg-code">@r.OrderQty.ToString("N2") <span style="color:var(--mer-ink-500);">@r.OrderUnit</span></div>
+                    <div class="tlg-col tlg-col--num tlg-code">@r.ShippedQtyToDate.ToString("N2")</div>
+                    <div class="tlg-col tlg-col--num tlg-code" style="font-weight:600;color:@(r.RemainingToShip > 0 ? "var(--mer-blue-darker)" : "var(--mer-ink-400)");">@r.RemainingToShip.ToString("N2")</div>
+                    <div class="tlg-col">@(string.IsNullOrEmpty(r.ShipToAddressName) ? "—" : r.ShipToAddressName)</div>
+                    <div class="tlg-col tlg-code">@r.DeliveryDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col"><span class="tlg-status @StatusClass(r.Status)">@r.Status</span></div>
+                </div>
+            }
+        </div>
+
+        <Pager Page="page" PageSize="PageSize" TotalCount="grid.Page.TotalCount" PageChanged="OnPageChanged" />
+    }
+</div>
+
+@code {
+    private DeliveryScheduleGridDto? grid;
+    private List<SupplierListItemDto> suppliers = new();
+    private bool loading = true;
+
+    // Filters (§7).
+    private string supplierFilter = string.Empty;
+    private string shipToFilter = string.Empty;
+    private string poFilter = string.Empty;
+    private DateTime? dateFrom;
+    private DateTime? dateTo;
+    private string statusFilter = string.Empty;
+
+    private int page = 1;
+    private const int PageSize = 50;
+
+    // Ship-to auto-hide state. The backend's ShowShipToFilter / DistinctShipToCount is the authoritative signal
+    // (it counts distinct ship-tos across the supplier's visible schedules BEFORE the ship-to filter). We still
+    // need the option list to populate the dropdown; we collect it from an unfiltered sweep on init/supplier-change.
+    private bool showShipToFilter;
+    private readonly List<ShipToOption> shipToOptions = new();
+    private sealed record ShipToOption(Guid Id, string Name);
+
+    // PO option set (the backend filters by PO id, not free text). Built in the same unfiltered sweep.
+    private readonly List<PoOption> poOptions = new();
+    private sealed record PoOption(Guid Id, string Number);
+
+    private bool HasActiveFilter =>
+        !string.IsNullOrEmpty(supplierFilter) || !string.IsNullOrEmpty(shipToFilter)
+        || !string.IsNullOrWhiteSpace(poFilter) || dateFrom.HasValue || dateTo.HasValue
+        || !string.IsNullOrEmpty(statusFilter);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Seccode-scoped: a supplier login mapped to several suppliers gets them all; an internal user gets the
+        // visible set. Drives the optional supplier filter (rendered only when >1) — same source as PurchaseOrderList.
+        var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+        suppliers = sup?.Data ?? new();
+
+        await LoadFilterOptions();
+        await Reload();
+    }
+
+    /// <summary>
+    /// Build the Ship-To + PO dropdown option sets. The grid query returns ShipToAddressName / PoNumber per row but
+    /// pages the data, so a single page may not surface every distinct value. We sweep one unfiltered (apart from the
+    /// supplier filter) large page to collect the distinct pairs, then let the backend's ShowShipToFilter flag drive
+    /// the ship-to auto-hide. Re-run whenever the supplier filter changes (a different supplier may ship elsewhere).
+    /// </summary>
+    private async Task LoadFilterOptions()
+    {
+        shipToOptions.Clear();
+        poOptions.Clear();
+        var url = $"api/delivery-schedules?page=1&pageSize=500";
+        if (!string.IsNullOrEmpty(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
+        var resp = await Api.GetAsync<DeliveryScheduleGridDto>(url);
+        var data = resp?.Data;
+
+        // Authoritative auto-hide signal from the backend (§7): hide the Ship-To filter when ≤ 1 ship-to exists.
+        showShipToFilter = data?.ShowShipToFilter ?? false;
+
+        if (data is not null)
+        {
+            foreach (var pair in data.Page.Items
+                         .Where(i => !string.IsNullOrEmpty(i.ShipToAddressName))
+                         .Select(i => new ShipToOption(i.ShipToAddressId, i.ShipToAddressName!))
+                         .DistinctBy(o => o.Id)
+                         .OrderBy(o => o.Name))
+            {
+                shipToOptions.Add(pair);
+            }
+
+            foreach (var po in data.Page.Items
+                         .Select(i => new PoOption(i.PurchaseOrderId, i.PoNumber))
+                         .DistinctBy(o => o.Id)
+                         .OrderBy(o => o.Number))
+            {
+                poOptions.Add(po);
+            }
+        }
+    }
+
+    private async Task Reload()
+    {
+        loading = true;
+        var url = $"api/delivery-schedules?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrEmpty(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
+        if (!string.IsNullOrEmpty(shipToFilter)) url += $"&shipToAddressId={Uri.EscapeDataString(shipToFilter)}";
+        if (!string.IsNullOrEmpty(poFilter)) url += $"&purchaseOrderId={Uri.EscapeDataString(poFilter)}";
+        if (dateFrom.HasValue) url += $"&deliveryDateFrom={dateFrom.Value:yyyy-MM-dd}";
+        if (dateTo.HasValue) url += $"&deliveryDateTo={dateTo.Value:yyyy-MM-dd}";
+        if (!string.IsNullOrEmpty(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
+        var resp = await Api.GetAsync<DeliveryScheduleGridDto>(url);
+        grid = resp?.Data;
+        loading = false;
+    }
+
+    private async Task OnFilterChanged()
+    {
+        page = 1;
+        await Reload();
+    }
+
+    // Supplier change can change the ship-to universe → refresh the option set + re-evaluate the auto-hide,
+    // and reset a now-irrelevant ship-to selection before reloading.
+    private async Task OnSupplierChanged()
+    {
+        page = 1;
+        shipToFilter = string.Empty;
+        poFilter = string.Empty;
+        await LoadFilterOptions();
+        await Reload();
+    }
+
+    private async Task ClearFilters()
+    {
+        supplierFilter = string.Empty;
+        shipToFilter = string.Empty;
+        poFilter = string.Empty;
+        dateFrom = null;
+        dateTo = null;
+        statusFilter = string.Empty;
+        page = 1;
+        await LoadFilterOptions();
+        await Reload();
+    }
+
+    private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+
+    private string StatusClass(string status) => status switch
+    {
+        "Approved" => "tlg-status--active",
+        "Proposed" => "tlg-status--pending",
+        "Rejected" or "Cancelled" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

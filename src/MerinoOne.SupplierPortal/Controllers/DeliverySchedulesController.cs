@@ -1,15 +1,17 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Models;
-using MerinoOne.SupplierPortal.Application.Shipments.Commands;
 using MerinoOne.SupplierPortal.Application.Shipments.Queries;
-using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ContractsPagedResult = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Shipments.DeliveryScheduleDto>;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
+/// <summary>
+/// R5 (TSD R5 Addendum §8) — Delivery Schedule grid. Schedules are PORTAL-CREATED when a PO becomes shippable
+/// (§8.1) and upserted on a material Modify (§8.2); there is NO manual propose/approve in R5 (the pre-R5 endpoints
+/// are retired). This controller exposes only the read grid — the ASN-creation surface (§7).
+/// </summary>
 [ApiController]
 [Authorize]
 [Route("api/delivery-schedules")]
@@ -20,53 +22,31 @@ public class DeliverySchedulesController : ControllerBase
 
     [HttpGet]
     [Authorize(Policy = "DeliverySchedule.Read")]
-    [EndpointSummary("Delivery schedule list")]
-    [EndpointDescription(@"Paged list of supplier-proposed delivery schedules against POs.
-Filters / params:
-- **page**: Optional — 1-based page index (default 1).
-- **pageSize**: Optional — rows per page (default 50).
-- **status**: Optional — schedule lifecycle status.
-- **purchaseOrderId**: Optional — restrict to one PO.
-Returns: PagedResult<DeliveryScheduleDto>. Requires permission **DeliverySchedule.Read**.")]
-    public async Task<Result<ContractsPagedResult>> List(
+    [EndpointSummary("Delivery schedule grid")]
+    [EndpointDescription(@"R5 — Delivery Schedule grid (the ASN-creation surface). One row per PO line, sorted PO → Line → Delivery date ASC, with remaining-to-ship derived from the R4 line balance (orderQty − shippedQtyToDate).
+Filters / params (all optional):
+- **page**: 1-based page index (default 1).
+- **pageSize**: rows per page (default 50, max 500).
+- **supplierId**: restrict to one supplier.
+- **shipToAddressId**: restrict to one ship-to address.
+- **purchaseOrderId**: restrict to one PO.
+- **deliveryDateFrom / deliveryDateTo**: inclusive delivery-date day range.
+- **status**: schedule status (Approved).
+Returns: DeliveryScheduleGridDto — the paged rows plus the auto-hide ship-to signal (DistinctShipToCount + ShowShipToFilter; the Ship-To filter is hidden when only one ship-to is present). Requires permission **DeliverySchedule.Read**.")]
+    public async Task<Result<DeliveryScheduleGridDto>> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
-        [FromQuery] string? status = null,
+        [FromQuery] Guid? supplierId = null,
+        [FromQuery] Guid? shipToAddressId = null,
         [FromQuery] Guid? purchaseOrderId = null,
+        [FromQuery] DateTime? deliveryDateFrom = null,
+        [FromQuery] DateTime? deliveryDateTo = null,
+        [FromQuery] string? status = null,
         CancellationToken ct = default)
     {
-        var data = await _mediator.Send(new GetDeliveryScheduleListQuery(page, pageSize, status, purchaseOrderId), ct);
-        return Result<ContractsPagedResult>.Ok(data, HttpContext.TraceIdentifier);
-    }
-
-    [HttpPost]
-    [Authorize(Policy = "DeliverySchedule.Propose")]
-    [EndpointSummary("Propose delivery schedule")]
-    [EndpointDescription(@"Supplier proposes a delivery schedule (date + qty splits) against a PO.
-Body:
-- **body**: ProposeDeliveryScheduleRequest with PO reference + scheduled dates / quantities.
-Side effects:
-- Creates the schedule in Proposed status awaiting buyer approval.
-Returns: DeliveryScheduleDto on success; 400 on validation; 403 if seccode mismatch. Requires permission **DeliverySchedule.Propose**.")]
-    public async Task<Result<DeliveryScheduleDto>> Propose([FromBody] ProposeDeliveryScheduleRequest body, CancellationToken ct)
-    {
-        var data = await _mediator.Send(new ProposeDeliveryScheduleCommand(body), ct);
-        return Result<DeliveryScheduleDto>.Ok(data, HttpContext.TraceIdentifier);
-    }
-
-    [HttpPost("{id:guid}/approve")]
-    [Authorize(Policy = "DeliverySchedule.Approve")]
-    [EndpointSummary("Approve delivery schedule")]
-    [EndpointDescription(@"Buyer approves a proposed delivery schedule.
-Filters / params:
-- **id**: Required — schedule GUID.
-- **body**: ApproveDeliveryScheduleRequest with reviewer notes.
-Side effects:
-- Flips status to Approved + records approver/timestamp.
-Returns: empty success; 404 if not found; 409 if not in approvable state. Requires permission **DeliverySchedule.Approve**.")]
-    public async Task<Result> Approve(Guid id, [FromBody] ApproveDeliveryScheduleRequest body, CancellationToken ct)
-    {
-        await _mediator.Send(new ApproveDeliveryScheduleCommand(id, body), ct);
-        return Result.Ok(HttpContext.TraceIdentifier);
+        var filter = new DeliveryScheduleFilterRequest(
+            page, pageSize, supplierId, shipToAddressId, purchaseOrderId, deliveryDateFrom, deliveryDateTo, status);
+        var data = await _mediator.Send(new GetDeliveryScheduleListQuery(filter), ct);
+        return Result<DeliveryScheduleGridDto>.Ok(data, HttpContext.TraceIdentifier);
     }
 }

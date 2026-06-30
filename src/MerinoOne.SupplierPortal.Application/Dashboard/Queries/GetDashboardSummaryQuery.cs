@@ -3,6 +3,7 @@ using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Dashboard;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+// R5: DeliveryScheduleStatus is in the same namespace as ScheduleStatus — no extra using needed.
 
 namespace MerinoOne.SupplierPortal.Application.Dashboard.Queries;
 
@@ -38,7 +39,9 @@ public class GetDashboardSummaryQueryHandler : IRequestHandler<GetDashboardSumma
         var payments30Net = await _db.Payments
             .Where(p => p.PaymentDate > last30)
             .SumAsync(p => (decimal?)p.NetPaid, ct) ?? 0m;
-        var openSchedules = await _db.DeliverySchedules.CountAsync(d => d.ScheduleStatus == ScheduleStatus.Proposed, ct);
+        // R5 (TSD R5 Addendum §4.4): DeliverySchedule is now always Approved at creation; pre-R5
+        // "Proposed" status removed. Count all non-deleted R5 schedules (status=Approved) as "open".
+        var openSchedules = await _db.DeliverySchedules.CountAsync(d => d.Status == DeliveryScheduleStatus.Approved, ct);
 
         // ---- previous-period values (30..60 days ago) ---------------------------
         var submittedInvoicesPrev = await _db.Invoices.CountAsync(i =>

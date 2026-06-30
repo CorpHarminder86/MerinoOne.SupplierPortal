@@ -60,7 +60,8 @@ public class UpsertPurchaseOrdersCommandHandler(
     InboundUpsertExecutor exec,
     IOutboxDispatcher outbox,
     IPoStatusMap statusMap,
-    ISyncLogWriter syncLog) : IRequestHandler<UpsertPurchaseOrdersCommand, UpsertResultDto>
+    ISyncLogWriter syncLog,
+    PurchaseOrders.DeliverySchedules.DeliveryScheduleFactory schedules) : IRequestHandler<UpsertPurchaseOrdersCommand, UpsertResultDto>
 {
     public Task<UpsertResultDto> Handle(UpsertPurchaseOrdersCommand request, CancellationToken ct)
     {
@@ -271,6 +272,12 @@ public class UpsertPurchaseOrdersCommandHandler(
                         EnqueueMaterialChangeNotification(db, po, sup.LegalName,
                             emailBySupplier.TryGetValue(sup.Id, out var em) ? em : null,
                             PoMaterialChange.DescribeDiff(beforeSnap, rec.Lines, resolvedQty), now);
+                        // R5 (§8.2) — a material Modify upserts the EXISTING schedules per line in place (date / qty),
+                        // never duplicating. refreshOnly: an AcceptToShip / AcknowledgeToShip PO resets to Released
+                        // (un-confirmed) here, so we must NOT fabricate a new schedule set — only refresh ones that
+                        // already exist (re-confirm re-creates the rest). The AutoAccept re-stamp below then runs the
+                        // create-or-refresh path for AutoAccept suppliers (whose PO is re-confirmed at ingest).
+                        await schedules.EnsureDeliverySchedulesAsync(po.Id, token, refreshOnly: true);
                         // §6.2 / UC-PO-10 — re-released material PO: AutoAccept suppliers are auto-stamped Accepted again.
                         await AutoAcceptIfConfiguredAsync(db, po, sup.PoConfirmationMode, tenantId, now, token);
                     }
@@ -355,6 +362,11 @@ public class UpsertPurchaseOrdersCommandHandler(
         // dedupes a re-released PO). Po.Id is the persisted Guid (set for new POs above, already present for updates).
         var key = OutboxKey.For(OutboxEntity.PurchaseOrder, tenantId, po.PoNumber, "accept");
         await outbox.EnqueueAsync(OutboxTransactionType.PoAccept, OutboxEntity.PurchaseOrder, po.Id, key, null, token);
+
+        // R5 (§8.1) — AutoAccept becomes shippable on Released: the auto-stamp opened the ship-gate at ingest, so
+        // create-or-refresh the per-line schedules in THIS executor transaction. The entity overload reads the
+        // tracked-but-unflushed aggregate (a brand-new PO's lines are not yet queryable). Idempotent on the line key.
+        await schedules.EnsureDeliverySchedulesAsync(po, token);
     }
 
     // R4 (2026-06-26) — §6.3/§14. Enqueue a supplier EmailOutbox row carrying the material-change diff + revised ship
@@ -508,61 +520,17 @@ public class UpsertDeliverySchedulesCommandValidator : AbstractValidator<UpsertD
     }
 }
 
-public class UpsertDeliverySchedulesCommandHandler(InboundUpsertExecutor exec) : IRequestHandler<UpsertDeliverySchedulesCommand, UpsertResultDto>
+// R5 (TSD R5 Addendum §4.4 / §8) — Pre-R5 inbound delivery-schedule upsert handler retired.
+// Delivery schedules are now PORTAL-CREATED when a PO becomes shippable (§8.1), not pushed inbound
+// from ERP. Backend-developer will remove this command and its inbound endpoint in the R5 Application
+// build. This stub keeps the migration compilation path clean.
+public class UpsertDeliverySchedulesCommandHandler : IRequestHandler<UpsertDeliverySchedulesCommand, UpsertResultDto>
 {
     public Task<UpsertResultDto> Handle(UpsertDeliverySchedulesCommand request, CancellationToken ct)
-    {
-        var recs = request.Body.Schedules;
-        var canonical = recs.Select(r => $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ProposedDate:O}|{r.TimeWindow}|{r.ScheduleStatus}");
-        var codes = recs.Select(r => r.PoNumber.Trim());
-        return exec.ExecuteAsync(TransactionalInboundEntity.DeliverySchedule, request.Body.CompanyCode, request.BoundCompanyIds,
-            request.IdempotencyKey, recs.Count, canonical, codes, request.Body, Upsert, ct);
-
-        async Task<IReadOnlyList<RowResult>> Upsert(IAppDbContext db, Guid tenantId, Guid sourceId, CancellationToken token)
-        {
-            var now = DateTime.UtcNow;
-            var results = new List<RowResult>(recs.Count);
-
-            var poNumbers = recs.Select(r => r.PoNumber.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            var poMap = (await db.PurchaseOrders.IgnoreQueryFilters()
-                    .Where(p => !p.IsDeleted && p.TenantId == tenantId && p.TenantEntityId == sourceId && poNumbers.Contains(p.PoNumber))
-                    .Select(p => new { p.PoNumber, p.Id, p.SeccodeId }).ToListAsync(token))
-                .ToDictionary(p => p.PoNumber, StringComparer.OrdinalIgnoreCase);
-
-            var poIds = poMap.Values.Select(p => p.Id).ToList();
-            var existing = await db.DeliverySchedules.IgnoreQueryFilters()
-                .Where(d => !d.IsDeleted && d.TenantId == tenantId && poIds.Contains(d.PurchaseOrderId)).ToListAsync(token);
-
-            foreach (var rec in recs)
-            {
-                var poNum = rec.PoNumber.Trim();
-                if (!poMap.TryGetValue(poNum, out var po))
-                { results.Add(new RowResult(poNum, RowOutcome.Failed, $"Unknown PO '{poNum}' for the resolved company.")); continue; }
-
-                var status = Enum.TryParse<ScheduleStatus>(rec.ScheduleStatus, true, out var st) ? st : ScheduleStatus.Proposed;
-                var row = existing.FirstOrDefault(d => d.PurchaseOrderId == po.Id && d.ProposedDate == rec.ProposedDate);
-                if (row is not null)
-                {
-                    row.TimeWindow = rec.TimeWindow; row.VehicleInfo = rec.VehicleInfo; row.ScheduleStatus = status;
-                    row.SeccodeId = po.SeccodeId; row.TenantId = tenantId; row.TenantEntityId = sourceId;
-                    row.UpdatedBy = "infor:inbound"; row.UpdatedOn = now;
-                    results.Add(new RowResult(poNum, RowOutcome.Updated, null));
-                }
-                else
-                {
-                    db.DeliverySchedules.Add(new DeliverySchedule
-                    {
-                        Id = Guid.NewGuid(), TenantId = tenantId, TenantEntityId = sourceId, SeccodeId = po.SeccodeId,
-                        PurchaseOrderId = po.Id, ProposedDate = rec.ProposedDate, TimeWindow = rec.TimeWindow,
-                        VehicleInfo = rec.VehicleInfo, ScheduleStatus = status,
-                        CreatedBy = "infor:inbound", CreatedOn = now
-                    });
-                    results.Add(new RowResult(poNum, RowOutcome.Inserted, null));
-                }
-            }
-            return results;
-        }
-    }
+        => throw new NotImplementedException(
+            "R5: Inbound delivery-schedule push is retired. Schedules are created by the portal on " +
+            "PO-becomes-shippable (TSD R5 §8.1). Backend-developer must implement " +
+            "CreateDeliveryScheduleOnPoShippable handler and remove this endpoint.");
 }
 
 // ============================== Goods Receipts (create) ==============================

@@ -20,10 +20,11 @@ public class AcknowledgePoCommandHandler : IRequestHandler<AcknowledgePoCommand,
 {
     private readonly IAppDbContext _db;
     private readonly IOutboxDispatcher _outbox;
+    private readonly DeliverySchedules.DeliveryScheduleFactory _schedules;
 
-    public AcknowledgePoCommandHandler(IAppDbContext db, IOutboxDispatcher outbox)
+    public AcknowledgePoCommandHandler(IAppDbContext db, IOutboxDispatcher outbox, DeliverySchedules.DeliveryScheduleFactory schedules)
     {
-        _db = db; _outbox = outbox;
+        _db = db; _outbox = outbox; _schedules = schedules;
     }
 
     public async Task<Unit> Handle(AcknowledgePoCommand request, CancellationToken ct)
@@ -51,6 +52,10 @@ public class AcknowledgePoCommandHandler : IRequestHandler<AcknowledgePoCommand,
 
         var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "acknowledge"); // tenant-qualified (review B2)
         await _outbox.EnqueueAsync(OutboxTransactionType.PoAcknowledge, OutboxEntity.PurchaseOrder, po.Id, key, null, ct);
+
+        // R5 (§8.1) — AcknowledgeToShip becomes shippable ON Acknowledged: stage the per-line delivery schedules so
+        // they commit in the SAME transaction. Idempotent — safe even when this is a no-op re-acknowledge.
+        await _schedules.EnsureDeliverySchedulesAsync(po.Id, ct);
 
         await _db.SaveChangesAsync(ct);
         return Unit.Value;

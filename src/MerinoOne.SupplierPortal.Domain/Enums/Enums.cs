@@ -61,6 +61,14 @@ public enum PoNegotiationStatus { Submitted, Approved, Rejected, Cancelled }
 
 public enum ScheduleStatus { Proposed, Approved, Rejected, Cancelled }
 
+/// <summary>
+/// R5 (TSD R5 Addendum §4.4 / §8) — lifecycle of a <c>proc.DeliverySchedule</c> row. Created with
+/// <c>Approved</c> when a PO becomes shippable; Phase 2 may add further states (e.g. Shipped, Cancelled).
+/// Persisted as the enum name (string) via HasConversion&lt;string&gt;, no DB CHECK — the C# enum is the
+/// guard. APPEND-ONLY.
+/// </summary>
+public enum DeliveryScheduleStatus { Approved }
+
 public enum AsnStatus { Draft, Submitted, InTransit, Delivered, Cancelled }
 
 public enum MatchingType { TwoWay, ThreeWay }
