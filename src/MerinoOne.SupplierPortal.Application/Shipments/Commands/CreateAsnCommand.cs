@@ -48,10 +48,10 @@ public class CreateAsnCommandValidator : AbstractValidator<CreateAsnCommand>
 /// <summary>Shared input-level rules for ASN line serial/lot capture (used by Create + Update validators).</summary>
 internal static class AsnLineRules
 {
-    public static bool SerialsDistinct(List<string>? serials)
+    public static bool SerialsDistinct(List<AsnLineSerialInput>? serials)
     {
         if (serials is null) return true;
-        var nonEmpty = serials.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList();
+        var nonEmpty = serials.Where(s => !string.IsNullOrWhiteSpace(s.SerialNumber)).Select(s => s.SerialNumber.Trim()).ToList();
         return nonEmpty.Count == nonEmpty.Distinct(StringComparer.OrdinalIgnoreCase).Count();
     }
 
@@ -227,12 +227,13 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
             // Draft-stage capture is lenient — full count/uniqueness validation runs on Submit.
             if (flags?.IsSerialized == true && line.Serials is { Count: > 0 })
             {
-                foreach (var serial in line.Serials.Where(s => !string.IsNullOrWhiteSpace(s)))
+                foreach (var serial in line.Serials.Where(s => !string.IsNullOrWhiteSpace(s.SerialNumber)))
                     asnLine.Serials.Add(new AsnLineSerial
                     {
                         Id = Guid.NewGuid(),
                         AsnLineId = asnLine.Id,
-                        SerialNumber = serial.Trim(),
+                        SerialNumber = serial.SerialNumber.Trim(),
+                        ExpiryDate = serial.ExpiryDate,
                         CreatedBy = _user.UserCode,
                         CreatedOn = now,
                     });

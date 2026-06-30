@@ -286,6 +286,7 @@ public class AsnLineSerialConfiguration : IEntityTypeConfiguration<AsnLineSerial
         b.ApplyBaseEntityConvention("AsnLineSerial", "proc", "asnLineSerial");
         b.Property(x => x.AsnLineId).HasColumnName("asnLineId");
         b.Property(x => x.SerialNumber).HasColumnName("serialNumber").HasMaxLength(100).IsRequired();
+        b.Property(x => x.ExpiryDate).HasColumnName("expiryDate").HasColumnType("date");
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
 
         b.HasOne(x => x.AsnLine).WithMany(l => l.Serials).HasForeignKey(x => x.AsnLineId)

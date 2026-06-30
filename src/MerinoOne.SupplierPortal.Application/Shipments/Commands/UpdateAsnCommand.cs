@@ -169,12 +169,13 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
             // only for a lot-controlled item (Item XOR guard); the other side is ignored. Submit re-validates.
             if (flags?.IsSerialized == true && line.Serials is { Count: > 0 })
             {
-                foreach (var serial in line.Serials.Where(s => !string.IsNullOrWhiteSpace(s)))
+                foreach (var serial in line.Serials.Where(s => !string.IsNullOrWhiteSpace(s.SerialNumber)))
                     asnLine.Serials.Add(new AsnLineSerial
                     {
                         Id = Guid.NewGuid(),
                         AsnLineId = asnLine.Id,
-                        SerialNumber = serial.Trim(),
+                        SerialNumber = serial.SerialNumber.Trim(),
+                        ExpiryDate = serial.ExpiryDate,
                         CreatedBy = _user.UserCode,
                         CreatedOn = now,
                     });

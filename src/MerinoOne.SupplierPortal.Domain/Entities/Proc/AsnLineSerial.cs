@@ -15,5 +15,12 @@ public class AsnLineSerial : AuditableEntity
     public AsnLine? AsnLine { get; set; }
 
     public string SerialNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// R4 (2026-06-30) — per-serial expiry (one physical unit = one serial = one expiry). Nullable + lenient,
+    /// mirroring <see cref="AsnLineLot.ExpiryDate"/> (no required / future-date rule — parity with lot capture).
+    /// </summary>
+    public DateOnly? ExpiryDate { get; set; }
+
     public string? ErpCode { get; set; }
 }

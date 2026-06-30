@@ -74,6 +74,13 @@ public record AsnLineLotInput(string LotNo, decimal Qty, DateOnly? ExpiryDate = 
 // R4 (2026-06-23) — Serial/Lot capture. One lot read back from a lot-controlled ASN line (carries ErpCode).
 public record AsnLineLotDto(string LotNo, decimal Qty, DateOnly? ExpiryDate, string? ErpCode);
 
+// R4 (2026-06-30) — Serial capture with per-serial expiry (input shape; mirrors AsnLineLotInput). ExpiryDate is
+// optional + lenient — same policy as lots. One serial = one physical unit = one optional expiry.
+public record AsnLineSerialInput(string SerialNumber, DateOnly? ExpiryDate = null);
+
+// R4 (2026-06-30) — Serial read back from a serialized ASN line (carries ExpiryDate + ErpCode; mirrors AsnLineLotDto).
+public record AsnLineSerialDto(string SerialNumber, DateOnly? ExpiryDate, string? ErpCode);
+
 // R4 (2026-06-22) — Addendum A4: PositionNo + SequenceNo (snapshot from the source PO line) shown while
 // building the ASN. PoPositionNo retained for back-compat (= PositionNo). PoNumber added (multi-PO lines).
 // R4 (2026-06-23) — Serial/Lot capture: SerialNumbers (serialized items) + Lots (lot-controlled items), at
@@ -97,7 +104,7 @@ public record AsnLineDto(
     decimal ShippedQty,
     string? BatchNumber,
     DateTime? ExpiryDate,
-    IReadOnlyList<string>? SerialNumbers = null,
+    IReadOnlyList<AsnLineSerialDto>? Serials = null,
     IReadOnlyList<AsnLineLotDto>? Lots = null,
     decimal ShippedQtyToDate = 0,
     decimal Balance = 0,
@@ -147,7 +154,7 @@ public record CreateAsnLineRequest(
     decimal ShippedQty,
     string? BatchNumber,
     DateTime? ExpiryDate,
-    List<string>? Serials = null,
+    List<AsnLineSerialInput>? Serials = null,
     List<AsnLineLotInput>? Lots = null);
 
 public record UpdateAsnRequest(

@@ -51,7 +51,7 @@ public class AsnSerialLotTests
             Lines: new List<CreateAsnLineRequest>
             {
                 new(ctx.SerialLineId, ShippedQty: 3, BatchNumber: null, ExpiryDate: null,
-                    Serials: new List<string> { "SN-1", "SN-2", "SN-3" }),
+                    Serials: new List<AsnLineSerialInput> { new("SN-1"), new("SN-2"), new("SN-3") }),
                 new(ctx.LotLineId, ShippedQty: 40, BatchNumber: null, ExpiryDate: null,
                     Lots: new List<AsnLineLotInput>
                     {
@@ -76,7 +76,7 @@ public class AsnSerialLotTests
         var detail = await Read<AsnDetailDto>(getResp);
 
         var serLine = detail.Data!.Lines.Single(l => l.PurchaseOrderLineId == ctx.SerialLineId);
-        serLine.SerialNumbers.Should().BeEquivalentTo(new[] { "SN-1", "SN-2", "SN-3" });
+        serLine.Serials!.Select(s => s.SerialNumber).Should().BeEquivalentTo(new[] { "SN-1", "SN-2", "SN-3" });
 
         var lotLine = detail.Data!.Lines.Single(l => l.PurchaseOrderLineId == ctx.LotLineId);
         lotLine.Lots!.Select(x => x.LotNo).Should().BeEquivalentTo(new[] { "LOT-A", "LOT-B" });
@@ -104,7 +104,7 @@ public class AsnSerialLotTests
         var detail = await Read<AsnDetailDto>(getResp);
         detail.Success.Should().BeTrue();
         detail.Data!.AsnStatus.Should().Be(nameof(AsnStatus.Draft));
-        detail.Data!.Lines.Single().SerialNumbers.Should().BeEquivalentTo(new[] { "D-1", "D-2" });
+        detail.Data!.Lines.Single().Serials!.Select(s => s.SerialNumber).Should().BeEquivalentTo(new[] { "D-1", "D-2" });
     }
 
     // ============================== negatives (expect 400) ==============================
@@ -256,7 +256,7 @@ public class AsnSerialLotTests
             Lines: new List<CreateAsnLineRequest>
             {
                 new(ctx.SerialLineId, ShippedQty: shippedQty, BatchNumber: null, ExpiryDate: null,
-                    Serials: serials.ToList()),
+                    Serials: serials.Select(s => new AsnLineSerialInput(s)).ToList()),
             });
 
     private static async Task<HttpResponseMessage> PostOk(HttpClient client, CreateAsnRequest body)

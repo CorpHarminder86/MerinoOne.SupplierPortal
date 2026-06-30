@@ -135,7 +135,7 @@
                 @foreach (var ln in detail.Lines)
                 {
                     var line = ln;
-                    var hasSerials = line.SerialNumbers is { Count: > 0 };
+                    var hasSerials = line.Serials is { Count: > 0 };
                     var hasLots = line.Lots is { Count: > 0 };
                     <tr style="border-bottom:1px solid var(--mer-line-soft);">
                         <td style="padding:6px 4px;font-family:Inter,monospace;">@line.PoNumber</td>
@@ -152,11 +152,11 @@
                     {
                         <tr style="border-bottom:1px solid var(--mer-line-soft);">
                             <td colspan="9" style="padding:4px 4px 10px 16px;">
-                                <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:4px;">Serials (@line.SerialNumbers!.Count)</div>
+                                <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:4px;">Serials (@line.Serials!.Count)</div>
                                 <div style="display:flex;flex-wrap:wrap;gap:4px;">
-                                    @foreach (var s in line.SerialNumbers!)
+                                    @foreach (var s in line.Serials!)
                                     {
-                                        <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-ink-50);border:1px solid var(--mer-line);border-radius:4px;padding:2px 6px;">@s</span>
+                                        <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-ink-50);border:1px solid var(--mer-line);border-radius:4px;padding:2px 6px;">@s.SerialNumber@(s.ExpiryDate is { } ex ? $" · exp {ex:yyyy-MM-dd}" : "")</span>
                                     }
                                 </div>
                             </td>
@@ -312,7 +312,7 @@
                         @foreach (var ln in lines)
                         {
                             var full = FullyShipped(ln);     // ceiling reached (no over-ship headroom) → row read-only
-                            var over = OverAllowance(ln);    // entered qty exceeds the order qty + tolerance ceiling
+                            var over = OverAllowance(ln);    // entered qty exceeds the order qty + tolerance ceiling → red border (no inline text; dialog carries the message)
                             <tr style="border-bottom:1px solid var(--mer-line-soft);@(full ? "background:var(--mer-ink-50);" : "")">
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PoNumber</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@ln.PositionNo</td>
@@ -324,10 +324,6 @@
                                     <input type="number" step="0.001" min="0" max="@ln.OverShipAllowance.ToString("0.###")" class="rz-textbox"
                                            style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;@(over ? "border:1px solid var(--mer-red);" : "")"
                                            @bind="ln.ShippedQty" @bind:event="oninput" @onblur="() => OnShipQtyBlur(ln)" disabled="@full" title="@(full ? "Line fully shipped — no remaining ship capacity" : null)" />
-                                    @if (over)
-                                    {
-                                        <div style="font-size:10.5px;color:var(--mer-red);margin-top:2px;white-space:nowrap;">Max @ln.OverShipAllowance.ToString("0.###")</div>
-                                    }
                                 </td>
                                 <td style="padding:6px 4px;"><input type="text" class="rz-textbox" style="width:120px;padding:4px 6px;" @bind="ln.BatchNumber" disabled="@full" /></td>
                                 <td style="padding:6px 4px;"><input type="date" class="rz-textbox" style="width:130px;padding:4px 6px;" @bind="ln.ExpiryDate" disabled="@full" /></td>
@@ -347,12 +343,21 @@
                             {
                                 var line = sl;
                                 var need = (int)line.ShippedQty;
-                                var filled = line.Serials.Count(s => !string.IsNullOrWhiteSpace(s));
+                                var filled = line.Serials.Count(s => !string.IsNullOrWhiteSpace(s.Serial));
                                 var ok = SerialLineValid(line, out var serMsg);
                                 <div style="border:1px solid var(--mer-line);border-radius:8px;padding:14px;margin-bottom:12px;background:var(--mer-surface);">
                                     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
                                         <span style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);font-family:Inter,monospace;">@line.ItemCode <span style="font-weight:400;color:var(--mer-ink-500);">· PO @line.PoNumber · pos @line.PositionNo</span></span>
                                         <span class="tlg-status @(ok ? "tlg-status--active" : "tlg-status--danger")" style="font-family:Inter,monospace;">@filled / @need captured</span>
+                                    </div>
+
+                                    @* R4 (2026-06-30) — bulk "expiry for all units": one click fills every serial's expiry (the common shared-expiry case). Per-row expiry below overrides for mixed batches. *@
+                                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;background:var(--mer-ink-50);border:1px solid var(--mer-line);border-radius:6px;">
+                                        <span class="material-symbols-outlined" style="font-size:16px;color:var(--mer-ink-500);">event</span>
+                                        <span style="font-size:12px;color:var(--mer-ink-600);">Expiry for all units</span>
+                                        <input type="date" class="rz-textbox" style="width:150px;padding:4px 6px;" @bind="line._bulkExpiry" />
+                                        <button class="rz-button" style="padding:5px 10px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="() => ApplyBulkExpiry(line)">Apply to all</button>
+                                        <button class="rz-button" style="padding:5px 10px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="() => ClearExpiries(line)">Clear</button>
                                     </div>
 
                                     @* Paste affordance — split on newline/comma, fill the N boxes, ignore extras (warn). *@
@@ -376,15 +381,17 @@
                                             Large quantity (@need units). Use <b>Paste serials</b> above. Only the first @SerialBoxCap boxes are rendered for editing; pasted serials beyond that are still captured.
                                         </div>
                                     }
-                                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;@(need > SerialBoxCap ? "max-height:320px;overflow:auto;" : "")">
+                                    <div style="display:grid;grid-template-columns:26px 1fr 150px;gap:6px 8px;align-items:center;@(need > SerialBoxCap ? "max-height:320px;overflow:auto;" : "")">
                                         @{ var renderCount = Math.Min(need, SerialBoxCap); EnsureSerialSlots(line, need); }
+                                        <span></span>
+                                        <span style="font-size:10px;color:var(--mer-ink-400);text-transform:uppercase;letter-spacing:.4px;">Serial</span>
+                                        <span style="font-size:10px;color:var(--mer-ink-400);text-transform:uppercase;letter-spacing:.4px;">Expiry · optional</span>
                                         @for (int si = 0; si < renderCount; si++)
                                         {
                                             var sIdx = si;
-                                            <div style="display:flex;align-items:center;gap:6px;">
-                                                <span style="font-size:10.5px;color:var(--mer-ink-400);font-family:Inter,monospace;width:26px;text-align:right;">@(sIdx + 1)</span>
-                                                <input class="rz-textbox" style="flex:1;padding:5px 8px;font-family:Inter,monospace;font-size:12px;@(DuplicateSerial(line, sIdx) ? "border:1px solid var(--mer-red);" : "")" placeholder="Serial" @bind="line.Serials[sIdx]" @bind:event="oninput" />
-                                            </div>
+                                            <span style="font-size:10.5px;color:var(--mer-ink-400);font-family:Inter,monospace;text-align:right;">@(sIdx + 1)</span>
+                                            <input class="rz-textbox" style="padding:5px 8px;font-family:Inter,monospace;font-size:12px;@(DuplicateSerial(line, sIdx) ? "border:1px solid var(--mer-red);" : "")" placeholder="Serial" @bind="line.Serials[sIdx].Serial" @bind:event="oninput" />
+                                            <input type="date" class="rz-textbox" style="padding:5px 6px;font-size:12px;" @bind="line.Serials[sIdx].Expiry" />
                                         }
                                     </div>
                                     @if (!ok)
@@ -935,9 +942,9 @@
                     ExpiryDate = l.ExpiryDate,
                     // AsnLineDto carries no Item flag — infer the line type from which capture collection is
                     // populated (serialized XOR lot-controlled). Re-merged with PO flags below for empty lines.
-                    IsSerialized = l.SerialNumbers is { Count: > 0 },
+                    IsSerialized = l.Serials is { Count: > 0 },
                     IsLotControlled = l.Lots is { Count: > 0 },
-                    Serials = l.SerialNumbers?.ToList() ?? new(),
+                    Serials = l.Serials?.Select(s => new SerialRow { Serial = s.SerialNumber, Expiry = s.ExpiryDate }).ToList() ?? new(),
                     Lots = l.Lots?.Select(x => new LotRow { LotNo = x.LotNo, Qty = x.Qty, ExpiryDate = x.ExpiryDate }).ToList() ?? new(),
                     // R4 (2026-06-26) — §7.3 / DI-04: ship-tracking from the ASN line (ReloadLines re-merges the PO
                     // line's authoritative figures for editable drafts; the locked read-only view uses these).
@@ -1349,10 +1356,11 @@
     private List<CreateAsnLineRequest> BuildLineRequests() =>
         lines.Where(l => l.ShippedQty > 0).Select(l =>
         {
-            List<string>? serials = null;
+            List<AsnLineSerialInput>? serials = null;
             List<AsnLineLotInput>? lots = null;
             if (l.IsSerialized)
-                serials = l.Serials.Select(s => s?.Trim() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s)).ToList();
+                serials = l.Serials.Where(s => !string.IsNullOrWhiteSpace(s.Serial))
+                    .Select(s => new AsnLineSerialInput(s.Serial.Trim(), s.Expiry)).ToList();
             else if (l.IsLotControlled)
                 lots = l.Lots.Where(x => !string.IsNullOrWhiteSpace(x.LotNo) && (x.Qty ?? 0) > 0)
                     .Select(x => new AsnLineLotInput(x.LotNo.Trim(), x.Qty ?? 0, x.ExpiryDate)).ToList();
@@ -1363,26 +1371,41 @@
     // Don't render thousands of textboxes for huge qty: render up to this many; the paste box still fills the rest.
     private const int SerialBoxCap = 200;
 
-    // The step-2 capture sections render only for shipped lines of the matching Item type.
-    // Only capture serials/lots for VALID lines — a ship qty over the over-ship allowance is rejected, so we must
-    // not generate N serial/lot boxes from an invalid qty (the line shows "Max N" + Next is blocked until fixed).
+    // The step-2 capture sections render only for VALID shipped lines — qty within the over-ship allowance. An
+    // over-shipped line generates NO serial/lot boxes (capturing N serials against an invalid qty makes no sense);
+    // it shows the red border + over-ship dialog, and NextStep blocks advancing until the qty is corrected.
     private List<LineRow> SerialLines => lines.Where(l => l.IsSerialized && l.ShippedQty > 0 && !OverAllowance(l)).ToList();
     private List<LineRow> LotLines => lines.Where(l => l.IsLotControlled && l.ShippedQty > 0 && !OverAllowance(l)).ToList();
 
-    // Grow the per-line serial slot list to N so the indexed @bind targets exist (boxes start empty).
+    // Grow the per-line serial slot list to N so the indexed @bind targets exist. New rows inherit the line's bulk
+    // expiry (so "set expiry for all" then grow, or grow then "apply to all", both land the shared date).
     private static void EnsureSerialSlots(LineRow line, int need)
     {
-        while (line.Serials.Count < need) line.Serials.Add(string.Empty);
+        while (line.Serials.Count < need) line.Serials.Add(new SerialRow { Expiry = line._bulkExpiry });
         // Trim trailing extras only if the user reduced ShippedQty (keep what fits N).
         if (line.Serials.Count > need) line.Serials.RemoveRange(need, line.Serials.Count - need);
     }
 
+    // R4 (2026-06-30) — bulk expiry: copy the line's _bulkExpiry onto every serial row (overwrites per-row edits —
+    // the common case is one shared expiry). "Clear" nulls them all.
+    private static void ApplyBulkExpiry(LineRow line)
+    {
+        EnsureSerialSlots(line, (int)line.ShippedQty);
+        foreach (var s in line.Serials) s.Expiry = line._bulkExpiry;
+    }
+
+    private static void ClearExpiries(LineRow line)
+    {
+        line._bulkExpiry = null;
+        foreach (var s in line.Serials) s.Expiry = null;
+    }
+
     private static bool DuplicateSerial(LineRow line, int idx)
     {
-        var v = line.Serials[idx]?.Trim();
+        var v = line.Serials[idx].Serial?.Trim();
         if (string.IsNullOrEmpty(v)) return false;
         for (int j = 0; j < line.Serials.Count; j++)
-            if (j != idx && string.Equals(line.Serials[j]?.Trim(), v, StringComparison.OrdinalIgnoreCase)) return true;
+            if (j != idx && string.Equals(line.Serials[j].Serial?.Trim(), v, StringComparison.OrdinalIgnoreCase)) return true;
         return false;
     }
 
@@ -1402,7 +1425,7 @@
             .ToList();
         EnsureSerialSlots(line, need);
         var take = Math.Min(tokens.Count, need);
-        for (int i = 0; i < take; i++) line.Serials[i] = tokens[i];
+        for (int i = 0; i < take; i++) line.Serials[i].Serial = tokens[i];
         line._pasteWarn = tokens.Count > need ? $"{tokens.Count - need} extra serial(s) ignored (need {need})." : null;
         line._pasteBuffer = string.Empty;
     }
@@ -1411,7 +1434,7 @@
     private static bool SerialLineValid(LineRow line, out string message)
     {
         var need = (int)line.ShippedQty;
-        var vals = line.Serials.Select(s => s?.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        var vals = line.Serials.Select(s => s.Serial?.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
         if (vals.Count != need) { message = $"Captured {vals.Count} of {need} required serial(s)."; return false; }
         var distinct = vals.Select(s => s!.ToLowerInvariant()).Distinct().Count();
         if (distinct != vals.Count) { message = "Duplicate serial numbers on this line."; return false; }
@@ -1432,8 +1455,8 @@
 
     // True only if EVERY serialized/lot line currently passes — gates Next on step 2 and the final submit.
     private bool SerialLotCaptureValid =>
-        lines.Where(l => l.IsSerialized && l.ShippedQty > 0 && !OverAllowance(l)).All(l => SerialLineValid(l, out _))
-        && lines.Where(l => l.IsLotControlled && l.ShippedQty > 0 && !OverAllowance(l)).All(l => LotLineValid(l, out _));
+        SerialLines.All(l => SerialLineValid(l, out _))
+        && LotLines.All(l => LotLineValid(l, out _));
 
     private class LineRow
     {
@@ -1452,8 +1475,10 @@
         // section the line gets; Serials/Lots hold the captured values. ShippedQty is the required count/Σ.
         public bool IsSerialized { get; set; }
         public bool IsLotControlled { get; set; }
-        public List<string> Serials { get; set; } = new();
+        public List<SerialRow> Serials { get; set; } = new();
         public List<LotRow> Lots { get; set; } = new();
+        // R4 (2026-06-30) — bulk "expiry for all units" picker value (transient; copied onto each SerialRow.Expiry).
+        public DateOnly? _bulkExpiry { get; set; }
 
         // R4 (2026-06-26) — §7.3 / §5.3 / DI-04: the PO-line ship-tracking figures shown on the ASN wizard. Balance
         // is nominal (MAX(0, orderQty − shippedQtyToDate)); OverShipAllowance is the tolerance-adjusted ceiling
@@ -1467,6 +1492,13 @@
         // Transient UI state (not persisted): the paste textarea buffer + the last paste warning for this line.
         public string? _pasteBuffer { get; set; }
         public string? _pasteWarn { get; set; }
+    }
+
+    // One captured serial row (serialized line): one physical unit = one serial + optional expiry. (R4 2026-06-30)
+    private class SerialRow
+    {
+        public string Serial { get; set; } = string.Empty;
+        public DateOnly? Expiry { get; set; }
     }
 
     // One captured lot row (lot-controlled line): lotNo + qty + optional expiry.

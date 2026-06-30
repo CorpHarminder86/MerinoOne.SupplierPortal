@@ -142,10 +142,10 @@ public static class AsnDtoBuilder
         var serialsByLine = (await db.AsnLineSerials.AsNoTracking()
                 .Where(s => asnLineIds.Contains(s.AsnLineId))
                 .OrderBy(s => s.SerialNumber)
-                .Select(s => new { s.AsnLineId, s.SerialNumber })
+                .Select(s => new { s.AsnLineId, Dto = new AsnLineSerialDto(s.SerialNumber, s.ExpiryDate, s.ErpCode) })
                 .ToListAsync(ct))
             .GroupBy(s => s.AsnLineId)
-            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(x => x.SerialNumber).ToList());
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<AsnLineSerialDto>)g.Select(x => x.Dto).ToList());
         var lotsGrouped = (await db.AsnLineLots.AsNoTracking()
                 .Where(l => asnLineIds.Contains(l.AsnLineId))
                 .OrderBy(l => l.LotNo)
