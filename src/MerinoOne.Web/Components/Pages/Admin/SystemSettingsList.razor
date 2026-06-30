@@ -122,6 +122,8 @@
 
                         @RenderToggleRow("EnforceOverShipGuard", "When ON, an ASN ship qty exceeding order qty + over-ship tolerance is REJECTED. Enable only after item / supplier-item tolerances are seeded. The cumulative shipped qty is always tracked regardless of this flag.", fulfil.EnforceOverShipGuard, v => fulfil.EnforceOverShipGuard = v, "EnforceOverShipGuard")
 
+                        @RenderSelectRow("OverShipAllowanceRounding", "Rounds the over-ship allowance to a whole unit (for discrete UOMs). None = exact (e.g. 2.3). Floor = round down (2.3 → 2) — safe, never grants more than the tolerance. Round = nearest. Ceiling = round up (2.3 → 3) — GRANTS MORE than the configured tolerance.", fulfil.OverShipAllowanceRounding, RoundingOptions, v => fulfil.OverShipAllowanceRounding = v, "OverShipAllowanceRounding")
+
                         <div class="settings-actions">
                             <button type="button" class="rz-button rz-primary settings-btn--primary" disabled="@busy" @onclick="SaveFulfilment">
                                 <span class="material-symbols-outlined">save</span> @(busy ? "Saving…" : "Save changes")
@@ -250,6 +252,7 @@
         else if (cat == FulfilmentCategory)
         {
             fulfil.EnforceOverShipGuard = ParseBool(Pick(rows, "EnforceOverShipGuard", "false"), false);
+            fulfil.OverShipAllowanceRounding = Pick(rows, "OverShipAllowanceRounding", "None");
             originalFulfil = SnapshotFulfil();
         }
         loading = false;
@@ -280,7 +283,10 @@
     private Dictionary<string, string> SnapshotFulfil() => new()
     {
         ["EnforceOverShipGuard"] = fulfil.EnforceOverShipGuard.ToString().ToLowerInvariant(),
+        ["OverShipAllowanceRounding"] = fulfil.OverShipAllowanceRounding,
     };
+
+    private static readonly string[] RoundingOptions = { "None", "Floor", "Round", "Ceiling" };
 
     private async Task SaveEmail()
     {
@@ -568,6 +574,23 @@
         </div>
     };
 
+    private RenderFragment RenderSelectRow(string label, string hint, string value, string[] options, Action<string> setter, string key) => __builder =>
+    {
+        <div class="settings-row">
+            <div class="settings-row__label">@label<span class="settings-row__hint">@hint</span></div>
+            <div class="settings-row__control">
+                <select class="settings-row__input" style="max-width:180px;" value="@value"
+                        @onchange="e => setter(e.Value?.ToString() ?? string.Empty)">
+                    @foreach (var opt in options)
+                    {
+                        <option value="@opt" selected="@(string.Equals(opt, value, StringComparison.OrdinalIgnoreCase))">@opt</option>
+                    }
+                </select>
+            </div>
+            <button type="button" class="settings-row__reset" disabled="@busy" @onclick="() => ResetKey(key)" title="Reset to default">Reset</button>
+        </div>
+    };
+
     private RenderFragment RenderPasswordRow(string label, string hint, string value, Action<string> setter, string key, bool disabled, bool masked, Action onClear) => __builder =>
     {
         <div class="settings-row">
@@ -638,6 +661,7 @@
     private class FulfilForm
     {
         public bool EnforceOverShipGuard { get; set; } = false;
+        public string OverShipAllowanceRounding { get; set; } = "None";
     }
 
     private class InforForm

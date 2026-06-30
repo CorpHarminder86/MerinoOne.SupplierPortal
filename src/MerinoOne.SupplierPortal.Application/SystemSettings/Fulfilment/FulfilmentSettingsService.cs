@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -82,6 +83,16 @@ public class FulfilmentSettingsService : IFulfilmentSettings, ISettingsCacheInva
         {
             var raw = Snapshot.TryGetValue(FulfilmentKeys.EnforceOverShipGuard, out var v) ? v : "false";
             return bool.TryParse(raw, out var on) && on;
+        }
+    }
+
+    public OverShipRoundingMode OverShipAllowanceRounding
+    {
+        get
+        {
+            var raw = Snapshot.TryGetValue(FulfilmentKeys.OverShipAllowanceRounding, out var v) ? v
+                : nameof(OverShipRoundingMode.None);
+            return Enum.TryParse<OverShipRoundingMode>(raw, ignoreCase: true, out var m) ? m : OverShipRoundingMode.None;
         }
     }
 }

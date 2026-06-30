@@ -18,7 +18,8 @@ public static class AsnDtoBuilder
     /// <summary>True once the ASN is past Draft — Update / attachment-mutation are rejected.</summary>
     public static bool IsLocked(AsnStatus status) => status != AsnStatus.Draft;
 
-    public static async Task<AsnDetailDto> BuildAsync(IAppDbContext db, Guid asnId, CancellationToken ct)
+    public static async Task<AsnDetailDto> BuildAsync(IAppDbContext db, Guid asnId, CancellationToken ct,
+        Policies.OverShipRoundingMode rounding = Policies.OverShipRoundingMode.None)
     {
         var a = await db.Asns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == asnId, ct)
                 ?? throw new Common.Exceptions.NotFoundException("Asn", asnId);
@@ -158,7 +159,8 @@ public static class AsnDtoBuilder
                 // §7.3 / DI-04 — nominal balance + tolerance-adjusted over-ship allowance, computed (never persisted).
                 var tolPct = ResolveTolerancePct(r.PoSupplierId, r.PoCompany, r.ItemId, r.ItemCode);
                 var balance = Math.Max(0m, r.OrderQty - r.ShippedQtyToDate);
-                var overShipAllowance = Math.Max(0m, (r.OrderQty * Policies.OverShipTolerance.Factor(tolPct)) - r.ShippedQtyToDate);
+                var overShipAllowance = Policies.OverShipTolerance.RoundAllowance(
+                    Math.Max(0m, (r.OrderQty * Policies.OverShipTolerance.Factor(tolPct)) - r.ShippedQtyToDate), rounding);
                 return new AsnLineDto(
                     r.Id, r.PurchaseOrderLineId, r.PurchaseOrderId, r.PoNumber,
                     r.PoPositionNo, r.PositionNo, r.SequenceNo,

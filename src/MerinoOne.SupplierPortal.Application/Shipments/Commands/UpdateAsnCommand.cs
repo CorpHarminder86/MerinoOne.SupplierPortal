@@ -238,6 +238,22 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
                 // OrderQty*factor − ShippedQtyToDate >= delta (single conditional UPDATE; revision/concurrency-safe).
                 var pol = poLines[poLineId];
                 var factor = OverShipTolerance.Factor(ResolveLineTolerancePct(pol));
+
+                // R4 (2026-06-30) — rounded-allowance consistency (mirrors CreateAsnCommand). When a rounding mode is
+                // active, reject the net increase against the SAME rounded cap the DTO/client showed. The live-SQL
+                // ceiling below stays UNROUNDED (non-linear flooring isn't SQL-translatable) as the concurrency-safe net.
+                var rounding = _fulfilment.OverShipAllowanceRounding;
+                if (rounding != OverShipRoundingMode.None)
+                {
+                    var roundedCap = OverShipTolerance.RoundAllowance(
+                        Math.Max(0m, (pol.OrderQty * factor) - pol.ShippedQtyToDate), rounding);
+                    if (delta > roundedCap)
+                        throw new ValidationException(new Dictionary<string, string[]>
+                        {
+                            ["shippedQty"] = new[] { "Ship qty exceeds order qty plus over-ship tolerance." }
+                        });
+                }
+
                 var affected = await _db.PurchaseOrderLines
                     .Where(l => l.Id == poLineId
                                 && (l.OrderQty * factor) - l.ShippedQtyToDate >= delta)
@@ -264,6 +280,6 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         await _db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
 
-        return await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct);
+        return await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct, _fulfilment.OverShipAllowanceRounding);
     }
 }

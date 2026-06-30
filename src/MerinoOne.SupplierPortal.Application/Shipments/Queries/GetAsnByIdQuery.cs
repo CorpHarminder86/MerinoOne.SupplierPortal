@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
 
 namespace MerinoOne.SupplierPortal.Application.Shipments.Queries;
@@ -14,8 +15,13 @@ public record GetAsnByIdQuery(Guid Id) : IRequest<AsnDetailDto>;
 public class GetAsnByIdQueryHandler : IRequestHandler<GetAsnByIdQuery, AsnDetailDto>
 {
     private readonly IAppDbContext _db;
-    public GetAsnByIdQueryHandler(IAppDbContext db) => _db = db;
+    private readonly IFulfilmentSettings _fulfilment;
+    public GetAsnByIdQueryHandler(IAppDbContext db, IFulfilmentSettings fulfilment)
+    {
+        _db = db;
+        _fulfilment = fulfilment;
+    }
 
     public Task<AsnDetailDto> Handle(GetAsnByIdQuery request, CancellationToken ct)
-        => AsnDtoBuilder.BuildAsync(_db, request.Id, ct);
+        => AsnDtoBuilder.BuildAsync(_db, request.Id, ct, _fulfilment.OverShipAllowanceRounding);
 }

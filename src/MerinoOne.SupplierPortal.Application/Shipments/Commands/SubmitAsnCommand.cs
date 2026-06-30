@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Documents;
 using MerinoOne.SupplierPortal.Application.Invoices;
 using MerinoOne.SupplierPortal.Application.Shipments.Policies;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -49,12 +50,14 @@ public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, SubmitO
     private readonly IOutboxDispatcher _outbox;
     private readonly DraftInvoiceFromAsnFactory _invoiceFactory;
     private readonly AttachmentSubmitGuard _attachmentGuard;
+    private readonly IFulfilmentSettings _fulfilment;
 
     public SubmitAsnCommandHandler(
         IAppDbContext db, ICurrentUser user, IOutboxDispatcher outbox, DraftInvoiceFromAsnFactory invoiceFactory,
-        AttachmentSubmitGuard attachmentGuard)
+        AttachmentSubmitGuard attachmentGuard, IFulfilmentSettings fulfilment)
     {
         _db = db; _user = user; _outbox = outbox; _invoiceFactory = invoiceFactory; _attachmentGuard = attachmentGuard;
+        _fulfilment = fulfilment;
     }
 
     public async Task<SubmitOutcome<AsnDetailDto>> Handle(SubmitAsnCommand request, CancellationToken ct)
@@ -273,7 +276,7 @@ public class SubmitAsnCommandHandler : IRequestHandler<SubmitAsnCommand, SubmitO
         // ONE transaction: ASN status + draft Invoice (+ lines) + Outbox row + any attachment-skip audit.
         await _db.SaveChangesAsync(ct);
 
-        var dto = await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct);
+        var dto = await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct, _fulfilment.OverShipAllowanceRounding);
         return SubmitOutcome<AsnDetailDto>.Completed(dto);
     }
 }

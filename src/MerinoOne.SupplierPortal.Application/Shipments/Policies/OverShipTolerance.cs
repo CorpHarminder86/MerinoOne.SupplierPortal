@@ -28,4 +28,19 @@ public static class OverShipTolerance
 
     /// <summary>The multiplicative ceiling factor for the resolved tolerance: <c>1 + tol%/100</c>.</summary>
     public static decimal Factor(decimal tolerancePct) => 1m + (tolerancePct / 100m);
+
+    /// <summary>
+    /// R4 (2026-06-30) — the SINGLE chokepoint for over-ship allowance rounding (Fulfilment setting
+    /// <c>OverShipAllowanceRounding</c>). Applied to the raw allowance/ceiling at EVERY compute site (the two
+    /// server guards + the two read DTOs) so the displayed cap, the client cap, and the enforced cap agree.
+    /// <c>Floor</c> never grants more than the configured tolerance %; <c>Ceiling</c> grants MORE than it.
+    /// The raw value is already clamped to ≥ 0 by callers, so rounding stays non-negative.
+    /// </summary>
+    public static decimal RoundAllowance(decimal rawAllowance, OverShipRoundingMode mode) => mode switch
+    {
+        OverShipRoundingMode.Floor => Math.Floor(rawAllowance),
+        OverShipRoundingMode.Round => Math.Round(rawAllowance, MidpointRounding.AwayFromZero),
+        OverShipRoundingMode.Ceiling => Math.Ceiling(rawAllowance),
+        _ => rawAllowance,
+    };
 }

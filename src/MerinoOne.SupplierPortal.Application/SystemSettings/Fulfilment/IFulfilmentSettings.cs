@@ -1,3 +1,5 @@
+using MerinoOne.SupplierPortal.Application.Shipments.Policies;
+
 namespace MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 
 /// <summary>
@@ -10,4 +12,10 @@ public interface IFulfilmentSettings
     /// Defaults to <c>false</c> when unset/invalid (the cumulative is tracked either way).
     /// </summary>
     bool EnforceOverShipGuard { get; }
+
+    /// <summary>
+    /// R4 (2026-06-30) — rounding applied to the over-ship allowance/ceiling. Defaults to
+    /// <see cref="OverShipRoundingMode.None"/> when unset/invalid (no rounding).
+    /// </summary>
+    OverShipRoundingMode OverShipAllowanceRounding { get; }
 }

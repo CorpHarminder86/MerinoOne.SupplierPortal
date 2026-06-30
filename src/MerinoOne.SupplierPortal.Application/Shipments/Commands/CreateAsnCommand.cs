@@ -285,6 +285,23 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
             int affected;
             if (enforceGuard)
             {
+                // R4 (2026-06-30) — rounded-allowance consistency. When a rounding mode is active, reject against the
+                // SAME rounded cap the DTO/client showed. The live-SQL ceiling below stays UNROUNDED — flooring is
+                // non-linear (Floor(q×f) ≠ q×Floor(f)) and EF can't translate Math.Floor into the UPDATE — so it
+                // remains the concurrency-safe outer net (always ≥ the Floor cap, never wrongly rejects). The snapshot
+                // OrderQty/ShippedQtyToDate here match the displayed cap, so displayed cap == enforced cap.
+                var rounding = _fulfilment.OverShipAllowanceRounding;
+                if (rounding != OverShipRoundingMode.None)
+                {
+                    var roundedCap = OverShipTolerance.RoundAllowance(
+                        Math.Max(0m, (pol.OrderQty * factor) - pol.ShippedQtyToDate), rounding);
+                    if (shipQty > roundedCap)
+                        throw new ValidationException(new Dictionary<string, string[]>
+                        {
+                            ["shippedQty"] = new[] { "Ship qty exceeds order qty plus over-ship tolerance." }
+                        });
+                }
+
                 // Flag ON — single conditional UPDATE: increment ONLY if the tolerance-adjusted ceiling still holds.
                 // OrderQty + ShippedQtyToDate are read LIVE inside the statement (revision-safe, concurrency-safe).
                 affected = await _db.PurchaseOrderLines
@@ -316,6 +333,6 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
         await _db.SaveChangesAsync(ct);   // ASN + junction + lines + rebound attachments. NO ERP post (Draft only).
         await tx.CommitAsync(ct);
 
-        return await AsnDtoBuilder.BuildAsync(_db, asnId, ct);
+        return await AsnDtoBuilder.BuildAsync(_db, asnId, ct, _fulfilment.OverShipAllowanceRounding);
     }
 }

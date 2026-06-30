@@ -1,6 +1,7 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +12,12 @@ public record GetPurchaseOrderByIdQuery(Guid Id) : IRequest<PurchaseOrderDetailD
 public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrderByIdQuery, PurchaseOrderDetailDto>
 {
     private readonly IAppDbContext _db;
-    public GetPurchaseOrderByIdQueryHandler(IAppDbContext db) => _db = db;
+    private readonly IFulfilmentSettings _fulfilment;
+    public GetPurchaseOrderByIdQueryHandler(IAppDbContext db, IFulfilmentSettings fulfilment)
+    {
+        _db = db;
+        _fulfilment = fulfilment;
+    }
 
     public async Task<PurchaseOrderDetailDto> Handle(GetPurchaseOrderByIdQuery request, CancellationToken ct)
     {
@@ -63,7 +69,9 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
             // §7.1 — SupplierItem override (non-null) ?? Item floor ?? 0 (no resolvable item).
             var tolPct = r.SupplierItemTolerance ?? r.ItemTolerance ?? 0m;
             var balance = Math.Max(0m, l.OrderQty - l.ShippedQtyToDate);
-            var overShipAllowance = Math.Max(0m, (l.OrderQty * Shipments.Policies.OverShipTolerance.Factor(tolPct)) - l.ShippedQtyToDate);
+            var overShipAllowance = Shipments.Policies.OverShipTolerance.RoundAllowance(
+                Math.Max(0m, (l.OrderQty * Shipments.Policies.OverShipTolerance.Factor(tolPct)) - l.ShippedQtyToDate),
+                _fulfilment.OverShipAllowanceRounding);
             // §5.3 / UC-ASN-10 — flag a line whose orderQty was revised below the already-shipped cumulative.
             var isOverShippedQtyReduced = l.ShippedQtyToDate > l.OrderQty;
             return new PurchaseOrderLineDto(
