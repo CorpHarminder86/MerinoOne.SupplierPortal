@@ -11,45 +11,51 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 ///
 /// <para><b>Material fields (§6.4):</b> order qty, price (unit price OR extended line amount), delivery date, and
 /// line ADD / REMOVE. Anything else (notes, item description, tax code, discount) is non-material for the purpose
-/// of re-confirmation. The diff matches incoming ERP lines to persisted lines on the natural key
-/// <c>(PositionNo, SequenceNo)</c> — the same key the in-place upsert keys on (§5.2).</para>
+/// of re-confirmation. The diff matches incoming ERP lines to persisted lines on the storage key <c>PositionNo</c>
+/// (seq is always stored as 1; multiple inbound seqs per position are folded). The qty comparison uses the
+/// RESOLVED target qty (replace / signed-add / no-op) — NOT the raw incoming orderQty, which is 0 on an add and
+/// would otherwise read as a qty→0 drop (§5.2 / R4 2026-06-30).</para>
 /// </summary>
 public static class PoMaterialChange
 {
     /// <summary>
-    /// True when the incoming push materially changes the PO vs what is persisted: any line's order qty, unit
-    /// price, extended price, or delivery date changed, OR a line was added / removed (by natural key).
+    /// True when the incoming push materially changes the PO vs what is persisted: any position's RESOLVED order
+    /// qty, unit price, extended price, or delivery date changed, OR a position was added / removed.
     /// <paramref name="existingLines"/> are the persisted (non-deleted) lines; <paramref name="incomingLines"/>
-    /// are the ERP push's lines.
+    /// are the ERP push's lines; <paramref name="resolvedByPosition"/> is the resolved absolute target qty per
+    /// position (from the inbound upsert's ResolvePoLineQuantities).
     /// </summary>
     public static bool IsMaterial(
         IReadOnlyCollection<PurchaseOrderLine> existingLines,
-        IReadOnlyCollection<PoLineRecord> incomingLines)
+        IReadOnlyCollection<PoLineRecord> incomingLines,
+        IReadOnlyDictionary<int, decimal> resolvedByPosition)
     {
-        var existingByKey = new Dictionary<(int, int), PurchaseOrderLine>();
+        var existingByPos = new Dictionary<int, PurchaseOrderLine>();
         foreach (var l in existingLines)
-            existingByKey[(l.PositionNo, l.SequenceNo)] = l;   // last-wins (defensive against any legacy dup)
+            existingByPos[l.PositionNo] = l;   // last-wins (defensive against any legacy dup)
 
-        var incomingByKey = new Dictionary<(int, int), PoLineRecord>();
+        // Fold incoming by positionNo — the last line per position carries the material price/delivery attributes.
+        var incomingByPos = new Dictionary<int, PoLineRecord>();
         foreach (var l in incomingLines)
-            incomingByKey[(l.PositionNo, l.SequenceNo)] = l;
+            incomingByPos[l.PositionNo] = l;
 
-        // Line ADDED — an incoming key with no persisted match (material: a new line changes the order).
-        foreach (var key in incomingByKey.Keys)
-            if (!existingByKey.ContainsKey(key))
+        // Line ADDED — a pushed position with no persisted match (material: a new line changes the order).
+        foreach (var pos in incomingByPos.Keys)
+            if (!existingByPos.ContainsKey(pos))
                 return true;
 
-        // Line REMOVED — a persisted key absent from the push (material: the order shrank). Soft-handled by the
+        // Line REMOVED — a persisted position absent from the push (material: the order shrank). Soft-handled by the
         // upsert, but still a material change for re-confirmation purposes (§6.4).
-        foreach (var key in existingByKey.Keys)
-            if (!incomingByKey.ContainsKey(key))
+        foreach (var pos in existingByPos.Keys)
+            if (!incomingByPos.ContainsKey(pos))
                 return true;
 
-        // Both sides share the same key set — compare the material fields line by line.
-        foreach (var (key, incoming) in incomingByKey)
+        // Shared positions — compare the RESOLVED target qty + the folded line's price/delivery.
+        foreach (var (pos, incoming) in incomingByPos)
         {
-            var existing = existingByKey[key];
-            if (existing.OrderQty != incoming.OrderQty) return true;
+            var existing = existingByPos[pos];
+            var resolvedQty = resolvedByPosition.TryGetValue(pos, out var rq) ? rq : existing.OrderQty;
+            if (existing.OrderQty != resolvedQty) return true;
             if (existing.PriceUnit != incoming.PriceUnit) return true;
             if (existing.Price != incoming.Price) return true;
             if (existing.DeliveryDate != incoming.DeliveryDate) return true;
@@ -67,31 +73,33 @@ public static class PoMaterialChange
     /// </summary>
     public static string DescribeDiff(
         IReadOnlyCollection<PoLineChangeSnapshot> beforeLines,
-        IReadOnlyCollection<PoLineRecord> incomingLines)
+        IReadOnlyCollection<PoLineRecord> incomingLines,
+        IReadOnlyDictionary<int, decimal> resolvedByPosition)
     {
-        var beforeByKey = new Dictionary<(int, int), PoLineChangeSnapshot>();
+        var beforeByPos = new Dictionary<int, PoLineChangeSnapshot>();
         foreach (var l in beforeLines)
-            beforeByKey[(l.PositionNo, l.SequenceNo)] = l;
+            beforeByPos[l.PositionNo] = l;
 
-        var incomingByKey = new Dictionary<(int, int), PoLineRecord>();
+        var incomingByPos = new Dictionary<int, PoLineRecord>();
         foreach (var l in incomingLines)
-            incomingByKey[(l.PositionNo, l.SequenceNo)] = l;
+            incomingByPos[l.PositionNo] = l;
 
         var parts = new List<string>();
 
-        foreach (var (key, incoming) in incomingByKey)
+        foreach (var (pos, incoming) in incomingByPos)
         {
-            if (!beforeByKey.TryGetValue(key, out var before))
+            var resolvedQty = resolvedByPosition.TryGetValue(pos, out var rq) ? rq : incoming.OrderQty;
+            if (!beforeByPos.TryGetValue(pos, out var before))
             {
-                parts.Add($"Line {key.Item1} added (qty {Fmt(incoming.OrderQty)})");
+                parts.Add($"Line {pos} added (qty {Fmt(resolvedQty)})");
                 continue;
             }
 
             var changes = new List<string>();
-            if (before.OrderQty != incoming.OrderQty)
+            if (before.OrderQty != resolvedQty)
             {
-                var remaining = Math.Max(0m, incoming.OrderQty - before.ShippedQtyToDate);
-                changes.Add($"qty {Fmt(before.OrderQty)}→{Fmt(incoming.OrderQty)} ({Fmt(remaining)} remaining)");
+                var remaining = Math.Max(0m, resolvedQty - before.ShippedQtyToDate);
+                changes.Add($"qty {Fmt(before.OrderQty)}→{Fmt(resolvedQty)} ({Fmt(remaining)} remaining)");
             }
             if (before.PriceUnit != incoming.PriceUnit)
                 changes.Add($"unit price {Fmt(before.PriceUnit)}→{Fmt(incoming.PriceUnit)}");
@@ -101,12 +109,12 @@ public static class PoMaterialChange
                 changes.Add($"delivery {FmtDate(before.DeliveryDate)}→{FmtDate(incoming.DeliveryDate)}");
 
             if (changes.Count > 0)
-                parts.Add($"Line {key.Item1} {string.Join(", ", changes)}");
+                parts.Add($"Line {pos} {string.Join(", ", changes)}");
         }
 
-        foreach (var (key, _) in beforeByKey)
-            if (!incomingByKey.ContainsKey(key))
-                parts.Add($"Line {key.Item1} removed");
+        foreach (var pos in beforeByPos.Keys)
+            if (!incomingByPos.ContainsKey(pos))
+                parts.Add($"Line {pos} removed");
 
         return parts.Count == 0 ? "PO revised." : string.Join("; ", parts);
     }

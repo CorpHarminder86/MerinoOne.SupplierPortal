@@ -23,13 +23,18 @@ public class PoMaterialChangeTests
                OrderUnit: "EA", OrderQty: qty, PriceUnit: priceUnit, Price: price, DiscountAmount: discountAmount,
                DeliveryDate: delivery);
 
+    // R4 (2026-06-30) — resolved target qty per position. These tests use absolute orderQty (no additionalQty), so
+    // the resolved value is simply the last incoming line's orderQty for that position (replace semantics).
+    private static IReadOnlyDictionary<int, decimal> Resolved(IEnumerable<PoLineRecord> after)
+        => after.GroupBy(l => l.PositionNo).ToDictionary(g => g.Key, g => g.Last().OrderQty);
+
     // ── Material: order qty changed (UC-PO-06). ─────────────────────────────────────────────────────
     [Fact]
     public void OrderQty_change_is_material()
     {
         var before = new[] { Existing(10, 1, qty: 100) };
         var after = new[] { Incoming(10, 1, qty: 120) };
-        PoMaterialChange.IsMaterial(before, after).Should().BeTrue();
+        PoMaterialChange.IsMaterial(before, after, Resolved(after)).Should().BeTrue();
     }
 
     // ── Material: unit price changed. ───────────────────────────────────────────────────────────────
@@ -38,7 +43,7 @@ public class PoMaterialChangeTests
     {
         var before = new[] { Existing(10, 1, qty: 100, priceUnit: 1m) };
         var after = new[] { Incoming(10, 1, qty: 100, priceUnit: 2m) };
-        PoMaterialChange.IsMaterial(before, after).Should().BeTrue();
+        PoMaterialChange.IsMaterial(before, after, Resolved(after)).Should().BeTrue();
     }
 
     // ── Material: extended price changed. ───────────────────────────────────────────────────────────
@@ -47,7 +52,7 @@ public class PoMaterialChangeTests
     {
         var before = new[] { Existing(10, 1, qty: 100, price: 100m) };
         var after = new[] { Incoming(10, 1, qty: 100, price: 250m) };
-        PoMaterialChange.IsMaterial(before, after).Should().BeTrue();
+        PoMaterialChange.IsMaterial(before, after, Resolved(after)).Should().BeTrue();
     }
 
     // ── Material: delivery date changed. ────────────────────────────────────────────────────────────
@@ -58,7 +63,7 @@ public class PoMaterialChangeTests
         var d2 = new DateTime(2026, 7, 15);
         var before = new[] { Existing(10, 1, qty: 100, delivery: d1) };
         var after = new[] { Incoming(10, 1, qty: 100, delivery: d2) };
-        PoMaterialChange.IsMaterial(before, after).Should().BeTrue();
+        PoMaterialChange.IsMaterial(before, after, Resolved(after)).Should().BeTrue();
     }
 
     // ── Material: a line was ADDED (by natural key). ────────────────────────────────────────────────
@@ -67,7 +72,7 @@ public class PoMaterialChangeTests
     {
         var before = new[] { Existing(10, 1, qty: 100) };
         var after = new[] { Incoming(10, 1, qty: 100), Incoming(20, 1, qty: 50) };
-        PoMaterialChange.IsMaterial(before, after).Should().BeTrue();
+        PoMaterialChange.IsMaterial(before, after, Resolved(after)).Should().BeTrue();
     }
 
     // ── Material: a line was REMOVED (persisted key absent from the push). ──────────────────────────
@@ -76,16 +81,38 @@ public class PoMaterialChangeTests
     {
         var before = new[] { Existing(10, 1, qty: 100), Existing(20, 1, qty: 50) };
         var after = new[] { Incoming(10, 1, qty: 100) };
-        PoMaterialChange.IsMaterial(before, after).Should().BeTrue();
+        PoMaterialChange.IsMaterial(before, after, Resolved(after)).Should().BeTrue();
     }
 
-    // ── Same position, different sequence is a DIFFERENT line → add+remove → material. ──────────────
+    // ── R4 (2026-06-30): sequenceNo is IGNORED for storage (lines fold by positionNo). A re-push of the same
+    //    position with a different inbound seq but the SAME resolved qty/price is NON-material. ───────────────
     [Fact]
-    public void Same_position_different_sequence_is_material()
+    public void Same_position_different_sequence_same_qty_is_not_material()
     {
         var before = new[] { Existing(10, 1, qty: 100) };
-        var after = new[] { Incoming(10, 2, qty: 100) };
-        PoMaterialChange.IsMaterial(before, after).Should().BeTrue();
+        var after = new[] { Incoming(10, 2, qty: 100) };   // different seq, same position + qty → folded, no change
+        PoMaterialChange.IsMaterial(before, after, Resolved(after)).Should().BeFalse();
+    }
+
+    // ── R4 (2026-06-30): a cumulative ADD push carries raw orderQty=0; material must be judged by the RESOLVED
+    //    qty (existing + delta), NOT the raw 0 (else every add looks like a qty→0 drop). ──────────────────────
+    [Fact]
+    public void Cumulative_add_is_material_by_resolved_qty_not_raw_zero()
+    {
+        var before = new[] { Existing(10, 1, qty: 100) };
+        var after = new[] { Incoming(10, 1, qty: 0) };                       // an additionalQty push (orderQty 0)
+        var resolved = new Dictionary<int, decimal> { [10] = 120m };         // existing 100 + add 20
+        PoMaterialChange.IsMaterial(before, after, resolved).Should().BeTrue();
+    }
+
+    // ── A no-op (resolved == existing) is NOT material even though the raw incoming orderQty is 0. ────────────
+    [Fact]
+    public void Noop_push_is_not_material_even_with_raw_zero_qty()
+    {
+        var before = new[] { Existing(10, 1, qty: 100) };
+        var after = new[] { Incoming(10, 1, qty: 0) };
+        var resolved = new Dictionary<int, decimal> { [10] = 100m };         // unchanged
+        PoMaterialChange.IsMaterial(before, after, resolved).Should().BeFalse();
     }
 
     // ── NON-material: only notes / item description / discount changed (UC-PO-07). ──────────────────
@@ -94,7 +121,7 @@ public class PoMaterialChangeTests
     {
         var before = new[] { Existing(10, 1, qty: 100, priceUnit: 1m, price: 100m) };
         var after = new[] { Incoming(10, 1, qty: 100, priceUnit: 1m, price: 100m, itemDesc: "renamed", discountAmount: 5m) };
-        PoMaterialChange.IsMaterial(before, after).Should().BeFalse();
+        PoMaterialChange.IsMaterial(before, after, Resolved(after)).Should().BeFalse();
     }
 
     // ── NON-material: identical lines. ──────────────────────────────────────────────────────────────
@@ -104,7 +131,7 @@ public class PoMaterialChangeTests
         var d = new DateTime(2026, 7, 1);
         var before = new[] { Existing(10, 1, qty: 100, priceUnit: 2m, price: 200m, delivery: d), Existing(20, 1, qty: 50) };
         var after = new[] { Incoming(10, 1, qty: 100, priceUnit: 2m, price: 200m, delivery: d), Incoming(20, 1, qty: 50) };
-        PoMaterialChange.IsMaterial(before, after).Should().BeFalse();
+        PoMaterialChange.IsMaterial(before, after, Resolved(after)).Should().BeFalse();
     }
 
     // ── DescribeDiff renders the qty delta + revised remaining-to-ship balance (§14). ───────────────
@@ -114,7 +141,7 @@ public class PoMaterialChangeTests
         // Line 10 qty 100→120 with 60 already shipped → remaining = 120 − 60 = 60.
         var before = new[] { new PoLineChangeSnapshot(10, 1, OrderQty: 100m, PriceUnit: 1m, Price: 100m, DeliveryDate: null, ShippedQtyToDate: 60m) };
         var after = new[] { Incoming(10, 1, qty: 120m) };
-        var diff = PoMaterialChange.DescribeDiff(before, after);
+        var diff = PoMaterialChange.DescribeDiff(before, after, Resolved(after));
         diff.Should().Contain("Line 10");
         diff.Should().Contain("100→120");
         diff.Should().Contain("60 remaining");
@@ -129,7 +156,7 @@ public class PoMaterialChangeTests
             new PoLineChangeSnapshot(30, 1, 10m, 1m, 10m, null, 0m),
         };
         var after = new[] { Incoming(10, 1, qty: 100m), Incoming(20, 1, qty: 50m) };
-        var diff = PoMaterialChange.DescribeDiff(before, after);
+        var diff = PoMaterialChange.DescribeDiff(before, after, Resolved(after));
         diff.Should().Contain("Line 20 added");
         diff.Should().Contain("Line 30 removed");
     }

@@ -38,6 +38,16 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
                 .Must(r => !string.IsNullOrWhiteSpace(r.SupplierCode) || !string.IsNullOrWhiteSpace(r.ErpSupplierCode))
                 .WithMessage("Either supplierCode or erpSupplierCode is required.");
             o.RuleFor(r => r.Lines).NotNull();
+            // R4 (2026-06-30) — orderQty is an absolute qty (>= 0); additionalQty is a signed delta (may be
+            // negative to reduce). They are MUTUALLY EXCLUSIVE on a line: send orderQty to REPLACE the absolute
+            // qty, or additionalQty to ADD to the current qty — never both. (sequenceNo is accepted but ignored
+            // for storage; the runtime below-floor check — result < already-shipped — is per-row in the handler.)
+            o.RuleForEach(r => r.Lines).ChildRules(line =>
+            {
+                line.RuleFor(l => l.OrderQty).GreaterThanOrEqualTo(0).WithMessage("orderQty must be >= 0.");
+                line.RuleFor(l => l).Must(l => !(l.OrderQty > 0 && l.AdditionalQty != 0))
+                    .WithMessage("orderQty and additionalQty are mutually exclusive on a line — send orderQty to set the absolute qty OR additionalQty to add to the current qty, not both.");
+            });
         });
     }
 }
@@ -47,12 +57,16 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
     public Task<UpsertResultDto> Handle(UpsertPurchaseOrdersCommand request, CancellationToken ct)
     {
         var recs = request.Body.Orders;
-        // Canonical includes a per-line digest (position/seq/item/qty/price/discount) — NOT just Lines.Count — so a
-        // follow-up push that adds a line (e.g. position 10 seq 2 alongside an existing seq 1) hashes differently and
-        // is NOT short-circuited as a duplicate by the no-header idempotency fallback. Line natural key = (position, seq).
+        // Canonical includes a per-line digest (position/item/qty/additionalQty/price/discount) — NOT just Lines.Count
+        // — so a follow-up push that changes a qty or sends a cumulative delta hashes differently and is NOT
+        // short-circuited as a duplicate by the no-header idempotency fallback. Storage line key = positionNo (seq is
+        // always stored as 1 and is omitted from the digest); additionalQty is included so a changed delta re-processes.
+        // NOTE: an identical repeated cumulative-add push hashes the SAME — the ERP must vary the Idempotency-Key /
+        // erpSyncId per intentional add, else a deliberate second identical delta is deduped (an accidental retry is
+        // correctly deduped).
         var canonical = recs.Select(r =>
             $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|" +
-            string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.SequenceNo}/{l.ItemCode}/{l.OrderQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}")));
+            string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.ItemCode}/{l.OrderQty}/{l.AdditionalQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}")));
         var codes = recs.Select(r => r.PoNumber.Trim());
         return exec.ExecuteAsync(TransactionalInboundEntity.Po, request.Body.CompanyCode, request.BoundCompanyIds,
             request.IdempotencyKey, recs.Count, canonical, codes, request.Body, Upsert, ct);
@@ -153,6 +167,13 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
 
                 if (existing.TryGetValue(poNum, out var po))
                 {
+                    // R4 (2026-06-30) — resolve each position's TARGET qty (fold same-position lines; replace / signed-add /
+                    // 0-0 no-op) against the current stored qty, and REJECT the whole PO if any position would drop below
+                    // its already-shipped cumulative or go negative. Done BEFORE any header/line mutation so a reject leaves
+                    // the PO untouched (mirrors the supplier-not-found early-out above).
+                    var (resolvedQty, qtyError) = ResolvePoLineQuantities(po, rec);
+                    if (qtyError != null) { results.Add(new RowResult(poNum, RowOutcome.Failed, qtyError)); continue; }
+
                     // R4 (2026-06-26) — §6.3/§6.4 (UC-PO-06/07, UC-ASN-08). Snapshot the BEFORE line state (qty / price /
                     // delivery date / cumulative) so we can (a) decide whether this re-push is MATERIAL and (b) render the
                     // supplier diff ("100→120; 60 remaining") AFTER the in-place upsert overwrites the line. The cumulative
@@ -161,7 +182,9 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                     var beforeSnap = po.Lines.Where(l => !l.IsDeleted)
                         .Select(l => new PoLineChangeSnapshot(l.PositionNo, l.SequenceNo, l.OrderQty, l.PriceUnit, l.Price, l.DeliveryDate, l.ShippedQtyToDate))
                         .ToList();
-                    var isMaterial = PoMaterialChange.IsMaterial(po.Lines.Where(l => !l.IsDeleted).ToList(), rec.Lines);
+                    // Compare against the RESOLVED target qty (not raw incoming) — a cumulative-add push carries orderQty=0
+                    // and would otherwise look like a qty→0 drop, wrongly resetting the gate + spamming re-confirm emails.
+                    var isMaterial = PoMaterialChange.IsMaterial(po.Lines.Where(l => !l.IsDeleted).ToList(), rec.Lines, resolvedQty);
 
                     po.SupplierId = sup.Id; po.SeccodeId = sup.SeccodeId;
                     po.TenantId = tenantId; po.TenantEntityId = sourceId;
@@ -177,14 +200,14 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                     // brand-new PO below DOES take the pushed status.)
                     po.PoStatus = isMaterial ? PoStatus.Released : po.PoStatus;
                     po.Version += 1; po.UpdatedBy = "infor:inbound"; po.UpdatedOn = now;
-                    SyncLines(db, po, rec, itemMap, taxMap, now);
+                    SyncLines(db, po, rec, resolvedQty, itemMap, taxMap, now);
 
                     if (isMaterial)
                     {
                         // §14 — notify the supplier with the diff + revised ship balance (best-effort email outbox row).
                         EnqueueMaterialChangeNotification(db, po, sup.LegalName,
                             emailBySupplier.TryGetValue(sup.Id, out var em) ? em : null,
-                            PoMaterialChange.DescribeDiff(beforeSnap, rec.Lines), now);
+                            PoMaterialChange.DescribeDiff(beforeSnap, rec.Lines, resolvedQty), now);
                         // §6.2 / UC-PO-10 — re-released material PO: AutoAccept suppliers are auto-stamped Accepted again.
                         await AutoAcceptIfConfiguredAsync(db, po, sup.PoConfirmationMode, tenantId, now, token);
                     }
@@ -193,6 +216,11 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                 }
                 else
                 {
+                    // R4 (2026-06-30) — new PO: resolve the per-position qty (no existing stored qty; a net-negative
+                    // delta on a brand-new line is rejected as < 0). Fold same-position lines into ONE stored line.
+                    var (resolvedQty, qtyError) = ResolvePoLineQuantities(null, rec);
+                    if (qtyError != null) { results.Add(new RowResult(poNum, RowOutcome.Failed, qtyError)); continue; }
+
                     var po2 = new PurchaseOrder
                     {
                         Id = Guid.NewGuid(), TenantId = tenantId, TenantEntityId = sourceId, SeccodeId = sup.SeccodeId,
@@ -202,7 +230,13 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                         Notes = rec.Notes, ErpSyncId = rec.ErpSyncId, Version = 1,
                         CreatedBy = "infor:inbound", CreatedOn = now
                     };
-                    foreach (var l in rec.Lines) po2.Lines.Add(NewLine(l, itemMap, taxMap, now));
+                    // One stored line per positionNo (seq forced to 1 in Apply); the resolved qty is the absolute total.
+                    foreach (var (pos, last) in FoldByPosition(rec))
+                    {
+                        var nl = NewLine(last, itemMap, taxMap, now);
+                        nl.OrderQty = resolvedQty[pos];
+                        po2.Lines.Add(nl);
+                    }
                     db.PurchaseOrders.Add(po2);
                     // §6.2 / UC-PO-01/10 — a NEW PO that lands Released: AutoAccept suppliers are auto-stamped Accepted +
                     // acceptedAt at ingest (ship-gate open immediately, no manual step); Acknowledge/AcceptToShip stay at
@@ -275,34 +309,82 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
         });
     }
 
-    // Upsert lines by their natural key (PositionNo, SequenceNo): update the matched line, add new ones (does not
-    // delete lines absent from the push). A push for the same PositionNo with a different SequenceNo ADDS a new line
-    // rather than overwriting the existing seq — mirrors the (purchaseOrderId, positionNo, sequenceNo) unique index.
+    // R4 (2026-06-30) — STORAGE line key is positionNo ALONE; sequenceNo is always stored as 1 (Apply forces it), so
+    // the unique index (purchaseOrderId, positionNo, sequenceNo) is functionally (po, positionNo) and can never be
+    // violated. Multiple inbound lines sharing a positionNo are FOLDED into the one stored line: the LAST line wins
+    // for attributes (item/price/etc.) and the RESOLVED qty (from ResolvePoLineQuantities) is the absolute total.
+    // SyncLines NEVER deletes lines absent from the push, and NEVER touches ShippedQtyToDate (§5.2 / DI-01).
     //
     // NEW lines are added straight to the DbSet with an explicit PurchaseOrderId — NOT via the tracked po.Lines
     // navigation. Adding to the loaded navigation of an ALREADY-PERSISTED, change-tracked PurchaseOrder makes EF emit
     // a spurious optimistic-concurrency UPDATE against the parent (rowVersion) that fails "0 rows affected" when
-    // batched with the child INSERT; the explicit-FK DbSet add inserts the line cleanly without touching the parent's
-    // concurrency token. (For a brand-new PO the insert path below still uses the navigation — that aggregate is all-Added.)
+    // batched with the child INSERT; the explicit-FK DbSet add inserts the line cleanly. (A brand-new PO uses the
+    // navigation in the handler — that aggregate is all-Added.)
     private static void SyncLines(IAppDbContext db, PurchaseOrder po, PoRecord rec,
+        IReadOnlyDictionary<int, decimal> resolvedByPosition,
         IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, Guid> taxMap, DateTime now)
     {
-        var byKey = new Dictionary<(int, int), PurchaseOrderLine>();
+        // Existing stored lines keyed by positionNo (seq is always 1 in our store; last-wins guards any legacy dup).
+        var byPosition = new Dictionary<int, PurchaseOrderLine>();
         foreach (var existing in po.Lines.Where(l => !l.IsDeleted))
-            byKey[(existing.PositionNo, existing.SequenceNo)] = existing; // last-wins guards any legacy dup pre-index
-        foreach (var l in rec.Lines)
+            byPosition[existing.PositionNo] = existing;
+
+        foreach (var (pos, last) in FoldByPosition(rec))
         {
-            if (byKey.TryGetValue((l.PositionNo, l.SequenceNo), out var line))
+            if (byPosition.TryGetValue(pos, out var line))
             {
-                Apply(line, l, itemMap, taxMap); line.UpdatedBy = "infor:inbound"; line.UpdatedOn = now;
+                Apply(line, last, itemMap, taxMap);
+                line.OrderQty = resolvedByPosition[pos];
+                line.UpdatedBy = "infor:inbound"; line.UpdatedOn = now;
             }
             else
             {
-                var newLine = NewLine(l, itemMap, taxMap, now);
+                var newLine = NewLine(last, itemMap, taxMap, now);
+                newLine.OrderQty = resolvedByPosition[pos];
                 newLine.PurchaseOrderId = po.Id;
                 db.PurchaseOrderLines.Add(newLine);
             }
         }
+    }
+
+    // Fold the payload's lines by positionNo (the storage key), keeping each position's LAST line for attributes.
+    private static IEnumerable<(int Position, PoLineRecord Last)> FoldByPosition(PoRecord rec)
+        => rec.Lines.GroupBy(l => l.PositionNo).Select(g => (g.Key, g.Last()));
+
+    // R4 (2026-06-30) — resolve each position's absolute target qty by folding its lines in payload order against the
+    // current stored qty: orderQty>0 REPLACES the running value; additionalQty≠0 ADDS the signed delta (may reduce);
+    // 0/0 is a no-op. Returns a non-null error (→ reject the whole PO) when a line sets both, or a position's result
+    // would go NEGATIVE. po == null for a brand-new PO.
+    //
+    // A result BELOW the already-shipped cumulative is deliberately NOT rejected — an ERP downward revision below
+    // shipped is a valid, handled state (UC-ASN-10 / §5.3): the PO line is FLAGGED (IsOverShippedQtyReduced) and the
+    // atomic over-ship guard blocks any further ASN; it is not refused. This applies equally to a negative additionalQty
+    // that lands below shipped (same end state as an absolute orderQty revision below shipped).
+    private static (Dictionary<int, decimal> Resolved, string? Error) ResolvePoLineQuantities(PurchaseOrder? po, PoRecord rec)
+    {
+        var existingByPos = new Dictionary<int, decimal>();
+        if (po != null)
+            foreach (var l in po.Lines.Where(l => !l.IsDeleted))
+                existingByPos[l.PositionNo] = l.OrderQty;
+
+        var resolved = new Dictionary<int, decimal>();
+        foreach (var group in rec.Lines.GroupBy(l => l.PositionNo))
+        {
+            var pos = group.Key;
+            existingByPos.TryGetValue(pos, out var running);   // 0 for a new position
+            foreach (var l in group)
+            {
+                if (l.OrderQty > 0m && l.AdditionalQty != 0m)
+                    return (resolved, $"position {pos}: orderQty and additionalQty are mutually exclusive — send orderQty to set the absolute qty OR additionalQty to add to the current qty, not both.");
+                if (l.OrderQty > 0m) running = l.OrderQty;                  // replace
+                else if (l.AdditionalQty != 0m) running += l.AdditionalQty; // signed add (may reduce)
+                // else 0/0 → no-op (leave the running value unchanged)
+            }
+            if (running < 0m)
+                return (resolved, $"position {pos}: resulting order qty {running:0.####} is negative.");
+            resolved[pos] = running;
+        }
+        return (resolved, null);
     }
 
     private static PurchaseOrderLine NewLine(PoLineRecord l, IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, Guid> taxMap, DateTime now)
@@ -312,13 +394,16 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
         return line;
     }
 
+    // Applies an inbound line's attributes onto a stored line. sequenceNo is FORCED to 1 (storage key is positionNo);
+    // additionalQty is echoed for audit. OrderQty is NOT set here — the caller sets the RESOLVED absolute qty.
     private static void Apply(PurchaseOrderLine line, PoLineRecord l, IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, Guid> taxMap)
     {
-        line.PositionNo = l.PositionNo; line.SequenceNo = l.SequenceNo;
+        line.PositionNo = l.PositionNo; line.SequenceNo = 1;   // ALWAYS 1 — index unchanged; seq is not a storage key.
+        line.AdditionalQty = l.AdditionalQty;                  // echo of the last received delta (signed; audit only).
         line.ItemCode = l.ItemCode.Trim(); line.ItemDescription = l.ItemDescription;
         line.ItemId = !string.IsNullOrWhiteSpace(l.ItemCode) && itemMap.TryGetValue(l.ItemCode.Trim(), out var iid) ? iid : null;
         line.OrderUnit = string.IsNullOrWhiteSpace(l.OrderUnit) ? "EA" : l.OrderUnit.Trim();
-        line.OrderQty = l.OrderQty; line.PriceUnit = l.PriceUnit; line.Price = l.Price;
+        line.PriceUnit = l.PriceUnit; line.Price = l.Price;
         line.DiscountPct = l.DiscountPct; line.DiscountAmount = l.DiscountAmount; line.DeliveryDate = l.DeliveryDate;
         line.TaxCode = l.TaxCode; line.TaxDescription = l.TaxDescription;
         line.TaxId = !string.IsNullOrWhiteSpace(l.TaxCode) && taxMap.TryGetValue(l.TaxCode!.Trim(), out var tid) ? tid : null;

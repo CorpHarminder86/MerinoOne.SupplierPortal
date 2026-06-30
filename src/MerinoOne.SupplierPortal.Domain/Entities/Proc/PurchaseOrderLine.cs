@@ -35,4 +35,10 @@ public class PurchaseOrderLine : AuditableEntity
     // The nominal balance (orderQty − shippedQtyToDate) is DERIVED at query time and never persisted.
     // DISTINCT from AsnLine.ShippedQty, which is "this ASN's ship qty" — the two must never be summed together.
     public decimal ShippedQtyToDate { get; set; }
+
+    // R4 (2026-06-30) — last-received inbound additive delta echo (signed; may be negative to reduce). The
+    // AUTHORITATIVE order quantity is always OrderQty: the inbound upsert applies the delta to OrderQty (OrderQty=0
+    // & AdditionalQty≠0 → OrderQty += AdditionalQty) and stores the delta here for audit/traceability only. NOT a
+    // running ledger of every add. NOT NULL DEFAULT 0 (EF auto-named default).
+    public decimal AdditionalQty { get; set; }
 }

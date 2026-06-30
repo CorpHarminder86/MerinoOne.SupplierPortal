@@ -228,12 +228,12 @@ public class PurchaseOrderInboundTests
     }
 
     /// <summary>
-    /// Line natural key = (positionNo, sequenceNo). A second push for the SAME position but a different sequence
-    /// must ADD a new line, not overwrite the existing one (the reported bug). Also asserts the PO header
-    /// TotalAmount = sum of each line's NetAmount (Price − DiscountAmount).
+    /// R4 (2026-06-30) — STORAGE line key is positionNo ALONE; sequenceNo is always stored as 1. A second push for
+    /// the SAME position with a different sequence FOLDS into the one stored line (last-push attributes win), it does
+    /// NOT add a second row — so the (po, positionNo, 1) unique index is never threatened.
     /// </summary>
     [SkippableFact]
-    public async Task Inbound_po_second_push_same_position_new_sequence_adds_line_and_header_total_sums_net()
+    public async Task Inbound_po_second_push_same_position_new_sequence_folds_into_one_line_seq1()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
@@ -243,7 +243,7 @@ public class PurchaseOrderInboundTests
             grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
         var poNumber = $"PO-SEQ-{tag}";
 
-        PushPurchaseOrdersRequest Body(int positionNo, int sequenceNo, decimal price, decimal discountAmount) =>
+        PushPurchaseOrdersRequest Body(int positionNo, int sequenceNo, decimal qty, decimal price, decimal discountAmount) =>
             new(IntegrationTestFixture.CompanyCode, new[]
             {
                 new PoRecord(
@@ -251,20 +251,21 @@ public class PurchaseOrderInboundTests
                     Lines: new[]
                     {
                         new PoLineRecord(PositionNo: positionNo, SequenceNo: sequenceNo, ItemCode: $"ITM-{tag}",
-                            OrderUnit: "EA", OrderQty: 1, PriceUnit: price, Price: price, DiscountAmount: discountAmount),
+                            OrderUnit: "EA", OrderQty: qty, PriceUnit: price, Price: price, DiscountAmount: discountAmount),
                     },
                     PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR")
             });
 
-        // Push 1: position 10 / seq 1, price 100, discount 10 → net 90.
-        var resp1 = await inbound_PostAsync(Body(10, 1, price: 100m, discountAmount: 10m));
+        // Push 1: position 10 / seq 1, qty 5, price 100, discount 10 → net 90.
+        var resp1 = await inbound_PostAsync(Body(10, 1, qty: 5, price: 100m, discountAmount: 10m));
         (await Read<UpsertResultDto>(resp1)).Data!.Inserted.Should().Be(1);
 
-        // Push 2: SAME position 10 but seq 2, price 200, discount 0 → net 200. Must ADD, not overwrite seq 1.
-        var resp2 = await inbound_PostAsync(Body(10, 2, price: 200m, discountAmount: 0m));
+        // Push 2: SAME position 10 but seq 2, qty 8, price 200, discount 0 → must FOLD into the one position-10 line
+        // (replace qty/price), NOT add a second row. The stored seq stays 1.
+        var resp2 = await inbound_PostAsync(Body(10, 2, qty: 8, price: 200m, discountAmount: 0m));
         var r2 = (await Read<UpsertResultDto>(resp2)).Data!;
         r2.Failed.Should().Be(0, because: r2.Rows.Count > 0 ? string.Join(" | ", r2.Rows.Select(x => $"{x.Code}/{x.Outcome}/{x.Error}")) : "no failures expected");
-        r2.Updated.Should().Be(1, because: "the PO already exists, so push 2 is an update that adds a line");
+        r2.Updated.Should().Be(1, because: "the PO already exists, so push 2 is an in-place update (fold), not an insert");
 
         Guid poId;
         using (var s = _fx.Factory.Services.CreateScope())
@@ -275,21 +276,79 @@ public class PurchaseOrderInboundTests
             poId = po.Id;
             var lines = await db.PurchaseOrderLines.IgnoreQueryFilters()
                 .Where(l => l.PurchaseOrderId == poId && !l.IsDeleted)
-                .Select(l => new { l.PositionNo, l.SequenceNo }).ToListAsync();
-            lines.Should().HaveCount(2, because: "position 10 seq 2 was ADDED alongside the existing seq 1, not merged into it");
-            lines.Should().Contain(x => x.PositionNo == 10 && x.SequenceNo == 1);
-            lines.Should().Contain(x => x.PositionNo == 10 && x.SequenceNo == 2);
+                .Select(l => new { l.PositionNo, l.SequenceNo, l.OrderQty, l.Price }).ToListAsync();
+            lines.Should().HaveCount(1, because: "the second seq for the same position folds into the one stored line (not added)");
+            lines.Single().SequenceNo.Should().Be(1, because: "sequenceNo is ALWAYS stored as 1");
+            lines.Single().OrderQty.Should().Be(8m, because: "the later push replaced the qty (last-push attributes win)");
+            lines.Single().Price.Should().Be(200m);
         }
 
-        // Header total = sum of line net amounts (90 + 200 = 290); each line carries its own NetAmount.
+        // Header total = the single folded line's net (price 200 − discount 0 = 200).
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
         var detail = (await Read<PurchaseOrderDetailDto>(await supplierClient.GetAsync($"/api/purchase-orders/{poId}"))).Data!;
-        detail.TotalAmount.Should().Be(290m);
-        detail.Lines.Single(l => l.SequenceNo == 1).NetAmount.Should().Be(90m);
-        detail.Lines.Single(l => l.SequenceNo == 2).NetAmount.Should().Be(200m);
+        detail.Lines.Should().HaveCount(1);
+        detail.TotalAmount.Should().Be(200m);
 
         Task<HttpResponseMessage> inbound_PostAsync(PushPurchaseOrdersRequest body) =>
             _fx.CreateInboundClient().PostAsJsonAsync("/api/integration/inbound/purchase-orders", body);
+    }
+
+    /// <summary>
+    /// R4 (2026-06-30) — line-level AdditionalQty + forced sequenceNo=1. orderQty>0 REPLACES the stored qty;
+    /// additionalQty≠0 ADDS a SIGNED delta (may reduce) to the current qty; 0/0 is a no-op; both-set is rejected
+    /// (400); and sequenceNo is ALWAYS stored as 1 regardless of the pushed value.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_additionalQty_replace_add_reduce_noop_and_seq_forced_to_1()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-ADDQ-{tag}";
+
+        PushPurchaseOrdersRequest Body(int seq, decimal orderQty, decimal additionalQty) =>
+            new(IntegrationTestFixture.CompanyCode, new[]
+            {
+                new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                    new[] { new PoLineRecord(PositionNo: 10, SequenceNo: seq, ItemCode: $"ITM-{tag}",
+                        OrderUnit: "EA", OrderQty: orderQty, PriceUnit: 1, Price: 1, AdditionalQty: additionalQty) },
+                    PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+            });
+
+        async Task<decimal> StoredQtyAsync()
+        {
+            using var s = _fx.Factory.Services.CreateScope();
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var line = await db.PurchaseOrderLines.IgnoreQueryFilters()
+                .FirstAsync(l => l.PurchaseOrder!.PoNumber == poNumber && !l.IsDeleted && l.PositionNo == 10);
+            line.SequenceNo.Should().Be(1, because: "sequenceNo is ALWAYS stored as 1 regardless of the pushed seq");
+            return line.OrderQty;
+        }
+
+        // 1) REPLACE — orderQty 100, add 0 (pushed seq 7 → must store as 1).
+        await PushAsync(Body(seq: 7, orderQty: 100, additionalQty: 0));
+        (await StoredQtyAsync()).Should().Be(100m, because: "orderQty>0 with add 0 replaces the absolute qty");
+
+        // 2) ADD — orderQty 0, add +20 → 120 (cumulative add to the current qty).
+        await PushAsync(Body(seq: 3, orderQty: 0, additionalQty: 20));
+        (await StoredQtyAsync()).Should().Be(120m, because: "orderQty 0 with add>0 adds to the current qty");
+
+        // 3) REDUCE — orderQty 0, add -50 → 70 (negative delta).
+        await PushAsync(Body(seq: 9, orderQty: 0, additionalQty: -50));
+        (await StoredQtyAsync()).Should().Be(70m, because: "additionalQty may be negative to reduce the qty");
+
+        // 4) NO-OP — orderQty 0, add 0 → unchanged (70).
+        await PushAsync(Body(seq: 1, orderQty: 0, additionalQty: 0));
+        (await StoredQtyAsync()).Should().Be(70m, because: "0/0 is a no-op — the qty is left unchanged");
+
+        // 5) BOTH SET → rejected at the validator (400); the qty is untouched.
+        var bad = await _fx.CreateInboundClient()
+            .PostAsJsonAsync("/api/integration/inbound/purchase-orders", Body(seq: 1, orderQty: 5, additionalQty: 5));
+        bad.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "orderQty and additionalQty are mutually exclusive on a line");
+        (await StoredQtyAsync()).Should().Be(70m);
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════

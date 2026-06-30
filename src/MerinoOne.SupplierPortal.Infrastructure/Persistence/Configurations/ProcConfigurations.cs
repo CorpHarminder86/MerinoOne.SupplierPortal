@@ -82,6 +82,11 @@ public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseO
         b.Property(x => x.ShippedQtyToDate).HasColumnName("shippedQtyToDate").HasColumnType("decimal(18,4)")
             .HasDefaultValue(0m);
 
+        // R4 (2026-06-30) — last-received inbound additive delta echo (signed). Authoritative qty stays OrderQty.
+        // NOT NULL DEFAULT 0 (EF auto-named default), like shippedQtyToDate.
+        b.Property(x => x.AdditionalQty).HasColumnName("additionalQty").HasColumnType("decimal(18,4)")
+            .HasDefaultValue(0m);
+
         b.HasOne(x => x.PurchaseOrder).WithMany(p => p.Lines).HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_PurchaseOrderLine_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId)

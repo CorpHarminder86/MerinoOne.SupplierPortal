@@ -6283,6 +6283,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnName("purchaseOrderLineId")
                         .HasDefaultValueSql("NEWID()");
 
+                    b.Property<decimal>("AdditionalQty")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18,4)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("additionalQty");
+
                     b.Property<string>("CreatedBy")
                         .IsRequired()
                         .HasMaxLength(100)
