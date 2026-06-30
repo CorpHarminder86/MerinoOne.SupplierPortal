@@ -21,6 +21,7 @@ namespace MerinoOne.SupplierPortal.Tests.Unit;
 /// Negotiation         | Block      | Block             | Block   (replaces DateProposed)
 /// Approved            | Block      | Block             | Block   (replaces DateProposed)
 /// PartiallyDelivered  | Allow      | Allow             | Allow
+/// FullyShipped        | Allow      | Allow             | Allow   (R5 §11.2 — balance=0 blocks at Submit)
 /// Delivered           | Block      | Block             | Block   (balance-driven no-op)
 /// Closed              | Block      | Block             | Block
 /// Cancelled           | Block      | Block             | Block
@@ -39,6 +40,7 @@ public class PoConfirmationPolicyTests
     [InlineData(PoStatus.Negotiation, false)]   // D2 — replaces DateProposed; blocks.
     [InlineData(PoStatus.Approved, false)]      // D2 — replaces DateProposed; blocks.
     [InlineData(PoStatus.PartiallyDelivered, true)]
+    [InlineData(PoStatus.FullyShipped, true)]   // R5 §11.2 — shippable at the gate; balance=0 blocks at Submit.
     [InlineData(PoStatus.Delivered, false)]
     [InlineData(PoStatus.Closed, false)]
     [InlineData(PoStatus.Cancelled, false)]
@@ -55,6 +57,7 @@ public class PoConfirmationPolicyTests
     [InlineData(PoStatus.Negotiation, false)]
     [InlineData(PoStatus.Approved, false)]
     [InlineData(PoStatus.PartiallyDelivered, true)]
+    [InlineData(PoStatus.FullyShipped, true)]   // R5 §11.2 — shippable at the gate; balance=0 blocks at Submit.
     [InlineData(PoStatus.Delivered, false)]
     [InlineData(PoStatus.Closed, false)]
     [InlineData(PoStatus.Cancelled, false)]
@@ -71,6 +74,7 @@ public class PoConfirmationPolicyTests
     [InlineData(PoStatus.Negotiation, false)]
     [InlineData(PoStatus.Approved, false)]
     [InlineData(PoStatus.PartiallyDelivered, true)]
+    [InlineData(PoStatus.FullyShipped, true)]   // R5 §11.2 — shippable at the gate; balance=0 blocks at Submit.
     [InlineData(PoStatus.Delivered, false)]
     [InlineData(PoStatus.Closed, false)]
     [InlineData(PoStatus.Cancelled, false)]

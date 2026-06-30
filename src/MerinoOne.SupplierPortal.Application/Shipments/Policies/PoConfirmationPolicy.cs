@@ -14,10 +14,14 @@ namespace MerinoOne.SupplierPortal.Application.Shipments.Policies;
 /// no-op).</para>
 ///
 /// <list type="bullet">
-///   <item><c>AutoAccept</c>      → Released, Acknowledged, Accepted, PartiallyDelivered.</item>
-///   <item><c>AcknowledgeToShip</c> → Acknowledged, Accepted, PartiallyDelivered.</item>
-///   <item><c>AcceptToShip</c>     → Accepted, PartiallyDelivered.</item>
+///   <item><c>AutoAccept</c>      → Released, Acknowledged, Accepted, PartiallyDelivered, FullyShipped.</item>
+///   <item><c>AcknowledgeToShip</c> → Acknowledged, Accepted, PartiallyDelivered, FullyShipped.</item>
+///   <item><c>AcceptToShip</c>     → Accepted, PartiallyDelivered, FullyShipped.</item>
 /// </list>
+///
+/// <para>R5 (§11.2 gate note) — <see cref="PoStatus.FullyShipped"/> is balance-driven like
+/// <see cref="PoStatus.PartiallyDelivered"/>: it is shippable at the gate, with the at-Submit over-ship guard
+/// (balance = 0) blocking any further ASN. No extra create-gate blocking is added for it.</para>
 /// </summary>
 public static class PoConfirmationPolicy
 {
@@ -30,6 +34,13 @@ public static class PoConfirmationPolicy
         // PartiallyDelivered + Accepted unblock in EVERY mode (the line is already confirmed-and-shipping).
         PoStatus.Accepted           => true,
         PoStatus.PartiallyDelivered => true,
+
+        // R5 (§11.2 gate note) — FullyShipped is balance-driven like PartiallyDelivered: the PO is already
+        // confirmed-and-shipping, so the CONFIRMATION gate must NOT block here. There is no remaining balance, so
+        // the authoritative over-ship guard at Submit (orderQty×factor − shippedQtyToDate ≥ shipQty, balance = 0)
+        // is what blocks any further ASN — exactly as §11.2 prescribes ("no extra gating work"). Blocking at the
+        // create gate instead would change the failure point and break the at-Submit balance-guard contract.
+        PoStatus.FullyShipped       => true,
 
         // Acknowledged unblocks for AutoAccept + AcknowledgeToShip; AcceptToShip still requires an Accept.
         PoStatus.Acknowledged => mode is PoConfirmationMode.AutoAccept or PoConfirmationMode.AcknowledgeToShip,

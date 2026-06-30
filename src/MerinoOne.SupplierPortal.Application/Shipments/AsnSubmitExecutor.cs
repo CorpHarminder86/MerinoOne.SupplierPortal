@@ -287,6 +287,58 @@ public sealed class AsnSubmitExecutor
             }
         }
 
+        // ---- Fulfilment status derivation (§11.2) — runs AFTER the guard consumed ShippedQtyToDate ------
+        // For EACH PO this ASN's lines touched, re-derive PoStatus from ALL its non-deleted lines:
+        //   every line fully shipped → FullyShipped; some but not all → PartiallyDelivered; none → unchanged.
+        // FulfilmentStatusDeriver guards the terminal/ERP-owned states (Cancelled/Closed/Delivered/Draft/...) so a
+        // submit never clobbers an ERP-owned Delivered nor regresses a fully-shipped+delivered PO. Delivered is
+        // NEVER set here — only the mapped ERP status (Phase 2 PoStatusResolver) advances FullyShipped → Delivered
+        // (UC-SM-08).
+        //
+        // CONCURRENCY (DI-02): the over-ship guard above already X-locked each PO LINE (its ExecuteUpdateAsync runs
+        // inside this tx and the lock is held to commit). The PO HEADER update below is therefore a SECOND-in-order
+        // exclusive lock, taken via a CONDITIONAL ExecuteUpdateAsync — NOT a tracked read-then-write. Using a
+        // server-side conditional UPDATE (no prior shared read of the PO row in this tx) keeps the lock order
+        // line→header consistent across all concurrent submitters, so N parallel approvals still serialise through
+        // the line guard (exactly the winners the balance allows) instead of deadlocking on a read→update upgrade.
+        // The current PoStatus is re-checked in the WHERE so a concurrent writer cannot be clobbered.
+        var affectedPoIds = await _db.AsnLines
+            .Where(al => al.AsnId == asn.Id && !al.IsDeleted)
+            .Join(_db.PurchaseOrderLines, al => al.PurchaseOrderLineId, pol => pol.Id, (al, pol) => pol.PurchaseOrderId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        foreach (var poId in affectedPoIds)
+        {
+            // Fresh, no-tracking reads — the guard's ExecuteUpdateAsync wrote the line cache straight to the DB.
+            var currentStatus = await _db.PurchaseOrders.AsNoTracking()
+                .Where(p => p.Id == poId).Select(p => p.PoStatus).FirstOrDefaultAsync(ct);
+            var poLines = (await _db.PurchaseOrderLines.AsNoTracking()
+                    .Where(l => l.PurchaseOrderId == poId && !l.IsDeleted)
+                    .Select(l => new { l.OrderQty, l.ShippedQtyToDate })
+                    .ToListAsync(ct))
+                .Select(l => new FulfilmentStatusDeriver.LineQty(l.OrderQty, l.ShippedQtyToDate))
+                .ToList();
+
+            var target = FulfilmentStatusDeriver.Derive(currentStatus, poLines);
+            if (target is not PoStatus ns) continue;   // null = no change (incl. terminal/ERP-owned guard).
+
+            // Conditional UPDATE: re-assert the current status is still derivable (no-clobber under concurrency),
+            // single exclusive lock on the PO header, taken AFTER the line lock — consistent order, no deadlock.
+            // The derivable-state guard is INLINED (not a method/array .Contains) so EF translates it to a clean IN.
+            await _db.PurchaseOrders
+                .Where(p => p.Id == poId
+                            && (p.PoStatus == PoStatus.Accepted
+                                || p.PoStatus == PoStatus.Acknowledged
+                                || p.PoStatus == PoStatus.Released
+                                || p.PoStatus == PoStatus.PartiallyDelivered
+                                || p.PoStatus == PoStatus.FullyShipped))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(p => p.PoStatus, ns)
+                    .SetProperty(p => p.UpdatedBy, _user.UserCode)
+                    .SetProperty(p => p.UpdatedOn, now), ct);
+        }
+
         // ---- Flip to Submitted + stamp + ERP correlation key --------------------------------------------
         var key = OutboxKey.For(OutboxEntity.Asn, asn.TenantId, asn.AsnNumber, "submit");
         asn.AsnStatus = AsnStatus.Submitted;
