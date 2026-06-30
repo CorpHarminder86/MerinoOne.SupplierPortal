@@ -84,6 +84,10 @@ public interface IAppDbContext
     DbSet<CreditDebitNote> CreditDebitNotes { get; }
     DbSet<Payment> Payments { get; }
 
+    // R5 (TSD R5 Addendum §4.7 / §4.9) — ERP→portal status mapping master + inbound sync log.
+    DbSet<PoStatusMapping> PoStatusMappings { get; }
+    DbSet<SyncLog> SyncLogs { get; }
+
     DbSet<DocumentUpload> DocumentUploads { get; }
     DbSet<AttachmentType> AttachmentTypes { get; }
     DbSet<AttachmentEntity> AttachmentEntities { get; }

@@ -1,0 +1,245 @@
+@page "/settings/po-status-mappings"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+@* R5 (TSD R5 Addendum §4.7 / §11 — Component 7, ERP→portal PO status mapping). Admin Settings editor that
+   replaces R4's hardcoded "modified→Released". Each row maps one raw ERP status (the lookup key, unique per
+   tenant, immutable once created) to one portal PoStatus. The target dropdown offers ONLY the ERP-driven subset
+   — Draft | Released | Cancelled | Closed | Delivered (§11.2). The supplier/fulfilment-driven statuses
+   (Acknowledged, Accepted, DateProposed, Rejected, PartiallyDelivered, FullyShipped) are NOT offered. The
+   server's "erpStatus already mapped" uniqueness 409 is surfaced inline. Settings.Write gate (matches the other
+   admin Settings pages). *@
+
+<PageTitle>PO Status Mappings</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">PO Status Mappings</h1>
+                <span class="tl-count-chip">@(mappings?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">ERP → portal purchase-order status translation · Settings → System</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (CanWrite)
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add mapping
+                </button>
+            }
+        </div>
+    </header>
+
+    @if (!CanWrite)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+            <div>You do not have permission to manage PO status mappings.</div>
+        </div>
+    }
+    else if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (mappings == null || mappings.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">swap_horiz</span>
+            <div>No PO status mappings defined.</div>
+            <div style="font-size:12px;color:var(--mer-ink-500);">Add a mapping to translate an incoming ERP status into a portal status.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.4fr 90px 110px; --tl-min-width: 640px;">
+            <div class="tlg-header">
+                <div class="tlg-col">ERP status</div>
+                <div class="tlg-col">Portal status</div>
+                <div class="tlg-col">Active</div>
+                <div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var m in mappings)
+            {
+                var row = m;
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code" style="font-weight:600;color:var(--mer-blue-darker);">@row.ErpStatus</div>
+                    <div class="tlg-col tlg-desc">
+                        <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;color:var(--mer-ink-400);">arrow_forward</span>
+                        @row.PoStatus
+                    </div>
+                    <div class="tlg-col"><span class="tlg-status @(row.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(row.IsActive ? "Yes" : "No")</span></div>
+                    <div class="tlg-col tlg-col--actions">
+                        <button @onclick="() => OpenEdit(row)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Re-target / toggle active">
+                            <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                        </button>
+                        @if (row.IsActive)
+                        {
+                            <button @onclick="() => Deactivate(row)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
+                                <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@* ---------------- Add / edit dialog ---------------- *@
+@if (showDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">swap_horiz</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">PO status mapping</div>
+                    <h2 class="merino-dialog__title">@(editingId.HasValue ? "Edit mapping" : "New mapping")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showDialog = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">ERP status *</label>
+                        @if (editingId.HasValue)
+                        {
+                            @* erpStatus is the immutable lookup key once created. *@
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;background:var(--mer-canvas);" value="@formErpStatus" disabled />
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">The ERP status is the lookup key and cannot be changed. Deactivate and re-add to rename.</div>
+                        }
+                        else
+                        {
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formErpStatus" placeholder="e.g. Approved" />
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">The raw ERP status, matched case-insensitively. Unique per tenant.</div>
+                        }
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Portal status *</label>
+                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formPoStatus">
+                            @foreach (var s in ErpDrivenTargets)
+                            {
+                                <option value="@s">@s</option>
+                            }
+                        </select>
+                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Only the ERP-driven targets are selectable (§11.2). Supplier-driven statuses are excluded.</div>
+                    </div>
+                    @if (editingId.HasValue)
+                    {
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" @bind="formActive" /> Active
+                        </label>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(formError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@formError</div> }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showDialog = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool CanWrite => Token.HasPermission("Settings.Write");
+    private bool busy;
+
+    // The ERP-driven portal-status subset valid as a mapping TARGET (§11.2 / UC-SM-07). MUST mirror the server's
+    // ErpDrivenTargets allow-list — the supplier/fulfilment-driven statuses (Acknowledged, Accepted, DateProposed,
+    // Rejected, PartiallyDelivered, FullyShipped) are deliberately excluded.
+    private static readonly string[] ErpDrivenTargets = { "Draft", "Released", "Cancelled", "Closed", "Delivered" };
+
+    private List<PoStatusMappingDto>? mappings;
+    private bool loading = true;
+
+    private bool showDialog;
+    private Guid? editingId;
+    private string formErpStatus = string.Empty;
+    private string formPoStatus = "Released";
+    private bool formActive = true;
+    private string formError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanWrite) { loading = false; return; }
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<PoStatusMappingDto>>("api/settings/po-status-mappings");
+        mappings = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenNew()
+    {
+        editingId = null;
+        formErpStatus = string.Empty;
+        formPoStatus = "Released";
+        formActive = true;
+        formError = string.Empty;
+        showDialog = true;
+    }
+
+    private void OpenEdit(PoStatusMappingDto m)
+    {
+        editingId = m.Id;
+        formErpStatus = m.ErpStatus;
+        formPoStatus = ErpDrivenTargets.Contains(m.PoStatus) ? m.PoStatus : ErpDrivenTargets[0];
+        formActive = m.IsActive;
+        formError = string.Empty;
+        showDialog = true;
+    }
+
+    private async Task Save()
+    {
+        formError = string.Empty;
+        if (!editingId.HasValue && string.IsNullOrWhiteSpace(formErpStatus)) { formError = "ERP status is required."; return; }
+        if (string.IsNullOrWhiteSpace(formPoStatus)) { formError = "Portal status is required."; return; }
+
+        busy = true;
+        ApiResult<PoStatusMappingDto>? resp;
+        if (editingId.HasValue)
+            resp = await Api.PutAsync<PoStatusMappingDto, UpdatePoStatusMappingRequest>($"api/settings/po-status-mappings/{editingId}", new UpdatePoStatusMappingRequest(formPoStatus, formActive));
+        else
+            resp = await Api.PostAsync<PoStatusMappingDto, CreatePoStatusMappingRequest>("api/settings/po-status-mappings", new CreatePoStatusMappingRequest(formErpStatus.Trim(), formPoStatus));
+
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+            showDialog = false;
+            await Load();
+        }
+        else
+        {
+            // Surface the server message inline — including the 409 "ERP status '<x>' is already mapped for this
+            // tenant." uniqueness error and the §11.2 ERP-driven-target validation message.
+            formError = resp?.Errors?.FirstOrDefault() ?? "Failed to save mapping.";
+        }
+        busy = false;
+    }
+
+    private async Task Deactivate(PoStatusMappingDto m)
+    {
+        if (!await Dialog.ConfirmDeactivateAsync(m.ErpStatus, "MAPPING")) return;
+        busy = true;
+        // Soft-delete (DELETE) — the erpStatus stops resolving and is freed for a future re-add (no hard delete).
+        var resp = await Api.DeleteAsync($"api/settings/po-status-mappings/{m.Id}");
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" });
+            await Load();
+        }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+}

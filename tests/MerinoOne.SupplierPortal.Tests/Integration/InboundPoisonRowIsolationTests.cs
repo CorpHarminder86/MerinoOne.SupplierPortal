@@ -48,10 +48,13 @@ public class InboundPoisonRowIsolationTests
         var poisonRef = $"PAY-BAD-{tag}";
         var poisonInvoiceId = Guid.NewGuid(); // does NOT exist → FK violation at flush.
 
+        var user = new StubCurrentUser(IntegrationTestFixture.TenantId);
         var exec = new InboundUpsertExecutor(
             db,
-            new StubCurrentUser(IntegrationTestFixture.TenantId),
+            user,
             new StubCurrentCompany(),
+            // R5 — the executor writes the central proc.SyncLog row; use a writer over the SAME test db + user.
+            new MerinoOne.SupplierPortal.Application.Common.Integration.SyncLogWriter(db, user),
             NullLogger<InboundUpsertExecutor>.Instance);
 
         var codes = new[] { goodRef1, goodRef2, poisonRef };

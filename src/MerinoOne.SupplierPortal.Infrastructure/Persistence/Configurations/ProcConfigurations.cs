@@ -503,6 +503,64 @@ public class CreditDebitNoteConfiguration : IEntityTypeConfiguration<CreditDebit
     }
 }
 
+// R5 (TSD R5 Addendum §4.7 / Component 7) — ERP→portal PO status mapping master.
+// Tenant-scoped (tenantId from BaseAggregateRoot → ITenantScoped). Many ERP statuses map to one
+// portal status; the filtered unique index enforces one portal status per ERP status per tenant.
+// Case-insensitivity: the DB collation SQL_Latin1_General_CP1_CI_AS (CI, verified 2026-06-30)
+// makes UQ_PoStatusMapping_tenant_erp naturally case-insensitive without an explicit COLLATE.
+public class PoStatusMappingConfiguration : IEntityTypeConfiguration<PoStatusMapping>
+{
+    public void Configure(EntityTypeBuilder<PoStatusMapping> b)
+    {
+        b.ApplyBaseEntityConvention("PoStatusMapping", "proc", "poStatusMapping");
+        b.Property(x => x.ErpStatus).HasColumnName("erpStatus").HasMaxLength(50).IsRequired();
+        b.Property(x => x.PoStatus).HasColumnName("poStatus").HasMaxLength(50).IsRequired();
+        b.Property(x => x.IsActive).HasColumnName("isActive").HasDefaultValue(true);
+
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_PoStatusMapping_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        // Composite tenant scope index — the always-on tenant filter scans this path.
+        b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_PoStatusMapping_tenant_company");
+
+        // Deterministic ERP-status resolution: one portal status per ERP status (per tenant), filtered
+        // on non-deleted rows. DB collation is CI (SQL_Latin1_General_CP1_CI_AS), so this index is
+        // naturally case-insensitive — no explicit COLLATE required on the erpStatus column.
+        b.HasIndex("TenantId", nameof(PoStatusMapping.ErpStatus))
+            .HasDatabaseName("UQ_PoStatusMapping_tenant_erp").IsUnique()
+            .HasFilter("[isDeleted] = 0");
+    }
+}
+
+// R5 (TSD R5 Addendum §4.9 / Component 8) — inbound integration sync log.
+// Tenant-scoped (tenantId from BaseAggregateRoot → ITenantScoped). Insert-only in practice;
+// carries the standard audit + soft-delete envelope so the global soft-delete filter applies.
+public class SyncLogConfiguration : IEntityTypeConfiguration<SyncLog>
+{
+    public void Configure(EntityTypeBuilder<SyncLog> b)
+    {
+        b.ApplyBaseEntityConvention("SyncLog", "proc", "syncLog");
+        b.Property(x => x.Direction).HasColumnName("direction").HasMaxLength(20).HasDefaultValue("Inbound");
+        b.Property(x => x.Api).HasColumnName("api").HasMaxLength(80).IsRequired();
+        b.Property(x => x.EntityType).HasColumnName("entityType").HasMaxLength(50);
+        b.Property(x => x.ExternalRef).HasColumnName("externalRef").HasMaxLength(100);
+        b.Property(x => x.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
+        // nvarchar(max) — no HasMaxLength; EF defaults to max for string without a length constraint.
+        b.Property(x => x.ErrorMessage).HasColumnName("errorMessage");
+        b.Property(x => x.Payload).HasColumnName("payload");
+        b.Property(x => x.ReceivedOn).HasColumnName("receivedOn").HasColumnType("datetime2");
+
+        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
+            .HasConstraintName("FK_SyncLog_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+
+        // Composite status + date scan — the admin sync-log grid filters by status and date range.
+        b.HasIndex(x => new { x.Status, x.ReceivedOn }).HasDatabaseName("IX_SyncLog_status_date");
+
+        // External-reference lookup — correlate a SyncLog entry to its source document (e.g. PO number).
+        b.HasIndex(x => x.ExternalRef).HasDatabaseName("IX_SyncLog_ref");
+    }
+}
+
 public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
 {
     public void Configure(EntityTypeBuilder<Payment> b)

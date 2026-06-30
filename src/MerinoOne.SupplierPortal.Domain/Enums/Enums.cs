@@ -34,6 +34,12 @@ public enum PoStatus
     // existing persisted enum-name strings keep their position — string-persisted, no DB CHECK; the C# enum is the
     // guard. The removed member was between Rejected and PartiallyDelivered.)
     PartiallyDelivered,
+    // R5 (TSD R5 Addendum §4.7 / §11.2) — all PO lines shipped (shippedQtyToDate == orderQty for every
+    // active line), awaiting ERP receipt confirmation. Portal-derived: set by the ASN Submit balance check,
+    // NOT by any ERP inbound mapping. Persisted as the enum name (string), no DB CHECK; APPEND-ONLY.
+    // Gate note (R4 §6.2): FullyShipped is balance-driven like PartiallyDelivered — no remaining qty, so
+    // no new ASNs can be created. Delivered (ERP-driven) is the next milestone after FullyShipped.
+    FullyShipped,
     Delivered,
     Closed,
     Cancelled,

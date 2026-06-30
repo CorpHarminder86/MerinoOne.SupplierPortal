@@ -87,6 +87,11 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
             // money-path seed; never mutates it. See SecurityTestHarness for the gate-flip strategy.
             await SecurityTestHarness.SeedAsync(db);
 
+            // R5 — drop the singleton PO-status-map cache so it reloads the just-seeded mapping rows on the next
+            // inbound resolution (the singleton may have lazily loaded an empty map against a reused test DB).
+            foreach (var inv in Factory.Services.GetServices<MerinoOne.SupplierPortal.Application.SystemSettings.ISettingsCacheInvalidator>())
+                inv.InvalidateCategory(MerinoOne.SupplierPortal.Application.PurchaseOrders.StatusMapping.PoStatusMapService.Category);
+
             DbAvailable = true;
         }
         catch (Exception ex)
@@ -217,6 +222,30 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
                 City = "Mumbai", State = "Maharashtra", Pincode = "400001", Country = "India",
                 IsActive = true, CreatedBy = "seed", CreatedOn = now
             });
+            await db.SaveChangesAsync();
+        }
+
+        // --- ERP→portal PO status mapping (R5 §4.7 / §11) -------------------------------------------------
+        // The inbound-PO status derivation (§11.3) resolves the raw erpStatus through this map; without it every
+        // erpStatus would be UNMAPPED. Seed the signed-off default so the resolver-driven PoStatus matches the
+        // pushed status in the inbound tests (e.g. erpStatus "Released" → portal Released). Owned by the supplier
+        // seccode (type G) so the FK is valid under the system-principal seed.
+        if (!await db.PoStatusMappings.IgnoreQueryFilters().AnyAsync(m => m.TenantId == TenantId))
+        {
+            var seed = new (string Erp, PoStatus Po)[]
+            {
+                ("Draft", PoStatus.Draft), ("Created", PoStatus.Draft),
+                ("Approved", PoStatus.Released), ("Released", PoStatus.Released),
+                ("Sent", PoStatus.Released), ("modified", PoStatus.Released),
+                ("Canceled", PoStatus.Cancelled), ("Blocked", PoStatus.Cancelled),
+                ("Closed", PoStatus.Closed), ("Delivered", PoStatus.Delivered),
+            };
+            foreach (var (erp, po) in seed)
+                db.PoStatusMappings.Add(new PoStatusMapping
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, ErpStatus = erp, PoStatus = po.ToString(),
+                    IsActive = true, SeccodeId = SeccodeId, CreatedBy = "seed", CreatedOn = now
+                });
             await db.SaveChangesAsync();
         }
 

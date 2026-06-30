@@ -109,6 +109,10 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<CreditDebitNote> CreditDebitNotes => Set<CreditDebitNote>();
     public DbSet<Payment> Payments => Set<Payment>();
 
+    // R5 (TSD R5 Addendum §4.7 / §4.9) — ERP→portal status mapping master + inbound sync log.
+    public DbSet<PoStatusMapping> PoStatusMappings => Set<PoStatusMapping>();
+    public DbSet<SyncLog> SyncLogs => Set<SyncLog>();
+
     public DbSet<DocumentUpload> DocumentUploads => Set<DocumentUpload>();
     public DbSet<AttachmentType> AttachmentTypes => Set<AttachmentType>();
     public DbSet<AttachmentEntity> AttachmentEntities => Set<AttachmentEntity>();

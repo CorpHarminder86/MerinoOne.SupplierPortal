@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Registry;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Scope;
 using MerinoOne.SupplierPortal.Application.SystemSettings.SupplierInvite;
+using MerinoOne.SupplierPortal.Application.PurchaseOrders.StatusMapping;
 using MerinoOne.SupplierPortal.Infrastructure.Identity;
 using MerinoOne.SupplierPortal.Infrastructure.Integration.Infor;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
@@ -171,6 +172,13 @@ public static class DependencyInjection
         services.AddSingleton<FulfilmentSettingsService>();
         services.AddSingleton<IFulfilmentSettings>(sp => sp.GetRequiredService<FulfilmentSettingsService>());
         services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<FulfilmentSettingsService>());
+
+        // R5 (TSD R5 Addendum §11 / Component 7) — cached ERP→portal PO-status map (per tenant). Singleton so the
+        // map persists across requests with zero DB I/O on the inbound hot path; invalidated like the other cached
+        // readers when a mapping row is saved/deleted.
+        services.AddSingleton<PoStatusMapService>();
+        services.AddSingleton<IPoStatusMap>(sp => sp.GetRequiredService<PoStatusMapService>());
+        services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<PoStatusMapService>());
 
         // Scope-filter rollout gate — singleton so the request DbContext reads the flag with zero DB I/O
         // (no re-entrancy during query-filter evaluation). Invalidated like the other cached readers.

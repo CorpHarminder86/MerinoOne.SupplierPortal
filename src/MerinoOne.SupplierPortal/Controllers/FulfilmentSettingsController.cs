@@ -248,4 +248,62 @@ Returns: CompanyAddressDto; 404 if not found; 409 if the erpCode collides within
         var data = await _mediator.Send(new UpdateCompanyAddressCommand(id, body), ct);
         return Result<CompanyAddressDto>.Ok(data, HttpContext.TraceIdentifier);
     }
+
+    // ============================ ERP→portal PO status mapping (R5 §4.7 / §11 — Component 7) ============================
+    // The configurable ERP→portal PO-status translation (replaces the R4 hardcoded Modify→Released). Many ERP
+    // statuses may map to ONE portal status; each erpStatus is unique per tenant. Targets are restricted to the
+    // ERP-driven subset Draft | Released | Cancelled | Closed | Delivered (§11.2). Resolution is case-insensitive.
+
+    [HttpGet("po-status-mappings")]
+    [Authorize(Policy = "Settings.Read")]
+    [EndpointSummary("PO status mapping list")]
+    [EndpointDescription(@"The tenant's ERP→portal PO-status mapping rows. Each maps one raw ERP status to one portal PoStatus; the inbound PO sync resolves the incoming erpStatus against this (case-insensitive).
+Filters / params:
+- **isActive**: Optional — true active only, false inactive only, omit for all.
+Returns: List<PoStatusMappingDto> { id, seq, erpStatus, poStatus, isActive, createdOn }. Requires permission **Settings.Read**.")]
+    public async Task<Result<List<PoStatusMappingDto>>> ListPoStatusMappings([FromQuery] bool? isActive, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetPoStatusMappingsQuery(isActive), ct);
+        return Result<List<PoStatusMappingDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("po-status-mappings")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Create PO status mapping")]
+    [EndpointDescription(@"Creates an ERP→portal PO-status mapping (erpStatus unique per tenant; the inbound sync resolves against it).
+Body:
+- **body**: CreatePoStatusMappingRequest { erpStatus, poStatus }. poStatus MUST be one of the ERP-driven targets: Draft | Released | Cancelled | Closed | Delivered (§11.2 — supplier/fulfilment-driven statuses are rejected).
+Returns: PoStatusMappingDto; 400 on validation; 409 if the erpStatus is already mapped. Requires permission **Settings.Write**.")]
+    public async Task<Result<PoStatusMappingDto>> CreatePoStatusMapping([FromBody] CreatePoStatusMappingRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new CreatePoStatusMappingCommand(body), ct);
+        return Result<PoStatusMappingDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("po-status-mappings/{id:guid}")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Update PO status mapping")]
+    [EndpointDescription(@"Re-targets a mapping's portal status and/or toggles its active flag (erpStatus is immutable — it is the lookup key).
+Filters / params:
+- **id**: Required — mapping GUID.
+- **body**: UpdatePoStatusMappingRequest { poStatus, isActive }. poStatus restricted to the ERP-driven subset (§11.2).
+Returns: PoStatusMappingDto; 400 on validation; 404 if not found. Requires permission **Settings.Write**.")]
+    public async Task<Result<PoStatusMappingDto>> UpdatePoStatusMapping(Guid id, [FromBody] UpdatePoStatusMappingRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpdatePoStatusMappingCommand(id, body), ct);
+        return Result<PoStatusMappingDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpDelete("po-status-mappings/{id:guid}")]
+    [Authorize(Policy = "Settings.Write")]
+    [EndpointSummary("Delete PO status mapping")]
+    [EndpointDescription(@"Deactivates (soft-deletes) a mapping row — the erpStatus stops resolving and is freed for a future re-add. No hard delete.
+Filters / params:
+- **id**: Required — mapping GUID.
+Returns: empty success; 404 if not found. Requires permission **Settings.Write**.")]
+    public async Task<Result> DeletePoStatusMapping(Guid id, CancellationToken ct)
+    {
+        await _mediator.Send(new DeletePoStatusMappingCommand(id), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
 }

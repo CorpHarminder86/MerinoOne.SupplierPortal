@@ -51,6 +51,12 @@ public static class SeedRunner
         logger?.LogInformation("Seed: CompanySeeder");
         await CompanySeeder.SeedAsync(ctx, ct);
 
+        // R5 (TSD R5 Addendum §4.7 / Component 7). Runs AFTER TenantSeeder so the tenant + tenant-admin seccode
+        // exist. Seeds the ERP→portal PO-status mapping per tenant; the seeded default reproduces the R4 hardcoded
+        // modified → Released behaviour, so out-of-the-box inbound-PO status derivation is unchanged.
+        logger?.LogInformation("Seed: PoStatusMappingSeeder");
+        await PoStatusMappingSeeder.SeedAsync(ctx, ct);
+
         // Light scope tagging (suppliers/masters/config/UserCompanyMaps + ensure flag OFF) runs BEFORE the
         // volume backfill so suppliers carry company 2000 when the heavy pass later joins on them.
         logger?.LogInformation("Seed: ScopeBackfillSeeder (light)");

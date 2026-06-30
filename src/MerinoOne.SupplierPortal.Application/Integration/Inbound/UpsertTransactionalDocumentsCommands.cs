@@ -3,6 +3,7 @@ using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.PurchaseOrders.StatusMapping;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
@@ -55,7 +56,11 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
     }
 }
 
-public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOutboxDispatcher outbox) : IRequestHandler<UpsertPurchaseOrdersCommand, UpsertResultDto>
+public class UpsertPurchaseOrdersCommandHandler(
+    InboundUpsertExecutor exec,
+    IOutboxDispatcher outbox,
+    IPoStatusMap statusMap,
+    ISyncLogWriter syncLog) : IRequestHandler<UpsertPurchaseOrdersCommand, UpsertResultDto>
 {
     public Task<UpsertResultDto> Handle(UpsertPurchaseOrdersCommand request, CancellationToken ct)
     {
@@ -171,12 +176,15 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                 // R5 (§6.2) — resolve the ship-to BEFORE any supplier/qty/persist work so a miss leaves the PO
                 // untouched (mirrors the supplier-not-found / qty-reject early-outs). HARD-FAIL on a miss: no company
                 // for the tenant entity, or no matching ACTIVE address erpCode → the PO is NOT created/updated.
-                // TODO R5 Phase 2: also write a SyncLog Failed row here (§12) — the SyncLog entity doesn't exist yet.
+                // R5 Phase 2 (§12) — a Sync Log Failed row is written (deferred — it commits in the executor's
+                // transaction) so the unresolvable ship-to surfaces in the admin Sync Log with its error message.
                 var shipToCode = rec.ShipToAddress.Trim();
                 if (shipToCompanyId is null || !addressByErpCode.TryGetValue(shipToCode, out var shipToAddress))
                 {
-                    results.Add(new RowResult(poNum, RowOutcome.Failed,
-                        $"Ship-to code '{shipToCode}' not found for tenant entity {sourceId}"));
+                    var shipErr = $"Ship-to code '{shipToCode}' not found for tenant entity {sourceId}";
+                    await syncLog.WriteFailedAsync("PO Inbound", "PurchaseOrder", poNum, shipErr,
+                        InboundUpsertSupport.SerializePayloadCapped(rec), tenantId, defer: true, token);
+                    results.Add(new RowResult(poNum, RowOutcome.Failed, shipErr));
                     continue;
                 }
 
@@ -226,16 +234,31 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                     po.PaymentTerms = rec.PaymentTerms; po.DeliveryTerms = rec.DeliveryTerms;
                     po.CurrencyId = curId; po.CurrencyCode = rec.CurrencyCode?.Trim();
                     po.Notes = rec.Notes; po.ErpSyncId = rec.ErpSyncId ?? po.ErpSyncId;
-                    // §6.4 — a MATERIAL change ALWAYS bumps version AND resets PoStatus → Released (re-arms the
-                    // confirmation gate so new/draft ASNs re-block, UC-ASN-08). A NON-MATERIAL change (notes / internal
-                    // ref) bumps version ONLY — the supplier is not frozen mid-fulfilment (UC-PO-07). We deliberately do
-                    // NOT blindly take the inbound PoStatus on an existing PO: ERP "Modify" pushes carry whatever status
-                    // string, but the gate semantics are driven by the material diff, not the literal push status. (A
-                    // brand-new PO below DOES take the pushed status.)
-                    po.PoStatus = isMaterial ? PoStatus.Released : po.PoStatus;
-                    // R5 (§6.2/§6.3) — re-snapshot the ship-to (it may have been re-pointed) + record the RAW erpStatus.
-                    // Store the raw value ONLY — do NOT resolve PoStatus from it (PoStatusMapping is Phase 2; the
-                    // PoStatus logic above stays exactly as-is). Snapshot copy uses the single factory (ShipToSnapshot.From).
+                    // R5 (§11.3) — PoStatus DERIVATION on a re-receipt is now resolver-driven (was the R4 hardcoded
+                    // "isMaterial → Released"). Resolve the raw erpStatus via the configurable PoStatusMapping, then
+                    // PoStatusResolver applies the §11.3 rule: terminal (Cancelled/Closed) wins unconditionally;
+                    // Released re-arms ONLY on a material change (no-clobber otherwise, = the R4 §6.3 behaviour now in
+                    // config); Draft is ignored on a re-receipt. UNMAPPED → a Sync Log Failed row, PoStatus untouched.
+                    // When NO erpStatus is sent (legacy push) the §11.3 flow is skipped and the R4 material gate stands.
+                    var incomingErp = rec.ErpStatus?.Trim();
+                    if (string.IsNullOrEmpty(incomingErp))
+                    {
+                        po.PoStatus = isMaterial ? PoStatus.Released : po.PoStatus;
+                    }
+                    else
+                    {
+                        var candidate = statusMap.Resolve(tenantId, incomingErp);
+                        var res = PoStatusResolver.Resolve(po.PoStatus, candidate, isMaterial);
+                        if (res.Unmapped)
+                            await syncLog.WriteFailedAsync("PO Inbound", "PurchaseOrder", poNum,
+                                $"ERP status '{incomingErp}' is not mapped", InboundUpsertSupport.SerializePayloadCapped(rec),
+                                tenantId, defer: true, token);
+                        else if (res.NewStatus is PoStatus ns)
+                            po.PoStatus = ns;
+                        // else: leave PoStatus unchanged (no-clobber / Draft-on-re-receipt).
+                    }
+                    // R5 (§6.2/§6.3) — re-snapshot the ship-to (it may have been re-pointed) + record the RAW erpStatus
+                    // (tracking/audit only — the DISPLAYED PoStatus is the resolver's output above).
                     po.ShipToAddressId = shipToAddress.Id;
                     po.ShipTo = ShipToSnapshot.From(shipToAddress);
                     po.ErpStatus = rec.ErpStatus;
@@ -261,10 +284,28 @@ public class UpsertPurchaseOrdersCommandHandler(InboundUpsertExecutor exec, IOut
                     var (resolvedQty, qtyError) = ResolvePoLineQuantities(null, rec);
                     if (qtyError != null) { results.Add(new RowResult(poNum, RowOutcome.Failed, qtyError)); continue; }
 
+                    // R5 (§11.3, first receipt) — derive the initial PoStatus from the raw erpStatus via the mapping
+                    // (currentStatus = null = first receipt → take the mapped candidate). UNMAPPED → a Sync Log Failed
+                    // row and fall back to the pushed PoStatus field baseline (the PO is still created — §6.2). When NO
+                    // erpStatus is sent (legacy push) the pushed PoStatus field is used directly (R4 behaviour).
+                    var newErp = rec.ErpStatus?.Trim();
+                    var newPoStatus = poStatus;
+                    if (!string.IsNullOrEmpty(newErp))
+                    {
+                        var candidate = statusMap.Resolve(tenantId, newErp);
+                        var res = PoStatusResolver.Resolve(currentStatus: null, candidate, isMaterialChange: false);
+                        if (res.Unmapped)
+                            await syncLog.WriteFailedAsync("PO Inbound", "PurchaseOrder", poNum,
+                                $"ERP status '{newErp}' is not mapped", InboundUpsertSupport.SerializePayloadCapped(rec),
+                                tenantId, defer: true, token);
+                        else if (res.NewStatus is PoStatus ns)
+                            newPoStatus = ns;
+                    }
+
                     var po2 = new PurchaseOrder
                     {
                         Id = Guid.NewGuid(), TenantId = tenantId, TenantEntityId = sourceId, SeccodeId = sup.SeccodeId,
-                        PoNumber = poNum, SupplierId = sup.Id, PoType = poType, PoDate = rec.PoDate, PoStatus = poStatus,
+                        PoNumber = poNum, SupplierId = sup.Id, PoType = poType, PoDate = rec.PoDate, PoStatus = newPoStatus,
                         PaymentTerms = rec.PaymentTerms, DeliveryTerms = rec.DeliveryTerms,
                         CurrencyId = curId, CurrencyCode = rec.CurrencyCode?.Trim(),
                         Notes = rec.Notes, ErpSyncId = rec.ErpSyncId, Version = 1,

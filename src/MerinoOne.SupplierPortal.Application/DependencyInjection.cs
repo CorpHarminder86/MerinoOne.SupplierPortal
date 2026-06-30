@@ -56,6 +56,10 @@ public static class DependencyInjection
         // Supplier submit handlers. Scoped — ctor-inject the per-request IAppDbContext / ICurrentUser.
         services.AddScoped<Common.Interfaces.IAttachmentPolicyEvaluator, Documents.AttachmentPolicyEvaluator>();
         services.AddScoped<Documents.AttachmentSubmitGuard>();
+
+        // R5 (TSD R5 Addendum §12 / Component 8) — inbound Sync Log writer (proc.SyncLog). Scoped — ctor-injects
+        // the per-request IAppDbContext / ICurrentUser. Payload is stored ONLY on Failed rows (SQL-Express cap).
+        services.AddScoped<Common.Interfaces.ISyncLogWriter, Common.Integration.SyncLogWriter>();
         return services;
     }
 }
