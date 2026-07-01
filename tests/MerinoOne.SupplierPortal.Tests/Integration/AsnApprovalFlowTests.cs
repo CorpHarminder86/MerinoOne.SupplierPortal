@@ -311,42 +311,39 @@ public class AsnApprovalFlowTests : IAsyncLifetime
 
     // ════════════════════════════ C2 — buyer-facing approval queue ════════════════════════════
 
-    // ── C2 routing — a buyer sees ONLY the ASNs routed to them (a covered PO's BuyerUserId), while an admin
-    //    oversees the whole tenant queue. The fixture has exactly ONE non-admin Asn.Approve principal (Buyer);
-    //    both Admin and SuperAdmin resolve IsAdmin=true. So we route ASN-1 to Buyer and ASN-2 to a different
-    //    buyer (SuperAdmin owns its PO) and use Buyer as the probe: it sees ASN-1, not ASN-2. ──
+    // ── C2 — the approval queue shows ALL PendingApproval ASNs to ANY approver (any Asn.Approve holder), mirroring
+    //    the PO-negotiation reviewer queue. Per-buyer routing was removed (nothing populates PurchaseOrder
+    //    .BuyerUserId, so a buyer queue was always empty). Both the (non-admin) Buyer and an Admin see both ASNs. ──
     [SkippableFact]
-    public async Task Pending_approvals_queue_routes_by_buyer_admin_sees_all()
+    public async Task Pending_approvals_queue_shows_all_pending_to_any_approver()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
-        // ASN-1 routed to Buyer X (sec-buyer-a via AssignBuyerAsync default); ASN-2 routed to a DIFFERENT buyer
-        // (SuperAdminUserId owns its PO) so Buyer X is not mapped to it. Both sent for approval → PendingApproval.
+        // Two independent ASNs, both sent for approval → PendingApproval.
         var (asn1, _, supplier1) = await NewDraftWithBuyerAsync(orderQty: 10m);
         await SendOkAsync(supplier1, asn1);
-        var (asn2, _, supplier2) = await NewDraftWithBuyerAsync(orderQty: 10m, buyerUserId: SecurityTestHarness.SuperAdminUserId);
+        var (asn2, _, supplier2) = await NewDraftWithBuyerAsync(orderQty: 10m);
         await SendOkAsync(supplier2, asn2);
 
-        // Buyer X (the one non-admin Asn.Approve principal) sees its own ASN-1 but NOT ASN-2 (routed elsewhere).
-        var buyerX = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
-        var mineResp = await buyerX.GetAsync("/api/asns/pending-approvals");
-        mineResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(mineResp));
-        var mine = (await Read<List<AsnApprovalListItemDto>>(mineResp)).Data!;
+        // Buyer (a non-admin Asn.Approve principal) sees BOTH pending ASNs (reviewer-sees-all).
+        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        var buyerResp = await buyer.GetAsync("/api/asns/pending-approvals");
+        buyerResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(buyerResp));
+        var mine = (await Read<List<AsnApprovalListItemDto>>(buyerResp)).Data!;
         var row = mine.SingleOrDefault(r => r.AsnId == asn1);
-        row.Should().NotBeNull(because: "ASN-1 is routed to Buyer X (a covered PO's BuyerUserId) and is PendingApproval");
+        row.Should().NotBeNull(because: "a PendingApproval ASN appears for any approver");
         row!.SubmittedBy.Should().Be(SecurityTestHarness.Users.Supplier);
         row.SubmittedOn.Should().NotBeNull();
         row.PoCount.Should().Be(1);
-        mine.Should().NotContain(r => r.AsnId == asn2,
-            because: "ASN-2 is routed to a different buyer and Buyer X is not an admin (C2 routing)");
+        mine.Should().Contain(r => r.AsnId == asn2, because: "the approver sees ALL pending ASNs, not a buyer-routed subset");
 
-        // An Admin (holds Asn.Approve + IsAdmin) sees ALL PendingApproval ASNs in the tenant — both.
+        // An Admin also sees both.
         var admin = await _fx.ClientAsAsync(SecurityTestHarness.Users.Admin, IntegrationTestFixture.CompanyId);
         var adminResp = await admin.GetAsync("/api/asns/pending-approvals");
         adminResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(adminResp));
         var all = (await Read<List<AsnApprovalListItemDto>>(adminResp)).Data!;
-        all.Should().Contain(r => r.AsnId == asn1, because: "an admin oversees the whole tenant queue (admin-sees-all)");
-        all.Should().Contain(r => r.AsnId == asn2, because: "admin-sees-all includes ASNs routed to any buyer");
+        all.Should().Contain(r => r.AsnId == asn1);
+        all.Should().Contain(r => r.AsnId == asn2);
     }
 
     // ── Authorization — a non-buyer (the supplier) cannot approve ────────────────────────────────────────

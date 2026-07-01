@@ -61,8 +61,9 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 140px 1.3fr 90px 130px 120px 120px 105px 115px 110px 70px 90px; --tl-min-width: 1460px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 44px 140px 1.3fr 90px 130px 120px 120px 105px 115px 110px 70px; --tl-min-width: 1420px;">
             <div class="tlg-header">
+                <div class="tlg-col"></div>
                 <div class="tlg-col">PO #</div>
                 <div class="tlg-col">Supplier</div>
                 <div class="tlg-col">Type</div>
@@ -73,7 +74,6 @@
                 <div class="tlg-col">Status</div>
                 <div class="tlg-col">Response</div>
                 <div class="tlg-col tlg-col--num">Version</div>
-                <div class="tlg-col tlg-col--actions"></div>
             </div>
             @foreach (var po in paged.Items)
             {
@@ -87,6 +87,15 @@
                 // automatically at release, so they only carry the mode badge.
                 var canRespond = !isAuto && (item.PoStatus == "Released" || item.PoStatus == "Acknowledged");
                 <div class="tlg-row" @onclick="() => OpenDetail(item.Id)" style="cursor:pointer">
+                    <div class="tlg-col" @onclick:stopPropagation="true">
+                        @if (canRespond)
+                        {
+                            <button @onclick="() => OpenDetail(item.Id)" title="Respond to this PO"
+                                    style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:transparent;border:1px solid var(--mer-ink-300);border-radius:6px;color:var(--mer-blue);cursor:pointer;">
+                                <span class="material-symbols-outlined" style="font-size:16px;">reply</span>
+                            </button>
+                        }
+                    </div>
                     <div class="tlg-col tlg-code">@item.PoNumber</div>
                     <div class="tlg-col tlg-name">@item.SupplierName</div>
                     <div class="tlg-col">@item.PoType</div>
@@ -108,15 +117,6 @@
                         }
                     </div>
                     <div class="tlg-col tlg-col--num">@item.Version</div>
-                    <div class="tlg-col tlg-col--actions" @onclick:stopPropagation="true">
-                        @if (canRespond)
-                        {
-                            <button @onclick="() => OpenDetail(item.Id)" title="Respond to this PO"
-                                    style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--mer-ink-300);border-radius:6px;padding:4px 10px;color:var(--mer-blue);cursor:pointer;font-size:11.5px;">
-                                <span class="material-symbols-outlined" style="font-size:15px;">reply</span> Respond
-                            </button>
-                        }
-                    </div>
                 </div>
             }
         </div>
