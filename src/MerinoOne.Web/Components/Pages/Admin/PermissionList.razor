@@ -1,0 +1,167 @@
+@page "/admin/permissions"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+<PageTitle>Permissions</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Permissions</h1>
+                <span class="tl-count-chip">@(items?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">The permission catalog assignable to roles</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (canWrite)
+            {
+                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span>
+                    New permission
+                </button>
+            }
+        </div>
+    </header>
+
+    <div style="background:var(--mer-amber-50, #fff8e6);border:1px solid var(--mer-amber-200, #ffe2a8);color:var(--mer-ink-700);padding:10px 14px;border-radius:8px;font-size:12.5px;margin-bottom:14px;">
+        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">info</span>
+        A new permission code is only a label until a developer adds a matching
+        <code>[Authorize(Policy = "…")]</code> gate in the API — creating a code here does not, by itself, protect anything.
+    </div>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (items == null || items.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">key</span>
+            <div>No permissions found.</div>
+        </div>
+    }
+    else
+    {
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:16px;">
+            @foreach (var group in items.GroupBy(p => p.Module).OrderBy(g => g.Key))
+            {
+                <div class="rz-card" style="padding:16px;">
+                    <h3 style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--mer-blue-darker);text-transform:uppercase;letter-spacing:0.05em;">@group.Key</h3>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        @foreach (var p in group.OrderBy(x => x.Code))
+                        {
+                            <div style="display:flex;flex-direction:column;gap:1px;">
+                                <span style="font-weight:600;color:var(--mer-ink-900);font-size:12.5px;">@p.Name</span>
+                                <span style="font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-500);">@p.Code</span>
+                                <span style="font-size:11px;color:var(--mer-ink-500);">@p.Description</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showNew)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" style="width:460px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">add</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Permission</div>
+                    <h2 class="merino-dialog__title">New permission</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showNew = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body" style="display:flex;flex-direction:column;gap:10px;">
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Code</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" placeholder="Module.Action e.g. Report.Export" @bind="newCode" />
+                </div>
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Name</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="Human-readable name" @bind="newName" />
+                </div>
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Module (optional)</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="e.g. Reporting" @bind="newModule" />
+                </div>
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Description (optional)</label>
+                    <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="newDescription" />
+                </div>
+                @if (!string.IsNullOrEmpty(newError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;">@newError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showNew = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="DoCreate" disabled="@busy">@(busy ? "Creating…" : "Create")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private List<PermissionListItemDto>? items;
+    private bool loading = true;
+    private bool showNew;
+    private bool busy;
+    private string newCode = string.Empty;
+    private string newName = string.Empty;
+    private string newModule = string.Empty;
+    private string newDescription = string.Empty;
+    private string newError = string.Empty;
+
+    // Creating a permission requires Role.Write (the role/permission management right).
+    private bool canWrite => Token.HasPermission("Role.Write");
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<PermissionListItemDto>>("api/permissions");
+        items = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenNew()
+    {
+        newCode = newName = newModule = newDescription = string.Empty;
+        newError = string.Empty;
+        showNew = true;
+    }
+
+    private async Task DoCreate()
+    {
+        if (string.IsNullOrWhiteSpace(newCode) || string.IsNullOrWhiteSpace(newName))
+        {
+            newError = "Code and Name are required.";
+            return;
+        }
+        busy = true;
+        var req = new CreatePermissionRequest(
+            newCode.Trim(),
+            newName.Trim(),
+            string.IsNullOrWhiteSpace(newModule) ? null : newModule.Trim(),
+            string.IsNullOrWhiteSpace(newDescription) ? null : newDescription.Trim());
+        var resp = await Api.PostAsync<string, CreatePermissionRequest>("api/permissions", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Permission created" });
+            showNew = false;
+            await Load();
+        }
+        else { newError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+}

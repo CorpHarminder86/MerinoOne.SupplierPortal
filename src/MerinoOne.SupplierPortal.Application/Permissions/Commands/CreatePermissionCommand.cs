@@ -10,9 +10,10 @@ using ConflictException = MerinoOne.SupplierPortal.Application.Common.Exceptions
 namespace MerinoOne.SupplierPortal.Application.Permissions.Commands;
 
 /// <summary>
-/// Register a new GLOBAL permission code in the catalog. Platform-operator only (D1). Permissions are
-/// global primitives with a globally-unique Code; there is no per-tenant custom permission.
-/// A created code enforces nothing until a matching [Authorize(Policy = ...)] gate references it.
+/// Register a new GLOBAL permission code in the catalog. Gated by Role.Write (the role/permission
+/// management right). Permissions are global primitives with a globally-unique Code; there is no
+/// per-tenant custom permission. A created code enforces nothing until a matching
+/// [Authorize(Policy = ...)] gate references it in code.
 /// </summary>
 public record CreatePermissionCommand(CreatePermissionRequest Body) : IRequest<string>;
 

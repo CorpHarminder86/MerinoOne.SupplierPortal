@@ -31,13 +31,14 @@ Returns: List<PermissionListItemDto> ordered by module then code. Requires permi
     }
 
     [HttpPost]
-    [Authorize(Policy = Perm.PlatformPermissions)]
+    [Authorize(Policy = Perm.RoleWrite)]
     [EndpointSummary("Create permission")]
-    [EndpointDescription(@"Registers a new GLOBAL permission code in the catalog. Platform-operator only.
+    [EndpointDescription(@"Registers a new GLOBAL permission code in the catalog. Gated by **Role.Write** (the
+same right that manages roles + assigns permissions), so it is reachable from the Roles/Permissions admin UI.
 NOTE: a permission code enforces nothing until a matching [Authorize(Policy = ...)] gate references it in code.
 Body:
 - **body**: CreatePermissionRequest (Code dotted PascalCase, Name, optional Module/Description).
-Returns: the created permission code; 400 on validation; 409 if the code already exists. Requires permission **Platform.Permissions**.")]
+Returns: the created permission code; 400 on validation; 409 if the code already exists. Requires permission **Role.Write**.")]
     public async Task<Result<string>> Create([FromBody] CreatePermissionRequest body, CancellationToken ct)
     {
         var code = await _mediator.Send(new CreatePermissionCommand(body), ct);

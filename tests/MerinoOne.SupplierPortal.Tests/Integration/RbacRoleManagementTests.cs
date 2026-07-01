@@ -67,13 +67,13 @@ public class RbacRoleManagementTests
     }
 
     [SkippableFact]
-    public async Task Admin_without_RoleWrite_cannot_create_a_role()
+    public async Task User_without_RoleWrite_cannot_create_a_role()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-        // Admin holds Role.Read but NOT Role.Write (matrix: Role.Write → SuperAdmin only).
-        var admin = await _fx.ClientAsAsync(SecurityTestHarness.Users.Admin, IntegrationTestFixture.CompanyId);
+        // Buyer holds neither Role.Read nor Role.Write, so it cannot create roles (SuperAdmin + Admin do).
+        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
 
-        var resp = await admin.PostAsJsonAsync("/api/roles", new { name = NewName("nope"), permissionCodes = Array.Empty<string>() });
+        var resp = await buyer.PostAsJsonAsync("/api/roles", new { name = NewName("nope"), permissionCodes = Array.Empty<string>() });
 
         resp.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
