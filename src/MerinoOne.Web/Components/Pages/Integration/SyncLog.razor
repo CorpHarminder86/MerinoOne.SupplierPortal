@@ -84,13 +84,14 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 140px 160px 110px 110px 1fr 160px 80px 70px; --tl-min-width: 1160px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 130px 150px 90px 90px 130px 1fr 150px 60px 60px; --tl-min-width: 1320px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Entity</div>
                     <div class="tlg-col">Entity ID</div>
                     <div class="tlg-col">Direction</div>
                     <div class="tlg-col">Status</div>
                     <div class="tlg-col">Idempotency key</div>
+                    <div class="tlg-col">Error</div>
                     <div class="tlg-col">Synced at</div>
                     <div class="tlg-col tlg-col--num">Retries</div>
                     <div class="tlg-col tlg-col--actions">Payload</div>
@@ -104,6 +105,7 @@ else
                         <div class="tlg-col">@row.Direction</div>
                         <div class="tlg-col"><span class="tlg-status @StatusClass(row.Status)">@row.Status</span></div>
                         <div class="tlg-col tlg-code" title="@row.IdempotencyKey">@(string.IsNullOrEmpty(row.IdempotencyKey) ? "—" : row.IdempotencyKey[..Math.Min(24, row.IdempotencyKey.Length)])</div>
+                        <div class="tlg-col" style="@(row.Status == "Failed" ? "color:var(--mer-danger,#b42318);" : "color:var(--mer-ink-500);")" title="@row.ErrorMessage">@(string.IsNullOrEmpty(row.ErrorMessage) ? "—" : (row.ErrorMessage.Length > 90 ? row.ErrorMessage[..90] + "…" : row.ErrorMessage))</div>
                         <div class="tlg-col tlg-code">@row.SyncedAt.ToString("yyyy-MM-dd HH:mm:ss")</div>
                         <div class="tlg-col tlg-col--num">@row.RetryCount</div>
                         <div class="tlg-col tlg-col--actions">

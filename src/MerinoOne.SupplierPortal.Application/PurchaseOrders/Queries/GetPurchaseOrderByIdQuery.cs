@@ -78,6 +78,7 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
                 l.Id, l.PositionNo, l.SequenceNo, l.ItemCode, l.ItemDescription,
                 l.OrderUnit, l.OrderQty, l.PriceUnit, l.Price,
                 l.DiscountPct, l.DiscountAmount, l.DeliveryDate, l.TaxCode,
+                // Tax description = the line's write-time snapshot (no Tax-master join on read).
                 l.TaxDescription, l.TaxId,
                 r.ResolvedItemId,
                 r.IsSerialized,

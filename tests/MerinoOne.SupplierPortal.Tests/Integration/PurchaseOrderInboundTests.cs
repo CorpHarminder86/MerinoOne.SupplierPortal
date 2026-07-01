@@ -191,6 +191,82 @@ public class PurchaseOrderInboundTests
     }
 
     /// <summary>
+    /// SNAPSHOT-ON-WRITE — the inbound PO resolves paymentTermCode / deliveryTermCode AND the line's taxCode to their
+    /// master rows and snapshots the Description onto the transaction row (the FK id is kept too). The save bug was
+    /// reading rec.PaymentTerms (null when the ERP sends only the *Code). The read models show the stored snapshot
+    /// directly — no term/Tax-master join.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_snapshots_term_and_tax_descriptions_on_write()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+
+        // Masters under the fixture company: a payment term, a delivery term, and a tax (the pushed line carries NO
+        // taxDescription, so the tax NAME must resolve from this master by code).
+        var payCode = $"PT-{tag}";
+        var delCode = $"DT-{tag}";
+        var taxCode = $"TX-{tag}";
+        var now = DateTime.UtcNow;
+        Guid payId, delId;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var pay = new PaymentTerm { Id = Guid.NewGuid(), TenantId = IntegrationTestFixture.TenantId, TenantEntityId = IntegrationTestFixture.CompanyId, Code = payCode, Description = "Net 30 (test)", NetDays = 30, IsActive = true, CreatedBy = "seed", CreatedOn = now };
+            var del = new DeliveryTerm { Id = Guid.NewGuid(), TenantId = IntegrationTestFixture.TenantId, TenantEntityId = IntegrationTestFixture.CompanyId, Code = delCode, Description = "Free On Board (test)", IsActive = true, CreatedBy = "seed", CreatedOn = now };
+            db.PaymentTerms.Add(pay); db.DeliveryTerms.Add(del);
+            db.Taxes.Add(new Tax { Id = Guid.NewGuid(), TenantId = IntegrationTestFixture.TenantId, TenantEntityId = IntegrationTestFixture.CompanyId, Code = taxCode, Description = "GST 18% (test)", TaxRate = 18m, IsActive = true, CreatedBy = "seed", CreatedOn = now });
+            await db.SaveChangesAsync();
+            payId = pay.Id; delId = del.Id;
+        }
+
+        var poNumber = $"PO-TERMS-{tag}";
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 100, TaxCode: taxCode) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR",
+                PaymentTermCode: payCode, DeliveryTermCode: delCode),
+        }));
+
+        // SAVE: the FK ids + the description snapshots were persisted from the *Code fields.
+        Guid poId;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var po = await db.PurchaseOrders.IgnoreQueryFilters()
+                .FirstAsync(p => p.PoNumber == poNumber && p.TenantId == IntegrationTestFixture.TenantId);
+            poId = po.Id;
+            po.PaymentTermId.Should().Be(payId, because: "paymentTermCode resolves to the PaymentTerm FK id");
+            po.DeliveryTermId.Should().Be(delId, because: "deliveryTermCode resolves to the DeliveryTerm FK id");
+            po.PaymentTerms.Should().Be("Net 30 (test)", because: "the snapshot defaults to the term Description");
+            po.DeliveryTerms.Should().Be("Free On Board (test)");
+
+            var line = await db.PurchaseOrderLines.IgnoreQueryFilters().FirstAsync(x => x.PurchaseOrderId == po.Id);
+            line.TaxDescription.Should().Be("GST 18% (test)",
+                because: "the tax description is snapshotted onto the line at inbound (a code-only push pulls the master's)");
+        }
+
+        var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var detail = (await Read<PurchaseOrderDetailDto>(await supplierClient.GetAsync($"/api/purchase-orders/{poId}"))).Data!;
+        detail.PaymentTerms.Should().Be("Net 30 (test)");
+        detail.DeliveryTerms.Should().Be("Free On Board (test)");
+        detail.Lines.Single().TaxDescription.Should().Be("GST 18% (test)",
+            because: "the read shows the line's tax-description snapshot (no Tax-master join)");
+
+        var listRow = (await Read<MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<PurchaseOrderListItemDto>>(
+                await supplierClient.GetAsync($"/api/purchase-orders?supplierId={supplier.SupplierId}&pageSize=200"))).Data!
+            .Items.Single(p => p.PoNumber == poNumber);
+        listRow.PaymentTerms.Should().Be("Net 30 (test)", because: "the PO list also falls back to the master via the id");
+        listRow.DeliveryTerms.Should().Be("Free On Board (test)");
+    }
+
+    /// <summary>
     /// UC-PS-02 (R5 §6.2) — an unresolvable ship-to code HARD-FAILS that PO row: Failed=1, the PO is NOT persisted.
     /// </summary>
     [SkippableFact]

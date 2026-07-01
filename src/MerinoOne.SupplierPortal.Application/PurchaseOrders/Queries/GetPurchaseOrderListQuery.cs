@@ -70,6 +70,7 @@ public class GetPurchaseOrderListQueryHandler : IRequestHandler<GetPurchaseOrder
                 // Total = sum of live line net amounts (Price − DiscountAmount); correlated subquery, paged so bounded.
                 _db.PurchaseOrderLines.Where(l => !l.IsDeleted && l.PurchaseOrderId == x.po.Id)
                     .Sum(l => (decimal?)(l.Price - l.DiscountAmount)) ?? 0m,
+                // Term display: the header snapshot string (written at inbound from the term master — no read join).
                 x.po.CurrencyCode, x.po.PaymentTerms, x.po.DeliveryTerms))
             .ToListAsync(ct);
 

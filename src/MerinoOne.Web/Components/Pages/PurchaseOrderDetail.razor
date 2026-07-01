@@ -103,7 +103,6 @@ else
                        Company.name), display-only and reflects company renames. *@
                     <dt style="color:var(--mer-ink-500);">Customer</dt><dd>@(string.IsNullOrEmpty(detail.CustomerName) ? "—" : detail.CustomerName)</dd>
                     <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
-                    <dt style="color:var(--mer-ink-500);">Buyer</dt><dd>@(detail.BuyerName ?? "—")</dd>
                     <dt style="color:var(--mer-ink-500);">PO Date</dt><dd style="font-family:Inter,monospace;">@detail.PoDate.ToString("yyyy-MM-dd")</dd>
                     <dt style="color:var(--mer-ink-500);">Currency</dt><dd>@(string.IsNullOrEmpty(detail.CurrencyCode) ? "—" : detail.CurrencyCode)</dd>
                     <dt style="color:var(--mer-ink-500);">Payment terms</dt><dd>@(detail.PaymentTerms ?? "—")</dd>
@@ -240,7 +239,7 @@ else
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.NetAmount.ToString("0.00")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountPct == 0 ? "—" : line.DiscountPct.ToString("0.##"))</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : line.DiscountAmount.ToString("0.00"))</td>
-                                <td style="padding:6px 4px;" title="@line.TaxDescription">@(string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode)</td>
+                                <td style="padding:6px 4px;" title="@line.TaxCode">@(string.IsNullOrEmpty(line.TaxDescription) ? (string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode) : line.TaxDescription)</td>
                                 @* Editable Delivery Date (req 3). *@
                                 <td style="padding:6px 4px;">
                                     <input type="date" class="rz-textbox" style="padding:4px 6px;font-family:Inter,monospace;" @bind="edit.DeliveryDate" />
@@ -256,7 +255,7 @@ else
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.NetAmount.ToString("0.00")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountPct == 0 ? "—" : line.DiscountPct.ToString("0.##"))</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : line.DiscountAmount.ToString("0.00"))</td>
-                                <td style="padding:6px 4px;" title="@line.TaxDescription">@(string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode)</td>
+                                <td style="padding:6px 4px;" title="@line.TaxCode">@(string.IsNullOrEmpty(line.TaxDescription) ? (string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode) : line.TaxDescription)</td>
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@(line.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQtyToDate.ToString("0.###")</td>
                                 <td style="padding:6px 4px;">@BalanceCell(line)</td>

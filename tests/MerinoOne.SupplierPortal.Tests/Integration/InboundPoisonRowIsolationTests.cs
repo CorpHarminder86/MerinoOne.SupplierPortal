@@ -131,8 +131,8 @@ public class InboundPoisonRowIsolationTests
         log.Should().NotBeNull(because: "the executor always writes a SyncLog for the batch");
         log!.Status.Should().Be(SyncStatus.Failed, because: "the batch had a failed row");
         log.EntityCount.Should().Be(3, because: "EntityCount = received");
-        log.ErrorMessage.Should().Contain("Succeeded 2 of 3");
-        log.ErrorMessage.Should().Contain("1 failed");
+        log.ErrorMessage.Should().Contain("1 of 3 failed", because: "the message states the failed/received counts");
+        log.ErrorMessage.Should().Contain(poisonRef, because: "the failure reason is now inlined on the SyncLog (not just 'see linked error')");
 
         var error = await db.IntegrationErrors.IgnoreQueryFilters()
             .Where(e => e.SyncLogId == log.Id)

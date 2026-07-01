@@ -163,9 +163,46 @@ public class UpsertPurchaseOrdersCommandHandler(
                     .Select(i => new { i.Code, i.Id }).ToListAsync(token)).ToDictionary(i => i.Code, i => i.Id, StringComparer.OrdinalIgnoreCase);
 
             var taxCodes = recs.SelectMany(r => r.Lines).Where(l => !string.IsNullOrWhiteSpace(l.TaxCode)).Select(l => l.TaxCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            var taxMap = taxCodes.Count == 0 ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
+            // code → (id, description). The description feeds the WRITE-TIME snapshot on the line so the read side
+            // never joins the Tax master (snapshot-on-write, like currency/ship-to).
+            var taxMap = taxCodes.Count == 0 ? new Dictionary<string, (Guid Id, string Desc)>(StringComparer.OrdinalIgnoreCase)
                 : (await db.Taxes.IgnoreQueryFilters().Where(t => !t.IsDeleted && t.TenantEntityId == sourceId && taxCodes.Contains(t.Code))
-                    .Select(t => new { t.Code, t.Id }).ToListAsync(token)).ToDictionary(t => t.Code, t => t.Id, StringComparer.OrdinalIgnoreCase);
+                    .Select(t => new { t.Code, t.Id, t.Description }).ToListAsync(token))
+                    .ToDictionary(t => t.Code, t => (Id: t.Id, Desc: t.Description), StringComparer.OrdinalIgnoreCase);
+
+            // Payment/Delivery term resolution: the inbound PO carries a term CODE (paymentTermCode / deliveryTermCode);
+            // resolve each to its master row (FK id + description snapshot) within the resolved company — mirrors the
+            // currency/item/tax resolution. Was a real bug: the header stored only rec.PaymentTerms (a freeform string,
+            // NULL when the ERP sends only the *Code), so the term id was never saved and the term was lost.
+            var payTermCodes = recs.Where(r => !string.IsNullOrWhiteSpace(r.PaymentTermCode)).Select(r => r.PaymentTermCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var payTermMap = payTermCodes.Count == 0 ? new Dictionary<string, (Guid Id, string Desc)>(StringComparer.OrdinalIgnoreCase)
+                : (await db.PaymentTerms.IgnoreQueryFilters().Where(p => !p.IsDeleted && p.TenantEntityId == sourceId && payTermCodes.Contains(p.Code))
+                    .Select(p => new { p.Code, p.Id, p.Description }).ToListAsync(token))
+                    .ToDictionary(p => p.Code, p => (Id: p.Id, Desc: p.Description), StringComparer.OrdinalIgnoreCase);
+
+            var delTermCodes = recs.Where(r => !string.IsNullOrWhiteSpace(r.DeliveryTermCode)).Select(r => r.DeliveryTermCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var delTermMap = delTermCodes.Count == 0 ? new Dictionary<string, (Guid Id, string Desc)>(StringComparer.OrdinalIgnoreCase)
+                : (await db.DeliveryTerms.IgnoreQueryFilters().Where(d => !d.IsDeleted && d.TenantEntityId == sourceId && delTermCodes.Contains(d.Code))
+                    .Select(d => new { d.Code, d.Id, d.Description }).ToListAsync(token))
+                    .ToDictionary(d => d.Code, d => (Id: d.Id, Desc: d.Description), StringComparer.OrdinalIgnoreCase);
+
+            // (id, snapshot) — resolve the *Code to a master row: id = the FK; snapshot = the freeform PaymentTerms/
+            // DeliveryTerms string if the ERP sent one, else the master Description. Unresolved code / no code → the
+            // FK stays null and only any freeform string is kept.
+            (Guid? Id, string? Snapshot) ResolvePayTerm(PoRecord r)
+            {
+                var code = r.PaymentTermCode?.Trim();
+                if (!string.IsNullOrWhiteSpace(code) && payTermMap.TryGetValue(code, out var m))
+                    return (m.Id, !string.IsNullOrWhiteSpace(r.PaymentTerms) ? r.PaymentTerms : m.Desc);
+                return (null, r.PaymentTerms);
+            }
+            (Guid? Id, string? Snapshot) ResolveDelTerm(PoRecord r)
+            {
+                var code = r.DeliveryTermCode?.Trim();
+                if (!string.IsNullOrWhiteSpace(code) && delTermMap.TryGetValue(code, out var m))
+                    return (m.Id, !string.IsNullOrWhiteSpace(r.DeliveryTerms) ? r.DeliveryTerms : m.Desc);
+                return (null, r.DeliveryTerms);
+            }
 
             // Existing POs (with lines) for upsert-by-PoNumber within the resolved company.
             var poNumbers = recs.Select(r => r.PoNumber.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -245,7 +282,10 @@ public class UpsertPurchaseOrdersCommandHandler(
                     po.SupplierId = sup.Id; po.SeccodeId = sup.SeccodeId;
                     po.TenantId = tenantId; po.TenantEntityId = sourceId;
                     po.PoType = poType; po.PoDate = rec.PoDate;
-                    po.PaymentTerms = rec.PaymentTerms; po.DeliveryTerms = rec.DeliveryTerms;
+                    var (payId, paySnap) = ResolvePayTerm(rec);
+                    var (delId, delSnap) = ResolveDelTerm(rec);
+                    po.PaymentTermId = payId; po.PaymentTerms = paySnap;
+                    po.DeliveryTermId = delId; po.DeliveryTerms = delSnap;
                     po.CurrencyId = curId; po.CurrencyCode = rec.CurrencyCode?.Trim();
                     po.Notes = rec.Notes; po.ErpSyncId = rec.ErpSyncId ?? po.ErpSyncId;
                     // R5 (§11.3) — PoStatus DERIVATION on a re-receipt is now resolver-driven (was the R4 hardcoded
@@ -320,11 +360,14 @@ public class UpsertPurchaseOrdersCommandHandler(
                             newPoStatus = ns;
                     }
 
+                    var (newPayId, newPaySnap) = ResolvePayTerm(rec);
+                    var (newDelId, newDelSnap) = ResolveDelTerm(rec);
                     var po2 = new PurchaseOrder
                     {
                         Id = Guid.NewGuid(), TenantId = tenantId, TenantEntityId = sourceId, SeccodeId = sup.SeccodeId,
                         PoNumber = poNum, SupplierId = sup.Id, PoType = poType, PoDate = rec.PoDate, PoStatus = newPoStatus,
-                        PaymentTerms = rec.PaymentTerms, DeliveryTerms = rec.DeliveryTerms,
+                        PaymentTermId = newPayId, PaymentTerms = newPaySnap,
+                        DeliveryTermId = newDelId, DeliveryTerms = newDelSnap,
                         CurrencyId = curId, CurrencyCode = rec.CurrencyCode?.Trim(),
                         Notes = rec.Notes, ErpSyncId = rec.ErpSyncId, Version = 1,
                         // R5 (§6.2/§6.3) — resolved ship-to FK + point-in-time snapshot (single copy point) + raw erpStatus.
@@ -430,7 +473,7 @@ public class UpsertPurchaseOrdersCommandHandler(
     // navigation in the handler — that aggregate is all-Added.)
     private static void SyncLines(IAppDbContext db, PurchaseOrder po, PoRecord rec,
         IReadOnlyDictionary<int, decimal> resolvedByPosition,
-        IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, Guid> taxMap, DateTime now)
+        IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
     {
         // Existing stored lines keyed by positionNo (seq is always 1 in our store; last-wins guards any legacy dup).
         var byPosition = new Dictionary<int, PurchaseOrderLine>();
@@ -495,7 +538,7 @@ public class UpsertPurchaseOrdersCommandHandler(
         return (resolved, null);
     }
 
-    private static PurchaseOrderLine NewLine(PoLineRecord l, IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, Guid> taxMap, DateTime now)
+    private static PurchaseOrderLine NewLine(PoLineRecord l, IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
     {
         var line = new PurchaseOrderLine { Id = Guid.NewGuid(), CreatedBy = "infor:inbound", CreatedOn = now };
         Apply(line, l, itemMap, taxMap);
@@ -504,7 +547,7 @@ public class UpsertPurchaseOrdersCommandHandler(
 
     // Applies an inbound line's attributes onto a stored line. sequenceNo is FORCED to 1 (storage key is positionNo);
     // additionalQty is echoed for audit. OrderQty is NOT set here — the caller sets the RESOLVED absolute qty.
-    private static void Apply(PurchaseOrderLine line, PoLineRecord l, IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, Guid> taxMap)
+    private static void Apply(PurchaseOrderLine line, PoLineRecord l, IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap)
     {
         line.PositionNo = l.PositionNo; line.SequenceNo = 1;   // ALWAYS 1 — index unchanged; seq is not a storage key.
         line.AdditionalQty = l.AdditionalQty;                  // echo of the last received delta (signed; audit only).
@@ -513,8 +556,20 @@ public class UpsertPurchaseOrdersCommandHandler(
         line.OrderUnit = string.IsNullOrWhiteSpace(l.OrderUnit) ? "EA" : l.OrderUnit.Trim();
         line.PriceUnit = l.PriceUnit; line.Price = l.Price;
         line.DiscountPct = l.DiscountPct; line.DiscountAmount = l.DiscountAmount; line.DeliveryDate = l.DeliveryDate;
-        line.TaxCode = l.TaxCode; line.TaxDescription = l.TaxDescription;
-        line.TaxId = !string.IsNullOrWhiteSpace(l.TaxCode) && taxMap.TryGetValue(l.TaxCode!.Trim(), out var tid) ? tid : null;
+        // Tax snapshot-on-write: resolve the code to the master (id + description). Store the pushed description if
+        // the ERP sent one, else the master's (code-only push) — so the read side always shows the line's snapshot
+        // with no Tax-master join. An unresolved code keeps whatever the ERP sent (may be null) and no FK.
+        line.TaxCode = l.TaxCode;
+        if (!string.IsNullOrWhiteSpace(l.TaxCode) && taxMap.TryGetValue(l.TaxCode!.Trim(), out var tx))
+        {
+            line.TaxId = tx.Id;
+            line.TaxDescription = !string.IsNullOrWhiteSpace(l.TaxDescription) ? l.TaxDescription : tx.Desc;
+        }
+        else
+        {
+            line.TaxId = null;
+            line.TaxDescription = l.TaxDescription;
+        }
     }
 }
 

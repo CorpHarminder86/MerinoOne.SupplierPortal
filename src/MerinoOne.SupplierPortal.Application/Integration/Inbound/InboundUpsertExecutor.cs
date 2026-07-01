@@ -222,10 +222,11 @@ public class InboundUpsertExecutor
                 PayloadJson = payloadJson,
                 IdempotencyKey = effectiveKey,
                 SyncedAt = now,
-                // Concise summary; the per-row root cause lives in the linked IntegrationError's failures JSON.
+                // The actual per-row reasons inline (the first few) so the Sync Log shows WHY it failed without a
+                // drill-in; the full structured detail still lives on the linked IntegrationError's failures JSON.
                 ErrorMessage = overallSuccess
                     ? null
-                    : $"Succeeded {received - failed} of {received}; {failed} failed (see linked error).",
+                    : $"{failed} of {received} failed — {BuildFailuresSummary(rows)}",
                 CreatedBy = "infor:inbound",
                 CreatedOn = now
             };
@@ -637,6 +638,19 @@ public class InboundUpsertExecutor
             .Where(r => r.Outcome == RowOutcome.Failed)
             .Select(r => new { code = r.Code, error = r.Error ?? "unknown error" });
         return JsonSerializer.Serialize(failures);
+    }
+
+    /// <summary>Concise human-readable failure summary for InforSyncLog.ErrorMessage — the first few Failed rows'
+    /// "code: error" so the Sync Log shows the actual reason inline (the full detail is on the linked
+    /// IntegrationError). Capped so a large batch's message stays bounded.</summary>
+    private static string BuildFailuresSummary(IReadOnlyCollection<RowResult> rows)
+    {
+        var failed = rows.Where(r => r.Outcome == RowOutcome.Failed).ToList();
+        const int take = 5;
+        var head = string.Join("; ", failed.Take(take).Select(r =>
+            string.IsNullOrWhiteSpace(r.Code) ? (r.Error ?? "unknown error") : $"{r.Code}: {r.Error ?? "unknown error"}"));
+        if (failed.Count > take) head += $"; …(+{failed.Count - take} more)";
+        return head.Length > 1000 ? head[..1000] + "…" : head;
     }
 
     /// <summary>Whole-batch failures JSON (one entry per code) for the isolation-impossible fallback path.</summary>
