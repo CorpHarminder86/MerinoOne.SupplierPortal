@@ -39,9 +39,8 @@ public interface IAppDbContext
     DbSet<TenantEntity> TenantEntities { get; }
     DbSet<UserCompanyMap> UserCompanyMaps { get; }
 
-    // R5 (TSD R5 Addendum §4.1–4.2 / Component 1) — Company Master: the customer (buying entity) keyed 1:1 to
-    // tenantEntityId, with its named, ERP-mappable ship-to addresses. Admin config masters (Settings-gated).
-    DbSet<Company> Companies { get; }
+    // R5 (TSD R5 Addendum §4.1–4.2 / Component 1) — named, ERP-mappable ship-to addresses hung off the
+    // TenantEntity (the customer/buying entity). Admin config master (Settings-gated).
     DbSet<CompanyAddress> CompanyAddresses { get; }
 
     DbSet<Item> Items { get; }
@@ -86,9 +85,8 @@ public interface IAppDbContext
     DbSet<CreditDebitNote> CreditDebitNotes { get; }
     DbSet<Payment> Payments { get; }
 
-    // R5 (TSD R5 Addendum §4.7 / §4.9) — ERP→portal status mapping master + inbound sync log.
+    // R5 (TSD R5 Addendum §4.7) — ERP→portal status mapping master.
     DbSet<PoStatusMapping> PoStatusMappings { get; }
-    DbSet<SyncLog> SyncLogs { get; }
 
     DbSet<DocumentUpload> DocumentUploads { get; }
     DbSet<AttachmentType> AttachmentTypes { get; }

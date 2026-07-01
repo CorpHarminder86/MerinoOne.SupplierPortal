@@ -4,12 +4,15 @@
 @inject NotificationService Notif
 @inject DialogService Dialog
 
-@* R5 (TSD R5 Addendum §5 / §5.2 — Component 1, Company Master). Admin master-detail screen under Settings.
-   Top: the Company list (the customer / buying entity keyed 1:1 to a tenantEntityId). Name is the only editable
-   field; deactivate toggles IsActive via PUT. Selecting a company loads its CompanyAddress list (the named,
-   ERP-mappable ship-to addresses). The address form reuses the supplier address field set (AddressType +
-   Line1/Line2/City/State/Country/Pincode) extended with addressName (REQUIRED) and erpCode (optional, unique per
-   company — the server + filtered unique index enforce it; the duplicate error is surfaced inline). Settings.Write. *@
+@* R5 (TSD R5 Addendum §5 / §5.2 — Component 1, Company Master; [[r5-consolidation]]). After the backend
+   consolidation the duplicate admin.Company entity was DROPPED — the "company" is now the pre-existing
+   admin.TenantEntity, served READ-ONLY by Contracts.Companies.CompanyDto over api/companies/accessible.
+   Companies are ERP-synced TenantEntities, so this screen no longer creates / edits / deactivates them; it
+   only LISTS them (Settings.Read) and manages each company's named, ERP-mappable ship-to addresses
+   (admin.CompanyAddress, which now hangs directly off the TenantEntity). The address CompanyId field carries
+   a TenantEntity id. The address dialog uses the shared GeoAutocomplete (mirroring supplier onboarding):
+   Country / PIN / State / City are typeaheads; picking a PIN reverse-fills City/State/Country. Only STRING
+   names/code are persisted — the geo ids are transient cascade drivers. Settings.Write to manage addresses. *@
 
 <PageTitle>Companies</PageTitle>
 
@@ -20,118 +23,96 @@
                 <h1 class="tl-title">Companies</h1>
                 <span class="tl-count-chip">@(companies?.Count ?? 0)</span>
             </div>
-            <p class="tl-sub">Customer (buying-entity) master + named ship-to addresses · Settings → System</p>
-        </div>
-        <div class="tl-header__actions">
-            @if (CanWrite)
-            {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewCompany">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add company
-                </button>
-            }
+            <p class="tl-sub">Companies (buying entities) synced from the ERP · pick one to manage its named ship-to addresses</p>
         </div>
     </header>
 
-    @if (!CanWrite)
+    @* ---------------- Companies list (read-only — ERP-synced TenantEntities) ---------------- *@
+    @if (companiesLoading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (companies == null || companies.Count == 0)
     {
         <div class="tl-empty">
-            <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
-            <div>You do not have permission to manage companies.</div>
+            <span class="material-symbols-outlined" style="font-size:32px;">domain</span>
+            <div>No companies available.</div>
         </div>
     }
     else
     {
-        @* ---------------- Companies list ---------------- *@
-        @if (companiesLoading)
-        {
-            <div class="tl-empty">Loading…</div>
-        }
-        else if (companies == null || companies.Count == 0)
-        {
-            <div class="tl-empty">
-                <span class="material-symbols-outlined" style="font-size:32px;">domain</span>
-                <div>No companies defined.</div>
+        <div class="tl-grid-wrapper" style="--tl-cols: 130px 1.6fr 90px; --tl-min-width: 560px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Code</div>
+                <div class="tlg-col">Name</div>
+                <div class="tlg-col">Active</div>
             </div>
-        }
-        else
-        {
-            <div class="tl-grid-wrapper" style="--tl-cols: 1.6fr 90px 110px; --tl-min-width: 560px;">
-                <div class="tlg-header">
-                    <div class="tlg-col">Name</div>
-                    <div class="tlg-col">Active</div>
-                    <div class="tlg-col tlg-col--actions">Actions</div>
-                </div>
-                @foreach (var c in companies)
-                {
-                    var company = c;
-                    <div class="tlg-row @(selectedCompany?.Id == company.Id ? "tlg-row--selected" : "")"
-                         style="cursor:pointer;@(selectedCompany?.Id == company.Id ? "background:rgba(46,91,183,.08);" : "")"
-                         @onclick="() => SelectCompany(company)">
-                        <div class="tlg-col tlg-desc" style="font-weight:600;color:var(--mer-blue-darker);">@company.Name</div>
-                        <div class="tlg-col"><span class="tlg-status @(company.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(company.IsActive ? "Yes" : "No")</span></div>
-                        <div class="tlg-col tlg-col--actions">
-                            <button @onclick="() => OpenEditCompany(company)" @onclick:stopPropagation="true" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Rename / toggle active">
-                                <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
-                            </button>
-                            @if (company.IsActive)
-                            {
-                                <button @onclick="() => DeactivateCompany(company)" @onclick:stopPropagation="true" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
-                                    <span class="material-symbols-outlined" style="font-size:18px;">block</span>
-                                </button>
-                            }
-                        </div>
-                    </div>
-                }
-            </div>
-
-            @* ---------------- Addresses for the selected company ---------------- *@
-            @if (selectedCompany != null)
+            @foreach (var c in companies)
             {
-                <div class="rz-card" style="padding:20px;margin-top:18px;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-                        <div>
-                            <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">
-                                Ship-to addresses · @selectedCompany.Name (@(addresses?.Count ?? 0))
-                            </h3>
-                            <p style="color:var(--mer-ink-500);font-size:12px;">Each address has a mandatory name (the ship-to label) and an optional ERP ship-to code, unique within the company.</p>
-                        </div>
+                var company = c;
+                <div class="tlg-row @(selectedCompany?.Id == company.Id ? "tlg-row--selected" : "")"
+                     style="cursor:pointer;@(selectedCompany?.Id == company.Id ? "background:rgba(46,91,183,.08);" : "")"
+                     @onclick="() => SelectCompany(company)">
+                    <div class="tlg-col tlg-code">@company.Code</div>
+                    <div class="tlg-col tlg-desc" style="font-weight:600;color:var(--mer-blue-darker);">@company.Name</div>
+                    <div class="tlg-col"><span class="tlg-status @(company.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(company.IsActive ? "Yes" : "No")</span></div>
+                </div>
+            }
+        </div>
+
+        @* ---------------- Addresses for the selected company ---------------- *@
+        @if (selectedCompany != null)
+        {
+            <div class="rz-card" style="padding:20px;margin-top:18px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <div>
+                        <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">
+                            Ship-to addresses · @selectedCompany.Name (@(addresses?.Count ?? 0))
+                        </h3>
+                        <p style="color:var(--mer-ink-500);font-size:12px;">Each address has a mandatory name (the ship-to label) and an optional ERP ship-to code, unique within the company.</p>
+                    </div>
+                    @if (CanWrite)
+                    {
                         <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewAddress">
                             <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add_location_alt</span> Add address
                         </button>
-                    </div>
+                    }
+                </div>
 
-                    @if (addressesLoading)
-                    {
-                        <div class="tl-empty">Loading…</div>
-                    }
-                    else if (addresses == null || addresses.Count == 0)
-                    {
-                        <div class="tl-empty">
-                            <span class="material-symbols-outlined" style="font-size:32px;">location_off</span>
-                            <div>No addresses for this company yet.</div>
+                @if (addressesLoading)
+                {
+                    <div class="tl-empty">Loading…</div>
+                }
+                else if (addresses == null || addresses.Count == 0)
+                {
+                    <div class="tl-empty">
+                        <span class="material-symbols-outlined" style="font-size:32px;">location_off</span>
+                        <div>No addresses for this company yet.</div>
+                    </div>
+                }
+                else
+                {
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 110px 1.6fr 90px 110px; --tl-min-width: 920px;">
+                        <div class="tlg-header">
+                            <div class="tlg-col">Address name</div>
+                            <div class="tlg-col">ERP code</div>
+                            <div class="tlg-col">Type</div>
+                            <div class="tlg-col">Address</div>
+                            <div class="tlg-col">Active</div>
+                            <div class="tlg-col tlg-col--actions">Actions</div>
                         </div>
-                    }
-                    else
-                    {
-                        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 110px 1.6fr 90px 110px; --tl-min-width: 920px;">
-                            <div class="tlg-header">
-                                <div class="tlg-col">Address name</div>
-                                <div class="tlg-col">ERP code</div>
-                                <div class="tlg-col">Type</div>
-                                <div class="tlg-col">Address</div>
-                                <div class="tlg-col">Active</div>
-                                <div class="tlg-col tlg-col--actions">Actions</div>
-                            </div>
-                            @foreach (var a in addresses)
-                            {
-                                var addr = a;
-                                <div class="tlg-row">
-                                    <div class="tlg-col tlg-desc" style="font-weight:600;color:var(--mer-blue-darker);">@addr.AddressName</div>
-                                    <div class="tlg-col tlg-code">@(string.IsNullOrEmpty(addr.ErpCode) ? "—" : addr.ErpCode)</div>
-                                    <div class="tlg-col">@addr.AddressType</div>
-                                    <div class="tlg-col" style="font-size:12px;color:var(--mer-ink-700);">@FormatLine(addr)</div>
-                                    <div class="tlg-col"><span class="tlg-status @(addr.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(addr.IsActive ? "Yes" : "No")</span></div>
-                                    <div class="tlg-col tlg-col--actions">
+                        @foreach (var a in addresses)
+                        {
+                            var addr = a;
+                            <div class="tlg-row">
+                                <div class="tlg-col tlg-desc" style="font-weight:600;color:var(--mer-blue-darker);">@addr.AddressName</div>
+                                <div class="tlg-col tlg-code">@(string.IsNullOrEmpty(addr.ErpCode) ? "—" : addr.ErpCode)</div>
+                                <div class="tlg-col">@addr.AddressType</div>
+                                <div class="tlg-col" style="font-size:12px;color:var(--mer-ink-700);">@FormatLine(addr)</div>
+                                <div class="tlg-col"><span class="tlg-status @(addr.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(addr.IsActive ? "Yes" : "No")</span></div>
+                                <div class="tlg-col tlg-col--actions">
+                                    @if (CanWrite)
+                                    {
                                         <button @onclick="() => OpenEditAddress(addr)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit">
                                             <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
                                         </button>
@@ -141,57 +122,22 @@
                                                 <span class="material-symbols-outlined" style="font-size:18px;">block</span>
                                             </button>
                                         }
-                                    </div>
+                                    }
+                                    else
+                                    {
+                                        <span style="color:var(--mer-ink-300);">—</span>
+                                    }
                                 </div>
-                            }
-                        </div>
-                    }
-                </div>
-            }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
         }
     }
 </div>
 
-@* ---------------- Company add/edit dialog ---------------- *@
-@if (showCompanyDialog)
-{
-    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
-        <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
-            <div class="merino-dialog__accent"></div>
-            <header class="merino-dialog__header">
-                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">domain</span></div>
-                <div class="merino-dialog__head-text">
-                    <div class="merino-dialog__eyebrow">Company</div>
-                    <h2 class="merino-dialog__title">@(editingCompanyId.HasValue ? "Edit company" : "New company")</h2>
-                </div>
-                <button class="merino-dialog__close" @onclick="() => showCompanyDialog = false"><span class="material-symbols-outlined">close</span></button>
-            </header>
-            <div class="merino-dialog__body">
-                <div style="display:flex;flex-direction:column;gap:12px;">
-                    <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Company name *</label>
-                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="companyFormName" placeholder="e.g. Merino Industries Ltd." />
-                    </div>
-                    @if (editingCompanyId.HasValue)
-                    {
-                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-                            <input type="checkbox" @bind="companyFormActive" /> Active
-                        </label>
-                    }
-                </div>
-                @if (!string.IsNullOrEmpty(companyError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@companyError</div> }
-            </div>
-            <footer class="merino-dialog__footer">
-                <div class="merino-dialog__actions">
-                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showCompanyDialog = false">Cancel</button>
-                    <button class="merino-dialog__btn" data-intent="primary" @onclick="SaveCompany" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
-                </div>
-            </footer>
-        </div>
-    </div>
-}
-
-@* ---------------- Address add/edit dialog (supplier address field set + addressName / erpCode) ---------------- *@
+@* ---------------- Address add/edit dialog (supplier address field set + addressName / erpCode + geo autocomplete) ---------------- *@
 @if (showAddressDialog)
 {
     <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
@@ -226,7 +172,11 @@
                     </div>
                     <div>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Country *</label>
-                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.Country" placeholder="India" />
+                        <GeoAutocomplete Placeholder="Country" Value="@af.Country"
+                            Style="width:100%;padding:8px 10px;"
+                            Search="@((q, sk) => SearchCountries(q, sk))"
+                            ValueChanged="@(v => { af.Country = v; af.CountryId = null; af.StateId = null; af.CityId = null; af.PostalCodeId = null; af.State = string.Empty; af.City = string.Empty; af.Pincode = string.Empty; })"
+                            OnSelected="@(g => { af.Country = g.Name; af.CountryId = g.Id; af.StateId = null; af.CityId = null; af.PostalCodeId = null; af.State = string.Empty; af.City = string.Empty; af.Pincode = string.Empty; })" />
                     </div>
                     <div style="grid-column:1 / span 2;">
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Address line 1 *</label>
@@ -236,17 +186,29 @@
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Address line 2</label>
                         <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.AddressLine2" />
                     </div>
-                    <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">City *</label>
-                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.City" />
+                    <div style="grid-column:1 / span 2;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Pincode — pick to auto-fill city / state / country</label>
+                        <GeoAutocomplete Placeholder="PIN — pick to auto-fill city / state / country" Value="@af.Pincode" UseCode="true" Disabled="@(af.CountryId is null)"
+                            Style="width:100%;padding:8px 10px;font-family:Inter,monospace;"
+                            Search="@((q, sk) => SearchPostals(q, sk))"
+                            ValueChanged="@(v => { af.Pincode = v; af.PostalCodeId = null; af.StateId = null; af.CityId = null; af.State = string.Empty; af.City = string.Empty; })"
+                            OnSelected="@(g => OnPostalSelected(g))" />
                     </div>
                     <div>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">State *</label>
-                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.State" />
+                        <GeoAutocomplete Placeholder="State" Value="@af.State" Disabled="@(af.CountryId is null || af.PostalCodeId is not null)"
+                            Style="width:100%;padding:8px 10px;"
+                            Search="@((q, sk) => SearchStates(q, sk))"
+                            ValueChanged="@(v => { af.State = v; af.StateId = null; })"
+                            OnSelected="@(g => { af.State = g.Name; af.StateId = g.Id; af.CityId = null; })" />
                     </div>
                     <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Pincode</label>
-                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="af.Pincode" />
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">City *</label>
+                        <GeoAutocomplete Placeholder="City" Value="@af.City" Disabled="@(af.CountryId is null || af.PostalCodeId is not null)"
+                            Style="width:100%;padding:8px 10px;"
+                            Search="@((q, sk) => SearchCities(q, sk))"
+                            ValueChanged="@(v => { af.City = v; af.CityId = null; })"
+                            OnSelected="@(g => { af.City = g.Name; af.CityId = g.Id; })" />
                     </div>
                     @if (editingAddressId.HasValue)
                     {
@@ -255,6 +217,7 @@
                         </label>
                     }
                 </div>
+                <p style="font-size:11px;color:var(--mer-ink-500);margin-top:8px;">To change Country/State/City, re-pick Country to enable the lookups. State/City are disabled once a PIN is chosen (the PIN drives them).</p>
                 @if (!string.IsNullOrEmpty(addressError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;">@addressError</div> }
             </div>
             <footer class="merino-dialog__footer">
@@ -269,21 +232,16 @@
 
 @code {
     private bool CanWrite => Token.HasPermission("Settings.Write");
+    private bool CanRead => Token.HasPermission("Settings.Read");
     private bool busy;
 
     // Address types mirror the supplier address control (Register.razor) + the §4.2 "Plant" option.
     private static readonly string[] AddressTypes = { "Registered", "Billing", "Shipping", "Plant", "Other" };
 
-    // ---- Companies ----
-    private List<CompanyMasterDto>? companies;
+    // ---- Companies (read-only TenantEntities from api/companies/accessible) ----
+    private List<CompanyDto>? companies;
     private bool companiesLoading = true;
-    private CompanyMasterDto? selectedCompany;
-
-    private bool showCompanyDialog;
-    private Guid? editingCompanyId;
-    private string companyFormName = string.Empty;
-    private bool companyFormActive = true;
-    private string companyError = string.Empty;
+    private CompanyDto? selectedCompany;
 
     // ---- Addresses (for the selected company) ----
     private List<CompanyAddressDto>? addresses;
@@ -296,14 +254,16 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!CanWrite) { companiesLoading = false; return; }
+        if (!CanRead) { companiesLoading = false; return; }
         await LoadCompanies();
     }
 
     private async Task LoadCompanies()
     {
         companiesLoading = true;
-        var resp = await Api.GetAsync<List<CompanyMasterDto>>("api/settings/companies");
+        // Companies are the pre-existing TenantEntities; the accessible-companies endpoint is Settings.Read-safe
+        // for every authenticated user and returns only the companies the caller may act under.
+        var resp = await Api.GetAsync<List<CompanyDto>>("api/companies/accessible");
         companies = resp?.Data ?? new();
         // Keep the current selection if it still exists; otherwise drop it.
         if (selectedCompany != null)
@@ -311,7 +271,7 @@
         companiesLoading = false;
     }
 
-    private async Task SelectCompany(CompanyMasterDto c)
+    private async Task SelectCompany(CompanyDto c)
     {
         selectedCompany = c;
         await LoadAddresses();
@@ -326,60 +286,6 @@
         var resp = await Api.GetAsync<List<CompanyAddressDto>>($"api/settings/companies/{selectedCompany.Id}/addresses");
         addresses = resp?.Data ?? new();
         addressesLoading = false;
-    }
-
-    // ---- Company CRUD ----
-    private void OpenNewCompany()
-    {
-        editingCompanyId = null;
-        companyFormName = string.Empty;
-        companyFormActive = true;
-        companyError = string.Empty;
-        showCompanyDialog = true;
-    }
-
-    private void OpenEditCompany(CompanyMasterDto c)
-    {
-        editingCompanyId = c.Id;
-        companyFormName = c.Name;
-        companyFormActive = c.IsActive;
-        companyError = string.Empty;
-        showCompanyDialog = true;
-    }
-
-    private async Task SaveCompany()
-    {
-        companyError = string.Empty;
-        if (string.IsNullOrWhiteSpace(companyFormName)) { companyError = "Company name is required."; return; }
-        busy = true;
-        ApiResult<CompanyMasterDto>? resp;
-        if (editingCompanyId.HasValue)
-            resp = await Api.PutAsync<CompanyMasterDto, UpdateCompanyMasterRequest>($"api/settings/companies/{editingCompanyId}", new UpdateCompanyMasterRequest(companyFormName.Trim(), companyFormActive));
-        else
-            resp = await Api.PostAsync<CompanyMasterDto, CreateCompanyMasterRequest>("api/settings/companies", new CreateCompanyMasterRequest(companyFormName.Trim()));
-
-        if (resp?.Success == true)
-        {
-            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
-            showCompanyDialog = false;
-            await LoadCompanies();
-        }
-        else { companyError = resp?.Errors?.FirstOrDefault() ?? "Failed to save company."; }
-        busy = false;
-    }
-
-    private async Task DeactivateCompany(CompanyMasterDto c)
-    {
-        if (!await Dialog.ConfirmDeactivateAsync(c.Name, "COMPANY")) return;
-        busy = true;
-        var resp = await Api.PutAsync<CompanyMasterDto, UpdateCompanyMasterRequest>($"api/settings/companies/{c.Id}", new UpdateCompanyMasterRequest(c.Name, false));
-        if (resp?.Success == true)
-        {
-            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" });
-            await LoadCompanies();
-        }
-        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
-        busy = false;
     }
 
     // ---- Address CRUD ----
@@ -404,6 +310,9 @@
         af.Pincode = a.Pincode ?? string.Empty;
         af.Country = a.Country;
         af.IsActive = a.IsActive;
+        // Existing rows have no resolved geo ids — the lookups start disabled; the note tells the user to
+        // re-pick Country to enable them (mirrors supplier onboarding's existing-row behaviour).
+        af.CountryId = null; af.StateId = null; af.CityId = null; af.PostalCodeId = null;
         addressError = string.Empty;
         showAddressDialog = true;
     }
@@ -424,6 +333,8 @@
         var country = string.IsNullOrWhiteSpace(af.Country) ? null : af.Country.Trim();
 
         busy = true;
+        // Persist STRINGS only — the transient geo ids (CountryId/StateId/CityId/PostalCodeId) drive the
+        // cascade but are never sent; the request DTOs carry names/code, exactly like supplier onboarding.
         ApiResult<CompanyAddressDto>? resp;
         if (editingAddressId.HasValue)
         {
@@ -466,6 +377,38 @@
         busy = false;
     }
 
+    // ---------------- Geo autocomplete (authenticated /api/geo) — mirrors supplier onboarding ----------------
+    private Task<List<GeoLookupDto>> SearchCountries(string q, int skip) => Geo("countries", q, null, skip);
+    private Task<List<GeoLookupDto>> SearchStates(string q, int skip) => Geo("states", q, $"countryId={af.CountryId}", skip);
+    private Task<List<GeoLookupDto>> SearchCities(string q, int skip) =>
+        Geo("cities", q, $"countryId={af.CountryId}" + (af.StateId is Guid s ? $"&stateId={s}" : ""), skip);
+    private Task<List<GeoLookupDto>> SearchPostals(string q, int skip) =>
+        Geo("postal-codes", q, $"countryId={af.CountryId}", skip);
+
+    private async Task<List<GeoLookupDto>> Geo(string seg, string q, string? extra, int skip)
+    {
+        var url = $"api/geo/{seg}?";
+        if (!string.IsNullOrEmpty(extra)) url += extra + "&";
+        if (!string.IsNullOrWhiteSpace(q)) url += "search=" + Uri.EscapeDataString(q.Trim()) + "&";
+        if (skip > 0) url += "skip=" + skip;
+        var resp = await Api.GetAsync<List<GeoLookupDto>>(url);
+        return resp?.Data ?? new();
+    }
+
+    // Reverse-cascade: picking a PIN fills city/state/country from the postal-code master. CompanyAddress has
+    // no Area field, so the returned area is intentionally dropped (do NOT invent a CompanyAddress.Area).
+    private async Task OnPostalSelected(GeoLookupDto g)
+    {
+        af.Pincode = g.Code;
+        af.PostalCodeId = g.Id;
+        var detail = (await Api.GetAsync<PostalCodeDetailDto>($"api/geo/postal-codes/{g.Id}/detail"))?.Data;
+        if (detail is null) return;
+        if (detail.CountryId is Guid cid) { af.CountryId = cid; if (!string.IsNullOrWhiteSpace(detail.CountryName)) af.Country = detail.CountryName!; }
+        if (detail.StateId is Guid sid) { af.StateId = sid; if (!string.IsNullOrWhiteSpace(detail.StateName)) af.State = detail.StateName!; }
+        if (detail.CityId is Guid ctid) { af.CityId = ctid; if (!string.IsNullOrWhiteSpace(detail.CityName)) af.City = detail.CityName!; }
+        StateHasChanged();
+    }
+
     private static string FormatLine(CompanyAddressDto a)
     {
         var parts = new List<string> { a.AddressLine1 };
@@ -488,6 +431,13 @@
         public string Country { get; set; } = "India";
         public bool IsActive { get; set; } = true;
 
+        // Transient geo-cascade ids — drive the autocompletes ONLY; never persisted (the request DTOs carry
+        // the string names/code). Mirrors supplier onboarding's AddressRow transient ids.
+        public Guid? CountryId { get; set; }
+        public Guid? StateId { get; set; }
+        public Guid? CityId { get; set; }
+        public Guid? PostalCodeId { get; set; }
+
         public void Reset()
         {
             AddressName = string.Empty;
@@ -500,6 +450,10 @@
             Pincode = string.Empty;
             Country = "India";
             IsActive = true;
+            CountryId = null;
+            StateId = null;
+            CityId = null;
+            PostalCodeId = null;
         }
     }
 }

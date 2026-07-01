@@ -4,67 +4,50 @@ using Microsoft.EntityFrameworkCore;
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Seed;
 
 /// <summary>
-/// R5 (TSD R5 Addendum §4.1–4.2 / §5 — Component 1, Company Master). Seeds one <see cref="Company"/> per existing
-/// tenant company (<c>tenantEntityId</c>) and at least one <see cref="CompanyAddress"/> per Company carrying an
+/// R5 (TSD R5 Addendum §4.2 / §5 — Component 1 / [[r5-consolidation]]). Seeds at least one
+/// <see cref="CompanyAddress"/> per existing tenant company (<see cref="TenantEntity"/>) carrying an
 /// <c>erpCode</c>, so the inbound PO ship-to resolution (§6.2) and the integration tests can resolve a ship-to.
+/// (The duplicate admin.Company was dropped — CompanyAddress now hangs directly off the TenantEntity.)
 ///
-/// <para>Runs AFTER <see cref="TenantSeeder"/> (the tenant + the tenant-admin seccode must exist) and alongside
-/// <see cref="AttachmentGovernanceSeeder"/>. The Company aggregate owns a seccode; like the other tenant-wide
-/// config masters it is owned by the TENANT-ADMIN seccode so the admin's SecRight grants read/write under the
-/// seccode RLS filter. Idempotent (deterministic ids, existence-checked). <c>CreatedBy = "seed"</c> short-circuits
-/// the audit interceptor; tenant scope is stamped EXPLICITLY (the seed runs under the system principal).</para>
+/// <para>Runs AFTER <see cref="TenantSeeder"/> (the tenant companies must exist). CompanyAddress is an
+/// AuditableEntity with NO seccode of its own — it scopes via its owning TenantEntity — so nothing is stamped
+/// with a seccode here. Idempotent (deterministic ids, existence-checked). <c>CreatedBy = "seed"</c>
+/// short-circuits the audit interceptor; the seed runs under the system principal.</para>
 /// </summary>
 public static class CompanySeeder
 {
-    public static Guid CompanyId(Guid tenantId, Guid tenantEntityId)
-        => DeterministicId.From("Company", $"{tenantId}|{tenantEntityId}");
-
-    public static Guid AddressId(Guid companyId, string erpCode)
-        => DeterministicId.From("CompanyAddress", $"{companyId}|{erpCode}");
+    public static Guid AddressId(Guid tenantEntityId, string erpCode)
+        => DeterministicId.From("CompanyAddress", $"{tenantEntityId}|{erpCode}");
 
     public static async Task SeedAsync(AppDbContext ctx, CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
         var tenantId = TenantSeeder.TenantId;
-        // The tenant-admin seccode (created by TenantSeeder) owns these tenant-wide config masters so the admin's
-        // SecRight grants read/write under the seccode RLS filter — same pattern as AttachmentGovernanceSeeder.
-        var seccodeId = DeterministicId.From("Seccode.U", TenantSeeder.AdminUserCode);
 
-        // One Company per existing tenant company (TenantEntity). Name taken from the TenantEntity display name.
+        // One ship-to address per existing tenant company (TenantEntity). Name taken from the TenantEntity.
         var tenantEntities = await ctx.TenantEntities.IgnoreQueryFilters()
             .Where(e => e.TenantId == tenantId)
             .Select(e => new { e.Id, e.Code, e.Name })
             .ToListAsync(ct);
 
-        var existingCompanyIds = await ctx.Companies.IgnoreQueryFilters()
-            .Where(c => c.TenantId == tenantId)
-            .Select(c => c.Id)
+        // CompanyAddress has no tenant column of its own; the deterministic id folds in tenantEntityId so ids never
+        // collide across tenants — an all-rows existence check is sufficient for idempotency.
+        var existingAddressIds = await ctx.CompanyAddresses.IgnoreQueryFilters()
+            .Select(a => a.Id)
             .ToListAsync(ct);
 
         foreach (var te in tenantEntities)
         {
-            var companyId = CompanyId(tenantId, te.Id);
-            if (existingCompanyIds.Contains(companyId)) continue;
-
-            ctx.Companies.Add(new Company
-            {
-                Id = companyId,
-                TenantId = tenantId,
-                TenantEntityId = te.Id,
-                Name = te.Name,
-                IsActive = true,
-                SeccodeId = seccodeId,
-                CreatedBy = "seed",
-                CreatedOn = now,
-            });
-
-            // At least one ship-to address per Company, with a deterministic erpCode keyed on the company code
-            // (e.g. "DC-2000-01"), so the inbound PO ship-to resolves and the integration tests have a code to push.
+            // A deterministic erpCode keyed on the company code (e.g. "DC-2000-01"), so the inbound PO ship-to
+            // resolves and the integration tests have a code to push.
             var erpCode = $"DC-{te.Code}-01";
+            var addressId = AddressId(te.Id, erpCode);
+            if (existingAddressIds.Contains(addressId)) continue;
+
             ctx.CompanyAddresses.Add(new CompanyAddress
             {
-                Id = AddressId(companyId, erpCode),
-                CompanyId = companyId,
+                Id = addressId,
+                TenantEntityId = te.Id,
                 AddressName = $"{te.Name} — Distribution Centre",
                 ErpCode = erpCode,
                 AddressType = "Shipping",

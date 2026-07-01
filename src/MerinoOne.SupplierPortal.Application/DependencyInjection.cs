@@ -61,10 +61,6 @@ public static class DependencyInjection
         services.AddScoped<Common.Interfaces.IAttachmentPolicyEvaluator, Documents.AttachmentPolicyEvaluator>();
         services.AddScoped<Documents.AttachmentSubmitGuard>();
 
-        // R5 (TSD R5 Addendum §12 / Component 8) — inbound Sync Log writer (proc.SyncLog). Scoped — ctor-injects
-        // the per-request IAppDbContext / ICurrentUser. Payload is stored ONLY on Failed rows (SQL-Express cap).
-        services.AddScoped<Common.Interfaces.ISyncLogWriter, Common.Integration.SyncLogWriter>();
-
         // R5 (TSD R5 Addendum §8.1/§8.2 / Component 4) — the SINGLE shared delivery-schedule upsert point, wired
         // into every PO-becomes-shippable transition (Accept / Acknowledge / AutoAccept ingest / AutoRelease) and
         // the material-Modify re-confirmation path. Idempotent, so calling it from multiple sites is safe. Scoped

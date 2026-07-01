@@ -53,8 +53,8 @@ public class InboundPoisonRowIsolationTests
             db,
             user,
             new StubCurrentCompany(),
-            // R5 — the executor writes the central proc.SyncLog row; use a writer over the SAME test db + user.
-            new MerinoOne.SupplierPortal.Application.Common.Integration.SyncLogWriter(db, user),
+            // Every inbound call logs one integration.InforSyncLog row (+ a linked IntegrationError on failure);
+            // the duplicate proc.SyncLog writer was dropped ([[r5-consolidation]]).
             NullLogger<InboundUpsertExecutor>.Instance);
 
         var codes = new[] { goodRef1, goodRef2, poisonRef };

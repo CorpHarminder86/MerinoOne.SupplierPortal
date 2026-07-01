@@ -198,36 +198,15 @@ public class UserCompanyMapConfiguration : IEntityTypeConfiguration<UserCompanyM
     }
 }
 
-// R5 (TSD R5 Addendum §4.1 / Component 1) — Company = the customer (buying entity), 1:1 to tenantEntityId.
-// Aggregate root: the base convention maps audit + soft-delete + seccodeId + RowVersion + tenant scope columns.
-// tenantEntityId IS the §4.1 business "buying entity" column (the inherited ITenantScoped property).
-public class CompanyConfiguration : IEntityTypeConfiguration<Company>
-{
-    public void Configure(EntityTypeBuilder<Company> b)
-    {
-        b.ApplyBaseEntityConvention("Company", "admin", "company");
-        b.Property(x => x.Name).HasColumnName("name").HasMaxLength(300).IsRequired();
-        b.Property(x => x.IsActive).HasColumnName("isActive").HasColumnType("bit").HasDefaultValue(true);
-
-        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
-            .HasConstraintName("FK_Company_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
-
-        // §4.1 — one Company per (tenant, buying entity). tenantId + tenantEntityId are the base scope columns.
-        // Filtered on isDeleted = 0 so a soft-deleted row never blocks re-creating the same (tenant, entity).
-        b.HasIndex("TenantId", "TenantEntityId")
-            .HasDatabaseName("UQ_Company_tenant_entity").IsUnique()
-            .HasFilter("[isDeleted] = 0");
-    }
-}
-
-// R5 (TSD R5 Addendum §4.2 / Component 1) — named, ERP-mappable addresses under a Company. Mirrors
-// supplier.SupplierAddress (AuditableEntity), plus mandatory addressName + optional, per-company-unique erpCode.
+// R5 (TSD R5 Addendum §4.2 / Component 1 / [[r5-consolidation]]) — named, ERP-mappable ship-to addresses hung
+// directly off a TenantEntity (the customer/buying company; the duplicate admin.Company was dropped). Mirrors
+// supplier.SupplierAddress (AuditableEntity), plus mandatory addressName + optional, per-tenant-entity-unique erpCode.
 public class CompanyAddressConfiguration : IEntityTypeConfiguration<CompanyAddress>
 {
     public void Configure(EntityTypeBuilder<CompanyAddress> b)
     {
         b.ApplyBaseEntityConvention("CompanyAddress", "admin", "companyAddress");
-        b.Property(x => x.CompanyId).HasColumnName("companyId");
+        b.Property(x => x.TenantEntityId).HasColumnName("tenantEntityId");
         b.Property(x => x.AddressName).HasColumnName("addressName").HasMaxLength(150).IsRequired();
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
         b.Property(x => x.AddressType).HasColumnName("addressType").HasMaxLength(50).IsRequired();
@@ -239,15 +218,17 @@ public class CompanyAddressConfiguration : IEntityTypeConfiguration<CompanyAddre
         b.Property(x => x.Country).HasColumnName("country").HasMaxLength(100).HasDefaultValue("India");
         b.Property(x => x.IsActive).HasColumnName("isActive").HasColumnType("bit").HasDefaultValue(true);
 
-        b.HasOne(x => x.Company).WithMany(c => c.Addresses).HasForeignKey(x => x.CompanyId)
-            .HasConstraintName("FK_CompanyAddress_Company_companyId").OnDelete(DeleteBehavior.Cascade);
+        // Ship-to hangs off the TenantEntity (no inverse nav collection). Restrict: a hub TenantEntity is not
+        // hard-deleted out from under its addresses (they soft-delete); also avoids a multiple-cascade-path conflict.
+        b.HasOne(x => x.TenantEntity).WithMany().HasForeignKey(x => x.TenantEntityId)
+            .HasConstraintName("FK_CompanyAddress_TenantEntity_tenantEntityId").OnDelete(DeleteBehavior.Restrict);
 
-        b.HasIndex(x => x.CompanyId).HasDatabaseName("IX_CompanyAddress_company");
+        b.HasIndex(x => x.TenantEntityId).HasDatabaseName("IX_CompanyAddress_tenantEntity");
 
-        // §4.2 — deterministic inbound ship-to resolution: erpCode unique per company WHEN PRESENT and not
+        // §4.2 — deterministic inbound ship-to resolution: erpCode unique per tenant entity WHEN PRESENT and not
         // soft-deleted. Filtered so NULL erpCodes never collide and a soft-deleted row never blocks re-use.
-        b.HasIndex(x => new { x.CompanyId, x.ErpCode })
-            .HasDatabaseName("UQ_CompanyAddress_company_erp").IsUnique()
+        b.HasIndex(x => new { x.TenantEntityId, x.ErpCode })
+            .HasDatabaseName("UQ_CompanyAddress_tenantEntity_erp").IsUnique()
             .HasFilter("[erpCode] IS NOT NULL AND [isDeleted] = 0");
     }
 }

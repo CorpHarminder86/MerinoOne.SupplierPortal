@@ -234,7 +234,7 @@ public static class ProcureToPayFlow
         var id = Guid.NewGuid();
         db.CompanyAddresses.Add(new Domain.Entities.Admin.CompanyAddress
         {
-            Id = id, CompanyId = IntegrationTestFixture.ShipToCompanyId, AddressName = $"Alt DC {tag}",
+            Id = id, TenantEntityId = IntegrationTestFixture.CompanyId, AddressName = $"Alt DC {tag}",
             ErpCode = erpCode, AddressType = "Shipping", AddressLine1 = "2 Alt Estate",
             City = "Pune", State = "Maharashtra", Pincode = "411001", Country = "India",
             IsActive = true, CreatedBy = "seed", CreatedOn = now,

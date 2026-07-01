@@ -90,12 +90,12 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
         // PO header total = sum of line net amounts (Price − DiscountAmount). Derived, not persisted.
         var totalAmount = lines.Sum(l => l.NetAmount);
 
-        // R5 (§6.1) — CustomerName is DERIVED live from the Company master by the PO's tenantEntityId (reflects
-        // company renames live; never stored on the PO). IgnoreQueryFilters because the read may run under a supplier
-        // principal who does not own the Company's config seccode; scoped by (tenantId, tenantEntityId). The ship-to
-        // displayed below is the POINT-IN-TIME snapshot off po.ShipTo (the owned VO), not the live address.
-        var customerName = await _db.Companies.IgnoreQueryFilters()
-            .Where(c => !c.IsDeleted && c.TenantId == row.po.TenantId && c.TenantEntityId == row.po.TenantEntityId)
+        // R5 (§6.1 / [[r5-consolidation]]) — CustomerName is DERIVED live from the TenantEntity (the company) by the
+        // PO's tenantEntityId (reflects company renames live; never stored on the PO). IgnoreQueryFilters because the
+        // read may run under a supplier principal with no config-seccode context; scoped by (tenantId, tenantEntityId).
+        // The ship-to displayed below is the POINT-IN-TIME snapshot off po.ShipTo (the owned VO), not the live address.
+        var customerName = await _db.TenantEntities.IgnoreQueryFilters()
+            .Where(c => !c.IsDeleted && c.TenantId == row.po.TenantId && c.Id == row.po.TenantEntityId)
             .Select(c => c.Name)
             .FirstOrDefaultAsync(ct);
         var shipTo = row.po.ShipTo;

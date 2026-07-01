@@ -65,8 +65,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<TenantEntity> TenantEntities => Set<TenantEntity>();
     public DbSet<UserCompanyMap> UserCompanyMaps => Set<UserCompanyMap>();
 
-    // R5 (TSD R5 Addendum §4.1–4.2) — Company Master + its named ship-to addresses (admin config masters).
-    public DbSet<Company> Companies => Set<Company>();
+    // R5 (TSD R5 Addendum §4.1–4.2) — named ship-to addresses hung off the TenantEntity (admin config master).
     public DbSet<CompanyAddress> CompanyAddresses => Set<CompanyAddress>();
 
     public DbSet<Item> Items => Set<Item>();
@@ -111,9 +110,8 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<CreditDebitNote> CreditDebitNotes => Set<CreditDebitNote>();
     public DbSet<Payment> Payments => Set<Payment>();
 
-    // R5 (TSD R5 Addendum §4.7 / §4.9) — ERP→portal status mapping master + inbound sync log.
+    // R5 (TSD R5 Addendum §4.7) — ERP→portal status mapping master.
     public DbSet<PoStatusMapping> PoStatusMappings => Set<PoStatusMapping>();
-    public DbSet<SyncLog> SyncLogs => Set<SyncLog>();
 
     public DbSet<DocumentUpload> DocumentUploads => Set<DocumentUpload>();
     public DbSet<AttachmentType> AttachmentTypes => Set<AttachmentType>();

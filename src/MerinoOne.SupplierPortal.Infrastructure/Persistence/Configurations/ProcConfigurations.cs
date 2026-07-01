@@ -590,35 +590,6 @@ public class PoStatusMappingConfiguration : IEntityTypeConfiguration<PoStatusMap
     }
 }
 
-// R5 (TSD R5 Addendum §4.9 / Component 8) — inbound integration sync log.
-// Tenant-scoped (tenantId from BaseAggregateRoot → ITenantScoped). Insert-only in practice;
-// carries the standard audit + soft-delete envelope so the global soft-delete filter applies.
-public class SyncLogConfiguration : IEntityTypeConfiguration<SyncLog>
-{
-    public void Configure(EntityTypeBuilder<SyncLog> b)
-    {
-        b.ApplyBaseEntityConvention("SyncLog", "proc", "syncLog");
-        b.Property(x => x.Direction).HasColumnName("direction").HasMaxLength(20).HasDefaultValue("Inbound");
-        b.Property(x => x.Api).HasColumnName("api").HasMaxLength(80).IsRequired();
-        b.Property(x => x.EntityType).HasColumnName("entityType").HasMaxLength(50);
-        b.Property(x => x.ExternalRef).HasColumnName("externalRef").HasMaxLength(100);
-        b.Property(x => x.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
-        // nvarchar(max) — no HasMaxLength; EF defaults to max for string without a length constraint.
-        b.Property(x => x.ErrorMessage).HasColumnName("errorMessage");
-        b.Property(x => x.Payload).HasColumnName("payload");
-        b.Property(x => x.ReceivedOn).HasColumnName("receivedOn").HasColumnType("datetime2");
-
-        b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
-            .HasConstraintName("FK_SyncLog_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
-
-        // Composite status + date scan — the admin sync-log grid filters by status and date range.
-        b.HasIndex(x => new { x.Status, x.ReceivedOn }).HasDatabaseName("IX_SyncLog_status_date");
-
-        // External-reference lookup — correlate a SyncLog entry to its source document (e.g. PO number).
-        b.HasIndex(x => x.ExternalRef).HasDatabaseName("IX_SyncLog_ref");
-    }
-}
-
 public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
 {
     public void Configure(EntityTypeBuilder<Payment> b)

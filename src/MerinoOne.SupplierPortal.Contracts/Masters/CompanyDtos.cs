@@ -1,27 +1,11 @@
 namespace MerinoOne.SupplierPortal.Contracts.Masters;
 
-// R5 (TSD R5 Addendum §4.1–4.2 / §5 — Component 1, Company Master). These are the admin.Company / admin.CompanyAddress
-// CONFIG-MASTER DTOs — the CUSTOMER (buying entity) the supplier ships to, plus its named, ERP-mappable ship-to
-// addresses. NAMED *CompanyMaster* (not *Company*) deliberately: Contracts.Companies.CompanyDto already exists (the
-// TenantEntity/active-company selector record) and both Contracts namespaces are imported together in the Blazor
-// _Imports, so a bare CompanyDto here would be globally ambiguous. CompanyAddress* records do not collide.
+// R5 (TSD R5 Addendum §4.2 / §5 — Component 1 / [[r5-consolidation]]). CONFIG-MASTER DTOs for the named,
+// ERP-mappable ship-to addresses (admin.CompanyAddress) that hang off a company = admin.TenantEntity (the
+// duplicate admin.Company was dropped; the company itself is served by Contracts.Companies.CompanyDto over
+// TenantEntity). The CompanyId field below is that company's id — a TenantEntity id.
 
-/// <summary>A Company-master row — the customer (buying entity) keyed 1:1 to a tenantEntityId (the PO's company).</summary>
-public record CompanyMasterDto(
-    Guid Id,
-    int Seq,
-    Guid? TenantEntityId,
-    string Name,
-    bool IsActive,
-    DateTime CreatedOn);
-
-/// <summary>Settings: create a Company-master row for the active company (tenantEntityId is resolved from context).</summary>
-public record CreateCompanyMasterRequest(string Name);
-
-/// <summary>Settings: rename / activate-deactivate a Company-master row.</summary>
-public record UpdateCompanyMasterRequest(string Name, bool IsActive);
-
-/// <summary>A named, ERP-mappable ship-to address under a Company (§4.2).</summary>
+/// <summary>A named, ERP-mappable ship-to address under a company (§4.2). CompanyId = the owning TenantEntity id.</summary>
 public record CompanyAddressDto(
     Guid Id,
     int Seq,

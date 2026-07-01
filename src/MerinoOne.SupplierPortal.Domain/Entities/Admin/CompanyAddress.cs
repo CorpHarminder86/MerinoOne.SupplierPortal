@@ -3,25 +3,26 @@ using MerinoOne.SupplierPortal.Domain.Common;
 namespace MerinoOne.SupplierPortal.Domain.Entities.Admin;
 
 /// <summary>
-/// R5 (TSD R5 Addendum §4.2 / §5) — a named, ERP-mappable address under a <see cref="Company"/>. Mirrors
-/// <c>supplier.SupplierAddress</c> (and reuses the same Blazor address control), plus two new fields:
+/// R5 (TSD R5 Addendum §4.2 / §5) — a named, ERP-mappable ship-to address hung directly off a
+/// <see cref="TenantEntity"/> (the customer / buying company — [[r5-consolidation]], was the dropped
+/// admin.Company). Mirrors <c>supplier.SupplierAddress</c> (and reuses the same Blazor address control), plus:
 /// <list type="bullet">
 ///   <item><b>AddressName</b> — MANDATORY human label for the ship-to (e.g. "Bhiwandi DC").</item>
 ///   <item><b>ErpCode</b> — OPTIONAL; the key the inbound PO ship-to resolves against. Unique within the
-///   company when present (filtered-unique index), so inbound resolution is deterministic (§6.2).</item>
+///   tenant entity when present (filtered-unique index), so inbound resolution is deterministic (§6.2).</item>
 /// </list>
 /// Audit + soft-delete come from <see cref="AuditableEntity"/> (mirrors SupplierAddress); tenant/seccode scope
-/// is carried by the owning <see cref="Company"/> aggregate.
+/// is carried by the owning <see cref="TenantEntity"/>.
 /// </summary>
 public class CompanyAddress : AuditableEntity
 {
-    public Guid CompanyId { get; set; }
-    public Company? Company { get; set; }
+    public Guid TenantEntityId { get; set; }
+    public TenantEntity? TenantEntity { get; set; }
 
     /// <summary>NEW (§4.2) — mandatory label for the ship-to.</summary>
     public string AddressName { get; set; } = string.Empty;
 
-    /// <summary>NEW (§4.2) — optional; matched by the inbound PO shipToAddress code. Unique per company when set.</summary>
+    /// <summary>NEW (§4.2) — optional; matched by the inbound PO shipToAddress code. Unique per tenant entity when set.</summary>
     public string? ErpCode { get; set; }
 
     /// <summary>Registered | Billing | Shipping | Plant | Other.</summary>

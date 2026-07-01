@@ -180,10 +180,10 @@ public class PurchaseOrderInboundTests
             po.ShipTo!.City.Should().Be("Mumbai");
         }
 
-        // Read model: derived CustomerName (Company.name) + the snapshot fields (display-only).
+        // Read model: derived CustomerName (TenantEntity.Name — [[r5-consolidation]]) + snapshot fields (display-only).
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
         var detail = (await Read<PurchaseOrderDetailDto>(await supplierClient.GetAsync($"/api/purchase-orders/{poId}"))).Data!;
-        detail.CustomerName.Should().Be("IntTest Customer 2000", because: "customer name derives from Company.name by tenantEntityId");
+        detail.CustomerName.Should().Be("IntTest Co 2000", because: "customer name derives live from the TenantEntity (the company) by tenantEntityId");
         detail.ShipToAddressName.Should().Be("IntTest DC");
         detail.ShipToErpCode.Should().Be(IntegrationTestFixture.ShipToErpCode);
         detail.ShipToCity.Should().Be("Mumbai");

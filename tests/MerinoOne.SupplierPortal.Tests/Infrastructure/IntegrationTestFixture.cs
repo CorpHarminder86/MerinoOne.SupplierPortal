@@ -47,8 +47,8 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     // Deterministic ids (kept stable so the seed is idempotent across runs).
     public static readonly Guid TenantId      = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public static readonly Guid CompanyId     = Guid.Parse("22222222-2222-2222-2222-222222222222");
-    // R5 — the admin.Company (customer master, 1:1 to the TenantEntity CompanyId) + its ship-to address.
-    public static readonly Guid ShipToCompanyId = Guid.Parse("2c000000-0000-0000-0000-000000000001");
+    // R5 ([[r5-consolidation]]) — a named ship-to address hung off the fixture company (TenantEntity CompanyId);
+    // its erpCode (ShipToErpCode) is what the inbound PO push resolves against.
     public static readonly Guid ShipToAddressId = Guid.Parse("2c000000-0000-0000-0000-000000000002");
     public static readonly Guid SupplierId    = Guid.Parse("33333333-3333-3333-3333-333333333333");
     public static readonly Guid SeccodeId     = Guid.Parse("44444444-4444-4444-4444-444444444444");
@@ -203,21 +203,15 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        // --- Company master (R5 §4.1) + ship-to address (R5 §4.2) -----------------------------------------
-        // The customer/buying-entity master 1:1 to the TenantEntity (CompanyId), plus one ship-to address whose
-        // erpCode (ShipToErpCode) the inbound PO push resolves against. Owned by the supplier seccode (type G) so
-        // the FK is valid under the system-principal seed; the always-on filters are bypassed at read time anyway.
-        if (!await db.Companies.IgnoreQueryFilters().AnyAsync(c => c.Id == ShipToCompanyId))
+        // --- Ship-to address (R5 §4.2 / [[r5-consolidation]]) ----------------------------------------------
+        // A named ship-to address hung directly off the fixture company (TenantEntity CompanyId), whose erpCode
+        // (ShipToErpCode) the inbound PO push resolves against. CompanyAddress is an AuditableEntity with no
+        // tenant/seccode column of its own; the always-on filters are bypassed at read time anyway.
+        if (!await db.CompanyAddresses.IgnoreQueryFilters().AnyAsync(a => a.Id == ShipToAddressId))
         {
-            db.Companies.Add(new Company
-            {
-                Id = ShipToCompanyId, TenantId = TenantId, TenantEntityId = CompanyId,
-                Name = "IntTest Customer 2000", IsActive = true, SeccodeId = SeccodeId,
-                CreatedBy = "seed", CreatedOn = now
-            });
             db.CompanyAddresses.Add(new CompanyAddress
             {
-                Id = ShipToAddressId, CompanyId = ShipToCompanyId, AddressName = "IntTest DC",
+                Id = ShipToAddressId, TenantEntityId = CompanyId, AddressName = "IntTest DC",
                 ErpCode = ShipToErpCode, AddressType = "Shipping", AddressLine1 = "1 Test Estate",
                 City = "Mumbai", State = "Maharashtra", Pincode = "400001", Country = "India",
                 IsActive = true, CreatedBy = "seed", CreatedOn = now

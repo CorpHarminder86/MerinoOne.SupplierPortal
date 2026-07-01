@@ -33,20 +33,17 @@ public class InboundUpsertExecutor
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly ICurrentCompany _company;
-    private readonly ISyncLogWriter _syncLog;
     private readonly ILogger<InboundUpsertExecutor> _logger;
 
     public InboundUpsertExecutor(
         IAppDbContext db,
         ICurrentUser user,
         ICurrentCompany company,
-        ISyncLogWriter syncLog,
         ILogger<InboundUpsertExecutor> logger)
     {
         _db = db;
         _user = user;
         _company = company;
-        _syncLog = syncLog;
         _logger = logger;
     }
 
@@ -263,16 +260,6 @@ public class InboundUpsertExecutor
             map.UpdatedBy = "infor:inbound";
             map.UpdatedOn = now;
 
-            // R5 (§12 / Component 8) — central wiring point: EVERY inbound call writes ONE proc.SyncLog row so the
-            // admin Sync Log shows the call outcome (Success on a clean run; Failed with the error + payload when any
-            // row failed). Deferred so it commits in THIS transaction (same atomic flush as the upsert). Payload is
-            // stored ONLY on the Failed row (the SQL-Express 10 GB cap — success rows carry no payload).
-            if (overallSuccess)
-                await _syncLog.WriteSuccessAsync(entityName, entityName, entityId, tenantId, defer: true, ct);
-            else
-                await _syncLog.WriteFailedAsync(entityName, entityName, entityId,
-                    $"Succeeded {received - failed} of {received}; {failed} failed.", payloadJson, tenantId, defer: true, ct);
-
             // The SyncLog/IntegrationError + endpoint telemetry are clean writes (no business constraints) — a plain
             // flush. The poison rows were already isolated above, so this cannot re-trip the same DbUpdateException.
             await _db.SaveChangesAsync(ct);
@@ -360,9 +347,6 @@ public class InboundUpsertExecutor
                     CreatedBy = "infor:inbound",
                     CreatedOn = DateTime.UtcNow
                 });
-                // R5 (§12) — the central proc.SyncLog Failed row for the aborted call (best-effort; flushed with the
-                // InforSyncLog/IntegrationError rows above). Payload captured for diagnosis (Failed-row-only rule).
-                await _syncLog.WriteFailedAsync(entityName, entityName, entityId, ex.Message, payloadJson, tenantId, defer: true, ct);
                 await _db.SaveChangesAsync(ct);
             }
             catch (Exception logEx)
@@ -418,9 +402,6 @@ public class InboundUpsertExecutor
                 CreatedBy = "infor:inbound",
                 CreatedOn = DateTime.UtcNow
             });
-            // R5 (§12) — central proc.SyncLog Failed row for the retryable-conflict skip (best-effort).
-            await _syncLog.WriteFailedAsync(entityName, entityName, entityId,
-                $"Retryable write conflict (concurrent/duplicate delivery): {ex.Message}", payloadJson, tenantId, defer: true, ct);
             await _db.SaveChangesAsync(ct);
         }
         catch (Exception logEx)
@@ -712,9 +693,6 @@ public class InboundUpsertExecutor
                 CreatedBy = "infor:inbound",
                 CreatedOn = now
             });
-            // R5 (§12) — central proc.SyncLog Failed row for the whole-batch failure (best-effort).
-            await _syncLog.WriteFailedAsync(entityName, entityName, entityId,
-                $"Succeeded 0 of {received}; {received} failed — {rootCause}", payloadJson, tenantId, defer: true, ct);
             await _db.SaveChangesAsync(ct);
         }
         catch (Exception logEx)

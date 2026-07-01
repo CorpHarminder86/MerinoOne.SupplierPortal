@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.PurchaseOrders.StatusMapping;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
+using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -60,7 +61,6 @@ public class UpsertPurchaseOrdersCommandHandler(
     InboundUpsertExecutor exec,
     IOutboxDispatcher outbox,
     IPoStatusMap statusMap,
-    ISyncLogWriter syncLog,
     PurchaseOrders.DeliverySchedules.DeliveryScheduleFactory schedules) : IRequestHandler<UpsertPurchaseOrdersCommand, UpsertResultDto>
 {
     public Task<UpsertResultDto> Handle(UpsertPurchaseOrdersCommand request, CancellationToken ct)
@@ -81,6 +81,27 @@ public class UpsertPurchaseOrdersCommandHandler(
         var codes = recs.Select(r => r.PoNumber.Trim());
         return exec.ExecuteAsync(TransactionalInboundEntity.Po, request.Body.CompanyCode, request.BoundCompanyIds,
             request.IdempotencyKey, recs.Count, canonical, codes, request.Body, Upsert, ct);
+
+        // R5 (§11.3 / [[r5-consolidation]]) — an UNMAPPED erpStatus leaves PoStatus untouched and records the
+        // diagnostic as a standalone InforSyncLog Failed row on the single integration sync log (was proc.SyncLog).
+        // The PO is still created/updated (no control-flow change). Payload captured (Failed-row-only rule).
+        static InforSyncLog UnmappedStatusLog(Guid tenantId, string poNum, string erpStatus, string? payloadJson, DateTime now)
+            => new()
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                EntityName = "PurchaseOrder",
+                Direction = SyncDirection.Inbound,
+                Status = SyncStatus.Failed,
+                PayloadRef = poNum,
+                EntityId = poNum,
+                EntityCount = 1,
+                PayloadJson = payloadJson,
+                SyncedAt = now,
+                ErrorMessage = $"ERP status '{erpStatus}' is not mapped",
+                CreatedBy = "infor:inbound",
+                CreatedOn = now
+            };
 
         async Task<IReadOnlyList<RowResult>> Upsert(IAppDbContext db, Guid tenantId, Guid sourceId, CancellationToken token)
         {
@@ -153,38 +174,30 @@ public class UpsertPurchaseOrdersCommandHandler(
                     .ToListAsync(token))
                 .ToDictionary(p => p.PoNumber, StringComparer.OrdinalIgnoreCase);
 
-            // R5 (§6.2/§6.3) — ship-to resolution. All rows in a payload share the ONE resolved company (sourceId =
-            // PO.tenantEntityId), so batch-load that company + its ACTIVE, non-deleted ship-to addresses up front
+            // R5 (§6.2/§6.3 / [[r5-consolidation]]) — ship-to resolution. All rows in a payload share the ONE
+            // resolved company (sourceId = PO.tenantEntityId = admin.TenantEntity.Id); CompanyAddress hangs directly
+            // off the TenantEntity now, so batch-load that entity's ACTIVE, non-deleted ship-to addresses up front
             // (no per-row DB round-trip — mirrors the supplier/item/tax batch-loads). The inbound code resolves to
             // CompanyAddress.erpCode case-insensitively (§6.2). On a resolution MISS the PO row is hard-failed below.
-            var shipToCompanyId = await db.Companies.IgnoreQueryFilters()
-                .Where(c => !c.IsDeleted && c.TenantId == tenantId && c.TenantEntityId == sourceId)
-                .Select(c => (Guid?)c.Id).FirstOrDefaultAsync(token);
+            var shipToAddresses = await db.CompanyAddresses.IgnoreQueryFilters()
+                .Where(a => !a.IsDeleted && a.IsActive && a.TenantEntityId == sourceId && a.ErpCode != null)
+                .ToListAsync(token);
             var addressByErpCode = new Dictionary<string, CompanyAddress>(StringComparer.OrdinalIgnoreCase);
-            if (shipToCompanyId is Guid companyId)
-            {
-                var addresses = await db.CompanyAddresses.IgnoreQueryFilters()
-                    .Where(a => !a.IsDeleted && a.IsActive && a.CompanyId == companyId && a.ErpCode != null)
-                    .ToListAsync(token);
-                foreach (var a in addresses)
-                    addressByErpCode[a.ErpCode!.Trim()] = a;   // last-wins (the filtered UQ makes erpCode unique anyway).
-            }
+            foreach (var a in shipToAddresses)
+                addressByErpCode[a.ErpCode!.Trim()] = a;   // last-wins (the filtered UQ makes erpCode unique anyway).
 
             foreach (var rec in recs)
             {
                 var poNum = rec.PoNumber.Trim();
 
                 // R5 (§6.2) — resolve the ship-to BEFORE any supplier/qty/persist work so a miss leaves the PO
-                // untouched (mirrors the supplier-not-found / qty-reject early-outs). HARD-FAIL on a miss: no company
-                // for the tenant entity, or no matching ACTIVE address erpCode → the PO is NOT created/updated.
-                // R5 Phase 2 (§12) — a Sync Log Failed row is written (deferred — it commits in the executor's
-                // transaction) so the unresolvable ship-to surfaces in the admin Sync Log with its error message.
+                // untouched (mirrors the supplier-not-found / qty-reject early-outs). HARD-FAIL on a miss: no
+                // matching ACTIVE address erpCode for the tenant entity → the PO is NOT created/updated. The Failed
+                // RowResult carries the error into the batch InforSyncLog + linked IntegrationError (§12).
                 var shipToCode = rec.ShipToAddress.Trim();
-                if (shipToCompanyId is null || !addressByErpCode.TryGetValue(shipToCode, out var shipToAddress))
+                if (!addressByErpCode.TryGetValue(shipToCode, out var shipToAddress))
                 {
                     var shipErr = $"Ship-to code '{shipToCode}' not found for tenant entity {sourceId}";
-                    await syncLog.WriteFailedAsync("PO Inbound", "PurchaseOrder", poNum, shipErr,
-                        InboundUpsertSupport.SerializePayloadCapped(rec), tenantId, defer: true, token);
                     results.Add(new RowResult(poNum, RowOutcome.Failed, shipErr));
                     continue;
                 }
@@ -251,9 +264,8 @@ public class UpsertPurchaseOrdersCommandHandler(
                         var candidate = statusMap.Resolve(tenantId, incomingErp);
                         var res = PoStatusResolver.Resolve(po.PoStatus, candidate, isMaterial);
                         if (res.Unmapped)
-                            await syncLog.WriteFailedAsync("PO Inbound", "PurchaseOrder", poNum,
-                                $"ERP status '{incomingErp}' is not mapped", InboundUpsertSupport.SerializePayloadCapped(rec),
-                                tenantId, defer: true, token);
+                            db.InforSyncLogs.Add(UnmappedStatusLog(tenantId, poNum, incomingErp,
+                                InboundUpsertSupport.SerializePayloadCapped(rec), now));
                         else if (res.NewStatus is PoStatus ns)
                             po.PoStatus = ns;
                         // else: leave PoStatus unchanged (no-clobber / Draft-on-re-receipt).
@@ -302,9 +314,8 @@ public class UpsertPurchaseOrdersCommandHandler(
                         var candidate = statusMap.Resolve(tenantId, newErp);
                         var res = PoStatusResolver.Resolve(currentStatus: null, candidate, isMaterialChange: false);
                         if (res.Unmapped)
-                            await syncLog.WriteFailedAsync("PO Inbound", "PurchaseOrder", poNum,
-                                $"ERP status '{newErp}' is not mapped", InboundUpsertSupport.SerializePayloadCapped(rec),
-                                tenantId, defer: true, token);
+                            db.InforSyncLogs.Add(UnmappedStatusLog(tenantId, poNum, newErp,
+                                InboundUpsertSupport.SerializePayloadCapped(rec), now));
                         else if (res.NewStatus is PoStatus ns)
                             newPoStatus = ns;
                     }

@@ -50,39 +50,6 @@ Returns: the stored JSON string (or null when none was stored / row not found). 
         return Result<string?>.Ok(data, HttpContext.TraceIdentifier);
     }
 
-    [HttpGet("inbound-sync-log")]
-    [Authorize(Policy = "Integration.Read")]
-    [EndpointSummary("Inbound sync log (R5)")]
-    [EndpointDescription(@"R5 (TSD R5 §12 / Component 8) — the admin inbound Sync Log (proc.SyncLog): one row per inbound call attempt with its status + error message inline. The same log is where the unresolvable-ship-to (§6.2) and unmapped-status (§11.3) failures land. Distinct from the legacy /sync-log (integration.InforSyncLog).
-Filters / params:
-- **page**: Optional — 1-based page index (default 1).
-- **pageSize**: Optional — rows per page (default 50).
-- **status**: Optional — Success | Failed.
-- **entityType**: Optional — e.g. ""PurchaseOrder"".
-- **externalRef**: Optional — substring match on the external ref (e.g. a PO number).
-- **fromDate** / **toDate**: Optional — inclusive ReceivedOn date range.
-Returns: PagedResult<SyncLogDto> (errorMessage inline; payload via the drill-in endpoint). Requires permission **Integration.Read**.")]
-    public async Task<Result<PagedResult<SyncLogDto>>> InboundSyncLog([FromQuery] int page = 1, [FromQuery] int pageSize = 50,
-        [FromQuery] string? status = null, [FromQuery] string? entityType = null, [FromQuery] string? externalRef = null,
-        [FromQuery] DateTime? fromDate = null, [FromQuery] DateTime? toDate = null, CancellationToken ct = default)
-    {
-        var data = await _mediator.Send(new GetInboundSyncLogQuery(page, pageSize, status, entityType, externalRef, fromDate, toDate), ct);
-        return Result<PagedResult<SyncLogDto>>.Ok(data, HttpContext.TraceIdentifier);
-    }
-
-    [HttpGet("inbound-sync-log/{id:guid}/payload")]
-    [Authorize(Policy = "Integration.Read")]
-    [EndpointSummary("Inbound sync-log payload (R5)")]
-    [EndpointDescription(@"R5 (§12.3) — the raw inbound payload for ONE proc.SyncLog row (drill-in viewer). Only Failed rows carry a payload (the success path stores none — SQL-Express 10 GB cap); success rows return null.
-Filters / params:
-- **id**: Required — sync-log GUID.
-Returns: the stored payload string (or null). Tenant-filtered. Requires permission **Integration.Read**.")]
-    public async Task<Result<string?>> InboundSyncLogPayload(Guid id, CancellationToken ct)
-    {
-        var data = await _mediator.Send(new GetInboundSyncLogPayloadQuery(id), ct);
-        return Result<string?>.Ok(data, HttpContext.TraceIdentifier);
-    }
-
     [HttpGet("errors")]
     [Authorize(Policy = "Integration.Read")]
     [EndpointSummary("Integration errors")]
