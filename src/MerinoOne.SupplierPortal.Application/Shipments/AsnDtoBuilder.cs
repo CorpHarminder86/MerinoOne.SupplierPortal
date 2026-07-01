@@ -200,10 +200,12 @@ public static class AsnDtoBuilder
                 ap.DecisionBy, ap.DecisionOn, ap.Reason))
             .FirstOrDefaultAsync(ct);
 
-        // R4 §6.2 — for an editable (Draft/Rejected) ASN, evaluate the ship gate so the UI can disable Save /
-        // Send-for-approval with the reason (the same hard block enforced server-side on those two paths).
+        // R4 §6.2 — evaluate the ship gate so the UI can disable the gated actions with the reason:
+        //  - Draft/Rejected (supplier): Save Changes + Send-For-Approval;
+        //  - PendingApproval (buyer): Approve + Reject (the buyer Approve→Submit is also hard-blocked server-side).
+        // The same hard block is enforced server-side on each of those paths.
         string? shipBlockReason = null;
-        if (a.AsnStatus is AsnStatus.Draft or AsnStatus.Rejected)
+        if (a.AsnStatus is AsnStatus.Draft or AsnStatus.Rejected or AsnStatus.PendingApproval)
             shipBlockReason = await Policies.AsnDraftGate.EvaluateAsync(db, a.SupplierId, a.Id, coveredPoIds.ToList(), ct);
 
         return new AsnDetailDto(

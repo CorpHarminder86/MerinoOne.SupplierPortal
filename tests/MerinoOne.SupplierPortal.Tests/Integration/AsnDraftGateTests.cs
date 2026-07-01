@@ -97,6 +97,38 @@ public class AsnDraftGateTests
             because: "only one ASN per PO may be pending buyer approval at a time");
     }
 
+    [SkippableFact]
+    public async Task PendingApproval_ASN_is_gate_blocked_for_the_buyer_when_Po_reReleased()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var setup = await ProcureToPayFlow.SeedPoAsync(_fx, confirm: true);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
+        var supplier = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+
+        var create = await supplier.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
+        var asnId = (await Read<AsnDetailDto>(create)).Data!.Id;
+        var send = await supplier.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
+        send.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(send));
+
+        // While the PO is shippable the PendingApproval ASN is NOT gate-blocked (buyer may approve/reject).
+        var before = (await Read<AsnDetailDto>(await supplier.GetAsync($"/api/asns/{asnId}"))).Data!;
+        before.AsnStatus.Should().Be("PendingApproval");
+        before.ShipBlocked.Should().BeFalse();
+
+        // ERP Modify re-releases the PO — now the buyer's Approve/Reject must be gate-blocked.
+        await SetPoStatusAsync(setup.PoId, PoStatus.Released);
+
+        var after = (await Read<AsnDetailDto>(await supplier.GetAsync($"/api/asns/{asnId}"))).Data!;
+        after.ShipBlocked.Should().BeTrue(because: "a PendingApproval ASN on a re-Released PO is gate-blocked for the buyer");
+        after.ShipBlockReason.Should().Contain("Accept");
+
+        // And the buyer's Approve is hard-blocked server-side (belt-and-braces behind the disabled button).
+        var buyer = await SecurityTestHarness.ClientAsAsync(_fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        (await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest())).StatusCode
+            .Should().Be(HttpStatusCode.BadRequest, because: "Approve→Submit re-checks the confirmation gate");
+    }
+
     // ── helpers ──
     private async Task SetPoStatusAsync(Guid poId, PoStatus status)
     {

@@ -38,10 +38,12 @@
                the server gate (AsnApprovalGate) is authoritative, so we only gate the affordance on Asn.Approve. *@
             @if (!IsNew && detail != null && CanApprove && detail.AsnStatus == "PendingApproval")
             {
-                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenRejectDialog" disabled="@busy">
+                @* §6.2 — a buyer cannot approve OR reject while the ASN's PO is not shippable (e.g. reset to Released
+                   by an ERP Modify); both actions are disabled with the reason until the PO is re-confirmed. *@
+                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenRejectDialog" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : null)">
                     <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject…
                 </button>
-                <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApproveDialog" disabled="@busy">
+                <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApproveDialog" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : null)">
                     <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
                 </button>
             }
@@ -92,7 +94,19 @@
                     </div>
                     @if (CanApprove)
                     {
-                        <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">Review the lines, attachments and shipment details below, then <b>Approve</b> (submits the shipment) or <b>Reject</b> with a reason.</div>
+                        @if (detail.ShipBlocked)
+                        {
+                            @* §6.2 — the PO is no longer shippable (e.g. re-Released by an ERP Modify): the buyer can
+                               neither approve (would ship) nor reject until the PO is re-confirmed. *@
+                            <div style="font-size:12px;color:var(--mer-amber-800);font-weight:600;margin-top:8px;">
+                                <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">block</span>
+                                @detail.ShipBlockReason Approve and Reject are disabled until the PO is re-confirmed.
+                            </div>
+                        }
+                        else
+                        {
+                            <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">Review the lines, attachments and shipment details below, then <b>Approve</b> (submits the shipment) or <b>Reject</b> with a reason.</div>
+                        }
                     }
                     else
                     {
