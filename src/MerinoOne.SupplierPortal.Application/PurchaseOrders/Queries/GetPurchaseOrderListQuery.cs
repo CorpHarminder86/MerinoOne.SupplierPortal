@@ -71,7 +71,9 @@ public class GetPurchaseOrderListQueryHandler : IRequestHandler<GetPurchaseOrder
                 _db.PurchaseOrderLines.Where(l => !l.IsDeleted && l.PurchaseOrderId == x.po.Id)
                     .Sum(l => (decimal?)(l.Price - l.DiscountAmount)) ?? 0m,
                 // Term display: the header snapshot string (written at inbound from the term master — no read join).
-                x.po.CurrencyCode, x.po.PaymentTerms, x.po.DeliveryTerms))
+                x.po.CurrencyCode, x.po.PaymentTerms, x.po.DeliveryTerms,
+                // Ship-to (from the owned snapshot) — the ASN wizard groups/filters open POs by ship-to.
+                x.po.ShipToAddressId, x.po.ShipTo != null ? x.po.ShipTo.AddressName : null))
             .ToListAsync(ct);
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling((double)total / pageSize);

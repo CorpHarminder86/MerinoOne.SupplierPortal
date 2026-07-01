@@ -21,7 +21,11 @@ public record PurchaseOrderListItemDto(
     decimal TotalAmount = 0,
     string? CurrencyCode = null,
     string? PaymentTerms = null,
-    string? DeliveryTerms = null);
+    string? DeliveryTerms = null,
+    // R5 (§6.2) — the PO's resolved ship-to (from the owned ShipTo snapshot). The ASN wizard groups/filters open
+    // POs by ship-to so an ASN never spans two ship-to addresses. Null on a PO with no resolved ship-to.
+    Guid? ShipToAddressId = null,
+    string? ShipToAddressName = null);
 
 public record PagedResult<T>(
     List<T> Items,

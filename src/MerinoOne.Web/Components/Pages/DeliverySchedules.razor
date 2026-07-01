@@ -447,7 +447,8 @@
             showCreateAsn = false;
             selected.Clear();
             // §9.2 — land on the new Draft ASN's detail so the supplier sets ship quantities / capture / attachments.
-            Nav.NavigateToRoute($"/asns/{resp.Data.Id}");
+            // The lines + POs are already chosen from the schedule, so open directly on the Lines step (step=2).
+            Nav.NavigateToRoute($"/asns/{resp.Data.Id}?step=2");
             return;
         }
         // Surface the server's reject (cross-ship-to / multi-supplier / invariant) verbatim — the UI guard's fallback.

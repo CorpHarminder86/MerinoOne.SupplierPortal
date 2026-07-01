@@ -13,15 +13,6 @@
             </div>
             <p class="tl-sub">Released and in-progress purchase orders</p>
         </div>
-        <div class="tl-header__actions">
-            @* R4 #6 — pick eligible POs from one supplier, then create an ASN covering them. *@
-            @if (asnSel.Count > 0)
-            {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="CreateAsnFromSelected">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">local_shipping</span> Create ASN (@asnSel.Count)
-                </button>
-            }
-        </div>
     </header>
 
     <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -70,9 +61,8 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 40px 140px 1.3fr 90px 130px 120px 120px 105px 115px 110px 70px 90px; --tl-min-width: 1500px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 140px 1.3fr 90px 130px 120px 120px 105px 115px 110px 70px 90px; --tl-min-width: 1460px;">
             <div class="tlg-header">
-                <div class="tlg-col" title="Select for ASN"></div>
                 <div class="tlg-col">PO #</div>
                 <div class="tlg-col">Supplier</div>
                 <div class="tlg-col">Type</div>
@@ -96,17 +86,7 @@
                 // permission-gated Acknowledge / Accept / Reject dialogs live. AutoAccept rows are accepted
                 // automatically at release, so they only carry the mode badge.
                 var canRespond = !isAuto && (item.PoStatus == "Released" || item.PoStatus == "Acknowledged");
-                var asnEligible = item.PoStatus is "Released" or "Acknowledged" or "Accepted" or "PartiallyDelivered";
-                var asnLocked = asnSelSupplier.HasValue && asnSelSupplier != item.SupplierId;
                 <div class="tlg-row" @onclick="() => OpenDetail(item.Id)" style="cursor:pointer">
-                    <div class="tlg-col" @onclick:stopPropagation="true">
-                        @if (asnEligible)
-                        {
-                            <input type="checkbox" checked="@asnSel.Contains(item.Id)" disabled="@asnLocked"
-                                   title="@(asnLocked ? "An ASN covers one supplier — clear the selection to switch" : "Select for ASN")"
-                                   @onchange="@(e => ToggleAsnSel(item, (bool)e.Value!))" />
-                        }
-                    </div>
                     <div class="tlg-col tlg-code">@item.PoNumber</div>
                     <div class="tlg-col tlg-name">@item.SupplierName</div>
                     <div class="tlg-col">@item.PoType</div>
@@ -156,10 +136,6 @@
     private int page = 1;
     private const int PageSize = 50;
 
-    // R4 #6 — "Create ASN from selected POs". An ASN ships from one supplier, so selection locks to it.
-    private readonly HashSet<Guid> asnSel = new();
-    private Guid? asnSelSupplier;
-
     protected override async Task OnInitializedAsync()
     {
         // Seccode-scoped: a supplier login mapped to several suppliers gets them all here; an
@@ -192,27 +168,6 @@
     private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
 
     private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/purchase-orders/{id}");
-
-    private void ToggleAsnSel(PurchaseOrderListItemDto po, bool on)
-    {
-        if (on)
-        {
-            if (asnSel.Count == 0) asnSelSupplier = po.SupplierId;
-            if (asnSelSupplier != po.SupplierId) return; // one supplier per ASN
-            asnSel.Add(po.Id);
-        }
-        else
-        {
-            asnSel.Remove(po.Id);
-            if (asnSel.Count == 0) asnSelSupplier = null;
-        }
-    }
-
-    private void CreateAsnFromSelected()
-    {
-        if (asnSel.Count == 0) return;
-        Nav.NavigateToRoute($"/asns/new?pos={string.Join(",", asnSel)}");
-    }
 
     // R4 (2026-06-26) — D1: short label + tooltip for the non-AutoAccept confirmation modes.
     private static string PoModeShort(string mode) => mode switch
