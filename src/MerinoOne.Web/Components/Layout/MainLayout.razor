@@ -117,6 +117,15 @@ else
                     <span class="mer-nav-item__icon material-symbols-outlined">local_shipping</span>
                     <span class="mer-nav-item__label">ASNs</span>
                 </NavLink>
+                @* R5 (review gap C2) — buyer/admin ASN approval queue. Same policy as the ASN
+                   approve/reject actions (Asn.Approve). Suppliers hold no approve right → hidden. *@
+                @if (Token.HasPermission("Asn.Approve"))
+                {
+                    <NavLink class="mer-nav-item" href="asn-approvals" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">fact_check</span>
+                        <span class="mer-nav-item__label">ASN Approvals</span>
+                    </NavLink>
+                }
                 <NavLink class="mer-nav-item" href="goods-receipts" ActiveClass="active">
                     <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
                     <span class="mer-nav-item__label">Goods Receipts</span>

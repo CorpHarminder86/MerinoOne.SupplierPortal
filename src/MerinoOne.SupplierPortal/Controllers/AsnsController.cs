@@ -46,6 +46,22 @@ Returns: PagedResult<AsnListItemDto>. Requires permission **Asn.Read**.")]
         return Result<ContractsPagedResult>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    [HttpGet("pending-approvals")]
+    [Authorize(Policy = "Asn.Approve")]
+    [EndpointSummary("Buyer ASN approval queue")]
+    [EndpointDescription(@"R5 (review gap C2) — the ASNs awaiting THIS buyer's approval. Returns every ASN in
+AsnStatus=PendingApproval that is routed to the caller: at least one of the ASN's covered POs (via its lines'
+PO lines, the multi-PO junction, or the legacy scalar header PO) has BuyerUserId == the caller's user id. An
+Admin sees ALL PendingApproval ASNs in the tenant (admins oversee the queue). Tenant-scoped (a buyer holds no
+supplier seccode, so the seccode/company filters are bypassed and re-scoped to the caller's tenant). Ordered by
+the latest Pending approval's SubmittedOn DESC.
+Returns: Result<List<AsnApprovalListItemDto>>. Requires permission **Asn.Approve** (same policy as approve/reject).")]
+    public async Task<Result<List<AsnApprovalListItemDto>>> PendingApprovals(CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetPendingAsnApprovalsQuery(), ct);
+        return Result<List<AsnApprovalListItemDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
     [HttpGet("{id:guid}")]
     [Authorize(Policy = "Asn.Read")]
     [EndpointSummary("ASN detail")]

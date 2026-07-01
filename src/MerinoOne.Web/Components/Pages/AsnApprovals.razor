@@ -1,0 +1,79 @@
+@page "/asn-approvals"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NavigationManager Nav
+
+@* ------------------------------------------------------------------------------------------------
+   R5 (review gap C2) — buyer/admin ASN approval queue. Lists PendingApproval ASNs routed to the
+   caller (via any covered PO's BuyerUserId), or every tenant PendingApproval ASN for an admin.
+   Each row opens the ASN detail, where the Approve/Reject actions already live. Mirrors
+   PoNegotiationList (the PO-negotiation review queue).
+------------------------------------------------------------------------------------------------ *@
+
+<PageTitle>ASN approvals</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">ASN approvals</h1>
+                <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Advance Shipment Notices submitted by suppliers, awaiting your approval.</p>
+        </div>
+    </header>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (rows == null || rows.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">fact_check</span>
+            <div>No ASNs awaiting your approval.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 1fr 1fr 1fr 80px 160px 130px; --tl-min-width: 960px;">
+            <div class="tlg-header">
+                <div class="tlg-col">ASN Number</div>
+                <div class="tlg-col">Supplier</div>
+                <div class="tlg-col">Ship-to</div>
+                <div class="tlg-col">#POs</div>
+                <div class="tlg-col">Submitted by</div>
+                <div class="tlg-col">Submitted on</div>
+            </div>
+            @foreach (var r in rows)
+            {
+                var row = r;
+                <div class="tlg-row" @onclick="() => Open(row.AsnId)" style="cursor:pointer">
+                    <div class="tlg-col tlg-code">@row.AsnNumber</div>
+                    <div class="tlg-col tlg-name">@row.SupplierName</div>
+                    <div class="tlg-col tlg-name">@(string.IsNullOrWhiteSpace(row.ShipToAddressName) ? "—" : row.ShipToAddressName)</div>
+                    <div class="tlg-col">@row.PoCount</div>
+                    <div class="tlg-col tlg-name">@(string.IsNullOrWhiteSpace(row.SubmittedBy) ? "—" : row.SubmittedBy)</div>
+                    <div class="tlg-col tlg-code">@(row.SubmittedOn?.ToString("yyyy-MM-dd") ?? "—")</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<AsnApprovalListItemDto>? rows;
+    private bool loading = true;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<AsnApprovalListItemDto>>("api/asns/pending-approvals");
+        rows = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void Open(Guid asnId) => Nav.NavigateToRoute($"/asns/{asnId}");
+}

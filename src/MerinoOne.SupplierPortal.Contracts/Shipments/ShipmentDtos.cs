@@ -76,6 +76,19 @@ public record AsnListItemDto(
     DateTime? SubmittedAt,
     DateTime CreatedOn);
 
+// R5 (review gap C2) — one row in the buyer-facing ASN approval queue (GET /api/asns/pending-approvals). Lists
+// PendingApproval ASNs routed to the calling buyer (via any covered PO's BuyerUserId), or ALL PendingApproval
+// ASNs in the tenant for an admin. SubmittedBy/On come from the ASN's latest Pending AsnApproval session.
+public record AsnApprovalListItemDto(
+    Guid AsnId,
+    int Seq,
+    string AsnNumber,
+    string SupplierName,
+    string? ShipToAddressName,
+    int PoCount,
+    string? SubmittedBy,
+    DateTime? SubmittedOn);
+
 // R5 (TSD R5 Addendum §10.2 / §4.6) — the latest approval session for an ASN, surfaced on the detail DTO.
 // Null when the ASN has never been sent for approval. Status is Pending | Approved | Rejected.
 public record AsnApprovalDto(
