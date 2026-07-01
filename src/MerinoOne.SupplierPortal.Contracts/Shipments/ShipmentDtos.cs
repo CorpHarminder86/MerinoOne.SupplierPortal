@@ -133,7 +133,12 @@ public record AsnDetailDto(
     // and the latest approval session (null until first Send-for-Approval).
     Guid? ShipToAddressId = null,
     string? ShipToAddressName = null,
-    AsnApprovalDto? Approval = null);
+    AsnApprovalDto? Approval = null,
+    // R4 §6.2 — for an editable (Draft/Rejected) ASN: true when Save Changes / Send For Approval are hard-blocked
+    // (a covered PO is not shippable, or another ASN for the same PO is pending buyer approval). ShipBlockReason
+    // carries the human message. False/null for locked ASNs and when shipping is permitted.
+    bool ShipBlocked = false,
+    string? ShipBlockReason = null);
 
 /// <summary>One covered PO on a (possibly multi-PO) ASN.</summary>
 public record AsnPurchaseOrderDto(

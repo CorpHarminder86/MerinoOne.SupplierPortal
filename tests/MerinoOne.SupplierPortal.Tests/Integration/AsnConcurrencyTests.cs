@@ -4,6 +4,8 @@ using System.Text.Json;
 using FluentAssertions;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
+using MerinoOne.SupplierPortal.Domain.Entities.Proc;
+using MerinoOne.SupplierPortal.Domain.Enums;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
 using MerinoOne.SupplierPortal.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -140,14 +142,33 @@ public class AsnConcurrencyTests
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
-    /// <summary>Creates a Draft ASN (no consumption) and sends it for approval → returns the PendingApproval asnId.</summary>
+    /// <summary>
+    /// Creates a Draft ASN (no consumption) and moves it to PendingApproval → returns the asnId. This suite
+    /// isolates the APPROVE-time atomic over-ship guard under contention, which requires MULTIPLE ASNs pending on
+    /// the SAME PO at once. The Send-For-Approval UX gate now permits only one pending ASN per PO (AsnDraftGate),
+    /// so we seed the pending state directly here rather than driving the gated send. The send gate itself is
+    /// covered by <see cref="AsnDraftGateTests"/>.
+    /// </summary>
     private async Task<Guid> CreatePendingAsync(HttpClient supplier, ProcureToPayFlow.Setup setup, decimal qty)
     {
         var create = await supplier.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup, shippedQty: qty));
         create.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(create));
         var asnId = (await Read<AsnDetailDto>(create)).Data!.Id;
-        var send = await supplier.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
-        send.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(send));
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = await db.Asns.IgnoreQueryFilters().FirstAsync(a => a.Id == asnId);
+        var now = DateTime.UtcNow;
+        db.AsnApprovals.Add(new AsnApproval
+        {
+            Id = Guid.NewGuid(), AsnId = asn.Id, Status = AsnApprovalStatus.Pending,
+            SubmittedBy = "seed", SubmittedOn = now, SeccodeId = asn.SeccodeId,
+            TenantId = asn.TenantId, TenantEntityId = asn.TenantEntityId, CreatedBy = "seed", CreatedOn = now,
+        });
+        asn.AsnStatus = AsnStatus.PendingApproval;
+        asn.UpdatedBy = "seed";
+        asn.UpdatedOn = now;
+        await db.SaveChangesAsync();
         return asnId;
     }
 

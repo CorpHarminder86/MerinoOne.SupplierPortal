@@ -61,6 +61,16 @@ public class SendForApprovalCommandHandler : IRequestHandler<SendForApprovalComm
 
         var now = DateTime.UtcNow;
 
+        // R4 §6.2 — "submission of a Draft ASN" is inside the gate block scope. Hard-block Send-For-Approval if a
+        // covered PO is not shippable (e.g. reset to Released by an ERP Modify) or another ASN for the same PO is
+        // already pending buyer approval. (The over-ship balance guard still runs later at Approve→Submit, §10.4.)
+        var coveredPoIds = await _db.AsnPurchaseOrders
+            .Where(j => j.AsnId == asn.Id)
+            .Select(j => j.PurchaseOrderId)
+            .Distinct()
+            .ToListAsync(ct);
+        await AsnDraftGate.EnsureEditableAsync(_db, asn, coveredPoIds, ct);
+
         // ---- Attachment Requirement Governance (MOVED from Submit, §10.3) --------------------------------
         // Mandatory missing → throws (400). Warning missing + not-acknowledged → ConfirmationRequired (no mutation).
         // Acknowledged-skip stages a skip AuditEntry committing in this handler's SaveChanges.

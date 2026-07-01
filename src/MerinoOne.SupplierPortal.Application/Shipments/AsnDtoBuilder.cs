@@ -200,6 +200,12 @@ public static class AsnDtoBuilder
                 ap.DecisionBy, ap.DecisionOn, ap.Reason))
             .FirstOrDefaultAsync(ct);
 
+        // R4 §6.2 — for an editable (Draft/Rejected) ASN, evaluate the ship gate so the UI can disable Save /
+        // Send-for-approval with the reason (the same hard block enforced server-side on those two paths).
+        string? shipBlockReason = null;
+        if (a.AsnStatus is AsnStatus.Draft or AsnStatus.Rejected)
+            shipBlockReason = await Policies.AsnDraftGate.EvaluateAsync(db, a.SupplierId, a.Id, coveredPoIds.ToList(), ct);
+
         return new AsnDetailDto(
             a.Id, a.Seq, a.AsnNumber,
             a.PurchaseOrderId, headerPoNumber,
@@ -212,7 +218,8 @@ public static class AsnDtoBuilder
             a.SubmittedAt, a.SubmittedBy, a.ErpSyncId, a.ErpCode,
             draftInvoiceId, IsLocked(a.AsnStatus),
             lines, attachments,
-            a.ShipToAddressId, shipToName, approval);
+            a.ShipToAddressId, shipToName, approval,
+            shipBlockReason is not null, shipBlockReason);
     }
 
     public static async Task<IReadOnlyList<DocumentAttachmentDto>> BuildAttachmentsAsync(

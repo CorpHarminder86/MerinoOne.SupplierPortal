@@ -76,6 +76,11 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
                 ["lines"] = new[] { $"PurchaseOrderLineId(s) not on a PO for this supplier: {string.Join(", ", invalid)}" }
             });
 
+        // R4 §6.2 — "saving a Draft" is inside the gate block scope. Hard-block the edit if a target PO is not
+        // shippable (e.g. reset to Released by an ERP Modify) or another ASN for the same PO is pending approval.
+        var targetPoIds = poLines.Values.Select(l => l.PurchaseOrderId).Distinct().ToList();
+        await AsnDraftGate.EnsureEditableAsync(_db, asn, targetPoIds, ct);
+
         // R4 (2026-06-23) — Serial/Lot capture: the Item control flags (serialized XOR lot-controlled) decide which
         // child rows to persist per replaced line. Resolve by **ItemCode within the ASN's company** (NOT ItemId —
         // the PO line is ERP-fed and routinely has a null ItemId; Item natural key = (TenantEntityId, Code)).

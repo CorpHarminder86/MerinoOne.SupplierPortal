@@ -640,16 +640,24 @@
                 }
             }
 
+            @if (currentStep == 4 && !IsNew && detail?.ShipBlocked == true)
+            {
+                <div style="background:var(--mer-amber-50, #fff8e6);border:1px solid var(--mer-amber-200,#ffe2a8);color:var(--mer-ink-700);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;">
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span>
+                    @detail?.ShipBlockReason
+                </div>
+            }
+
             <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--mer-line);">
                 <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="PrevStep" disabled="@(currentStep == 1)">Back</button>
                 <div style="display:flex;gap:8px;">
                     @if (currentStep == 4)
                     {
-                        <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="SaveDraft" disabled="@busy">@(busy && savingDraft ? "Saving…" : (IsNew ? "Save draft" : "Save changes"))</button>
+                        <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="SaveDraft" disabled="@(busy || (!IsNew && detail?.ShipBlocked == true))">@(busy && savingDraft ? "Saving…" : (IsNew ? "Save draft" : "Save changes"))</button>
                         @if (!IsNew)
                         {
                             @* R5 (§10.2) — replaces the old direct Submit. Sends Draft/Rejected → PendingApproval. *@
-                            <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="SendForApproval" disabled="@busy">
+                            <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="SendForApproval" disabled="@(busy || detail?.ShipBlocked == true)">
                                 <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">send</span> @(busy && !savingDraft ? "Sending…" : "Send for approval")
                             </button>
                         }
