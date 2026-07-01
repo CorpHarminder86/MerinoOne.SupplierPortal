@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Contracts.Admin;
 using MerinoOne.SupplierPortal.Contracts.SystemSettings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -21,7 +22,7 @@ public class EmailTemplatesController : ControllerBase
     public EmailTemplatesController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Email template list")]
     [EndpointDescription(@"All admin-editable email templates with their current subject + body.
 Returns: List<EmailTemplateDto> ordered by key. Requires permission **Settings.Read**.")]
@@ -32,7 +33,7 @@ Returns: List<EmailTemplateDto> ordered by key. Requires permission **Settings.R
     }
 
     [HttpGet("{key}")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Email template by key")]
     [EndpointDescription(@"Single email template identified by its symbolic key.
 Filters / params:
@@ -45,7 +46,7 @@ Returns: EmailTemplateDto on success; 404 if key not found. Requires permission 
     }
 
     [HttpPut("{key}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Update email template")]
     [EndpointDescription(@"Updates the subject + body of an existing email template.
 Filters / params:
@@ -62,7 +63,7 @@ Returns: true on success; 404 if key not found. Requires permission **Settings.W
     }
 
     [HttpPost("test-send")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Send test email")]
     [EndpointDescription(@"Renders a template with sample tokens and dispatches it to a test recipient.
 Body:

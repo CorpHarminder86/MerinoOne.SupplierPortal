@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.SupplierRegistration.Queries;
 using MerinoOne.SupplierPortal.Contracts.SupplierRegistration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -22,7 +23,7 @@ public class SupplierRegistrationController : ControllerBase
     }
 
     [HttpGet("invites")]
-    [Authorize(Policy = "Supplier.Invite")]
+    [Authorize(Policy = Perm.SupplierInvite)]
     [EndpointSummary("List supplier invites")]
     [EndpointDescription(@"Lists supplier registration invites issued by the buyer organisation.
 Filters / params:
@@ -37,7 +38,7 @@ Returns: List<SupplierInviteListDto>. Requires permission **Supplier.Invite**.")
     }
 
     [HttpPost("invites")]
-    [Authorize(Policy = "Supplier.Invite")]
+    [Authorize(Policy = Perm.SupplierInvite)]
     [EndpointSummary("Create supplier invite")]
     [EndpointDescription(@"Issues a new supplier registration invite + token.
 Body:
@@ -105,7 +106,7 @@ Returns: VerifyInviteOtpResponse; 400 on invalid code; 410 if OTP expired. Anony
     }
 
     [HttpPost("invites/{id:guid}/cancel")]
-    [Authorize(Policy = "Supplier.Invite")]
+    [Authorize(Policy = Perm.SupplierInvite)]
     [EndpointSummary("Cancel supplier invite")]
     [EndpointDescription(@"Cancels a pending supplier invite.
 Filters / params:
@@ -120,7 +121,7 @@ Returns: SupplierInviteDetailDto reflecting the cancelled state; 404 if not foun
     }
 
     [HttpPost("invites/{id:guid}/resend")]
-    [Authorize(Policy = "Supplier.Invite")]
+    [Authorize(Policy = Perm.SupplierInvite)]
     [EndpointSummary("Resend supplier invite")]
     [EndpointDescription(@"Reissues a pending supplier invite. Generates a fresh token + expiry, persists a new InviteOtp row, and re-sends both the Invite email and the InviteOtp email.
 Filters / params:

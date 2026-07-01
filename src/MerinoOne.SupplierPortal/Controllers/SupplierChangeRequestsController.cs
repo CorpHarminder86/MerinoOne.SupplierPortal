@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.Suppliers.ChangeRequests.Queries;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -58,7 +59,7 @@ Returns: SupplierChangeRequestDto; 404 if not found / not visible (seccode).")]
     }
 
     [HttpPost]
-    [Authorize(Policy = "Supplier.ChangeRequest")]
+    [Authorize(Policy = Perm.SupplierChangeRequest)]
     [EndpointSummary("Raise a supplier change request")]
     [EndpointDescription(@"Supplier raises a post-registration change request (status Draft). Builds one delta line per change; live supplier data is NOT mutated.
 Body: CreateSupplierChangeRequestRequest (supplierId, summary, lines[]). Each line: targetEntity (Supplier|Address|Contact|Bank|License), operation (Add|Edit|Delete), targetEntityId? (Edit/Delete), fieldName? + newValue? (Edit), payloadJson? (Add).
@@ -71,7 +72,7 @@ Returns: SupplierChangeRequestDto. Requires **Supplier.ChangeRequest**.")]
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Policy = "Supplier.ChangeRequest")]
+    [Authorize(Policy = Perm.SupplierChangeRequest)]
     [EndpointSummary("Edit a draft / bounced-back change request")]
     [EndpointDescription(@"Supplier replaces the line-set + summary. Allowed ONLY while Draft or ChangesRequested (409 otherwise). canWrite-gated (403).
 Body: UpdateSupplierChangeRequestRequest (summary, lines[]). Returns SupplierChangeRequestDto; 404 if not found; 400 on malformed lines. Requires **Supplier.ChangeRequest**.")]
@@ -82,7 +83,7 @@ Body: UpdateSupplierChangeRequestRequest (summary, lines[]). Returns SupplierCha
     }
 
     [HttpPost("{id:guid}/submit")]
-    [Authorize(Policy = "Supplier.ChangeRequest")]
+    [Authorize(Policy = Perm.SupplierChangeRequest)]
     [EndpointSummary("Submit a change request for review")]
     [EndpointDescription(@"Supplier submits a Draft / ChangesRequested request for review (→ Submitted). Requires at least one line (400 otherwise). canWrite-gated (403).
 Returns: empty success; 404 if not found; 409 if not in a submittable state. Requires **Supplier.ChangeRequest**.")]
@@ -93,7 +94,7 @@ Returns: empty success; 404 if not found; 409 if not in a submittable state. Req
     }
 
     [HttpPost("{id:guid}/request-changes")]
-    [Authorize(Policy = "Supplier.ApproveChange")]
+    [Authorize(Policy = Perm.SupplierApproveChange)]
     [EndpointSummary("Bounce a change request back to the supplier")]
     [EndpointDescription(@"Reviewer requests changes (→ ChangesRequested), bouncing the request back to the supplier for amendment.
 Body: RequestChangesRequest (reason — required). Returns empty success; 404 if not found; 409 if not Submitted/UnderReview. Requires **Supplier.ApproveChange**.")]
@@ -104,7 +105,7 @@ Body: RequestChangesRequest (reason — required). Returns empty success; 404 if
     }
 
     [HttpPost("{id:guid}/approve")]
-    [Authorize(Policy = "Supplier.ApproveChange")]
+    [Authorize(Policy = Perm.SupplierApproveChange)]
     [EndpointSummary("Approve a change request")]
     [EndpointDescription(@"Reviewer approves the request: applies every delta onto the live supplier data (one atomic transaction) then enqueues the per-line ERP push.
 Side effects: live supplier/address/contact/bank/license rows mutated; request → Approved then rolled up to Pushed/PartiallyPushed/PushFailed; per-line PushStatus tracked.
@@ -116,7 +117,7 @@ Returns: empty success; 404 if not found; 409 if not Submitted/UnderReview OR a 
     }
 
     [HttpPost("{id:guid}/reject")]
-    [Authorize(Policy = "Supplier.ApproveChange")]
+    [Authorize(Policy = Perm.SupplierApproveChange)]
     [EndpointSummary("Reject a change request")]
     [EndpointDescription(@"Reviewer rejects the request (→ Rejected). No deltas applied, nothing pushed to ERP.
 Body: RejectSupplierChangeRequest (reason — required). Returns empty success; 404 if not found; 409 if not Submitted/UnderReview. Requires **Supplier.ApproveChange**.")]

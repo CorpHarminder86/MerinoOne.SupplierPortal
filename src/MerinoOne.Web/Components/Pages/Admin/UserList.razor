@@ -10,7 +10,7 @@
         <div>
             <div class="tl-title-row">
                 <h1 class="tl-title">Users</h1>
-                <span class="tl-count-chip">@(users?.Count ?? 0)</span>
+                <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
             </div>
             <p class="tl-sub">Portal users — both internal staff and supplier contacts</p>
         </div>
@@ -26,7 +26,7 @@
     </header>
 
     <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <input class="rz-textbox" placeholder="Search code / name / email…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="ApplyFilters" />
+        <input class="rz-textbox" placeholder="Search code / name / email…" style="width:280px;padding:8px 12px;" @bind="search" @bind:event="oninput" @onkeyup="OnSearchKeyup" />
         <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="internalFilter" @bind:after="ApplyFilters">
             <option value="">Internal: all</option>
             <option value="yes">Internal: Yes</option>
@@ -43,7 +43,7 @@
     {
         <div class="tl-empty">Loading…</div>
     }
-    else if (users == null || users.Count == 0)
+    else if (paged == null || paged.Items.Count == 0)
     {
         <div class="tl-empty">
             <span class="material-symbols-outlined" style="font-size:32px;">group</span>
@@ -62,7 +62,7 @@
                 <div class="tlg-col tlg-col--num">Suppliers</div>
                 <div class="tlg-col">Active</div>
             </div>
-            @foreach (var u in users)
+            @foreach (var u in paged.Items)
             {
                 <div class="tlg-row" @onclick="() => OpenDetail(u.Id)" style="cursor:pointer">
                     <div class="tlg-col tlg-code">@u.UserCode</div>
@@ -75,42 +75,46 @@
                 </div>
             }
         </div>
+
+        <Pager Page="page" PageSize="PageSize" TotalCount="paged.TotalCount" PageChanged="OnPageChanged" />
     }
 </div>
 
 @code {
-    private List<UserListItemDto>? all;
-    private List<UserListItemDto>? users;
+    private PagedResult<UserListItemDto>? paged;
     private bool loading = true;
     private string search = string.Empty;
     private string internalFilter = string.Empty;
     private string activeFilter = string.Empty;
+    private int page = 1;
+    private const int PageSize = 50;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    // Filters are applied server-side (the list is paged) — any filter change resets to page 1.
+    private async Task ApplyFilters() { page = 1; await Reload(); }
+
+    private async Task OnSearchKeyup(KeyboardEventArgs e)
     {
-        var resp = await Api.GetAsync<List<UserListItemDto>>("api/users");
-        all = resp?.Data ?? new();
-        ApplyFilters();
+        if (e.Key == "Enter") await ApplyFilters();
+    }
+
+    private async Task Reload()
+    {
+        loading = true;
+        var url = $"api/users?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search.Trim())}";
+        if (internalFilter == "yes") url += "&isInternal=true";
+        else if (internalFilter == "no") url += "&isInternal=false";
+        if (activeFilter == "yes") url += "&isActive=true";
+        else if (activeFilter == "no") url += "&isActive=false";
+
+        var resp = await Api.GetAsync<PagedResult<UserListItemDto>>(url);
+        paged = resp?.Data;
         loading = false;
     }
 
-    private void ApplyFilters()
-    {
-        if (all == null) { users = new(); return; }
-        IEnumerable<UserListItemDto> q = all;
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var s = search.Trim();
-            q = q.Where(x => (x.UserCode ?? string.Empty).Contains(s, StringComparison.OrdinalIgnoreCase)
-                          || (x.FullName ?? string.Empty).Contains(s, StringComparison.OrdinalIgnoreCase)
-                          || (x.Email ?? string.Empty).Contains(s, StringComparison.OrdinalIgnoreCase));
-        }
-        if (internalFilter == "yes") q = q.Where(x => x.IsInternal);
-        else if (internalFilter == "no") q = q.Where(x => !x.IsInternal);
-        if (activeFilter == "yes") q = q.Where(x => x.IsActive);
-        else if (activeFilter == "no") q = q.Where(x => !x.IsActive);
-        users = q.ToList();
-    }
+    private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
 
     private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/admin/users/{id}");
     private void GoNew() => Nav.NavigateToRoute("/admin/users/new");

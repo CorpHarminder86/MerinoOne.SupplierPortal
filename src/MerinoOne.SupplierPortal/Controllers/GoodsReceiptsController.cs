@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Contracts.Shipments;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ContractsPagedResult = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Shipments.GoodsReceiptDto>;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -18,7 +19,7 @@ public class GoodsReceiptsController : ControllerBase
     public GoodsReceiptsController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "GoodsReceipt.Read")]
+    [Authorize(Policy = Perm.GoodsReceiptRead)]
     [EndpointSummary("Goods receipt list")]
     [EndpointDescription(@"Paged list of buyer-side goods receipts (read-only for suppliers).
 Filters / params:

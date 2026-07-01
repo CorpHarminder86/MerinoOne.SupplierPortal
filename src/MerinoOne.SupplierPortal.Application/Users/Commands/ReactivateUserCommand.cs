@@ -11,11 +11,13 @@ public class ReactivateUserCommandHandler : IRequestHandler<ReactivateUserComman
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
+    private readonly IUserStatusService _status;
 
-    public ReactivateUserCommandHandler(IAppDbContext db, ICurrentUser user)
+    public ReactivateUserCommandHandler(IAppDbContext db, ICurrentUser user, IUserStatusService status)
     {
         _db = db;
         _user = user;
+        _status = status;
     }
 
     public async Task<Unit> Handle(ReactivateUserCommand request, CancellationToken ct)
@@ -30,6 +32,9 @@ public class ReactivateUserCommandHandler : IRequestHandler<ReactivateUserComman
         user.UpdatedOn = DateTime.UtcNow;
         user.UpdatedBy = string.IsNullOrEmpty(_user.UserCode) ? "api" : _user.UserCode;
         await _db.SaveChangesAsync(ct);
+
+        // Evict the cached "inactive" status so the reactivated user can authenticate again immediately.
+        await _status.InvalidateAsync(user.Id, ct);
         return Unit.Value;
     }
 }

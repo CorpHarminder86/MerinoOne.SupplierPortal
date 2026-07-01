@@ -4,6 +4,7 @@ using MerinoOne.SupplierPortal.Application.Masters.Settings;
 using MerinoOne.SupplierPortal.Contracts.Masters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -25,7 +26,7 @@ public class FulfilmentSettingsController : ControllerBase
     // ============================ Supplier-item over-ship tolerance (§7.4) ============================
 
     [HttpGet("supplier-items")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Supplier item tolerance grid")]
     [EndpointDescription(@"Every active item master joined to the given supplier's over-ship tolerance override, with the RESOLVED tolerance (override ?? master) the ASN guard applies.
 Filters / params:
@@ -38,7 +39,7 @@ Returns: List<SupplierItemToleranceDto> { itemId, itemCode, itemDescription, ite
     }
 
     [HttpPut("supplier-items")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Upsert supplier item tolerance")]
     [EndpointDescription(@"Upserts a supplier's over-ship tolerance override for an item, keyed on (supplierId, itemId).
 Body:
@@ -51,7 +52,7 @@ Returns: SupplierItemToleranceDto (with the recomputed resolved tolerance); 400 
     }
 
     [HttpDelete("supplier-items/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Delete supplier item tolerance")]
     [EndpointDescription(@"Removes a supplier item tolerance override (reverts that item to inherit the master tolerance).
 Filters / params:
@@ -66,7 +67,7 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
     // ============================ Attachment-type catalogue (§8.5) ============================
 
     [HttpGet("attachment-types")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Attachment type list")]
     [EndpointDescription(@"The tenant's attachment-type catalogue (active + inactive).
 Filters / params:
@@ -79,7 +80,7 @@ Returns: List<AttachmentTypeDto>. Requires permission **Settings.Read**.")]
     }
 
     [HttpPost("attachment-types")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Create attachment type")]
     [EndpointDescription(@"Creates a new attachment-type catalogue row (code unique per tenant).
 Body:
@@ -92,7 +93,7 @@ Returns: AttachmentTypeDto; 400 on validation; 409 if the code already exists. R
     }
 
     [HttpPut("attachment-types/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Update attachment type")]
     [EndpointDescription(@"Renames an attachment type and/or toggles its active flag (no hard delete — deactivate via isActive=false). Code is immutable.
 Filters / params:
@@ -108,7 +109,7 @@ Returns: AttachmentTypeDto; 404 if not found. Requires permission **Settings.Wri
     // ============================ Attachment-entity reference (read-only, §8.5) ============================
 
     [HttpGet("attachment-entities")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Attachment entity list")]
     [EndpointDescription(@"The tenant's attachment-bearing entity reference list (Supplier / Asn / Invoice). Read-only — seeded, used to drive the policy-grid entity picker.
 Filters / params:
@@ -123,7 +124,7 @@ Returns: List<AttachmentEntityDto>. Requires permission **Settings.Read**.")]
     // ============================ Attachment requirement policy (§8.5 + D5) ============================
 
     [HttpGet("attachment-policies")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Attachment policy grid")]
     [EndpointDescription(@"The two-tier attachment requirement policy rows for an entity: tenant defaults (supplierId NULL) and, when a supplierId is given, that supplier's overrides. Each row carries the EFFECTIVE requirement (D5 supplier-wins: supplier override ?? tenant default ?? Optional).
 Filters / params:
@@ -137,7 +138,7 @@ Returns: List<AttachmentPolicyDto> { id, attachmentEntityCode, attachmentTypeId,
     }
 
     [HttpPut("attachment-policies")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Upsert attachment policy")]
     [EndpointDescription(@"Upserts an attachment requirement policy row, keyed on the D5 unique: (entity, type) for a tenant default (supplierId NULL) or (supplier, entity, type) for a supplier override.
 Body:
@@ -150,7 +151,7 @@ Returns: AttachmentPolicyDto (with effective resolution); 400 on validation; 404
     }
 
     [HttpDelete("attachment-policies/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Delete attachment policy")]
     [EndpointDescription(@"Removes an attachment requirement policy row (reverts to the tenant default, or to Optional if it was the tenant default).
 Filters / params:
@@ -169,7 +170,7 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
     // /api/settings/companies/{companyId}/addresses (companyId = the TenantEntity id).
 
     [HttpGet("companies/{companyId:guid}/addresses")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Company address list")]
     [EndpointDescription(@"The named, ERP-mappable ship-to addresses under a company (TenantEntity).
 Filters / params:
@@ -183,7 +184,7 @@ Returns: List<CompanyAddressDto> { id, seq, companyId, addressName, erpCode, add
     }
 
     [HttpPost("company-addresses")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Create company address")]
     [EndpointDescription(@"Creates a ship-to address under a Company. AddressName is REQUIRED; ErpCode is OPTIONAL but must be unique within the company when present (the inbound PO ship-to resolves against it).
 Body:
@@ -196,7 +197,7 @@ Returns: CompanyAddressDto; 400 on validation; 404 unknown company; 409 if the e
     }
 
     [HttpPut("company-addresses/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Update company address")]
     [EndpointDescription(@"Edits a ship-to address (deactivate via isActive=false — kept for historical POs, removed from new ship-to resolution). ErpCode stays unique per company when present.
 Filters / params:
@@ -215,7 +216,7 @@ Returns: CompanyAddressDto; 404 if not found; 409 if the erpCode collides within
     // ERP-driven subset Draft | Released | Cancelled | Closed | Delivered (§11.2). Resolution is case-insensitive.
 
     [HttpGet("po-status-mappings")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("PO status mapping list")]
     [EndpointDescription(@"The tenant's ERP→portal PO-status mapping rows. Each maps one raw ERP status to one portal PoStatus; the inbound PO sync resolves the incoming erpStatus against this (case-insensitive).
 Filters / params:
@@ -228,7 +229,7 @@ Returns: List<PoStatusMappingDto> { id, seq, erpStatus, poStatus, isActive, crea
     }
 
     [HttpPost("po-status-mappings")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Create PO status mapping")]
     [EndpointDescription(@"Creates an ERP→portal PO-status mapping (erpStatus unique per tenant; the inbound sync resolves against it).
 Body:
@@ -241,7 +242,7 @@ Returns: PoStatusMappingDto; 400 on validation; 409 if the erpStatus is already 
     }
 
     [HttpPut("po-status-mappings/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Update PO status mapping")]
     [EndpointDescription(@"Re-targets a mapping's portal status and/or toggles its active flag (erpStatus is immutable — it is the lookup key).
 Filters / params:
@@ -255,7 +256,7 @@ Returns: PoStatusMappingDto; 400 on validation; 404 if not found. Requires permi
     }
 
     [HttpDelete("po-status-mappings/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Delete PO status mapping")]
     [EndpointDescription(@"Deactivates (soft-deletes) a mapping row — the erpStatus stops resolving and is freed for a future re-add. No hard delete.
 Filters / params:

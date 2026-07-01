@@ -3,8 +3,10 @@ using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Application.Roles.Commands;
 using MerinoOne.SupplierPortal.Application.Roles.Queries;
 using MerinoOne.SupplierPortal.Contracts.Users;
+using RolesPaged = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Users.RoleListItemDto>;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -17,18 +19,22 @@ public class RolesController : ControllerBase
     public RolesController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Role.Read")]
+    [Authorize(Policy = Perm.RoleRead)]
     [EndpointSummary("Role list")]
-    [EndpointDescription(@"Lists all RBAC roles defined in the system.
-Returns: List<RoleListItemDto> ordered by name. Requires permission **Role.Read**.")]
-    public async Task<Result<List<RoleListItemDto>>> List(CancellationToken ct)
+    [EndpointDescription(@"Lists RBAC roles (paged) with per-role permission + user counts.
+Filters / params:
+- **page**: Optional — 1-based page number (default 1).
+- **pageSize**: Optional — rows per page (default 50, max 200).
+Returns: PagedResult<RoleListItemDto> ordered by name. Requires permission **Role.Read**.")]
+    public async Task<Result<RolesPaged>> List(
+        [FromQuery] int page, [FromQuery] int pageSize, CancellationToken ct)
     {
-        var data = await _mediator.Send(new GetRoleListQuery(), ct);
-        return Result<List<RoleListItemDto>>.Ok(data, HttpContext.TraceIdentifier);
+        var data = await _mediator.Send(new GetRoleListQuery(page < 1 ? 1 : page, pageSize < 1 ? 50 : pageSize), ct);
+        return Result<RolesPaged>.Ok(data, HttpContext.TraceIdentifier);
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "Role.Read")]
+    [Authorize(Policy = Perm.RoleRead)]
     [EndpointSummary("Role detail")]
     [EndpointDescription(@"Returns a single role with its current permission assignments.
 Filters / params:
@@ -41,7 +47,7 @@ Returns: RoleDetailDto on success; 404 if not found. Requires permission **Role.
     }
 
     [HttpPost]
-    [Authorize(Policy = "Role.Write")]
+    [Authorize(Policy = Perm.RoleWrite)]
     [EndpointSummary("Create role")]
     [EndpointDescription(@"Creates a new RBAC role.
 Body:
@@ -54,7 +60,7 @@ Returns: GUID of the newly created role; 400 on validation; 409 if name already 
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Policy = "Role.Write")]
+    [Authorize(Policy = Perm.RoleWrite)]
     [EndpointSummary("Update role")]
     [EndpointDescription(@"Updates name / description of an existing role.
 Filters / params:
@@ -69,7 +75,7 @@ Returns: empty success; 404 if not found; 400 on validation. Requires permission
     }
 
     [HttpPost("{id:guid}/permissions")]
-    [Authorize(Policy = "Role.Write")]
+    [Authorize(Policy = Perm.RoleWrite)]
     [EndpointSummary("Assign role permissions")]
     [EndpointDescription(@"Replaces the role's permission set with the supplied list.
 Filters / params:
@@ -78,7 +84,7 @@ Body:
 - **body**: AssignPermissionsRequest containing the full list of permission codes to assign.
 Side effects:
 - All previously assigned permissions not in the list are revoked.
-- All users holding this role gain/lose claims on next JWT refresh.
+- All users holding this role gain/lose the permissions on their NEXT request (resolved live server-side; no relogin).
 Returns: empty success; 404 if role not found. Requires permission **Role.Write**.")]
     public async Task<Result> AssignPermissions(Guid id, [FromBody] AssignPermissionsRequest body, CancellationToken ct)
     {

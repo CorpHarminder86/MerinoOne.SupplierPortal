@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.Masters.Queries;
 using MerinoOne.SupplierPortal.Contracts.Masters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -19,7 +20,7 @@ public class MastersController : ControllerBase
     // ---------------- Delivery Terms ----------------
 
     [HttpGet("delivery-terms")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Delivery terms list")]
     [EndpointDescription(@"All delivery terms (Incoterms-style codes used on POs).
 Filters / params:
@@ -32,7 +33,7 @@ Returns: List<MasterItemDto>. Requires permission **Settings.Read**.")]
     }
 
     [HttpGet("delivery-terms/{id:guid}")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Delivery term detail")]
     [EndpointDescription(@"Single delivery term by GUID.
 Filters / params:
@@ -45,7 +46,7 @@ Returns: MasterItemDto on success; 404 if not found. Requires permission **Setti
     }
 
     [HttpPost("delivery-terms")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Create delivery term")]
     [EndpointDescription(@"Creates a new delivery term row.
 Body:
@@ -58,7 +59,7 @@ Returns: MasterItemDto on success; 400 on validation. Requires permission **Sett
     }
 
     [HttpPut("delivery-terms/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Update delivery term")]
     [EndpointDescription(@"Updates an existing delivery term.
 Filters / params:
@@ -72,7 +73,7 @@ Returns: MasterItemDto on success; 404 if not found. Requires permission **Setti
     }
 
     [HttpPost("delivery-terms/{id:guid}/deactivate")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Deactivate delivery term")]
     [EndpointDescription(@"Marks a delivery term inactive; preserved on historical POs.
 Filters / params:
@@ -89,7 +90,7 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
     // ---------------- Payment Terms ----------------
 
     [HttpGet("payment-terms")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Payment terms list")]
     [EndpointDescription(@"All payment terms (e.g. Net30, Net60) referenced on POs + invoices.
 Filters / params:
@@ -102,7 +103,7 @@ Returns: List<PaymentTermDto>. Requires permission **Settings.Read**.")]
     }
 
     [HttpGet("payment-terms/{id:guid}")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Payment term detail")]
     [EndpointDescription(@"Single payment term by GUID.
 Filters / params:
@@ -115,7 +116,7 @@ Returns: PaymentTermDto on success; 404 if not found. Requires permission **Sett
     }
 
     [HttpPost("payment-terms")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Create payment term")]
     [EndpointDescription(@"Creates a new payment term row.
 Body:
@@ -128,7 +129,7 @@ Returns: PaymentTermDto on success; 400 on validation. Requires permission **Set
     }
 
     [HttpPut("payment-terms/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Update payment term")]
     [EndpointDescription(@"Updates an existing payment term.
 Filters / params:
@@ -142,7 +143,7 @@ Returns: PaymentTermDto on success; 404 if not found. Requires permission **Sett
     }
 
     [HttpPost("payment-terms/{id:guid}/deactivate")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Deactivate payment term")]
     [EndpointDescription(@"Marks a payment term inactive; preserved on historical POs.
 Filters / params:
@@ -159,7 +160,7 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
     // ---------------- Taxes (R4 Module 6) ----------------
 
     [HttpGet("taxes")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Tax master list")]
     [EndpointDescription(@"All tax codes (company-shared master) used on PO / invoice lines.
 Filters / params:
@@ -172,7 +173,7 @@ Returns: List<TaxDto>. Requires permission **Settings.Read**.")]
     }
 
     [HttpGet("taxes/{id:guid}")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Tax detail")]
     [EndpointDescription(@"Single tax code by GUID.
 Filters / params:
@@ -185,7 +186,7 @@ Returns: TaxDto on success; 404 if not found. Requires permission **Settings.Rea
     }
 
     [HttpPost("taxes")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Create tax")]
     [EndpointDescription(@"Creates a new tax code row.
 Body:
@@ -198,7 +199,7 @@ Returns: TaxDto on success; 400 on validation; 409 if code exists. Requires perm
     }
 
     [HttpPut("taxes/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Update tax")]
     [EndpointDescription(@"Updates an existing tax code (Code immutable).
 Filters / params:
@@ -212,7 +213,7 @@ Returns: TaxDto on success; 404 if not found. Requires permission **Settings.Wri
     }
 
     [HttpPost("taxes/{id:guid}/deactivate")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Deactivate tax")]
     [EndpointDescription(@"Marks a tax code inactive; preserved on historical PO/invoice lines.
 Filters / params:
@@ -227,7 +228,7 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
     // ---------------- Items ----------------
 
     [HttpGet("items")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Item master list")]
     [EndpointDescription(@"All item master rows used on PO lines.
 Filters / params:
@@ -241,7 +242,7 @@ Returns: List<ItemDto>. Requires permission **Settings.Read**.")]
     }
 
     [HttpGet("items/{id:guid}")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Item detail")]
     [EndpointDescription(@"Single item master row by GUID.
 Filters / params:
@@ -254,7 +255,7 @@ Returns: ItemDto on success; 404 if not found. Requires permission **Settings.Re
     }
 
     [HttpPost("items")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Create item")]
     [EndpointDescription(@"Creates a new item master row.
 Body:
@@ -267,7 +268,7 @@ Returns: ItemDto on success; 400 on validation. Requires permission **Settings.W
     }
 
     [HttpPut("items/{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Update item")]
     [EndpointDescription(@"Updates an existing item master row.
 Filters / params:
@@ -281,7 +282,7 @@ Returns: ItemDto on success; 404 if not found. Requires permission **Settings.Wr
     }
 
     [HttpPost("items/{id:guid}/deactivate")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Deactivate item")]
     [EndpointDescription(@"Marks an item inactive; preserved on historical POs.
 Filters / params:

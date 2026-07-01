@@ -529,8 +529,8 @@ else
     protected override async Task OnInitializedAsync()
     {
         await Load();
-        var rolesResp = await Api.GetAsync<List<RoleListItemDto>>("api/roles");
-        availableRoles = rolesResp?.Data ?? new();
+        var rolesResp = await Api.GetAsync<PagedResult<RoleListItemDto>>("api/roles?pageSize=200");
+        availableRoles = rolesResp?.Data?.Items ?? new();
         var compResp = await Api.GetAsync<List<CompanyDto>>("api/companies");
         companies = compResp?.Data ?? new();
     }

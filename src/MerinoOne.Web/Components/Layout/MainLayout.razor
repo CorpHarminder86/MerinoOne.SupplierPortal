@@ -431,6 +431,11 @@ else
     private bool _hydrated;
     private bool _companiesLoaded;
 
+    // Live RBAC (no relogin): the server enforces permission changes immediately; the client re-fetches its
+    // permission VIEW from /me on navigation (throttled) + a 60s interval so menus/buttons update in place.
+    private DateTime _lastPermRefresh = DateTime.MinValue;
+    private System.Threading.PeriodicTimer? _permTimer;
+
     protected override void OnInitialized()
     {
         Shell.OnChange += OnShellChange;
@@ -447,7 +452,43 @@ else
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
         EnforceRouteGuard();
+        _ = RefreshPermissionsSilentAsync();
         InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Re-fetch the current permission set from /me and update the client view, silently. Throttled to at
+    /// most once per 10s so navigation spam doesn't hammer the endpoint. A 401 (e.g. the account was just
+    /// deactivated) flows through ApiClient's session-expiry handling and signs the user out.
+    /// </summary>
+    private async Task RefreshPermissionsSilentAsync()
+    {
+        if (!Token.IsAuthenticated || Token.MustChangePassword) return;
+        if (DateTime.UtcNow - _lastPermRefresh < TimeSpan.FromSeconds(10)) return;
+        _lastPermRefresh = DateTime.UtcNow;
+        try
+        {
+            var resp = await Api.GetAsync<MerinoOne.SupplierPortal.Contracts.Auth.LoginResponse>("api/auth/me");
+            if (resp?.Success == true && resp.Data is not null)
+            {
+                Token.SetSession(
+                    resp.Data.Token, resp.Data.UserCode, Token.Email, resp.Data.FullName,
+                    resp.Data.Roles, resp.Data.Permissions, resp.Data.ExpiresAt, resp.Data.MustChangePassword);
+                try { await Storage.SetAsync("merinoone.token", resp.Data.Token); } catch { }
+            }
+        }
+        catch { /* transient failure: keep the last-known permission view until the next tick */ }
+    }
+
+    private async Task StartPermissionPollAsync()
+    {
+        _permTimer = new System.Threading.PeriodicTimer(TimeSpan.FromSeconds(60));
+        try
+        {
+            while (await _permTimer.WaitForNextTickAsync())
+                await RefreshPermissionsSilentAsync();
+        }
+        catch (OperationCanceledException) { /* disposed on teardown */ }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -456,6 +497,7 @@ else
         {
             await HydrateTokenAsync();
             EnforceRouteGuard();
+            _ = StartPermissionPollAsync();
         }
 
         if (Token.IsAuthenticated && Token.MustChangePassword && !IsOnChangePasswordRoute())
@@ -615,6 +657,7 @@ else
         Token.Changed -= OnTokenChanged;
         Token.SessionExpired -= HandleSessionExpired;
         Company.Changed -= OnCompanyChanged;
+        _permTimer?.Dispose();
     }
 
     private void ToggleCompanyMenu() => _companyMenuOpen = !_companyMenuOpen;

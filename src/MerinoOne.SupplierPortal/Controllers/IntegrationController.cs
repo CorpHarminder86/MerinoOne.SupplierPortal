@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.Integration.Queries;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -17,7 +18,7 @@ public class IntegrationController : ControllerBase
     public IntegrationController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet("sync-log")]
-    [Authorize(Policy = "Integration.Read")]
+    [Authorize(Policy = Perm.IntegrationRead)]
     [EndpointSummary("Infor sync log")]
     [EndpointDescription(@"Paged history of Infor inbound/outbound sync runs.
 Filters / params:
@@ -38,7 +39,7 @@ Returns: PagedResult<InforSyncLogDto>. Requires permission **Integration.Read**.
     }
 
     [HttpGet("sync-log/{id:guid}/payload")]
-    [Authorize(Policy = "Integration.Read")]
+    [Authorize(Policy = Perm.IntegrationRead)]
     [EndpointSummary("Infor sync-log payload")]
     [EndpointDescription(@"Returns the stored request JSON for ONE inbound sync-log row (Enhancement Round 2 / Feature D — payload viewer). The list endpoint never ships the full JSON; this is fetched on demand for the payload dialog.
 Filters / params:
@@ -51,7 +52,7 @@ Returns: the stored JSON string (or null when none was stored / row not found). 
     }
 
     [HttpGet("errors")]
-    [Authorize(Policy = "Integration.Read")]
+    [Authorize(Policy = Perm.IntegrationRead)]
     [EndpointSummary("Integration errors")]
     [EndpointDescription(@"Paged list of unresolved + resolved integration errors awaiting operator attention.
 Filters / params:
@@ -67,7 +68,7 @@ Returns: PagedResult<IntegrationErrorDto>. Requires permission **Integration.Rea
     }
 
     [HttpPost("errors/{id:guid}/retry")]
-    [Authorize(Policy = "Integration.Manage")]
+    [Authorize(Policy = Perm.IntegrationManage)]
     [EndpointSummary("Retry integration error")]
     [EndpointDescription(@"Re-queues a failed integration payload for another attempt.
 Filters / params:
@@ -82,7 +83,7 @@ Returns: empty success; 404 if not found. Requires permission **Integration.Mana
     }
 
     [HttpGet("endpoints")]
-    [Authorize(Policy = "Integration.Read")]
+    [Authorize(Policy = Perm.IntegrationRead)]
     [EndpointSummary("Infor endpoints + session telemetry")]
     [EndpointDescription(@"Lists the current tenant's Infor endpoint configuration plus inbound-session liveness telemetry (last received timestamp/status/idempotency-key/message + cumulative received count).
 Filters / params:
@@ -95,7 +96,7 @@ Returns: List<InforEndpointDto> scoped to the caller's tenant. Requires permissi
     }
 
     [HttpPut("endpoints/{id:guid}")]
-    [Authorize(Policy = "Integration.Manage")]
+    [Authorize(Policy = Perm.IntegrationManage)]
     [EndpointSummary("Update Infor endpoint")]
     [EndpointDescription(@"Updates an endpoint's config (URL, BOD name, enabled flag).
 Filters / params:
@@ -110,7 +111,7 @@ Returns: empty success; 404 if not found; 400 on validation. Requires permission
     }
 
     [HttpPost("endpoints/{id:guid}/toggle")]
-    [Authorize(Policy = "Integration.Manage")]
+    [Authorize(Policy = Perm.IntegrationManage)]
     [EndpointSummary("Toggle Infor endpoint")]
     [EndpointDescription(@"Flips an endpoint's enabled flag — the inbound kill-switch. When disabled, inbound pushes to that endpoint are rejected with 403.
 Filters / params:

@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Application.Platform.Commands;
 using MerinoOne.SupplierPortal.Contracts.Companies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -24,7 +25,7 @@ public class CompaniesController : ControllerBase
     public CompaniesController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("List companies")]
     [EndpointDescription(@"Lists the current tenant's companies (TenantEntities). Drives the active-company selector and company dropdowns.
 Filters / params:
@@ -48,7 +49,7 @@ No admin permission required (unlike GET /api/companies). Returns: List<CompanyD
     }
 
     [HttpPost]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Create company")]
     [EndpointDescription(@"Creates a company in the current tenant (reuses the platform CreateTenantEntity handler with the acting tenant).
 Body:
@@ -65,7 +66,7 @@ Returns: GUID of the new company; 400 on validation; 409 if the code is taken. R
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Update company")]
     [EndpointDescription(@"Renames / re-codes a company in the current tenant.
 Filters / params:
@@ -80,7 +81,7 @@ Returns: empty success; 404 if not found; 409 if the new code collides. Requires
     }
 
     [HttpPost("{id:guid}/deactivate")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Deactivate company")]
     [EndpointDescription(@"Deactivates a company — drops it from the active-company selector while preserving its data.
 Filters / params:
@@ -93,7 +94,7 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
     }
 
     [HttpPost("{id:guid}/reactivate")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Reactivate company")]
     [EndpointDescription(@"Reactivates a previously deactivated company.
 Filters / params:

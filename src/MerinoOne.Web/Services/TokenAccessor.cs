@@ -1,3 +1,5 @@
+using MerinoOne.SupplierPortal.Contracts.Authorization;
+
 namespace MerinoOne.Web.Services;
 
 public class TokenAccessor
@@ -12,15 +14,15 @@ public class TokenAccessor
     public bool MustChangePassword { get; set; }
 
     public bool IsAuthenticated => !string.IsNullOrEmpty(Token) && (!ExpiresAt.HasValue || ExpiresAt.Value > DateTime.UtcNow);
-    public bool IsAdmin => Roles.Contains("Admin") || Roles.Contains("SuperAdmin");
-    public bool IsSupplier => Roles.Contains("Supplier");
+    public bool IsAdmin => Roles.Contains(RoleNames.Admin) || Roles.Contains(RoleNames.SuperAdmin);
+    public bool IsSupplier => Roles.Contains(RoleNames.Supplier);
 
     /// <summary>
     /// Cross-tenant onboarding actor. A Platform Admin bypasses the tenant filter and holds NO
     /// business-data permissions, so the Platform nav group and the tenant-context indicator
     /// (rather than the company selector) are gated on this flag.
     /// </summary>
-    public bool IsPlatformAdmin => Roles.Contains("PlatformAdmin");
+    public bool IsPlatformAdmin => Roles.Contains(RoleNames.PlatformAdmin);
 
     public bool HasPermission(string code) => Permissions.Contains(code);
 

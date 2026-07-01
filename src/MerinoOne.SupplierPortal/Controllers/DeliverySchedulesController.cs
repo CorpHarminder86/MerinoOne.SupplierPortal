@@ -4,6 +4,7 @@ using MerinoOne.SupplierPortal.Application.Shipments.Queries;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -21,7 +22,7 @@ public class DeliverySchedulesController : ControllerBase
     public DeliverySchedulesController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "DeliverySchedule.Read")]
+    [Authorize(Policy = Perm.DeliveryScheduleRead)]
     [EndpointSummary("Delivery schedule grid")]
     [EndpointDescription(@"R5 — Delivery Schedule grid (the ASN-creation surface). One row per PO line, sorted PO → Line → Delivery date ASC, with remaining-to-ship derived from the R4 line balance (orderQty − shippedQtyToDate).
 Filters / params (all optional):

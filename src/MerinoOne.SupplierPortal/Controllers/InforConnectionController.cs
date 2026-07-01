@@ -4,6 +4,7 @@ using MerinoOne.SupplierPortal.Application.Integration.Connection;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -21,7 +22,7 @@ public class InforConnectionController : ControllerBase
     public InforConnectionController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Get Infor connection config")]
     [EndpointDescription(@"Returns the current tenant's Infor CloudSuite (ION API) connection configuration.
 Secrets (Client Secret, Password) are masked with ""********"" when set; ciphertext never leaves the API.
@@ -33,7 +34,7 @@ Returns: InforConnectionDto. Requires permission **Settings.Read**.")]
     }
 
     [HttpPut]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Save Infor connection config")]
     [EndpointDescription(@"Creates or updates the current tenant's Infor connection configuration (one row per tenant).
 Body:
@@ -48,7 +49,7 @@ Returns: true on success; 400 on validation. Requires permission **Settings.Writ
     }
 
     [HttpPost("test")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Test Infor connection")]
     [EndpointDescription(@"Requests an OAuth2 token from Infor Mingle SSO using the supplied settings to verify the connection.
 Body:

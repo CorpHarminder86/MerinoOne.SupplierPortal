@@ -58,6 +58,9 @@ public class UserRoleConfiguration : IEntityTypeConfiguration<UserRole>
         b.HasOne(x => x.Role).WithMany(r => r.UserRoles).HasForeignKey(x => x.RoleId)
             .HasConstraintName("FK_UserRole_Role_RoleId").OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.AppUserId, x.RoleId }).HasDatabaseName("UQ_UserRole_user_role").IsUnique();
+        // Seekable by RoleId (leading col) for the per-role user COUNT on the role list + role-scoped
+        // fan-out lookups (AssignPermissions invalidation) — the unique index above leads with AppUserId.
+        b.HasIndex(x => new { x.RoleId, x.AppUserId }).HasDatabaseName("IX_UserRole_role_user");
     }
 }
 
@@ -86,7 +89,12 @@ public class RolePermissionConfiguration : IEntityTypeConfiguration<RolePermissi
             .HasConstraintName("FK_RolePermission_Role_RoleId").OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.Permission).WithMany(p => p.RolePermissions).HasForeignKey(x => x.PermissionId)
             .HasConstraintName("FK_RolePermission_Permission_PermissionId").OnDelete(DeleteBehavior.Restrict);
-        b.HasIndex(x => new { x.RoleId, x.PermissionId }).HasDatabaseName("UQ_RolePermission_role_permission").IsUnique();
+        // Filtered on isDeleted so a soft-deleted grant (physically retained by the audit interceptor) does
+        // not collide with a live re-add of the same (RoleId, PermissionId) — mirrors UQ_Role_tenant_name.
+        b.HasIndex(x => new { x.RoleId, x.PermissionId })
+            .HasDatabaseName("UQ_RolePermission_role_permission")
+            .IsUnique()
+            .HasFilter("[isDeleted] = 0");
     }
 }
 

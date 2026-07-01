@@ -1,3 +1,4 @@
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -127,7 +128,7 @@ public static class TenantSeeder
             return;
 
         var adminRole = await ctx.Roles.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => !r.IsDeleted && r.Name == "Admin"
+            .FirstOrDefaultAsync(r => !r.IsDeleted && r.Name == RoleNames.Admin
                                       && (r.TenantId == tenantId || r.TenantId == null), ct);
 
         var seccodeId = DeterministicId.From("Seccode.U", AdminUserCode);

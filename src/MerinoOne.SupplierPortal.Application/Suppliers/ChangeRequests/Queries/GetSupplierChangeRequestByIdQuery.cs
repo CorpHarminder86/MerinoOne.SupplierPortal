@@ -3,6 +3,7 @@ using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using Microsoft.EntityFrameworkCore;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Application.Suppliers.ChangeRequests.Queries;
 
@@ -25,7 +26,7 @@ public class GetSupplierChangeRequestByIdQueryHandler
     {
         // Reviewers open any request in their tenant (the queue spans companies); bypass seccode/company but
         // re-apply the tenant predicate. Suppliers stay seccode-scoped (404 on someone else's request).
-        var reviewer = _user.IsAdmin || _user.IsManager || _user.HasPermission("Supplier.ApproveChange");
+        var reviewer = _user.IsAdmin || _user.IsManager || _user.HasPermission(Perm.SupplierApproveChange);
         var reqs = reviewer
             ? _db.SupplierChangeRequests.IgnoreQueryFilters().Where(x => !x.IsDeleted && x.TenantId == _user.TenantId)
             : _db.SupplierChangeRequests.AsQueryable();

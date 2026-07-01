@@ -1,11 +1,10 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Roles.Common;
 using MerinoOne.SupplierPortal.Contracts.Users;
-using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using Microsoft.EntityFrameworkCore;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
-using ValidationException = MerinoOne.SupplierPortal.Application.Common.Exceptions.ValidationException;
 
 namespace MerinoOne.SupplierPortal.Application.Roles.Commands;
 
@@ -23,11 +22,16 @@ public class AssignPermissionsCommandHandler : IRequestHandler<AssignPermissions
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
+    private readonly RolePermissionWriter _writer;
+    private readonly IEffectivePermissionService _perms;
 
-    public AssignPermissionsCommandHandler(IAppDbContext db, ICurrentUser user)
+    public AssignPermissionsCommandHandler(
+        IAppDbContext db, ICurrentUser user, RolePermissionWriter writer, IEffectivePermissionService perms)
     {
         _db = db;
         _user = user;
+        _writer = writer;
+        _perms = perms;
     }
 
     public async Task<Unit> Handle(AssignPermissionsCommand request, CancellationToken ct)
@@ -36,47 +40,26 @@ public class AssignPermissionsCommandHandler : IRequestHandler<AssignPermissions
             .FirstOrDefaultAsync(r => r.Id == request.RoleId, ct)
             ?? throw new NotFoundException("Role", request.RoleId);
 
-        var requested = (request.Body.PermissionCodes ?? Array.Empty<string>())
-            .Where(c => !string.IsNullOrWhiteSpace(c))
-            .Distinct()
-            .ToHashSet(StringComparer.Ordinal);
-
-        var allPerms = await _db.Permissions.IgnoreQueryFilters()
-            .Select(p => new { p.Id, p.Code })
-            .ToListAsync(ct);
-        var permRows = allPerms.Where(p => requested.Contains(p.Code)).ToList();
-        var missing = requested.Except(permRows.Select(p => p.Code)).ToArray();
-        if (missing.Length > 0)
-        {
-            throw new ValidationException(new Dictionary<string, string[]>
-            {
-                ["permissionCodes"] = new[] { $"Unknown permissions: {string.Join(", ", missing)}." }
-            });
-        }
-
-        // Replace semantics: drop existing rows, insert the new set.
-        var existing = await _db.RolePermissions.IgnoreQueryFilters()
-            .Where(rp => rp.RoleId == role.Id)
-            .ToListAsync(ct);
-        _db.RolePermissions.RemoveRange(existing);
+        var permIds = await _writer.ResolveAsync(request.Body.PermissionCodes, ct);
 
         var actor = string.IsNullOrEmpty(_user.UserCode) ? "api" : _user.UserCode;
         var now = DateTime.UtcNow;
-        foreach (var p in permRows)
-        {
-            _db.RolePermissions.Add(new RolePermission
-            {
-                Id = Guid.NewGuid(),
-                RoleId = role.Id,
-                PermissionId = p.Id,
-                CreatedBy = actor,
-                CreatedOn = now
-            });
-        }
+
+        // Delta apply (resurrect / soft-delete / add) — no full-set churn, no unique-index collision.
+        await _writer.ApplyAsync(role.Id, permIds, actor, now, ct);
 
         role.UpdatedOn = now;
         role.UpdatedBy = actor;
         await _db.SaveChangesAsync(ct);
+
+        // Live RBAC (no relogin): evict every holder's cached permission set so the change applies on
+        // their next request.
+        var affected = await _db.UserRoles.IgnoreQueryFilters()
+            .Where(ur => ur.RoleId == role.Id && !ur.IsDeleted)
+            .Select(ur => ur.AppUserId)
+            .ToListAsync(ct);
+        await _perms.InvalidateAsync(affected, ct);
+
         return Unit.Value;
     }
 }

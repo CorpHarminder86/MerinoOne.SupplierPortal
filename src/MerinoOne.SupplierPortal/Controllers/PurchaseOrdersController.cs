@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ContractsPagedResult = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PurchaseOrderListItemDto>;
 using ContractsItemsToDeliverPaged = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.PurchaseOrders.ItemsToDeliverRowDto>;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -20,7 +21,7 @@ public class PurchaseOrdersController : ControllerBase
     public PurchaseOrdersController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "PurchaseOrder.Read")]
+    [Authorize(Policy = Perm.PurchaseOrderRead)]
     [EndpointSummary("Purchase order list")]
     [EndpointDescription(@"Paged list of purchase orders visible to the caller.
 Filters / params:
@@ -47,7 +48,7 @@ Returns: PagedResult<PurchaseOrderListItemDto>. Requires permission **PurchaseOr
     }
 
     [HttpGet("{id:guid}/history")]
-    [Authorize(Policy = "PurchaseOrder.Read")]
+    [Authorize(Policy = Perm.PurchaseOrderRead)]
     [EndpointSummary("Purchase order change history")]
     [EndpointDescription(@"Field-level audit trail for ONE purchase order — status transitions plus the qty /
 delivery-date changes proposed via a PO negotiation. Unlike the generic audit endpoint (Settings.Read, admins
@@ -60,7 +61,7 @@ only), this is gated on **PurchaseOrder.Read** and seccode-scoped, so a supplier
     }
 
     [HttpGet("items-to-deliver")]
-    [Authorize(Policy = "PurchaseOrder.Read")]
+    [Authorize(Policy = Perm.PurchaseOrderRead)]
     [EndpointSummary("Items to be delivered")]
     [EndpointDescription(@"Enhancement R4 — Module 8. Open PO lines grouped by (ItemCode, DeliveryDate), netted
 against received GRN qty. OpenQty = OrderQty − Σ GoodsReceipt.ReceivedQty. Open-PO statuses: Released,
@@ -88,7 +89,7 @@ Returns: PagedResult<ItemsToDeliverRowDto>. Requires permission **PurchaseOrder.
     }
 
     [HttpGet("schedule-calendar")]
-    [Authorize(Policy = "PurchaseOrder.Read")]
+    [Authorize(Policy = Perm.PurchaseOrderRead)]
     [EndpointSummary("PO schedule calendar")]
     [EndpointDescription(@"Enhancement R4 — Module 9. PO-line delivery dates inside a required [from, to] window,
 grouped PO-wise per date (one event per (Date, PO) carrying that PO's items + qty).
@@ -110,7 +111,7 @@ Returns: list of PoCalendarEventDto. Requires permission **PurchaseOrder.Read**.
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "PurchaseOrder.Read")]
+    [Authorize(Policy = Perm.PurchaseOrderRead)]
     [EndpointSummary("Purchase order detail")]
     [EndpointDescription(@"Full PO header + line items + delivery schedule + acknowledgement / proposal trail.
 Filters / params:
@@ -123,7 +124,7 @@ Returns: PurchaseOrderDetailDto on success; 404 if not found; 403 if seccode mis
     }
 
     [HttpPost("{id:guid}/acknowledge")]
-    [Authorize(Policy = "PurchaseOrder.Acknowledge")]
+    [Authorize(Policy = Perm.PurchaseOrderAcknowledge)]
     [EndpointSummary("Acknowledge PO")]
     [EndpointDescription(@"Supplier confirms receipt of a new PO (no commitment yet).
 Filters / params:
@@ -140,7 +141,7 @@ Returns: empty success; 404 if not found; 409 if not in acknowledgeable state. R
     }
 
     [HttpPost("{id:guid}/accept")]
-    [Authorize(Policy = "PurchaseOrder.Accept")]
+    [Authorize(Policy = Perm.PurchaseOrderAccept)]
     [EndpointSummary("Accept PO")]
     [EndpointDescription(@"Supplier commits to PO terms as issued (accept-only — a counter-proposal goes through PO negotiation).
 Filters / params:
@@ -158,7 +159,7 @@ Returns: empty success; 404 if not found; 409 if not in acceptable state. Requir
     }
 
     [HttpPost("{id:guid}/reject")]
-    [Authorize(Policy = "PurchaseOrder.Accept")]
+    [Authorize(Policy = Perm.PurchaseOrderAccept)]
     [EndpointSummary("Reject PO")]
     [EndpointDescription(@"Supplier declines a PO; buyer must amend or cancel.
 Filters / params:

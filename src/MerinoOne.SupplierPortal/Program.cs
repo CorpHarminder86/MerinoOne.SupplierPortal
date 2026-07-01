@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text;
 using MerinoOne.SupplierPortal.Application;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
@@ -133,6 +134,33 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = jwt["Issuer"],
             ValidAudience = jwt["Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["SigningKey"]!))
+        };
+
+        // No-relogin RBAC: permissions are NOT baked into the token. Once per request we
+        //   (1) reject a deactivated user immediately (lockout without waiting for token expiry), and
+        //   (2) enrich the principal with the user's CURRENT permission claims, resolved from a
+        //       short-TTL cache that is invalidated on every role/permission change.
+        // The PermissionRequirementHandler and ICurrentUser.HasPermission read these live "permission"
+        // claims exactly as before, so an admin's grant/revoke takes effect on the user's next request.
+        o.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async ctx =>
+            {
+                if (!Guid.TryParse(ctx.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var uid))
+                    return;
+                var sp = ctx.HttpContext.RequestServices;
+                var abort = ctx.HttpContext.RequestAborted;
+
+                if (!await sp.GetRequiredService<IUserStatusService>().IsActiveAsync(uid, abort))
+                {
+                    ctx.Fail("Account is deactivated.");
+                    return;
+                }
+
+                var held = await sp.GetRequiredService<IEffectivePermissionService>().GetAsync(uid, abort);
+                if (ctx.Principal!.Identity is ClaimsIdentity id)
+                    id.AddClaims(held.Select(code => new Claim("permission", code)));
+            }
         };
     })
     // Named, non-default "ApiKey" scheme for inbound integration (Infor LN). JWT stays the default

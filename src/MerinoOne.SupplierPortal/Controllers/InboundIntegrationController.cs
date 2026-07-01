@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Contracts.Integration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -30,7 +31,7 @@ public class InboundIntegrationController : ControllerBase
 
     [HttpPost("payment-terms")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.PaymentTerm")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundPaymentTerm)]
     [EndpointSummary("Push payment terms (Infor LN)")]
     [EndpointDescription(@"Upserts Payment Term master rows pushed by Infor LN.
 Auth: X-APIKey scheme; the key must carry the `Integration.Inbound.PaymentTerm` scope and be bound to the source company the body resolves to.
@@ -50,7 +51,7 @@ Behaviour: 200 + UpsertResultDto (per-row outcomes; partial failures flagged + a
 
     [HttpPost("delivery-terms")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.DeliveryTerm")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundDeliveryTerm)]
     [EndpointSummary("Push delivery terms (Infor LN)")]
     [EndpointDescription(@"Upserts Delivery Term master rows pushed by Infor LN.
 Auth: X-APIKey scheme; the key must carry the `Integration.Inbound.DeliveryTerm` scope and be bound to the source company the body resolves to.
@@ -72,35 +73,35 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
 
     [HttpPost("currencies")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Currency")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundCurrency)]
     [EndpointSummary("Push currencies (Infor LN)")]
     public async Task<Result<UpsertResultDto>> Currencies([FromBody] PushCurrenciesRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertCurrenciesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
     [HttpPost("countries")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Country")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundCountry)]
     [EndpointSummary("Push countries (Infor LN)")]
     public async Task<Result<UpsertResultDto>> Countries([FromBody] PushCountriesRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertCountriesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
     [HttpPost("states")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.State")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundState)]
     [EndpointSummary("Push states (Infor LN)")]
     public async Task<Result<UpsertResultDto>> States([FromBody] PushStatesRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertStatesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
     [HttpPost("cities")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.City")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundCity)]
     [EndpointSummary("Push cities (Infor LN)")]
     public async Task<Result<UpsertResultDto>> Cities([FromBody] PushCitiesRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertCitiesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
     [HttpPost("postal-codes")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.PostalCode")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundPostalCode)]
     [EndpointSummary("Push postal codes (Infor LN)")]
     public async Task<Result<UpsertResultDto>> PostalCodes([FromBody] PushPostalCodesRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertPostalCodesCommand(body, IdempotencyKey()), ct), HttpContext.TraceIdentifier);
@@ -109,21 +110,21 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
 
     [HttpPost("units")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Unit")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundUnit)]
     [EndpointSummary("Push units (Infor LN)")]
     public async Task<Result<UpsertResultDto>> Units([FromBody] PushUnitsRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertUnitsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
     [HttpPost("item-groups")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.ItemGroup")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundItemGroup)]
     [EndpointSummary("Push item groups (Infor LN)")]
     public async Task<Result<UpsertResultDto>> ItemGroups([FromBody] PushItemGroupsRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertItemGroupsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
     [HttpPost("items")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Item")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundItem)]
     [EndpointSummary("Push items (Infor LN)")]
     [EndpointDescription(@"Upserts company-scoped Item master rows pushed by Infor LN (ICompanyScoped, ERP-fed). CompanyCode is resolved + normalized to the share-group source; upsert keyed on (sourceId, Code). Unit + item group are referenced by code (resolved within the source company).
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.Item` and be bound to the source company the body resolves to.
@@ -140,7 +141,7 @@ Behaviour: 200 + UpsertResultDto (per-row Inserted/Updated/Failed); 400 unknown 
 
     [HttpPost("taxes")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Tax")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundTax)]
     [EndpointSummary("Push tax codes (Infor LN)")]
     [EndpointDescription(@"Upserts company-shared Tax master rows pushed by Infor LN (Q6: ICompanyScoped, ERP-fed). CompanyCode is resolved + normalized to the share-group source; upsert keyed on (sourceId, Code). PO/invoice lines resolve taxId by code.
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.Tax` and be bound to the source company the body resolves to.
@@ -153,7 +154,7 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
 
     [HttpPost("grn-status")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Grn")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundGrn)]
     [EndpointSummary("Push goods-receipt status (Infor LN)")]
     [EndpointDescription(@"Pushes goods-receipt (GRN) approval status from Infor LN. GRN status is ERP-owned (no portal approval).
 Auth: X-APIKey scheme; the key must carry the `Integration.Inbound.Grn` scope and be bound to the source company the body resolves to.
@@ -172,7 +173,7 @@ Behaviour: 200 + UpsertGrnStatusResultDto (per-row outcome + auto-posts-enqueued
 
     [HttpPost("payments")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Payment")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundPayment)]
     [EndpointSummary("Push payments / remittance (Infor LN)")]
     [EndpointDescription(@"Writes payment / remittance rows pushed by Infor LN (payments originate in the ERP). The invoice is resolved by invoiceErpSyncId (preferred) else invoiceNumber.
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.Payment` and be bound to the resolved company.
@@ -185,7 +186,7 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
 
     [HttpPost("invoice-status")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.InvoiceStatus")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundInvoiceStatus)]
     [EndpointSummary("Push invoice status (Infor LN)")]
     [EndpointDescription(@"Advances invoice status from Infor LN (Matched|MatchExceptions|Approved|Rejected|PartiallyPaid|Paid). The writer never regresses a portal-owned state (Draft/Submitted/Cancelled).
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.InvoiceStatus` and be bound to the resolved company.
@@ -198,7 +199,7 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / non-advanceable status /
 
     [HttpPost("erp-ack")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.ErpAck")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundErpAck)]
     [EndpointSummary("ERP acknowledgement / erpCode write-back (Infor LN)")]
     [EndpointDescription(@"The ERP acknowledges a Portal->ERP transaction and (on success) returns the entity's ERP code, written back to the matching record. Tenant-scoped (no CompanyCode).
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.ErpAck`.
@@ -214,7 +215,7 @@ Behaviour: on success resolves portalRef to exactly one outbox row of transactio
 
     [HttpPost("purchase-orders")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.Po")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundPo)]
     [EndpointSummary("Push purchase orders (Infor LN)")]
     [EndpointDescription(@"Creates/updates Purchase Orders (+ lines) pushed by Infor LN. PoNumber is the natural key within the resolved company; currency/payment-term/delivery-term/item/tax resolve by code (resolve-or-keep-snapshot). The owning supplier resolves from erpSupplierCode (matched on Supplier.ErpCode) OR supplierCode (matched on Supplier.SupplierCode); when both are present erpSupplierCode WINS, when neither is present the row is rejected (at least one required). The PO's seccode is the owning supplier's, so supplier users see it via RLS.
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.Po` and be bound to the resolved company.
@@ -227,7 +228,7 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / missing shipToAddress / 
 
     [HttpPost("delivery-schedules")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.DeliverySchedule")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundDeliverySchedule)]
     [EndpointSummary("Push delivery schedules (Infor LN)")]
     [EndpointDescription(@"Creates/updates PO delivery schedules (proposed dates) pushed by Infor LN. PO resolved by poNumber within the resolved company; upsert key = (PurchaseOrderId, ProposedDate).
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.DeliverySchedule` and be bound to the resolved company.
@@ -238,7 +239,7 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / unknown PO (per-row) / v
 
     [HttpPost("goods-receipts")]
     [RequestSizeLimit(2_000_000)]
-    [Authorize(AuthenticationSchemes = "ApiKey", Policy = "Integration.Inbound.GrnReceipt")]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundGrnReceipt)]
     [EndpointSummary("Push goods receipts / GRN rows (Infor LN)")]
     [EndpointDescription(@"Creates/updates goods-receipt (GRN) rows pushed by Infor LN, against a PO line resolved by (poNumber, poPositionNo). New GRNs land GrnNotApproved; the separate /grn-status endpoint then advances them (and triggers the invoice auto-post). GrnNumber is the natural key within the resolved company.
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.GrnReceipt` and be bound to the resolved company.

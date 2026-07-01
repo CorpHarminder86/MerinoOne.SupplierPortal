@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.PurchaseOrders.Negotiations.Queries;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -32,7 +33,7 @@ public class PoNegotiationsController : ControllerBase
     public PoNegotiationsController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "PurchaseOrder.Read")]
+    [Authorize(Policy = Perm.PurchaseOrderRead)]
     [EndpointSummary("List PO negotiations")]
     [EndpointDescription(@"Lists PO negotiations visible to the caller.
 Filters / params:
@@ -46,7 +47,7 @@ Returns: List<PoNegotiationListItemDto> ordered by submittedAt desc. Requires **
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "PurchaseOrder.Read")]
+    [Authorize(Policy = Perm.PurchaseOrderRead)]
     [EndpointSummary("PO negotiation detail")]
     [EndpointDescription(@"Full negotiation detail for the diff view: header + delta lines (original → negotiated qty / delivery date per changed PO line).
 Filters / params:
@@ -59,7 +60,7 @@ Returns: PoNegotiationDto; 404 if not found / not visible (seccode). Requires **
     }
 
     [HttpPost]
-    [Authorize(Policy = "PurchaseOrder.Negotiate")]
+    [Authorize(Policy = Perm.PurchaseOrderNegotiate)]
     [EndpointSummary("Raise a PO negotiation")]
     [EndpointDescription(@"Supplier raises a negotiation proposing revised qty / delivery date on PO lines. The live PO lines are NOT mutated.
 Body: CreatePoNegotiationRequest (purchaseOrderId, notes?, lines[]). Each line: purchaseOrderLineId, negotiatedQty (>0), negotiatedDeliveryDate?.
@@ -72,7 +73,7 @@ Returns: PoNegotiationDto; 404 if PO/supplier not found; 409 if PO not Released/
     }
 
     [HttpPost("{id:guid}/cancel")]
-    [Authorize(Policy = "PurchaseOrder.Negotiate")]
+    [Authorize(Policy = Perm.PurchaseOrderNegotiate)]
     [EndpointSummary("Cancel a PO negotiation")]
     [EndpointDescription(@"Supplier withdraws an in-flight negotiation (Submitted -> Cancelled). The PO reverts to its captured PreviousPoStatus. Nothing is pushed to ERP.
 Filters / params:
@@ -85,7 +86,7 @@ Returns: empty success; 404 if not found; 409 if not Submitted. Requires **Purch
     }
 
     [HttpPost("{id:guid}/approve")]
-    [Authorize(Policy = "PurchaseOrder.ApproveNegotiation")]
+    [Authorize(Policy = Perm.PurchaseOrderApproveNegotiation)]
     [EndpointSummary("Approve a PO negotiation")]
     [EndpointDescription(@"Buyer approves a submitted negotiation: negotiation -> Approved, PO.PoStatus -> Approved, and (same transaction) enqueues the ERP round-trip on the outbox (PoNegotiationApprove). The post-commit dispatcher POSTs the negotiated terms + writes the InforSyncLog. Local PO lines are NOT mutated (ERP re-syncs the revised PO inbound).
 Filters / params:
@@ -98,7 +99,7 @@ Returns: empty success; 404 if not found; 409 if not Submitted OR a concurrent a
     }
 
     [HttpPost("{id:guid}/reject")]
-    [Authorize(Policy = "PurchaseOrder.ApproveNegotiation")]
+    [Authorize(Policy = Perm.PurchaseOrderApproveNegotiation)]
     [EndpointSummary("Reject a PO negotiation")]
     [EndpointDescription(@"Buyer rejects a submitted negotiation (Submitted -> Rejected, reason stored). The PO reverts to its captured PreviousPoStatus (supplier again sees Ack/Accept/Reject/Negotiate). Nothing is pushed to ERP.
 Body: RejectPoNegotiationRequest (reason — required, <=1000).

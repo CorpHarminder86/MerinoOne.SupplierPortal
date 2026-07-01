@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Identity;
 
@@ -23,8 +24,8 @@ public class HttpContextCurrentUser : ICurrentUser
         Principal?.Claims.Where(c => c.Type == "permission").Select(c => c.Value).ToArray() ?? Array.Empty<string>();
 
     public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated == true;
-    public bool IsManager => Roles.Contains("Buyer") || Roles.Contains("Finance");
-    public bool IsAdmin => Roles.Contains("SuperAdmin") || Roles.Contains("Admin");
+    public bool IsManager => Roles.Contains(RoleNames.Buyer) || Roles.Contains(RoleNames.Finance);
+    public bool IsAdmin => Roles.Contains(RoleNames.SuperAdmin) || Roles.Contains(RoleNames.Admin);
     public bool HasPermission(string code) => Permissions.Contains(code);
 
     // The "tenant" claim is minted by AuthController.BuildSessionAsync (backend-developer). Parsed
@@ -32,5 +33,5 @@ public class HttpContextCurrentUser : ICurrentUser
     public Guid? TenantId =>
         Guid.TryParse(Principal?.FindFirst("tenant")?.Value, out var t) ? t : (Guid?)null;
 
-    public bool IsPlatformAdmin => Roles.Contains("PlatformAdmin");
+    public bool IsPlatformAdmin => Roles.Contains(RoleNames.PlatformAdmin);
 }

@@ -39,8 +39,13 @@ public class UpdateRoleCommandHandler : IRequestHandler<UpdateRoleCommand, Unit>
 
         if (!string.Equals(role.Name, request.Body.Name, StringComparison.Ordinal))
         {
+            // Scope the rename-conflict check to the role's own tenant + live rows, matching
+            // UQ_Role_tenant_name (TenantId, Name) WHERE isDeleted = 0.
             var owned = await _db.Roles.IgnoreQueryFilters()
-                .AnyAsync(r => r.Id != role.Id && r.Name == request.Body.Name, ct);
+                .AnyAsync(r => r.Id != role.Id
+                               && r.TenantId == role.TenantId
+                               && r.Name == request.Body.Name
+                               && !r.IsDeleted, ct);
             if (owned) throw new ConflictException($"Role '{request.Body.Name}' already exists.");
         }
 

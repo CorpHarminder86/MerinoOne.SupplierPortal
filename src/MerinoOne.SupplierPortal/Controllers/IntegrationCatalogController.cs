@@ -3,6 +3,7 @@ using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -18,7 +19,7 @@ namespace MerinoOne.SupplierPortal.Controllers;
 public class IntegrationCatalogController : ControllerBase
 {
     [HttpGet("catalog")]
-    [Authorize(Policy = "Integration.Read")]
+    [Authorize(Policy = Perm.IntegrationRead)]
     public Result<List<IntegrationEndpointDocDto>> Catalog()
         => Result<List<IntegrationEndpointDocDto>>.Ok(IntegrationCatalog.All.ToList(), HttpContext.TraceIdentifier);
 }

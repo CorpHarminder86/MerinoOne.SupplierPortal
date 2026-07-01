@@ -35,8 +35,14 @@ else
             </div>
         </header>
 
+        @if (catalog.Count == 0)
+        {
+            <div class="tl-empty">No assignable permissions found.</div>
+        }
+        else
+        {
         <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:16px;">
-            @foreach (var group in PermissionCatalog.GroupBy(p => p.Module).OrderBy(g => g.Key))
+            @foreach (var group in catalog.GroupBy(p => p.Module).OrderBy(g => g.Key))
             {
                 <div class="rz-card" style="padding:16px;">
                     <h3 style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--mer-blue-darker);text-transform:uppercase;letter-spacing:0.05em;">@group.Key</h3>
@@ -47,7 +53,8 @@ else
                             <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer;padding:4px 6px;border-radius:4px;">
                                 <input type="checkbox" checked="@ck" @onchange="@((ChangeEventArgs e) => Toggle(p.Code, (bool)(e.Value ?? false)))" />
                                 <div style="display:flex;flex-direction:column;gap:1px;min-width:0;">
-                                    <span style="font-family:Inter,monospace;font-weight:600;color:var(--mer-ink-900);">@p.Code</span>
+                                    <span style="font-weight:600;color:var(--mer-ink-900);">@p.Name</span>
+                                    <span style="font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-500);">@p.Code</span>
                                     <span style="font-size:11px;color:var(--mer-ink-500);">@p.Description</span>
                                 </div>
                             </label>
@@ -56,6 +63,7 @@ else
                 </div>
             }
         </div>
+        }
     </div>
 }
 
@@ -66,53 +74,17 @@ else
     private bool busy = false;
     private HashSet<string> selectedCodes = new();
 
-    private record PermDef(string Code, string Module, string Description);
+    // Single source of truth: the assignable-permission catalog is served by the backend
+    // (GET api/permissions, projected from the seeded admin.Permission rows) so this UI can
+    // never drift from the actual permission set. No hardcoded list.
+    private List<PermissionListItemDto> catalog = new();
 
-    // Curated catalog mirroring [Authorize(Policy = "...")] usage across controllers.
-    // Backend treats permissions as opaque claim values, so this list is the source of truth for the UI.
-    private static readonly PermDef[] PermissionCatalog = new[]
+    protected override async Task OnInitializedAsync()
     {
-        // Users / Roles
-        new PermDef("User.Read",            "Users",      "View users"),
-        new PermDef("User.Write",           "Users",      "Create, edit, deactivate users; set passwords"),
-        new PermDef("Role.Read",            "Users",      "View roles"),
-        new PermDef("Role.Write",           "Users",      "Create or edit roles and permissions"),
-        // Suppliers
-        new PermDef("Supplier.Read",        "Suppliers",  "View suppliers"),
-        new PermDef("Supplier.Write",       "Suppliers",  "Edit supplier details"),
-        new PermDef("Supplier.Invite",      "Suppliers",  "Send onboarding invites"),
-        new PermDef("Supplier.Approve",     "Suppliers",  "Approve a registering supplier"),
-        new PermDef("Supplier.VerifyNic",   "Suppliers",  "Run GST/PAN/MSME NIC verification"),
-        new PermDef("Supplier.Provision",   "Suppliers",  "Map portal users to supplier accounts"),
-        // Procurement
-        new PermDef("PurchaseOrder.Read",        "Procurement", "View purchase orders"),
-        new PermDef("PurchaseOrder.Acknowledge", "Procurement", "Acknowledge a released PO"),
-        new PermDef("PurchaseOrder.Accept",       "Procurement", "Accept / reject PO lines"),
-        new PermDef("PurchaseOrder.ApproveProposal","Procurement","Approve a date proposal"),
-        new PermDef("DeliverySchedule.Read",    "Procurement", "View delivery schedules"),
-        new PermDef("DeliverySchedule.Propose", "Procurement", "Propose alternate delivery dates"),
-        new PermDef("DeliverySchedule.Approve", "Procurement", "Approve proposed schedules"),
-        new PermDef("Asn.Read",  "Procurement", "View ASNs"),
-        new PermDef("Asn.Write", "Procurement", "Create / submit ASNs"),
-        new PermDef("Asn.Approve", "Procurement", "Approve / reject ASNs sent for approval"),
-        new PermDef("GoodsReceipt.Read", "Procurement", "View goods receipts"),
-        // Finance
-        new PermDef("Invoice.Read",    "Finance", "View invoices"),
-        new PermDef("Invoice.Submit",  "Finance", "Submit invoices"),
-        new PermDef("Invoice.Review",  "Finance", "Review invoices"),
-        new PermDef("Invoice.Approve", "Finance", "Approve / reject invoices"),
-        new PermDef("CreditDebitNote.Read",    "Finance", "View credit / debit notes"),
-        new PermDef("CreditDebitNote.Write",   "Finance", "Create or edit credit / debit notes"),
-        new PermDef("CreditDebitNote.Approve", "Finance", "Approve credit / debit notes"),
-        new PermDef("Payment.Read", "Finance", "View payment advice"),
-        // Settings & integration
-        new PermDef("Settings.Read",     "Settings", "View masters (delivery / payment / items)"),
-        new PermDef("Settings.Write",    "Settings", "Create or edit masters"),
-        new PermDef("Integration.Read",   "Settings", "View integration sync logs and errors"),
-        new PermDef("Integration.Manage", "Settings", "Replay / manage integration messages"),
-    };
-
-    protected override async Task OnInitializedAsync() => await Load();
+        var perms = await Api.GetAsync<List<PermissionListItemDto>>("api/permissions");
+        catalog = perms?.Data ?? new();
+        await Load();
+    }
 
     private async Task Load()
     {

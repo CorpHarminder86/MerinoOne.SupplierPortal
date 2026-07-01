@@ -963,7 +963,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("RoleId", "PermissionId")
                         .IsUnique()
-                        .HasDatabaseName("UQ_RolePermission_role_permission");
+                        .HasDatabaseName("UQ_RolePermission_role_permission")
+                        .HasFilter("[isDeleted] = 0");
 
                     b.ToTable("RolePermission", "admin");
                 });
@@ -1729,8 +1730,6 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
-                    b.HasIndex("RoleId");
-
                     b.HasIndex("Seq")
                         .IsUnique()
                         .HasDatabaseName("UX_UserRole_userRoleSeq");
@@ -1740,6 +1739,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.HasIndex("AppUserId", "RoleId")
                         .IsUnique()
                         .HasDatabaseName("UQ_UserRole_user_role");
+
+                    b.HasIndex("RoleId", "AppUserId")
+                        .HasDatabaseName("IX_UserRole_role_user");
 
                     b.ToTable("UserRole", "admin");
                 });

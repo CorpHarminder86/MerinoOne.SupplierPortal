@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.Platform.Queries;
 using MerinoOne.SupplierPortal.Contracts.Platform;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -14,7 +15,7 @@ namespace MerinoOne.SupplierPortal.Controllers;
 /// business-data permissions (separation of duties). Thin — delegates to MediatR.
 /// </summary>
 [ApiController]
-[Authorize(Policy = "Platform.Onboard")]
+[Authorize(Policy = Perm.PlatformOnboard)]
 [Route("api/platform")]
 public class PlatformController : ControllerBase
 {
@@ -22,7 +23,7 @@ public class PlatformController : ControllerBase
     public PlatformController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet("tenants")]
-    [Authorize(Policy = "Platform.Tenants")]
+    [Authorize(Policy = Perm.PlatformTenants)]
     [EndpointSummary("List tenants")]
     [EndpointDescription(@"Lists all tenants (cross-tenant) with their company counts.
 Filters / params:
@@ -47,7 +48,7 @@ Returns: GUID of the new tenant; 400 on validation; 409 if the name is taken. Re
     }
 
     [HttpGet("tenants/{tenantId:guid}/companies")]
-    [Authorize(Policy = "Platform.Tenants")]
+    [Authorize(Policy = Perm.PlatformTenants)]
     [EndpointSummary("List a tenant's companies")]
     [EndpointDescription(@"Lists the companies (TenantEntities / Infor LN logistic companies) for a given tenant.
 Filters / params:

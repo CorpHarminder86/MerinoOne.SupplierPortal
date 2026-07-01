@@ -8,6 +8,7 @@ using MerinoOne.SupplierPortal.Contracts.Shipments;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ContractsPagedResult = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Shipments.AsnListItemDto>;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -20,7 +21,7 @@ public class AsnsController : ControllerBase
     public AsnsController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Asn.Read")]
+    [Authorize(Policy = Perm.AsnRead)]
     [EndpointSummary("ASN list")]
     [EndpointDescription(@"Paged list of Advance Shipment Notices (ASNs) visible to the caller.
 Filters / params:
@@ -47,7 +48,7 @@ Returns: PagedResult<AsnListItemDto>. Requires permission **Asn.Read**.")]
     }
 
     [HttpGet("pending-approvals")]
-    [Authorize(Policy = "Asn.Approve")]
+    [Authorize(Policy = Perm.AsnApprove)]
     [EndpointSummary("ASN approval queue")]
     [EndpointDescription(@"R5 (review gap C2) — the ASNs awaiting approval, scoped by the SUPPLIER-USER MAPPING: an
 internal approver (all callers hold Asn.Approve — the endpoint is policy-gated) sees the PendingApproval ASNs of the
@@ -62,7 +63,7 @@ Returns: Result<List<AsnApprovalListItemDto>>. Requires permission **Asn.Approve
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "Asn.Read")]
+    [Authorize(Policy = Perm.AsnRead)]
     [EndpointSummary("ASN detail")]
     [EndpointDescription(@"Full ASN header + line items + linked PO references.
 Filters / params:
@@ -75,7 +76,7 @@ Returns: AsnDetailDto on success; 404 if not found; 403 if seccode mismatch. Req
     }
 
     [HttpPost]
-    [Authorize(Policy = "Asn.Write")]
+    [Authorize(Policy = Perm.AsnWrite)]
     [EndpointSummary("Create ASN (Draft)")]
     [EndpointDescription(@"Supplier creates a DRAFT ASN spanning one or more POs. NO ERP post on create.
 Body:
@@ -90,7 +91,7 @@ Returns: AsnDetailDto (Draft) on success; 400 on validation; 403 if seccode mism
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Policy = "Asn.Write")]
+    [Authorize(Policy = Perm.AsnWrite)]
     [EndpointSummary("Update ASN (Draft only)")]
     [EndpointDescription(@"Edits a DRAFT ASN (header + lines). Rejected (409) once the ASN is Submitted/Cancelled
 (lock-on-submit). Replaces the line set, re-snapshots PositionNo/SequenceNo, rebuilds the multi-PO junction.
@@ -102,7 +103,7 @@ Returns: AsnDetailDto on success; 404 if not found; 409 if not Draft. Requires *
     }
 
     [HttpPost("from-schedule")]
-    [Authorize(Policy = "Asn.Write")]
+    [Authorize(Policy = Perm.AsnWrite)]
     [EndpointSummary("Create ASN from delivery schedules (Draft)")]
     [EndpointDescription(@"R5 §9 — supplier creates a DRAFT ASN from selected Delivery Schedule lines. All selected
 schedules must share ONE ship-to (cross-ship-to is blocked, UC-AS-02) and ONE supplier; lines may span multiple POs
@@ -118,7 +119,7 @@ missing. Requires **Asn.Write**.")]
     }
 
     [HttpPost("{id:guid}/send-for-approval")]
-    [Authorize(Policy = "Asn.Write")]
+    [Authorize(Policy = Perm.AsnWrite)]
     [EndpointSummary("Send ASN for approval")]
     [EndpointDescription(@"R5 §10.2/§10.3 — supplier sends a DRAFT ASN for buyer approval (Draft -> PendingApproval).
 Runs the attachment-requirement check HERE (moved from Submit): a missing MANDATORY attachment blocks (400, names
@@ -135,7 +136,7 @@ mandatory-missing; 409 if not Draft. Requires **Asn.Write**.")]
     }
 
     [HttpPost("{id:guid}/approve")]
-    [Authorize(Policy = "Asn.Approve")]
+    [Authorize(Policy = Perm.AsnApprove)]
     [EndpointSummary("Approve ASN (buyer)")]
     [EndpointDescription(@"R5 §10.2/§10.4 — a mapped PO buyer approves a PendingApproval ASN. Any ONE of the ASN's PO
 buyers may approve (Phase 1). On approve the system runs the SUBMIT path: the over-ship atomic guard consumes
@@ -151,7 +152,7 @@ buyer; 409 if not PendingApproval. Requires **Asn.Approve**.")]
     }
 
     [HttpPost("{id:guid}/reject")]
-    [Authorize(Policy = "Asn.Approve")]
+    [Authorize(Policy = Perm.AsnApprove)]
     [EndpointSummary("Reject ASN (buyer)")]
     [EndpointDescription(@"R5 §10.2 — a mapped PO buyer rejects a PendingApproval ASN with a MANDATORY reason
 (PendingApproval -> Rejected). No balance was consumed, so no reversal is needed; the supplier edits the ASN
@@ -165,7 +166,7 @@ PendingApproval. Requires **Asn.Approve**.")]
     }
 
     [HttpPost("{id:guid}/cancel")]
-    [Authorize(Policy = "Asn.Write")]
+    [Authorize(Policy = Perm.AsnWrite)]
     [EndpointSummary("Cancel ASN")]
     [EndpointDescription(@"Cancels an ASN (Draft or Submitted -> Cancelled). Terminal for supplier edits.
 Returns: empty success; 404 if not found; 409 if already Cancelled. Requires **Asn.Write**.")]

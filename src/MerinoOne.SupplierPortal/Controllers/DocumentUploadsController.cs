@@ -2,6 +2,7 @@ using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Application.Common.Security;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 using MerinoOne.SupplierPortal.Contracts.SupplierRegistration;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
@@ -143,7 +144,7 @@ public class DocumentUploadsController : ControllerBase
     /// Write access is enforced via <see cref="SupplierWriteGuard"/> on <paramref name="supplierId"/>'s seccode.
     /// </summary>
     [HttpPost("attach")]
-    [Authorize(Policy = "Supplier.Write")]
+    [Authorize(Policy = Perm.SupplierWrite)]
     [RequestSizeLimit(MaxBytes + 4096)]
     [EndpointSummary("Attach a document to a supplier license or ASN (authenticated)")]
     [EndpointDescription(@"Uploads a file and binds it to a SupplierLicense (ownerEntityType='SupplierLicense'), a
@@ -289,7 +290,7 @@ Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
     /// Seccode-scoped by the always-on RLS filter, so callers only ever see their own supplier's rows.
     /// </summary>
     [HttpGet("by-license/{licenseId:guid}")]
-    [Authorize(Policy = "Supplier.Write")]
+    [Authorize(Policy = Perm.SupplierWrite)]
     [EndpointSummary("List a license's attachments (authenticated)")]
     [EndpointDescription(@"Returns the documents attached to a SupplierLicense. Seccode-scoped (RLS). Returns
 List<DocumentAttachmentDto> ordered by upload time. Requires **Supplier.Write**.")]
@@ -311,7 +312,7 @@ List<DocumentAttachmentDto> ordered by upload time. Requires **Supplier.Write**.
     /// so allowed regardless of the ASN's draft/submit state (the lock applies to attach/delete, not view).
     /// </summary>
     [HttpGet("by-asn/{asnId:guid}")]
-    [Authorize(Policy = "Asn.Read")]
+    [Authorize(Policy = Perm.AsnRead)]
     [EndpointSummary("List an ASN's attachments (authenticated)")]
     [EndpointDescription(@"Returns the documents attached to an ASN (ownerEntityType='Asn'). Seccode-scoped (RLS).
 Returns List<DocumentAttachmentDto> ordered by upload time. Requires **Asn.Read**.")]
@@ -333,7 +334,7 @@ Returns List<DocumentAttachmentDto> ordered by upload time. Requires **Asn.Read*
     /// (a user discarding a draft upload). ASN-owned attachments are LOCKED once the ASN is Submitted.
     /// </summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Policy = "Supplier.Write")]
+    [Authorize(Policy = Perm.SupplierWrite)]
     [EndpointSummary("Delete a document attachment (authenticated, soft-delete)")]
     [EndpointDescription(@"Soft-deletes a DocumentUpload (SupplierLicense, Asn or Staging owned). canWrite-gated
 against the owning supplier's seccode (403). ASN attachments are locked once the ASN is Submitted. Returns empty
@@ -430,7 +431,7 @@ success; 404 if not found; 409 if the owning ASN is locked. Requires **Supplier.
         // filters, NOT tenant isolation: re-apply BOTH !IsDeleted AND TenantId == the caller's tenant so an
         // internal user can never read another tenant's document by GUID. A supplier principal stays fully
         // seccode-scoped (its own docs only).
-        var internalViewer = !user.Roles.Contains("Supplier");
+        var internalViewer = !user.Roles.Contains(RoleNames.Supplier);
         var doc = internalViewer
             ? await _db.DocumentUploads.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted && d.TenantId == user.TenantId, ct)

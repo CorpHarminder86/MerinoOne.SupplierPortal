@@ -87,6 +87,14 @@ public static class DependencyInjection
         // twice; Microsoft.Extensions registers a single MemoryCache + IMemoryCache pair.
         services.AddMemoryCache();
 
+        // Distributed cache backs the effective-permission + active-status resolvers (short 60s TTL +
+        // explicit invalidate-on-write). This single-node in-memory impl is correct for one instance;
+        // for a multi-instance deployment swap to AddStackExchangeRedisCache so an invalidation on one
+        // node evicts every node (a per-node cache would otherwise serve stale perms up to the TTL).
+        services.AddDistributedMemoryCache();
+        services.AddScoped<IEffectivePermissionService, EffectivePermissionService>();
+        services.AddScoped<IUserStatusService, UserStatusService>();
+
         // Admin-editable email template renderer (used by the TemplateAwareEmailService
         // decorator below, and by the test-send command in the EmailTemplates admin endpoints).
         services.AddScoped<IEmailTemplateRenderer, EmailTemplateRenderer>();

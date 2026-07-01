@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ContractsPagedResult = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Payments.PaymentListItemDto>;
 using ContractsPaymentSummaryPaged = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Payments.PaymentSummaryRowDto>;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -18,7 +19,7 @@ public class PaymentsController : ControllerBase
     public PaymentsController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Payment.Read")]
+    [Authorize(Policy = Perm.PaymentRead)]
     [EndpointSummary("Payment list")]
     [EndpointDescription(@"Paged list of payments dispatched (or scheduled) to suppliers.
 Filters / params:
@@ -43,7 +44,7 @@ Returns: PagedResult<PaymentListItemDto>. Requires permission **Payment.Read**."
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "Payment.Read")]
+    [Authorize(Policy = Perm.PaymentRead)]
     [EndpointSummary("Payment detail")]
     [EndpointDescription(@"Full payment record including allocations and bank details.
 Filters / params:
@@ -56,7 +57,7 @@ Returns: PaymentDetailDto on success; 404 if not found; 403 if seccode mismatch.
     }
 
     [HttpGet("summary")]
-    [Authorize(Policy = "Payment.Read")]
+    [Authorize(Policy = Perm.PaymentRead)]
     [EndpointSummary("Payment summary")]
     [EndpointDescription(@"Enhancement R4 — Module 7. Paged invoice-centric payment summary (one row per invoice).
 Columns: InvoiceNumber, InvoiceDate, InvoiceAmount (NetAmount), GrnNumber, GrnDate, GrnCount, IssueReported,
@@ -86,7 +87,7 @@ Returns: PagedResult<PaymentSummaryRowDto>. Requires permission **Payment.Read**
     }
 
     [HttpGet("{id:guid}/remittance")]
-    [Authorize(Policy = "Payment.Read")]
+    [Authorize(Policy = Perm.PaymentRead)]
     [EndpointSummary("Payment remittance")]
     [EndpointDescription(@"Remittance advice for a single payment — printable summary of invoice allocations.
 Filters / params:

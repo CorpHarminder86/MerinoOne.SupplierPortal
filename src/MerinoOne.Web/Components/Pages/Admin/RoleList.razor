@@ -11,7 +11,7 @@
         <div>
             <div class="tl-title-row">
                 <h1 class="tl-title">Roles</h1>
-                <span class="tl-count-chip">@(roles?.Count ?? 0)</span>
+                <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
             </div>
             <p class="tl-sub">Role definitions and their permission grants</p>
         </div>
@@ -30,7 +30,7 @@
     {
         <div class="tl-empty">Loading…</div>
     }
-    else if (roles == null || roles.Count == 0)
+    else if (paged == null || paged.Items.Count == 0)
     {
         <div class="tl-empty">
             <span class="material-symbols-outlined" style="font-size:32px;">admin_panel_settings</span>
@@ -45,7 +45,7 @@
                 <div class="tlg-col tlg-col--num">Permissions</div>
                 <div class="tlg-col tlg-col--num">Users</div>
             </div>
-            @foreach (var r in roles)
+            @foreach (var r in paged.Items)
             {
                 <div class="tlg-row" @onclick="() => OpenDetail(r.Id)" style="cursor:pointer">
                     <div class="tlg-col tlg-name">@r.Name</div>
@@ -54,6 +54,8 @@
                 </div>
             }
         </div>
+
+        <Pager Page="page" PageSize="PageSize" TotalCount="paged.TotalCount" PageChanged="OnPageChanged" />
     }
 </div>
 
@@ -89,22 +91,26 @@
 }
 
 @code {
-    private List<RoleListItemDto>? roles;
+    private PagedResult<RoleListItemDto>? paged;
     private bool loading = true;
     private bool showNew;
     private string newName = string.Empty;
     private string newError = string.Empty;
     private bool busy;
+    private int page = 1;
+    private const int PageSize = 50;
 
     protected override async Task OnInitializedAsync() => await Load();
 
     private async Task Load()
     {
         loading = true;
-        var resp = await Api.GetAsync<List<RoleListItemDto>>("api/roles");
-        roles = resp?.Data ?? new();
+        var resp = await Api.GetAsync<PagedResult<RoleListItemDto>>($"api/roles?page={page}&pageSize={PageSize}");
+        paged = resp?.Data;
         loading = false;
     }
+
+    private async Task OnPageChanged(int newPage) { page = newPage; await Load(); }
 
     private void OpenNew() { newName = string.Empty; newError = string.Empty; showNew = true; }
     private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/admin/roles/{id}");

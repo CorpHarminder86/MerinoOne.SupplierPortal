@@ -66,6 +66,10 @@ public static class DependencyInjection
         // the material-Modify re-confirmation path. Idempotent, so calling it from multiple sites is safe. Scoped
         // (per-request IAppDbContext); the caller owns the surrounding SaveChanges.
         services.AddScoped<PurchaseOrders.DeliverySchedules.DeliveryScheduleFactory>();
+
+        // RBAC — shared resolve/validate + collision-free diff writer for role↔permission rows, used by
+        // CreateRole and AssignPermissions so the rules live in exactly one place. Scoped (per-request IAppDbContext).
+        services.AddScoped<Roles.Common.RolePermissionWriter>();
         return services;
     }
 }

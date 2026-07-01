@@ -4,6 +4,7 @@ using MerinoOne.SupplierPortal.Application.Integration.ApiKeys;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -21,7 +22,7 @@ public class ApiKeysController : ControllerBase
     public ApiKeysController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Integration.Read")]
+    [Authorize(Policy = Perm.IntegrationRead)]
     [EndpointSummary("List API keys")]
     [EndpointDescription(@"Lists the current tenant's inbound API keys (metadata only — never the hash or plaintext).
 Filters / params:
@@ -34,7 +35,7 @@ Returns: List<ApiKeyDto>. Requires permission **Integration.Read**.")]
     }
 
     [HttpPost]
-    [Authorize(Policy = "Integration.ApiKeys")]
+    [Authorize(Policy = Perm.IntegrationApiKeys)]
     [EndpointSummary("Create API key")]
     [EndpointDescription(@"Mints a new inbound API key bound to one or more source companies + endpoint scopes (Enhancement Round 2 / Feature C — multi-company keys).
 Body:
@@ -49,7 +50,7 @@ Returns: ApiKeySecretDto with the one-time plaintext key + bound CompanyIds/Comp
     }
 
     [HttpPost("{id:guid}/rotate")]
-    [Authorize(Policy = "Integration.ApiKeys")]
+    [Authorize(Policy = Perm.IntegrationApiKeys)]
     [EndpointSummary("Rotate API key")]
     [EndpointDescription(@"Rotates a key: mints a successor (same tenant/company/scopes/expiry) and revokes the predecessor.
 Filters / params:
@@ -64,7 +65,7 @@ Returns: ApiKeySecretDto with the successor's one-time plaintext key; 404 if not
     }
 
     [HttpPost("{id:guid}/revoke")]
-    [Authorize(Policy = "Integration.ApiKeys")]
+    [Authorize(Policy = Perm.IntegrationApiKeys)]
     [EndpointSummary("Revoke API key")]
     [EndpointDescription(@"Revokes a key immediately — subsequent inbound requests with it return 401.
 Filters / params:

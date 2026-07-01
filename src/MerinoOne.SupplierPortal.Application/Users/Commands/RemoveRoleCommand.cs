@@ -10,7 +10,13 @@ public record RemoveRoleCommand(Guid UserId, Guid RoleId) : IRequest<Unit>;
 public class RemoveRoleCommandHandler : IRequestHandler<RemoveRoleCommand, Unit>
 {
     private readonly IAppDbContext _db;
-    public RemoveRoleCommandHandler(IAppDbContext db) => _db = db;
+    private readonly IEffectivePermissionService _perms;
+
+    public RemoveRoleCommandHandler(IAppDbContext db, IEffectivePermissionService perms)
+    {
+        _db = db;
+        _perms = perms;
+    }
 
     public async Task<Unit> Handle(RemoveRoleCommand request, CancellationToken ct)
     {
@@ -20,6 +26,9 @@ public class RemoveRoleCommandHandler : IRequestHandler<RemoveRoleCommand, Unit>
 
         _db.UserRoles.Remove(link);
         await _db.SaveChangesAsync(ct);
+
+        // Live RBAC (no relogin): revoking a role removes its permissions on the user's NEXT request.
+        await _perms.InvalidateAsync(new[] { request.UserId }, ct);
         return Unit.Value;
     }
 }

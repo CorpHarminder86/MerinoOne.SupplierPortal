@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.Communication.Queries;
 using MerinoOne.SupplierPortal.Contracts.Communication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -52,7 +53,7 @@ Returns: List<MessageRecipientDto>, tenant-scoped.")]
     }
 
     [HttpPost("messages")]
-    [Authorize(Policy = "Communication.Write")]
+    [Authorize(Policy = Perm.CommunicationWrite)]
     [EndpointSummary("Send message")]
     [EndpointDescription(@"Posts a new message into an existing thread, or starts a new thread.
 Body:
@@ -67,7 +68,7 @@ Returns: MessageDto on success; 400 on validation; 403 if caller is not a partic
     }
 
     [HttpPost("messages/{id:guid}/read")]
-    [Authorize(Policy = "Communication.Read")]
+    [Authorize(Policy = Perm.CommunicationRead)]
     [EndpointSummary("Mark message read")]
     [EndpointDescription(@"Flags a single message as read by the current user.
 Filters / params:

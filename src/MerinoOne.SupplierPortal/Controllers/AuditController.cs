@@ -4,6 +4,7 @@ using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Contracts.Audit;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -19,7 +20,7 @@ public class AuditController : ControllerBase
     /// Field-level audit trail for one entity row. Gated on <c>Settings.Read</c> (admins only).
     /// </summary>
     [HttpGet("{entityName}/{id:guid}")]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("Audit trail")]
     [EndpointDescription(@"Returns field-level change history (Before/After values) captured by the audit interceptor.
 Filters / params:

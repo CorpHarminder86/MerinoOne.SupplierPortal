@@ -13,11 +13,13 @@ public class AssignRoleCommandHandler : IRequestHandler<AssignRoleCommand, Unit>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
+    private readonly IEffectivePermissionService _perms;
 
-    public AssignRoleCommandHandler(IAppDbContext db, ICurrentUser user)
+    public AssignRoleCommandHandler(IAppDbContext db, ICurrentUser user, IEffectivePermissionService perms)
     {
         _db = db;
         _user = user;
+        _perms = perms;
     }
 
     public async Task<Unit> Handle(AssignRoleCommand request, CancellationToken ct)
@@ -60,6 +62,10 @@ public class AssignRoleCommandHandler : IRequestHandler<AssignRoleCommand, Unit>
         }
 
         await _db.SaveChangesAsync(ct);
+
+        // Live RBAC (no relogin): the user's effective permissions changed with the new role — evict
+        // their cache so it applies on the next request.
+        await _perms.InvalidateAsync(new[] { user.Id }, ct);
         return Unit.Value;
     }
 }

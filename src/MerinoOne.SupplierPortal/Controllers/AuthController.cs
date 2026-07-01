@@ -4,6 +4,7 @@ using System.Text;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Contracts.Auth;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Infrastructure.Identity;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
@@ -255,7 +256,9 @@ Returns: LoginResponse with token + roles + permissions; 401 on expired/invalid/
         if (user.MustChangePassword)
             claims.Add(new Claim("must_change_password", "true"));
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        claims.AddRange(perms.Select(p => new Claim("permission", p)));
+        // NOTE: permissions are deliberately NOT baked into the token. They are resolved live per request
+        // (JWT OnTokenValidated → IEffectivePermissionService) so an admin's grant/revoke applies without a
+        // relogin, and the token stays small. `perms` is still returned in the LoginResponse body below.
 
         // Tenant claim — the single fixed tenant this user belongs to. Omitted for a Platform Admin
         // (TenantId is null); HttpContextCurrentUser.IsPlatformAdmin is driven by the role claim and
@@ -268,7 +271,7 @@ Returns: LoginResponse with token + roles + permissions; 401 on expired/invalid/
         //    active company in the tenant (no per-company claim needed; access is implicit-all).
         //  - Regular user: one "company=<tenantEntityId>" claim per ACTIVE UserCompanyMap.
         // A Platform Admin gets none (no business-data access).
-        var isTenantAdmin = roles.Contains("SuperAdmin") || roles.Contains("Admin");
+        var isTenantAdmin = roles.Contains(RoleNames.SuperAdmin) || roles.Contains(RoleNames.Admin);
         if (user.TenantId.HasValue)
         {
             if (isTenantAdmin)
@@ -341,8 +344,8 @@ Returns: anonymous diagnostic payload; 401 if not authenticated. Requires authen
                                      where u.UserCode == userCode
                                      select new { s.SupplierCode, s.LegalName }).ToListAsync(ct);
 
-        var isAdmin = roles.Contains("SuperAdmin") || roles.Contains("Admin");
-        var isManager = roles.Contains("Buyer") || roles.Contains("Finance");
+        var isAdmin = roles.Contains(RoleNames.SuperAdmin) || roles.Contains(RoleNames.Admin);
+        var isManager = roles.Contains(RoleNames.Buyer) || roles.Contains(RoleNames.Finance);
         var willSeeAll = isAdmin || isManager || string.IsNullOrEmpty(userCode);
 
         return Ok(new

@@ -2,6 +2,7 @@ using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using Microsoft.EntityFrameworkCore;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Negotiations.Queries;
 
@@ -23,7 +24,7 @@ public class GetPoNegotiationListQueryHandler
 
     public async Task<List<PoNegotiationListItemDto>> Handle(GetPoNegotiationListQuery request, CancellationToken ct)
     {
-        var reviewer = _user.IsAdmin || _user.IsManager || _user.HasPermission("PurchaseOrder.ApproveNegotiation");
+        var reviewer = _user.IsAdmin || _user.IsManager || _user.HasPermission(Perm.PurchaseOrderApproveNegotiation);
         var q = reviewer
             ? _db.PurchaseOrderNegotiations.IgnoreQueryFilters().Where(n => !n.IsDeleted && n.TenantId == _user.TenantId)
             : _db.PurchaseOrderNegotiations.AsQueryable();

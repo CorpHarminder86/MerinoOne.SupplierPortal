@@ -6,6 +6,8 @@ using MerinoOne.SupplierPortal.Contracts.Auth;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
+using UsersPaged = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Users.UserListItemDto>;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -18,26 +20,31 @@ public class UsersController : ControllerBase
     public UsersController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "User.Read")]
+    [Authorize(Policy = Perm.UserRead)]
     [EndpointSummary("User list")]
-    [EndpointDescription(@"Lists application users matching the supplied filters.
+    [EndpointDescription(@"Lists application users matching the supplied filters (paged).
 Filters / params:
+- **page**: Optional — 1-based page number (default 1).
+- **pageSize**: Optional — rows per page (default 50, max 200).
 - **search**: Optional — free-text on user code / name / email.
 - **isInternal**: Optional — true = internal buyer users, false = supplier users.
 - **isActive**: Optional — true = active only, false = inactive only.
-Returns: List<UserListItemDto>. Requires permission **User.Read**.")]
-    public async Task<Result<List<UserListItemDto>>> List(
+Returns: PagedResult<UserListItemDto> (Items + Page/PageSize/TotalCount/TotalPages). Requires permission **User.Read**.")]
+    public async Task<Result<UsersPaged>> List(
+        [FromQuery] int page,
+        [FromQuery] int pageSize,
         [FromQuery] string? search,
         [FromQuery] bool? isInternal,
         [FromQuery] bool? isActive,
         CancellationToken ct)
     {
-        var data = await _mediator.Send(new GetUserListQuery(search, isInternal, isActive), ct);
-        return Result<List<UserListItemDto>>.Ok(data, HttpContext.TraceIdentifier);
+        var data = await _mediator.Send(
+            new GetUserListQuery(page < 1 ? 1 : page, pageSize < 1 ? 50 : pageSize, search, isInternal, isActive), ct);
+        return Result<UsersPaged>.Ok(data, HttpContext.TraceIdentifier);
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "User.Read")]
+    [Authorize(Policy = Perm.UserRead)]
     [EndpointSummary("User detail")]
     [EndpointDescription(@"Full user profile + assigned roles + supplier mappings.
 Filters / params:
@@ -50,7 +57,7 @@ Returns: UserDetailDto on success; 404 if not found. Requires permission **User.
     }
 
     [HttpPost]
-    [Authorize(Policy = "User.Write")]
+    [Authorize(Policy = Perm.UserWrite)]
     [EndpointSummary("Create user")]
     [EndpointDescription(@"Provisions a new application user.
 Body:
@@ -65,7 +72,7 @@ Returns: GUID of the newly created user; 400 on validation; 409 if user code alr
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Policy = "User.Write")]
+    [Authorize(Policy = Perm.UserWrite)]
     [EndpointSummary("Update user")]
     [EndpointDescription(@"Updates profile fields on an existing user.
 Filters / params:
@@ -80,7 +87,7 @@ Returns: empty success; 404 if not found; 400 on validation. Requires permission
     }
 
     [HttpPost("{id:guid}/roles")]
-    [Authorize(Policy = "User.Write")]
+    [Authorize(Policy = Perm.UserWrite)]
     [EndpointSummary("Assign role")]
     [EndpointDescription(@"Grants one role to a user.
 Filters / params:
@@ -97,7 +104,7 @@ Returns: empty success; 404 if user or role not found; 409 if already assigned. 
     }
 
     [HttpDelete("{id:guid}/roles/{roleId:guid}")]
-    [Authorize(Policy = "User.Write")]
+    [Authorize(Policy = Perm.UserWrite)]
     [EndpointSummary("Remove role")]
     [EndpointDescription(@"Revokes a role from a user.
 Filters / params:
@@ -113,7 +120,7 @@ Returns: empty success; 404 if mapping not found. Requires permission **User.Wri
     }
 
     [HttpPost("{id:guid}/supplier-maps")]
-    [Authorize(Policy = "Supplier.Provision")]
+    [Authorize(Policy = Perm.SupplierProvision)]
     [EndpointSummary("Map user to supplier")]
     [EndpointDescription(@"Links a supplier user to one or more suppliers (drives seccode-scoped data visibility).
 Filters / params:
@@ -130,7 +137,7 @@ Returns: empty success; 404 if user or supplier not found. Requires permission *
     }
 
     [HttpDelete("{id:guid}/supplier-maps/{supplierId:guid}")]
-    [Authorize(Policy = "Supplier.Provision")]
+    [Authorize(Policy = Perm.SupplierProvision)]
     [EndpointSummary("Unmap user from supplier")]
     [EndpointDescription(@"Removes a user's mapping to a supplier (revokes seccode-scoped access).
 Filters / params:
@@ -146,7 +153,7 @@ Returns: empty success; 404 if mapping not found. Requires permission **Supplier
     }
 
     [HttpPut("{id:guid}/supplier-maps")]
-    [Authorize(Policy = "Supplier.Provision")]
+    [Authorize(Policy = Perm.SupplierProvision)]
     [EndpointSummary("Bulk set user supplier maps for a company")]
     [EndpointDescription(@"Reconciles a user's supplier maps for ONE company as a diff (Enhancement Round 2 / Feature B).
 Filters / params:
@@ -165,7 +172,7 @@ Returns: empty success; 404 if user/company/supplier not found; 409 if a supplie
     }
 
     [HttpPost("{id:guid}/company-maps")]
-    [Authorize(Policy = "Supplier.Provision")]
+    [Authorize(Policy = Perm.SupplierProvision)]
     [EndpointSummary("Grant user full-access company")]
     [EndpointDescription(@"Grants a user DIRECT FULL access to a company — every supplier in it, incl. future ones (Enhancement Round 2 / Feature A).
 Filters / params:
@@ -182,7 +189,7 @@ Returns: empty success; 404 if user/company not found; 409 if the company belong
     }
 
     [HttpDelete("{id:guid}/company-maps/{tenantEntityId:guid}")]
-    [Authorize(Policy = "Supplier.Provision")]
+    [Authorize(Policy = Perm.SupplierProvision)]
     [EndpointSummary("Revoke user company access")]
     [EndpointDescription(@"Removes a user's access to one company (soft-deletes the UserCompanyMap). If the removed company was the user's default active company, the default is moved to another remaining company.
 Filters / params:
@@ -198,7 +205,7 @@ Returns: empty success; 404 if no active mapping. Requires permission **Supplier
     }
 
     [HttpPost("{id:guid}/password")]
-    [Authorize(Policy = "User.Write")]
+    [Authorize(Policy = Perm.UserWrite)]
     [EndpointSummary("Set user password (admin)")]
     [EndpointDescription(@"Admin sets / resets another user's password.
 Filters / params:
@@ -234,7 +241,7 @@ Returns: empty success; 400 if current password mismatch or policy violation. An
     }
 
     [HttpPost("{id:guid}/deactivate")]
-    [Authorize(Policy = "User.Write")]
+    [Authorize(Policy = Perm.UserWrite)]
     [EndpointSummary("Deactivate user")]
     [EndpointDescription(@"Marks a user as inactive — blocks future logins without deleting history.
 Filters / params:
@@ -249,7 +256,7 @@ Returns: empty success; 404 if not found. Requires permission **User.Write**.")]
     }
 
     [HttpPost("{id:guid}/reactivate")]
-    [Authorize(Policy = "User.Write")]
+    [Authorize(Policy = Perm.UserWrite)]
     [EndpointSummary("Reactivate user")]
     [EndpointDescription(@"Restores a previously deactivated user.
 Filters / params:

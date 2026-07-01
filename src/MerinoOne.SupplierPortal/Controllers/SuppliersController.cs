@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.Suppliers.Queries;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -37,7 +38,7 @@ Returns: List<SupplierListItemDto> ordered by legal name.")]
     }
 
     [HttpGet("for-mapping")]
-    [Authorize(Policy = "Supplier.Provision")]
+    [Authorize(Policy = Perm.SupplierProvision)]
     [EndpointSummary("Suppliers for the user-mapping picker")]
     [EndpointDescription(@"Lists a company's suppliers for the admin ""manage supplier maps"" dialog. Unlike GET /api/suppliers,
 this is NOT filtered by the header's active company (X-Active-Company) — admin user↔supplier mapping is tenant-wide config,
@@ -68,7 +69,7 @@ Returns: SupplierDetailDto on success; 404 if not found; 403 if seccode mismatch
     }
 
     [HttpPost("{id:guid}/verify-nic")]
-    [Authorize(Policy = "Supplier.Approve")]
+    [Authorize(Policy = Perm.SupplierApprove)]
     [EndpointSummary("Verify supplier NIC")]
     [EndpointDescription(@"Runs NIC / national-ID verification against the supplier's registered identifiers.
 Filters / params:
@@ -97,7 +98,7 @@ Returns: List<SupplierVerificationDto> ordered chronologically; 404 if supplier 
     }
 
     [HttpPost("{id:guid}/approve")]
-    [Authorize(Policy = "Supplier.Approve")]
+    [Authorize(Policy = Perm.SupplierApprove)]
     [EndpointSummary("Approve supplier")]
     [EndpointDescription(@"Buyer-side approval of a supplier's onboarding submission.
 Filters / params:
@@ -123,7 +124,7 @@ missing; 409 if not in approvable state.")]
     }
 
     [HttpPost("{id:guid}/reject")]
-    [Authorize(Policy = "Supplier.Approve")]
+    [Authorize(Policy = Perm.SupplierApprove)]
     [EndpointSummary("Reject supplier")]
     [EndpointDescription(@"Buyer-side rejection of a supplier onboarding submission.
 Filters / params:
@@ -143,7 +144,7 @@ Returns: empty success; 404 if not found; 409 if not in rejectable state.")]
     // ---------------- Bank details (R4 Module 1) ----------------
 
     [HttpPost("{id:guid}/bank-details")]
-    [Authorize(Policy = "Supplier.Write")]
+    [Authorize(Policy = Perm.SupplierWrite)]
     [EndpointSummary("Add supplier bank detail")]
     [EndpointDescription(@"Adds a bank account to a supplier. Seccode.canWrite is enforced in the handler (403 on mismatch).
 Body: AddSupplierBankDetailRequest — all six fields required (bankName, bankAddress, accountName, accountNumber, currencyId, ifscCode);
@@ -155,7 +156,7 @@ IFSC must match ^[A-Z]{4}0[A-Z0-9]{6}$ and is required for INR. Returns Supplier
     }
 
     [HttpPut("{id:guid}/bank-details/{bankDetailId:guid}")]
-    [Authorize(Policy = "Supplier.Write")]
+    [Authorize(Policy = Perm.SupplierWrite)]
     [EndpointSummary("Update supplier bank detail")]
     [EndpointDescription(@"Updates a supplier bank account. canWrite-gated (403). Returns SupplierBankDetailDto; 404 if not found. Requires **Supplier.Write**.")]
     public async Task<Result<SupplierBankDetailDto>> UpdateBankDetail(Guid id, Guid bankDetailId, [FromBody] UpdateSupplierBankDetailRequest body, CancellationToken ct)
@@ -165,7 +166,7 @@ IFSC must match ^[A-Z]{4}0[A-Z0-9]{6}$ and is required for INR. Returns Supplier
     }
 
     [HttpDelete("{id:guid}/bank-details/{bankDetailId:guid}")]
-    [Authorize(Policy = "Supplier.Write")]
+    [Authorize(Policy = Perm.SupplierWrite)]
     [EndpointSummary("Delete supplier bank detail")]
     [EndpointDescription(@"Soft-deletes a supplier bank account. canWrite-gated (403). Returns empty success; 404 if not found. Requires **Supplier.Write**.")]
     public async Task<Result> DeleteBankDetail(Guid id, Guid bankDetailId, CancellationToken ct)
@@ -177,7 +178,7 @@ IFSC must match ^[A-Z]{4}0[A-Z0-9]{6}$ and is required for INR. Returns Supplier
     // ---------------- Licenses (R4 Module 1) ----------------
 
     [HttpPost("{id:guid}/licenses")]
-    [Authorize(Policy = "Supplier.Write")]
+    [Authorize(Policy = Perm.SupplierWrite)]
     [EndpointSummary("Add supplier license")]
     [EndpointDescription(@"Adds a license / certification to a supplier. canWrite-gated (403). ExpiryDate must be >= IssueDate.
 Body: AddSupplierLicenseRequest. Returns SupplierLicenseDto. Requires **Supplier.Write**.")]
@@ -188,7 +189,7 @@ Body: AddSupplierLicenseRequest. Returns SupplierLicenseDto. Requires **Supplier
     }
 
     [HttpPut("{id:guid}/licenses/{licenseId:guid}")]
-    [Authorize(Policy = "Supplier.Write")]
+    [Authorize(Policy = Perm.SupplierWrite)]
     [EndpointSummary("Update supplier license")]
     [EndpointDescription(@"Updates a supplier license. canWrite-gated (403). ExpiryDate must be >= IssueDate. Returns SupplierLicenseDto; 404 if not found. Requires **Supplier.Write**.")]
     public async Task<Result<SupplierLicenseDto>> UpdateLicense(Guid id, Guid licenseId, [FromBody] UpdateSupplierLicenseRequest body, CancellationToken ct)
@@ -198,7 +199,7 @@ Body: AddSupplierLicenseRequest. Returns SupplierLicenseDto. Requires **Supplier
     }
 
     [HttpDelete("{id:guid}/licenses/{licenseId:guid}")]
-    [Authorize(Policy = "Supplier.Write")]
+    [Authorize(Policy = Perm.SupplierWrite)]
     [EndpointSummary("Delete supplier license")]
     [EndpointDescription(@"Soft-deletes a supplier license. canWrite-gated (403). Returns empty success; 404 if not found. Requires **Supplier.Write**.")]
     public async Task<Result> DeleteLicense(Guid id, Guid licenseId, CancellationToken ct)
@@ -208,7 +209,7 @@ Body: AddSupplierLicenseRequest. Returns SupplierLicenseDto. Requires **Supplier
     }
 
     [HttpGet("licenses/expiring")]
-    [Authorize(Policy = "Supplier.Read")]
+    [Authorize(Policy = Perm.SupplierRead)]
     [EndpointSummary("Expiring supplier licenses")]
     [EndpointDescription(@"Licenses expiring within N days (default 90) for the expiry-reminder dashboard. Seccode-scoped:
 suppliers see only their own. Filters / params: **withinDays** (optional). Returns List<SupplierLicenseExpiringDto>. Requires **Supplier.Read**.")]
@@ -221,7 +222,7 @@ suppliers see only their own. Filters / params: **withinDays** (optional). Retur
     // ---------------- PO-response mode (R4 Module 1, admin) ----------------
 
     [HttpPost("{id:guid}/po-response-mode")]
-    [Authorize(Policy = "Supplier.Approve")]
+    [Authorize(Policy = Perm.SupplierApprove)]
     [EndpointSummary("Set supplier PO-confirmation mode")]
     [EndpointDescription(@"Admin sets a supplier's PO confirmation mode (AutoAccept / AcknowledgeToShip / AcceptToShip)
 plus the AllowNegotiate / AllowReject action toggles. Editable post-approval.
@@ -235,7 +236,7 @@ Body: SetPoResponseModeRequest. Returns empty success; 404 if not found; 400 on 
     // ---------------- Commercial terms (R4 #1, internal) ----------------
 
     [HttpPut("{id:guid}/commercial-terms")]
-    [Authorize(Policy = "Supplier.Approve")]
+    [Authorize(Policy = Perm.SupplierApprove)]
     [EndpointSummary("Set supplier commercial terms")]
     [EndpointDescription(@"Internal user sets a supplier's Currency + Payment/Delivery term FKs (R4 #1); the handler snapshots the term codes. Any field may be null to clear it.
 Body: UpdateCommercialTermsRequest. Returns empty success; 404 if not found. Requires **Supplier.Approve**.")]

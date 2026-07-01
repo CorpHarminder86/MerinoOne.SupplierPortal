@@ -4,6 +4,7 @@ using MerinoOne.SupplierPortal.Application.Integration.ShareGroups;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -22,7 +23,7 @@ public class ShareGroupsController : ControllerBase
     public ShareGroupsController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Integration.Read")]
+    [Authorize(Policy = Perm.IntegrationRead)]
     [EndpointSummary("List share groups")]
     [EndpointDescription(@"Lists every endpoint-wise table-sharing group in the caller's tenant, each with its members resolved to company code + name.
 Filters / params:
@@ -35,7 +36,7 @@ Returns: List<ShareGroupDto> scoped to the caller's tenant. Requires permission 
     }
 
     [HttpPost]
-    [Authorize(Policy = "Integration.Manage")]
+    [Authorize(Policy = Perm.IntegrationManage)]
     [EndpointSummary("Create share group")]
     [EndpointDescription(@"Creates a share group (endpoint + source company + initial members) for the caller's tenant.
 Body:
@@ -51,7 +52,7 @@ Returns: the new group's GUID; 400 on validation; 404 if a company is not in the
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Policy = "Integration.Manage")]
+    [Authorize(Policy = Perm.IntegrationManage)]
     [EndpointSummary("Update share group")]
     [EndpointDescription(@"Updates a share group's display name + enabled flag (endpoint / source / members are not editable here).
 Filters / params:
@@ -66,7 +67,7 @@ Returns: empty success; 404 if not found in the tenant; 400 on validation. Requi
     }
 
     [HttpPost("{id:guid}/members")]
-    [Authorize(Policy = "Integration.Manage")]
+    [Authorize(Policy = Perm.IntegrationManage)]
     [EndpointSummary("Add share group member")]
     [EndpointDescription(@"Adds a company to a share group as a member. A previously removed (soft-deleted) membership is restored rather than duplicated.
 Filters / params:
@@ -83,7 +84,7 @@ Returns: empty success; 404 if the group / company is not in the tenant; 409 if 
     }
 
     [HttpDelete("{id:guid}/members/{tenantEntityId:guid}")]
-    [Authorize(Policy = "Integration.Manage")]
+    [Authorize(Policy = Perm.IntegrationManage)]
     [EndpointSummary("Remove share group member")]
     [EndpointDescription(@"Soft-deletes a single member of a share group (by the member's company id). The company is then free to join another group on this endpoint.
 Filters / params:
@@ -97,7 +98,7 @@ Returns: empty success (idempotent — removing an already-gone member is a no-o
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Policy = "Integration.Manage")]
+    [Authorize(Policy = Perm.IntegrationManage)]
     [EndpointSummary("Delete share group")]
     [EndpointDescription(@"Soft-deletes a share group and all of its members. The member companies' master data falls back to per-company storage.
 Filters / params:

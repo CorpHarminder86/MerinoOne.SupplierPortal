@@ -3,6 +3,7 @@ using MerinoOne.SupplierPortal.Domain.Entities.Audit;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using ValidationException = MerinoOne.SupplierPortal.Application.Common.Exceptions.ValidationException;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Application.Shipments.Policies;
 
@@ -43,7 +44,7 @@ public static class PoConfirmationGateEnforcer
         DateTime now)
     {
         var hasReason = !string.IsNullOrWhiteSpace(overrideReason);
-        var canOverride = user.HasPermission("PurchaseOrder.OverrideGate");
+        var canOverride = user.HasPermission(Perm.PurchaseOrderOverrideGate);
         var actor = string.IsNullOrEmpty(user.UserCode) ? "system" : user.UserCode;
 
         foreach (var po in coveredPos)

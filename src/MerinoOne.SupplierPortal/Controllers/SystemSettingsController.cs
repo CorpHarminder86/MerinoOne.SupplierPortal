@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Application.SystemSettings.Queries;
 using MerinoOne.SupplierPortal.Contracts.SystemSettings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -18,7 +19,7 @@ public class SystemSettingsController : ControllerBase
     public SystemSettingsController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Settings.Read")]
+    [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("List system settings")]
     [EndpointDescription(@"Returns system settings for a given category.
 Filters / params:
@@ -31,7 +32,7 @@ Returns: List<SystemSettingDto> with current values and defaults. Requires permi
     }
 
     [HttpPost]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Save system setting")]
     [EndpointDescription(@"Persists a new or updated system-setting value.
 Body:
@@ -47,7 +48,7 @@ Returns: true on success; 400 on validation. Requires permission **Settings.Writ
     }
 
     [HttpPost("reset")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Reset system setting")]
     [EndpointDescription(@"Reverts a system setting back to its built-in default value.
 Body:
@@ -63,7 +64,7 @@ Returns: true on success; 404 if no override exists. Requires permission **Setti
     }
 
     [HttpPost("email/test")]
-    [Authorize(Policy = "Settings.Write")]
+    [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Send test email")]
     [EndpointDescription(@"Sends a one-off test email using the currently configured SMTP/email settings.
 Body:

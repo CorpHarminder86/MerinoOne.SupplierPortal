@@ -2,6 +2,7 @@ using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using Microsoft.EntityFrameworkCore;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Application.Suppliers.ChangeRequests.Queries;
 
@@ -27,7 +28,7 @@ public class GetSupplierChangeRequestListQueryHandler
         // would otherwise show an admin an empty queue (they hold no SecRight on supplier G-seccodes, and the
         // requests live under the supplier's company, not the reviewer's active one). Bypass the filters but
         // re-apply the tenant predicate so it never crosses tenants. Suppliers stay seccode-scoped to their own.
-        var reviewer = _user.IsAdmin || _user.IsManager || _user.HasPermission("Supplier.ApproveChange");
+        var reviewer = _user.IsAdmin || _user.IsManager || _user.HasPermission(Perm.SupplierApproveChange);
         var q = reviewer
             ? _db.SupplierChangeRequests.IgnoreQueryFilters().Where(r => !r.IsDeleted && r.TenantId == _user.TenantId)
             : _db.SupplierChangeRequests.AsQueryable();

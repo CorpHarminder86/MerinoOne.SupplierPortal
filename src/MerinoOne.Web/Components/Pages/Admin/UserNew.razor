@@ -106,8 +106,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var resp = await Api.GetAsync<List<RoleListItemDto>>("api/roles");
-        availableRoles = resp?.Data ?? new();
+        var resp = await Api.GetAsync<PagedResult<RoleListItemDto>>("api/roles?pageSize=200");
+        availableRoles = resp?.Data?.Items ?? new();
     }
 
     private void ToggleRole(string name)

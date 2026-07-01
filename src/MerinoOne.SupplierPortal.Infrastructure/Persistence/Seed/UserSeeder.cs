@@ -1,3 +1,4 @@
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using MerinoOne.SupplierPortal.Infrastructure.Identity;
@@ -11,18 +12,18 @@ public static class UserSeeder
 
     public static readonly IReadOnlyList<UserSpec> Specs = new[]
     {
-        new UserSpec("sadmin1", "Super Admin One",   "sadmin1@merino.local",  "SuperAdmin"),
-        new UserSpec("sadmin2", "Super Admin Two",   "sadmin2@merino.local",  "SuperAdmin"),
-        new UserSpec("admin1",  "Admin One",         "admin1@merino.local",   "Admin"),
-        new UserSpec("admin2",  "Admin Two",         "admin2@merino.local",   "Admin"),
-        new UserSpec("buyer1",  "Buyer One",         "buyer1@merino.local",   "Buyer"),
-        new UserSpec("buyer2",  "Buyer Two",         "buyer2@merino.local",   "Buyer"),
-        new UserSpec("fin1",    "Finance One",       "finance1@merino.local", "Finance"),
-        new UserSpec("fin2",    "Finance Two",       "finance2@merino.local", "Finance"),
-        new UserSpec("sup1",    "Supplier User One", "supplier1@merino.local","Supplier"),
-        new UserSpec("sup2",    "Supplier User Two", "supplier2@merino.local","Supplier"),
-        new UserSpec("ro1",     "Read Only One",     "readonly1@merino.local","ReadOnly"),
-        new UserSpec("ro2",     "Read Only Two",     "readonly2@merino.local","ReadOnly"),
+        new UserSpec("sadmin1", "Super Admin One",   "sadmin1@merino.local",  RoleNames.SuperAdmin),
+        new UserSpec("sadmin2", "Super Admin Two",   "sadmin2@merino.local",  RoleNames.SuperAdmin),
+        new UserSpec("admin1",  "Admin One",         "admin1@merino.local",   RoleNames.Admin),
+        new UserSpec("admin2",  "Admin Two",         "admin2@merino.local",   RoleNames.Admin),
+        new UserSpec("buyer1",  "Buyer One",         "buyer1@merino.local",   RoleNames.Buyer),
+        new UserSpec("buyer2",  "Buyer Two",         "buyer2@merino.local",   RoleNames.Buyer),
+        new UserSpec("fin1",    "Finance One",       "finance1@merino.local", RoleNames.Finance),
+        new UserSpec("fin2",    "Finance Two",       "finance2@merino.local", RoleNames.Finance),
+        new UserSpec("sup1",    "Supplier User One", "supplier1@merino.local",RoleNames.Supplier),
+        new UserSpec("sup2",    "Supplier User Two", "supplier2@merino.local",RoleNames.Supplier),
+        new UserSpec("ro1",     "Read Only One",     "readonly1@merino.local",RoleNames.ReadOnly),
+        new UserSpec("ro2",     "Read Only Two",     "readonly2@merino.local",RoleNames.ReadOnly),
     };
 
     public const string DefaultPassword = "Merino@123";
@@ -38,7 +39,7 @@ public static class UserSeeder
         foreach (var spec in Specs)
         {
             if (existing.Contains(spec.UserCode)) continue;
-            var isInternal = spec.Role != "Supplier";
+            var isInternal = spec.Role != RoleNames.Supplier;
             var userId = DeterministicId.From("AppUser", spec.UserCode);
             var seccodeId = DeterministicId.From("Seccode.U", spec.UserCode);
             var secRightId = DeterministicId.From("SecRight.U", spec.UserCode);

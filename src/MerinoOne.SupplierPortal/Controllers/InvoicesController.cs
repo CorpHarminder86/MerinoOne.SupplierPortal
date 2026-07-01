@@ -7,6 +7,7 @@ using MerinoOne.SupplierPortal.Contracts.Invoices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ContractsPagedResult = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Invoices.InvoiceListItemDto>;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -19,7 +20,7 @@ public class InvoicesController : ControllerBase
     public InvoicesController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "Invoice.Read")]
+    [Authorize(Policy = Perm.InvoiceRead)]
     [EndpointSummary("Invoice list")]
     [EndpointDescription(@"Paged list of supplier invoices visible to the caller.
 Filters / params:
@@ -46,7 +47,7 @@ Returns: PagedResult<InvoiceListItemDto>. Requires permission **Invoice.Read**."
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "Invoice.Read")]
+    [Authorize(Policy = Perm.InvoiceRead)]
     [EndpointSummary("Invoice detail")]
     [EndpointDescription(@"Full invoice header + line items + linked PO / GR references + attachments.
 Filters / params:
@@ -59,7 +60,7 @@ Returns: InvoiceDetailDto on success; 404 if not found; 403 if seccode mismatch.
     }
 
     [HttpPost]
-    [Authorize(Policy = "Invoice.Submit")]
+    [Authorize(Policy = Perm.InvoiceSubmit)]
     [EndpointSummary("Create invoice (Draft)")]
     [EndpointDescription(@"Supplier creates a DRAFT invoice against a PO. REFACTORED: created as Draft (was
 Submitted) — NO ERP post on create. The supplier edits it (PUT) and submits it (/submit) separately; posting is
@@ -74,7 +75,7 @@ Returns: InvoiceDetailDto (Draft) on success; 400 on validation; 403 if seccode 
     }
 
     [HttpPost("from-asn")]
-    [Authorize(Policy = "Invoice.Submit")]
+    [Authorize(Policy = Perm.InvoiceSubmit)]
     [EndpointSummary("Create draft invoice from an ASN")]
     [EndpointDescription(@"Manually creates the ONE draft invoice spanning a Submitted ASN's POs (the same draft
 the ASN submit auto-creates). Idempotent: returns the existing draft if one already exists (UQ_Invoice_asnId).
@@ -89,7 +90,7 @@ currency. Requires **Invoice.Submit**.")]
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Policy = "Invoice.Submit")]
+    [Authorize(Policy = Perm.InvoiceSubmit)]
     [EndpointSummary("Update invoice (Draft only)")]
     [EndpointDescription(@"Edits a DRAFT invoice (409 once Submitted). Editable: invoiceNumber, invoiceDate,
 eInvoiceIrn, eInvoiceAckNo, eWayBillNumber, notes. Amounts/lines are inherited from the ASN.
@@ -101,7 +102,7 @@ Returns: InvoiceDetailDto on success; 404 if not found; 409 if not Draft; 400 on
     }
 
     [HttpPost("{id:guid}/submit")]
-    [Authorize(Policy = "Invoice.Submit")]
+    [Authorize(Policy = Perm.InvoiceSubmit)]
     [EndpointSummary("Submit invoice (Draft -> Submitted)")]
     [EndpointDescription(@"Submits a DRAFT invoice. Validates the mandatory fields (invoiceNumber + invoiceDate;
 the draft placeholder number must be replaced). Marks it ELIGIBLE for LN posting but does NOT post (posting is
@@ -119,7 +120,7 @@ if not Draft; 400 on missing mandatory fields / mandatory attachment. Requires *
     }
 
     [HttpPost("{id:guid}/revoke")]
-    [Authorize(Policy = "Invoice.Revoke")]
+    [Authorize(Policy = Perm.InvoiceRevoke)]
     [EndpointSummary("Revoke invoice (admin, pre-post)")]
     [EndpointDescription(@"Admin PRE-POST revoke: Submitted -> Draft (pure status flip, NO LN reversal). Guards:
 state (Submitted AND not yet posted) and optimistic concurrency via RowVersion (a stale token yields 409 against
@@ -135,7 +136,7 @@ RowVersion. Requires **Invoice.Revoke** (admin/Finance).")]
     }
 
     [HttpPost("{id:guid}/review")]
-    [Authorize(Policy = "Invoice.Review")]
+    [Authorize(Policy = Perm.InvoiceReview)]
     [EndpointSummary("Review invoice")]
     [EndpointDescription(@"Buyer reviewer flags an invoice as triaged before sending it for approval.
 Filters / params:
@@ -151,7 +152,7 @@ Returns: empty success; 404 if not found; 409 if not in reviewable state. Requir
     }
 
     [HttpPost("{id:guid}/approve")]
-    [Authorize(Policy = "Invoice.Approve")]
+    [Authorize(Policy = Perm.InvoiceApprove)]
     [EndpointSummary("Approve invoice")]
     [EndpointDescription(@"Finance approves a reviewed invoice for payment.
 Filters / params:
@@ -168,7 +169,7 @@ Returns: empty success; 404 if not found; 409 if not in approvable state. Requir
     }
 
     [HttpPost("{id:guid}/reject")]
-    [Authorize(Policy = "Invoice.Approve")]
+    [Authorize(Policy = Perm.InvoiceApprove)]
     [EndpointSummary("Reject invoice")]
     [EndpointDescription(@"Finance rejects an invoice; supplier must amend + resubmit.
 Filters / params:

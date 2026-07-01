@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Contracts.Invoices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ContractsPagedResult = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Invoices.CreditDebitNoteListItemDto>;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 
 namespace MerinoOne.SupplierPortal.Controllers;
 
@@ -18,7 +19,7 @@ public class CreditDebitNotesController : ControllerBase
     public CreditDebitNotesController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [Authorize(Policy = "CreditDebitNote.Read")]
+    [Authorize(Policy = Perm.CreditDebitNoteRead)]
     [EndpointSummary("Credit/debit note list")]
     [EndpointDescription(@"Paged list of credit + debit notes against supplier invoices.
 Filters / params:
@@ -43,7 +44,7 @@ Returns: PagedResult<CreditDebitNoteListItemDto>. Requires permission **CreditDe
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "CreditDebitNote.Read")]
+    [Authorize(Policy = Perm.CreditDebitNoteRead)]
     [EndpointSummary("Credit/debit note detail")]
     [EndpointDescription(@"Full credit/debit note header + line items + linked invoice reference.
 Filters / params:
@@ -56,7 +57,7 @@ Returns: CreditDebitNoteDetailDto on success; 404 if not found; 403 if seccode m
     }
 
     [HttpPost]
-    [Authorize(Policy = "CreditDebitNote.Write")]
+    [Authorize(Policy = Perm.CreditDebitNoteWrite)]
     [EndpointSummary("Create credit/debit note")]
     [EndpointDescription(@"Supplier-submitted credit or debit note against an existing invoice.
 Body:
@@ -71,7 +72,7 @@ Returns: CreditDebitNoteDetailDto on success; 400 on validation; 403 if seccode 
     }
 
     [HttpPost("{id:guid}/approve")]
-    [Authorize(Policy = "CreditDebitNote.Approve")]
+    [Authorize(Policy = Perm.CreditDebitNoteApprove)]
     [EndpointSummary("Approve credit/debit note")]
     [EndpointDescription(@"Approves a pending credit/debit note, flipping status to Approved.
 Filters / params:
