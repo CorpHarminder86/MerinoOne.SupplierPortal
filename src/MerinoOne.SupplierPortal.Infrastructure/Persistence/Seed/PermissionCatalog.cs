@@ -127,7 +127,7 @@ public static class PermissionCatalog
         [Perm.UserRead]                     = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.UserWrite]                    = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.RoleRead]                     = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
-        [Perm.RoleWrite]                    = new[] { RoleNames.SuperAdmin },
+        [Perm.RoleWrite]                    = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.SettingsRead]                 = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.SettingsWrite]                = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.IntegrationRead]              = new[] { RoleNames.SuperAdmin, RoleNames.Admin },

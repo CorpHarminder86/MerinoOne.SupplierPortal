@@ -2,6 +2,7 @@
 @inject ApiClient Api
 @inject NavigationManager Nav
 @inject NotificationService Notif
+@inject TokenAccessor Token
 
 <PageTitle>@detail?.Name</PageTitle>
 
@@ -26,12 +27,19 @@ else
                     <h1 class="tl-title">@detail.Name</h1>
                     <span class="tl-count-chip">@selectedCodes.Count permissions</span>
                 </div>
-                <p class="tl-sub">Tick the permission boxes to grant capabilities to this role</p>
+                <p class="tl-sub">
+                    @(canWrite
+                        ? "Tick the permission boxes to grant capabilities to this role"
+                        : "Read-only — you need the Role.Write permission (SuperAdmin) to change these.")
+                </p>
             </div>
             <div class="tl-header__actions">
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Save" disabled="@busy">
-                    @(busy ? "Saving…" : "Save permissions")
-                </button>
+                @if (canWrite)
+                {
+                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Save" disabled="@busy">
+                        @(busy ? "Saving…" : "Save permissions")
+                    </button>
+                }
             </div>
         </header>
 
@@ -51,7 +59,7 @@ else
                         {
                             var ck = selectedCodes.Contains(p.Code);
                             <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer;padding:4px 6px;border-radius:4px;">
-                                <input type="checkbox" checked="@ck" @onchange="@((ChangeEventArgs e) => Toggle(p.Code, (bool)(e.Value ?? false)))" />
+                                <input type="checkbox" checked="@ck" disabled="@(!canWrite)" @onchange="@((ChangeEventArgs e) => Toggle(p.Code, (bool)(e.Value ?? false)))" />
                                 <div style="display:flex;flex-direction:column;gap:1px;min-width:0;">
                                     <span style="font-weight:600;color:var(--mer-ink-900);">@p.Name</span>
                                     <span style="font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-500);">@p.Code</span>
@@ -73,6 +81,9 @@ else
     private bool loading = true;
     private bool busy = false;
     private HashSet<string> selectedCodes = new();
+
+    // Role editing requires Role.Write (SuperAdmin). Role.Read-only users see a read-only picker.
+    private bool canWrite => Token.HasPermission("Role.Write");
 
     // Single source of truth: the assignable-permission catalog is served by the backend
     // (GET api/permissions, projected from the seeded admin.Permission rows) so this UI can
