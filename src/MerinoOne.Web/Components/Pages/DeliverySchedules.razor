@@ -163,16 +163,27 @@
                 // locked ship-to). §9.1: cross-ship-to rows are disabled, not silently dropped.
                 var shipToBlocked = selectedShipToId.HasValue && row.ShipToAddressId != selectedShipToId.Value;
                 var noBalance = row.RemainingToShip <= 0;
-                var selectable = CanCreateAsn && !noBalance && !shipToBlocked;
+                // §6.2 — a schedule whose PO is no longer shippable (e.g. reset to Released by an ERP Modify) is not
+                // selectable for an ASN; the checkbox is hidden for it (see below).
+                var selectable = CanCreateAsn && !noBalance && !shipToBlocked && row.IsShippable;
                 var rowStyle = (isSelected ? "background:var(--mer-blue-50);" : "")
                     + (CanCreateAsn && !selectable && !isSelected ? "opacity:.55;" : "");
                 <div class="tlg-row" style="@rowStyle">
                     @if (CanCreateAsn)
                     {
                         <div class="tlg-col" style="display:flex;align-items:center;justify-content:center;">
-                            <input type="checkbox" checked="@isSelected" disabled="@(!selectable && !isSelected)"
-                                   title="@(noBalance ? "Nothing left to ship on this line" : shipToBlocked ? "Different ship-to — clear the selection to pick this one" : null)"
-                                   @onchange="() => ToggleRow(row)" />
+                            @if (row.IsShippable)
+                            {
+                                <input type="checkbox" checked="@isSelected" disabled="@(!selectable && !isSelected)"
+                                       title="@(noBalance ? "Nothing left to ship on this line" : shipToBlocked ? "Different ship-to — clear the selection to pick this one" : null)"
+                                       @onchange="() => ToggleRow(row)" />
+                            }
+                            else
+                            {
+                                @* §6.2 — PO not shippable (unconfirmed / reset to Released): no ASN checkbox. *@
+                                <span class="material-symbols-outlined" style="font-size:15px;color:var(--mer-ink-400);"
+                                      title="PO not confirmed — re-accept the PO before shipping this schedule">block</span>
+                            }
                         </div>
                     }
                     <div class="tlg-col tlg-code">@row.PoNumber</div>

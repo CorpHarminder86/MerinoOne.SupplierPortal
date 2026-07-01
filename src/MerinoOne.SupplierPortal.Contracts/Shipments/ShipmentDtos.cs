@@ -30,7 +30,10 @@ public record DeliveryScheduleDto(
     decimal ScheduledQty,
     DateTime DeliveryDate,
     string Status,
-    DateTime CreatedOn);
+    DateTime CreatedOn,
+    // R4 §6.2 — whether the schedule's PO is shippable for its supplier's confirmation mode. The grid hides the
+    // ASN checkbox when false (e.g. the PO was reset to Released by an ERP Modify). Computed server-side.
+    bool IsShippable = true);
 
 /// <summary>
 /// R5 (TSD R5 Addendum §7 / §8.3) — delivery-schedule grid filter/sort request. All filters are optional;

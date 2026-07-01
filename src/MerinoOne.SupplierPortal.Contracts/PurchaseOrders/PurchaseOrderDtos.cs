@@ -25,7 +25,10 @@ public record PurchaseOrderListItemDto(
     // R5 (§6.2) — the PO's resolved ship-to (from the owned ShipTo snapshot). The ASN wizard groups/filters open
     // POs by ship-to so an ASN never spans two ship-to addresses. Null on a PO with no resolved ship-to.
     Guid? ShipToAddressId = null,
-    string? ShipToAddressName = null);
+    string? ShipToAddressName = null,
+    // R4 §6.2 — whether the PO is shippable for its supplier's confirmation mode (PoConfirmationPolicy). The ASN
+    // PO-picker offers ONLY shippable POs. Computed server-side (the policy is not reachable from the Web layer).
+    bool IsShippable = true);
 
 public record PagedResult<T>(
     List<T> Items,

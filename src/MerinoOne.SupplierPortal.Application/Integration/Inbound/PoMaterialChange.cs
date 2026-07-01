@@ -28,7 +28,7 @@ public static class PoMaterialChange
     public static bool IsMaterial(
         IReadOnlyCollection<PurchaseOrderLine> existingLines,
         IReadOnlyCollection<PoLineRecord> incomingLines,
-        IReadOnlyDictionary<int, decimal> resolvedByPosition)
+        IReadOnlyDictionary<int, ResolvedPoLine> resolvedByPosition)
     {
         var existingByPos = new Dictionary<int, PurchaseOrderLine>();
         foreach (var l in existingLines)
@@ -50,14 +50,17 @@ public static class PoMaterialChange
             if (!incomingByPos.ContainsKey(pos))
                 return true;
 
-        // Shared positions — compare the RESOLVED target qty + the folded line's price/delivery.
+        // Shared positions — compare the RESOLVED target qty + extended price against the persisted line. Both qty
+        // and Price are folded (replace / signed-add / no-op), so an additive delta compares the resolved absolute
+        // (old + delta), never the raw incoming delta. Unit price + delivery date come straight from the push.
         foreach (var (pos, incoming) in incomingByPos)
         {
             var existing = existingByPos[pos];
-            var resolvedQty = resolvedByPosition.TryGetValue(pos, out var rq) ? rq : existing.OrderQty;
-            if (existing.OrderQty != resolvedQty) return true;
+            var resolved = resolvedByPosition.TryGetValue(pos, out var rl)
+                ? rl : new ResolvedPoLine(existing.OrderQty, existing.Price, existing.DiscountAmount);
+            if (existing.OrderQty != resolved.Qty) return true;
             if (existing.PriceUnit != incoming.PriceUnit) return true;
-            if (existing.Price != incoming.Price) return true;
+            if (existing.Price != resolved.Price) return true;
             if (existing.DeliveryDate != incoming.DeliveryDate) return true;
         }
 
@@ -74,7 +77,7 @@ public static class PoMaterialChange
     public static string DescribeDiff(
         IReadOnlyCollection<PoLineChangeSnapshot> beforeLines,
         IReadOnlyCollection<PoLineRecord> incomingLines,
-        IReadOnlyDictionary<int, decimal> resolvedByPosition)
+        IReadOnlyDictionary<int, ResolvedPoLine> resolvedByPosition)
     {
         var beforeByPos = new Dictionary<int, PoLineChangeSnapshot>();
         foreach (var l in beforeLines)
@@ -88,23 +91,24 @@ public static class PoMaterialChange
 
         foreach (var (pos, incoming) in incomingByPos)
         {
-            var resolvedQty = resolvedByPosition.TryGetValue(pos, out var rq) ? rq : incoming.OrderQty;
+            var resolved = resolvedByPosition.TryGetValue(pos, out var rl)
+                ? rl : new ResolvedPoLine(incoming.OrderQty, incoming.Price, incoming.DiscountAmount);
             if (!beforeByPos.TryGetValue(pos, out var before))
             {
-                parts.Add($"Line {pos} added (qty {Fmt(resolvedQty)})");
+                parts.Add($"Line {pos} added (qty {Fmt(resolved.Qty)})");
                 continue;
             }
 
             var changes = new List<string>();
-            if (before.OrderQty != resolvedQty)
+            if (before.OrderQty != resolved.Qty)
             {
-                var remaining = Math.Max(0m, resolvedQty - before.ShippedQtyToDate);
-                changes.Add($"qty {Fmt(before.OrderQty)}→{Fmt(resolvedQty)} ({Fmt(remaining)} remaining)");
+                var remaining = Math.Max(0m, resolved.Qty - before.ShippedQtyToDate);
+                changes.Add($"qty {Fmt(before.OrderQty)}→{Fmt(resolved.Qty)} ({Fmt(remaining)} remaining)");
             }
             if (before.PriceUnit != incoming.PriceUnit)
                 changes.Add($"unit price {Fmt(before.PriceUnit)}→{Fmt(incoming.PriceUnit)}");
-            if (before.Price != incoming.Price)
-                changes.Add($"price {Fmt(before.Price)}→{Fmt(incoming.Price)}");
+            if (before.Price != resolved.Price)
+                changes.Add($"price {Fmt(before.Price)}→{Fmt(resolved.Price)}");
             if (before.DeliveryDate != incoming.DeliveryDate)
                 changes.Add($"delivery {FmtDate(before.DeliveryDate)}→{FmtDate(incoming.DeliveryDate)}");
 
@@ -136,3 +140,10 @@ public readonly record struct PoLineChangeSnapshot(
     decimal Price,
     DateTime? DeliveryDate,
     decimal ShippedQtyToDate);
+
+/// <summary>
+/// R4 (2026-07-01) — the resolved absolute values for one PO position after folding the inbound push against the
+/// stored line: <see cref="Qty"/>, extended <see cref="Price"/> and <see cref="Discount"/> (DiscountAmount) are each
+/// REPLACED on an <c>orderQty&gt;0</c> line and ADDED on an <c>additionalQty≠0</c> delta line (0/0 = no-op).
+/// </summary>
+public readonly record struct ResolvedPoLine(decimal Qty, decimal Price, decimal Discount);

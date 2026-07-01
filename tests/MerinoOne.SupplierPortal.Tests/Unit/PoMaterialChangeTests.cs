@@ -23,10 +23,11 @@ public class PoMaterialChangeTests
                OrderUnit: "EA", OrderQty: qty, PriceUnit: priceUnit, Price: price, DiscountAmount: discountAmount,
                DeliveryDate: delivery);
 
-    // R4 (2026-06-30) — resolved target qty per position. These tests use absolute orderQty (no additionalQty), so
-    // the resolved value is simply the last incoming line's orderQty for that position (replace semantics).
-    private static IReadOnlyDictionary<int, decimal> Resolved(IEnumerable<PoLineRecord> after)
-        => after.GroupBy(l => l.PositionNo).ToDictionary(g => g.Key, g => g.Last().OrderQty);
+    // R4 (2026-06-30) — resolved target values per position. These tests use absolute orderQty (no additionalQty),
+    // so the resolved value is simply the last incoming line's qty/price/discount for that position (replace).
+    private static IReadOnlyDictionary<int, ResolvedPoLine> Resolved(IEnumerable<PoLineRecord> after)
+        => after.GroupBy(l => l.PositionNo)
+            .ToDictionary(g => g.Key, g => new ResolvedPoLine(g.Last().OrderQty, g.Last().Price, g.Last().DiscountAmount));
 
     // ── Material: order qty changed (UC-PO-06). ─────────────────────────────────────────────────────
     [Fact]
@@ -100,8 +101,8 @@ public class PoMaterialChangeTests
     public void Cumulative_add_is_material_by_resolved_qty_not_raw_zero()
     {
         var before = new[] { Existing(10, 1, qty: 100) };
-        var after = new[] { Incoming(10, 1, qty: 0) };                       // an additionalQty push (orderQty 0)
-        var resolved = new Dictionary<int, decimal> { [10] = 120m };         // existing 100 + add 20
+        var after = new[] { Incoming(10, 1, qty: 0) };                            // an additionalQty push (orderQty 0)
+        var resolved = new Dictionary<int, ResolvedPoLine> { [10] = new(120m, 100m, 0m) };   // existing 100 + add 20
         PoMaterialChange.IsMaterial(before, after, resolved).Should().BeTrue();
     }
 
@@ -111,7 +112,7 @@ public class PoMaterialChangeTests
     {
         var before = new[] { Existing(10, 1, qty: 100) };
         var after = new[] { Incoming(10, 1, qty: 0) };
-        var resolved = new Dictionary<int, decimal> { [10] = 100m };         // unchanged
+        var resolved = new Dictionary<int, ResolvedPoLine> { [10] = new(100m, 100m, 0m) };   // unchanged
         PoMaterialChange.IsMaterial(before, after, resolved).Should().BeFalse();
     }
 

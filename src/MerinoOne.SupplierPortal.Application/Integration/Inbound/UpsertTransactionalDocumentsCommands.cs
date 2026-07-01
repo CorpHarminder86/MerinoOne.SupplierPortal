@@ -380,7 +380,8 @@ public class UpsertPurchaseOrdersCommandHandler(
                     foreach (var (pos, last) in FoldByPosition(rec))
                     {
                         var nl = NewLine(last, itemMap, taxMap, now);
-                        nl.OrderQty = resolvedQty[pos];
+                        var rv = resolvedQty[pos];
+                        nl.OrderQty = rv.Qty; nl.Price = rv.Price; nl.DiscountAmount = rv.Discount;
                         po2.Lines.Add(nl);
                     }
                     db.PurchaseOrders.Add(po2);
@@ -472,7 +473,7 @@ public class UpsertPurchaseOrdersCommandHandler(
     // batched with the child INSERT; the explicit-FK DbSet add inserts the line cleanly. (A brand-new PO uses the
     // navigation in the handler — that aggregate is all-Added.)
     private static void SyncLines(IAppDbContext db, PurchaseOrder po, PoRecord rec,
-        IReadOnlyDictionary<int, decimal> resolvedByPosition,
+        IReadOnlyDictionary<int, ResolvedPoLine> resolvedByPosition,
         IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
     {
         // Existing stored lines keyed by positionNo (seq is always 1 in our store; last-wins guards any legacy dup).
@@ -482,16 +483,17 @@ public class UpsertPurchaseOrdersCommandHandler(
 
         foreach (var (pos, last) in FoldByPosition(rec))
         {
+            var rv = resolvedByPosition[pos];
             if (byPosition.TryGetValue(pos, out var line))
             {
                 Apply(line, last, itemMap, taxMap);
-                line.OrderQty = resolvedByPosition[pos];
+                line.OrderQty = rv.Qty; line.Price = rv.Price; line.DiscountAmount = rv.Discount;
                 line.UpdatedBy = "infor:inbound"; line.UpdatedOn = now;
             }
             else
             {
                 var newLine = NewLine(last, itemMap, taxMap, now);
-                newLine.OrderQty = resolvedByPosition[pos];
+                newLine.OrderQty = rv.Qty; newLine.Price = rv.Price; newLine.DiscountAmount = rv.Discount;
                 newLine.PurchaseOrderId = po.Id;
                 db.PurchaseOrderLines.Add(newLine);
             }
@@ -511,28 +513,33 @@ public class UpsertPurchaseOrdersCommandHandler(
     // shipped is a valid, handled state (UC-ASN-10 / §5.3): the PO line is FLAGGED (IsOverShippedQtyReduced) and the
     // atomic over-ship guard blocks any further ASN; it is not refused. This applies equally to a negative additionalQty
     // that lands below shipped (same end state as an absolute orderQty revision below shipped).
-    private static (Dictionary<int, decimal> Resolved, string? Error) ResolvePoLineQuantities(PurchaseOrder? po, PoRecord rec)
+    private static (Dictionary<int, ResolvedPoLine> Resolved, string? Error) ResolvePoLineQuantities(PurchaseOrder? po, PoRecord rec)
     {
-        var existingByPos = new Dictionary<int, decimal>();
+        var existingByPos = new Dictionary<int, ResolvedPoLine>();
         if (po != null)
             foreach (var l in po.Lines.Where(l => !l.IsDeleted))
-                existingByPos[l.PositionNo] = l.OrderQty;
+                existingByPos[l.PositionNo] = new ResolvedPoLine(l.OrderQty, l.Price, l.DiscountAmount);
 
-        var resolved = new Dictionary<int, decimal>();
+        var resolved = new Dictionary<int, ResolvedPoLine>();
         foreach (var group in rec.Lines.GroupBy(l => l.PositionNo))
         {
             var pos = group.Key;
-            existingByPos.TryGetValue(pos, out var running);   // 0 for a new position
+            existingByPos.TryGetValue(pos, out var running);   // default (0,0,0) for a new position
             foreach (var l in group)
             {
                 if (l.OrderQty > 0m && l.AdditionalQty != 0m)
                     return (resolved, $"position {pos}: orderQty and additionalQty are mutually exclusive — send orderQty to set the absolute qty OR additionalQty to add to the current qty, not both.");
-                if (l.OrderQty > 0m) running = l.OrderQty;                  // replace
-                else if (l.AdditionalQty != 0m) running += l.AdditionalQty; // signed add (may reduce)
-                // else 0/0 → no-op (leave the running value unchanged)
+                // R4 (2026-07-01) — qty, extended Price AND DiscountAmount fold together: orderQty>0 REPLACES all
+                // three with the pushed absolute values; additionalQty≠0 ADDS the pushed values as signed deltas
+                // (Price/DiscountAmount are the incremental amounts for the added qty); 0/0 is a no-op.
+                if (l.OrderQty > 0m)
+                    running = new ResolvedPoLine(l.OrderQty, l.Price, l.DiscountAmount);
+                else if (l.AdditionalQty != 0m)
+                    running = new ResolvedPoLine(running.Qty + l.AdditionalQty, running.Price + l.Price, running.Discount + l.DiscountAmount);
+                // else 0/0 → no-op (leave the running values unchanged)
             }
-            if (running < 0m)
-                return (resolved, $"position {pos}: resulting order qty {running:0.####} is negative.");
+            if (running.Qty < 0m)
+                return (resolved, $"position {pos}: resulting order qty {running.Qty:0.####} is negative.");
             resolved[pos] = running;
         }
         return (resolved, null);
@@ -546,7 +553,8 @@ public class UpsertPurchaseOrdersCommandHandler(
     }
 
     // Applies an inbound line's attributes onto a stored line. sequenceNo is FORCED to 1 (storage key is positionNo);
-    // additionalQty is echoed for audit. OrderQty is NOT set here — the caller sets the RESOLVED absolute qty.
+    // additionalQty is echoed for audit. OrderQty, Price and DiscountAmount are NOT set here — the caller sets the
+    // RESOLVED folded values (replace on orderQty>0, signed-add on additionalQty≠0) from ResolvePoLineQuantities.
     private static void Apply(PurchaseOrderLine line, PoLineRecord l, IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap)
     {
         line.PositionNo = l.PositionNo; line.SequenceNo = 1;   // ALWAYS 1 — index unchanged; seq is not a storage key.
@@ -554,8 +562,8 @@ public class UpsertPurchaseOrdersCommandHandler(
         line.ItemCode = l.ItemCode.Trim(); line.ItemDescription = l.ItemDescription;
         line.ItemId = !string.IsNullOrWhiteSpace(l.ItemCode) && itemMap.TryGetValue(l.ItemCode.Trim(), out var iid) ? iid : null;
         line.OrderUnit = string.IsNullOrWhiteSpace(l.OrderUnit) ? "EA" : l.OrderUnit.Trim();
-        line.PriceUnit = l.PriceUnit; line.Price = l.Price;
-        line.DiscountPct = l.DiscountPct; line.DiscountAmount = l.DiscountAmount; line.DeliveryDate = l.DeliveryDate;
+        line.PriceUnit = l.PriceUnit;               // unit RATE (replaced); the extended Price is folded by the caller.
+        line.DiscountPct = l.DiscountPct; line.DeliveryDate = l.DeliveryDate;   // DiscountAmount folded by the caller.
         // Tax snapshot-on-write: resolve the code to the master (id + description). Store the pushed description if
         // the ERP sent one, else the master's (code-only push) — so the read side always shows the line's snapshot
         // with no Tax-master join. An unresolved code keeps whatever the ERP sent (may be null) and no FK.

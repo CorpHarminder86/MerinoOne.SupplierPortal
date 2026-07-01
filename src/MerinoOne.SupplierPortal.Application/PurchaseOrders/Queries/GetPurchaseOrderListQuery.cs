@@ -1,6 +1,8 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
+using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Queries;
@@ -75,6 +77,15 @@ public class GetPurchaseOrderListQueryHandler : IRequestHandler<GetPurchaseOrder
                 // Ship-to (from the owned snapshot) — the ASN wizard groups/filters open POs by ship-to.
                 x.po.ShipToAddressId, x.po.ShipTo != null ? x.po.ShipTo.AddressName : null))
             .ToListAsync(ct);
+
+        // R4 §6.2 — stamp the ship-gate result per row (the policy is not translatable to SQL and the Web layer
+        // cannot call it, so compute it here from the already-projected PoStatus + supplier mode).
+        items = items.Select(d => d with
+        {
+            IsShippable = Enum.TryParse<PoStatus>(d.PoStatus, out var st)
+                          && Enum.TryParse<PoConfirmationMode>(d.PoResponseMode, out var md)
+                          && PoConfirmationPolicy.AllowsShipping(st, md)
+        }).ToList();
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling((double)total / pageSize);
         return new PagedResult<PurchaseOrderListItemDto>(items, page, pageSize, total, totalPages);

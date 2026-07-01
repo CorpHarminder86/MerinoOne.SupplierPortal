@@ -999,6 +999,8 @@
         : openPos
             .Where(p => p.ShipToAddressId == selectedShipToId)
             .Where(p => !selectedPoIds.Contains(p.Id))
+            // R4 §6.2 — offer ONLY POs whose confirmation gate is open (not shippable → hidden from the picker).
+            .Where(p => p.IsShippable)
             .Where(p => string.IsNullOrWhiteSpace(poSearch) || p.PoNumber.Contains(poSearch.Trim(), StringComparison.OrdinalIgnoreCase))
             .OrderBy(p => p.PoNumber)
             .ToList();

@@ -515,6 +515,57 @@ public class PurchaseOrderInboundTests
         (await StoredQtyAsync()).Should().Be(70m);
     }
 
+    /// <summary>
+    /// R4 (2026-07-01) — additionalQty folds Price AND DiscountAmount alongside qty: orderQty>0 REPLACES all three
+    /// absolute; additionalQty≠0 ADDS the pushed Price/DiscountAmount as signed deltas; 0/0 leaves all three unchanged.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_additionalQty_folds_price_and_discount_delta()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-ADDPD-{tag}";
+
+        PushPurchaseOrdersRequest Body(decimal orderQty, decimal additionalQty, decimal price, decimal discount) =>
+            new(IntegrationTestFixture.CompanyCode, new[]
+            {
+                new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                    new[] { new PoLineRecord(PositionNo: 10, SequenceNo: 1, ItemCode: $"ITM-{tag}",
+                        OrderUnit: "EA", OrderQty: orderQty, PriceUnit: 10, Price: price,
+                        DiscountAmount: discount, AdditionalQty: additionalQty) },
+                    ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                    PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+            });
+
+        async Task<(decimal Qty, decimal Price, decimal Discount)> StoredAsync()
+        {
+            using var s = _fx.Factory.Services.CreateScope();
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var line = await db.PurchaseOrderLines.IgnoreQueryFilters()
+                .FirstAsync(l => l.PurchaseOrder!.PoNumber == poNumber && !l.IsDeleted && l.PositionNo == 10);
+            return (line.OrderQty, line.Price, line.DiscountAmount);
+        }
+
+        // 1) REPLACE — qty 100, price 1000, discount 50 (absolute).
+        await PushAsync(Body(orderQty: 100, additionalQty: 0, price: 1000, discount: 50));
+        (await StoredAsync()).Should().Be((100m, 1000m, 50m), because: "orderQty>0 replaces qty, price AND discountAmount");
+
+        // 2) ADD — +20 qty, +200 price, +10 discount → 120 / 1200 / 60.
+        await PushAsync(Body(orderQty: 0, additionalQty: 20, price: 200, discount: 10));
+        (await StoredAsync()).Should().Be((120m, 1200m, 60m), because: "additionalQty adds the delta to qty, price AND discountAmount");
+
+        // 3) REDUCE — -50 qty, -500 price, -25 discount → 70 / 700 / 35.
+        await PushAsync(Body(orderQty: 0, additionalQty: -50, price: -500, discount: -25));
+        (await StoredAsync()).Should().Be((70m, 700m, 35m), because: "a negative additionalQty subtracts the delta from qty, price AND discountAmount");
+
+        // 4) NO-OP — 0/0 leaves qty, price AND discount unchanged even though the push carries values.
+        await PushAsync(Body(orderQty: 0, additionalQty: 0, price: 9999, discount: 9999));
+        (await StoredAsync()).Should().Be((70m, 700m, 35m), because: "0/0 is a no-op — qty, price and discountAmount are all left unchanged");
+    }
+
     // ════════════════════════════════════════════════════════════════════════════════════════════════
     // Phase 3 — PO-Change Sync Hardening (TSD R4 Addendum §5 / §6.3 / §6.4; UC-PO-06/07, UC-ASN-08/10, DI-01/03).
     // ════════════════════════════════════════════════════════════════════════════════════════════════

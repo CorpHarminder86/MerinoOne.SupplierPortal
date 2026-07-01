@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -54,6 +55,8 @@ public class GetDeliveryScheduleListQueryHandler
                 SupplierId = po.SupplierId,
                 SupplierName = sup != null ? sup.LegalName : null,
                 ShipToAddressName = addr != null ? addr.AddressName : null,
+                PoStatus = po.PoStatus,
+                PoConfirmationMode = sup != null ? sup.PoConfirmationMode : PoConfirmationMode.AcceptToShip,
             };
 
         // Filters (§7). Supplier / PO / ship-to / status / delivery-date range — all optional.
@@ -78,11 +81,14 @@ public class GetDeliveryScheduleListQueryHandler
 
         var total = await baseQuery.CountAsync(ct);
 
-        // Sort PO → Line → DeliveryDate ASC (§8.3). PO by number, line by position, then the schedule date.
-        var rows = await baseQuery
+        // Sort PO → Line → DeliveryDate ASC (§8.3). PO by number, line by position, then the schedule date. Project
+        // to a flat intermediate (carrying PoStatus + supplier mode) so IsShippable can be computed in-memory below
+        // (PoConfirmationPolicy is not translatable to SQL and the Web layer cannot call it).
+        var raw = await baseQuery
             .OrderBy(x => x.PoNumber).ThenBy(x => x.line.PositionNo).ThenBy(x => x.sch.DeliveryDate)
             .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(x => new DeliveryScheduleDto(
+            .Select(x => new
+            {
                 x.sch.Id,
                 x.sch.Seq,
                 x.sch.PurchaseOrderId,
@@ -94,17 +100,27 @@ public class GetDeliveryScheduleListQueryHandler
                 x.line.OrderUnit,
                 x.line.OrderQty,
                 x.line.ShippedQtyToDate,
-                // RemainingToShip DERIVED from the R4 line balance — MAX(0, orderQty − shippedQtyToDate).
-                x.line.OrderQty - x.line.ShippedQtyToDate > 0 ? x.line.OrderQty - x.line.ShippedQtyToDate : 0m,
                 x.sch.ShipToAddressId,
                 x.ShipToAddressName,
                 x.SupplierId,
                 x.SupplierName,
                 x.sch.ScheduledQty,
                 x.sch.DeliveryDate,
-                x.sch.Status.ToString(),
-                x.sch.CreatedOn))
+                Status = x.sch.Status,
+                x.sch.CreatedOn,
+                x.PoStatus,
+                x.PoConfirmationMode,
+            })
             .ToListAsync(ct);
+
+        var rows = raw.Select(r => new DeliveryScheduleDto(
+            r.Id, r.Seq, r.PurchaseOrderId, r.PoNumber, r.PurchaseOrderLineId, r.PositionNo,
+            r.ItemCode, r.ItemDescription, r.OrderUnit, r.OrderQty, r.ShippedQtyToDate,
+            // RemainingToShip DERIVED from the R4 line balance — MAX(0, orderQty − shippedQtyToDate).
+            r.OrderQty - r.ShippedQtyToDate > 0 ? r.OrderQty - r.ShippedQtyToDate : 0m,
+            r.ShipToAddressId, r.ShipToAddressName, r.SupplierId, r.SupplierName, r.ScheduledQty,
+            r.DeliveryDate, r.Status.ToString(), r.CreatedOn,
+            PoConfirmationPolicy.AllowsShipping(r.PoStatus, r.PoConfirmationMode))).ToList();
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling(total / (double)pageSize);
         var paged = new PagedResult<DeliveryScheduleDto>(rows, page, pageSize, total, totalPages);
