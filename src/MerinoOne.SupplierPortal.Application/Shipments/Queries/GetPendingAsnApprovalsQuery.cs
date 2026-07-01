@@ -8,14 +8,13 @@ namespace MerinoOne.SupplierPortal.Application.Shipments.Queries;
 
 /// <summary>
 /// R5 (review gap C2) — the approver-facing ASN approval queue: the ASNs awaiting a decision
-/// (<see cref="AsnStatus.PendingApproval"/>). Mirrors the PO-negotiation reviewer queue
-/// (<c>GetPoNegotiationListQuery</c>): the endpoint is policy-gated on <c>Asn.Approve</c>, so EVERY caller is an
-/// approver and sees ALL PendingApproval ASNs in the tenant. (Per-buyer routing by
-/// <c>PurchaseOrder.BuyerUserId</c> was removed — nothing in the app populates BuyerUserId, so it always yielded
-/// an empty buyer queue.) A buyer/reviewer holds NO SecRight on the supplier G-seccodes, so the always-on seccode +
-/// active-company filters would show them an empty queue: bypass the filters (<c>IgnoreQueryFilters</c>) and
-/// re-apply ONLY the tenant predicate (<c>TenantId == _user.TenantId</c>) so the queue never crosses tenants.
-/// Suppliers are joined the same way (IgnoreQueryFilters + tenant) for the name.
+/// (<see cref="AsnStatus.PendingApproval"/>). Scoped by the SUPPLIER-USER MAPPING (<c>admin.SupplierUserMap</c>):
+/// an internal approver (the endpoint is policy-gated on <c>Asn.Approve</c>) sees the PendingApproval ASNs of the
+/// suppliers they are mapped to — so multiple buyers with hierarchy access each see their own suppliers' ASNs.
+/// (Per-buyer routing by <c>PurchaseOrder.BuyerUserId</c> was removed — nothing populates BuyerUserId.) An
+/// <c>IsAdmin</c> caller oversees ALL PendingApproval ASNs in the tenant. A reviewer holds no supplier G-seccode,
+/// so bypass the always-on seccode + active-company filters (<c>IgnoreQueryFilters</c>) and re-apply ONLY the
+/// tenant predicate so the queue never crosses tenants.
 ///
 /// Order: newest approval first — the latest Pending <c>AsnApproval.SubmittedOn</c> DESC.
 /// </summary>
@@ -30,14 +29,27 @@ public class GetPendingAsnApprovalsQueryHandler
 
     public async Task<List<AsnApprovalListItemDto>> Handle(GetPendingAsnApprovalsQuery request, CancellationToken ct)
     {
-        // Every caller already holds Asn.Approve (the endpoint is policy-gated), so — like the PO-negotiation
-        // reviewer queue — ANY approver sees ALL PendingApproval ASNs in the tenant. Bypass the seccode +
-        // active-company filters (a reviewer holds no supplier G-seccode) and re-apply ONLY the tenant predicate
-        // so the queue never crosses tenants.
+        // All PendingApproval ASNs in the tenant (seccode/company filters bypassed — a reviewer holds no G-seccode).
         var asns = _db.Asns.IgnoreQueryFilters()
             .Where(a => !a.IsDeleted
                         && a.TenantId == _user.TenantId
                         && a.AsnStatus == AsnStatus.PendingApproval);
+
+        // Non-admins see ONLY the ASNs of the suppliers they are MAPPED to (admin.SupplierUserMap). Admins see all.
+        if (!_user.IsAdmin)
+        {
+            var myUserId = await _db.AppUsers.IgnoreQueryFilters()
+                .Where(u => u.UserCode == _user.UserCode && !u.IsDeleted)
+                .Select(u => (Guid?)u.Id)
+                .FirstOrDefaultAsync(ct);
+
+            // A null user id (unresolved principal) maps to nobody → empty queue.
+            var mySupplierIds = _db.SupplierUserMaps.IgnoreQueryFilters()
+                .Where(m => !m.IsDeleted && m.AppUserId == myUserId)
+                .Select(m => m.SupplierId);
+
+            asns = asns.Where(a => mySupplierIds.Contains(a.SupplierId));
+        }
 
         // Suppliers stay tenant-scoped via IgnoreQueryFilters + tenant (the buyer holds no G-seccode).
         var sups = _db.Suppliers.IgnoreQueryFilters()

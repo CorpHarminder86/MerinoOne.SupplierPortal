@@ -119,6 +119,16 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     {
         var now = DateTime.UtcNow;
 
+        // --- Self-healing cleanup: stale outbox rows -------------------------------------------------------
+        // The persistent int-test DB accumulates Dispatched, un-acked, un-alerted outbox rows from prior/
+        // interrupted runs. OutboxDispatcherWorker.ReconcileStaleDispatchedAsync sweeps ALL such tenant-wide rows,
+        // so that pollution made the stale-dispatched-sweep test's "raised exactly 1" assertion flaky. Neutralize
+        // them (mark alerted → the sweep's LastError==null filter skips them). Bulk ExecuteUpdate: no change
+        // tracker, no audit interceptor. Runs once at collection-fixture init, BEFORE any test seeds its own row.
+        await db.OutboxMessages.IgnoreQueryFilters()
+            .Where(m => m.Status == Domain.Enums.OutboxStatus.Dispatched && m.AckedAt == null && m.LastError == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastError, "inttest-seed-cleanup"));
+
         // --- Tenant ---------------------------------------------------------------------------------------
         if (!await db.Tenants.IgnoreQueryFilters().AnyAsync(t => t.Id == TenantId))
         {

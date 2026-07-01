@@ -7,34 +7,32 @@ using Microsoft.EntityFrameworkCore;
 namespace MerinoOne.SupplierPortal.Application.Shipments;
 
 /// <summary>
-/// R5 (TSD R5 Addendum §10.2) — shared helpers for the ASN approval flow: resolve the approver buyers + the
+/// R5 (TSD R5 Addendum §10.2) — shared helpers for the ASN approval flow: resolve the approver users + the
 /// supplier-side recipient, and stage best-effort notification rows on <c>admin.emailOutbox</c> (mirrors the R4
 /// EmailOutbox pattern — the row commits in the handler's own SaveChanges; the EmailOutboxWorker dispatches it).
 ///
-/// <para><b>Approver resolution (§10.2):</b> the DISTINCT <c>BuyerUserId</c> of the POs referenced by the ASN's
-/// lines (resolved through <c>AsnLine → PurchaseOrderLine → PurchaseOrder.BuyerUserId</c>, plus the legacy scalar
-/// header PO + the junction for back-compat ASNs). Any ONE of these buyers may decide (Phase 1).</para>
+/// <para><b>Approver resolution:</b> the INTERNAL, active portal users MAPPED to the ASN's supplier
+/// (<c>admin.SupplierUserMap</c>) — so every buyer with hierarchy access to that supplier is notified and may
+/// decide. (Was the PO's <c>BuyerUserId</c>, which nothing in the app populates.)</para>
 /// </summary>
 public static class AsnApprovalSupport
 {
     private const string Actor = "asn-approval";
 
     /// <summary>
-    /// The distinct, non-null <c>BuyerUserId</c> of every PO referenced by the ASN — via the lines' PO lines, plus
-    /// the legacy scalar/junction PO for back-compat ASNs. IgnoreQueryFilters: the buyer gate must see the PO buyer
-    /// regardless of the caller's RLS scope (a buyer may not hold the supplier's G-seccode).
+    /// The distinct AppUser ids of the INTERNAL, active portal users mapped to the ASN's supplier
+    /// (<c>admin.SupplierUserMap</c>). IgnoreQueryFilters: the resolution runs under the approving/submitting
+    /// principal, which may not hold the supplier's G-seccode.
     /// </summary>
     public static async Task<HashSet<Guid>> ResolveApproverUserIdsAsync(IAppDbContext db, Asn asn, CancellationToken ct)
     {
-        var poIds = await ResolveCoveredPoIdsAsync(db, asn, ct);
-        if (poIds.Count == 0) return new HashSet<Guid>();
-
-        var buyerIds = await db.PurchaseOrders.IgnoreQueryFilters()
-            .Where(p => poIds.Contains(p.Id) && p.BuyerUserId != null)
-            .Select(p => p.BuyerUserId!.Value)
+        var ids = await db.SupplierUserMaps.IgnoreQueryFilters()
+            .Where(m => m.SupplierId == asn.SupplierId && !m.IsDeleted)
+            .Join(db.AppUsers.IgnoreQueryFilters().Where(u => !u.IsDeleted && u.IsActive && u.IsInternal),
+                m => m.AppUserId, u => u.Id, (m, u) => u.Id)
             .Distinct()
             .ToListAsync(ct);
-        return buyerIds.ToHashSet();
+        return ids.ToHashSet();
     }
 
     /// <summary>Covered PO ids: union of the lines' PO lines' POs, the junction rows, and the legacy scalar header PO.</summary>

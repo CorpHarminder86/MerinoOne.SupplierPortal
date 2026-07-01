@@ -238,24 +238,27 @@ public class RejectAsnCommandHandler : IRequestHandler<RejectAsnCommand, AsnDeta
 }
 
 /// <summary>
-/// R5 §10.2 — the buyer authorization gate for Approve/Reject: the current user must be ONE of the ASN's PO
-/// buyers (any one may decide, Phase 1). Resolves the current user's AppUser id by UserCode, then checks it is in
-/// the distinct <c>BuyerUserId</c> set of the ASN's POs. Throws <see cref="ForbiddenException"/> (→ 403) otherwise.
+/// R5 §10.2 — the authorization gate for Approve/Reject: the current user must be an INTERNAL user MAPPED to the
+/// ASN's supplier (<c>admin.SupplierUserMap</c>) — any one such approver may decide. Admins bypass (they oversee
+/// the whole queue). Throws <see cref="ForbiddenException"/> (→ 403) otherwise.
 /// </summary>
 internal static class AsnApprovalGate
 {
     public static async Task AssertBuyerAsync(IAppDbContext db, ICurrentUser user, Asn asn, CancellationToken ct)
     {
-        var buyers = await AsnApprovalSupport.ResolveApproverUserIdsAsync(db, asn, ct);
-        if (buyers.Count == 0)
-            throw new ForbiddenException("This ASN has no assigned PO buyer; it cannot be approved or rejected.");
+        // Admins oversee the whole queue → may approve/reject any ASN.
+        if (user.IsAdmin) return;
+
+        var approvers = await AsnApprovalSupport.ResolveApproverUserIdsAsync(db, asn, ct);
+        if (approvers.Count == 0)
+            throw new ForbiddenException("This ASN's supplier has no mapped internal users; it cannot be approved or rejected.");
 
         var myId = await db.AppUsers.IgnoreQueryFilters()
             .Where(u => u.UserCode == user.UserCode && !u.IsDeleted)
             .Select(u => (Guid?)u.Id)
             .FirstOrDefaultAsync(ct);
 
-        if (myId is not { } id || !buyers.Contains(id))
-            throw new ForbiddenException("Only a buyer assigned to one of this ASN's purchase orders may approve or reject it.");
+        if (myId is not { } id || !approvers.Contains(id))
+            throw new ForbiddenException("Only an internal user mapped to this ASN's supplier may approve or reject it.");
     }
 }

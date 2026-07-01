@@ -774,9 +774,10 @@ public class PurchaseOrderInboundTests
             var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
             var po = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.Id == poId);
             po.PoStatus = PoStatus.Accepted;
-            po.BuyerUserId = SecurityTestHarness.BuyerUserId;   // for the Approve→Submit gate.
             await db.SaveChangesAsync();
         }
+        // Assign + MAP the buyer to the PO's supplier (approval is scoped by admin.SupplierUserMap) for the Approve step.
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, poId);
 
         // Enable the over-ship guard for this tenant so the ceiling rejection fires (default-off rollout flag, D3).
         await using var guardOn = await _fx.EnableOverShipGuardAsync();

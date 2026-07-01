@@ -4,6 +4,7 @@ using System.Text.Json;
 using FluentAssertions;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Contracts.Integration;
+using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
@@ -153,12 +154,32 @@ public static class ProcureToPayFlow
     /// Assigns the PO's <c>BuyerUserId</c> (inbound POs are buyer-less) so the buyer approve/reject gate resolves.
     /// Defaults to the seeded fixture Buyer user (<c>sec-buyer-a</c>).
     /// </summary>
-    public static async Task AssignBuyerAsync(IntegrationTestFixture fx, Guid poId, Guid? buyerUserId = null)
+    public static async Task AssignBuyerAsync(IntegrationTestFixture fx, Guid poId, Guid? buyerUserId = null, bool map = true)
     {
         using var scope = fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var po = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.Id == poId);
-        po.BuyerUserId = buyerUserId ?? SecurityTestHarness.BuyerUserId;
+        var uid = buyerUserId ?? SecurityTestHarness.BuyerUserId;
+        po.BuyerUserId = uid;
+        await db.SaveChangesAsync();
+
+        // ASN approval (view queue + approve/reject gate + notification) is scoped by admin.SupplierUserMap — also map
+        // the buyer to the PO's supplier so it may view + approve that supplier's ASNs (idempotent). map:false leaves
+        // the buyer UNMAPPED (the negative-scope case).
+        if (map) await MapUserToSupplierAsync(db, uid, po.SupplierId, po.SeccodeId);
+    }
+
+    /// <summary>Seed a SecRight + SupplierUserMap linking an internal user to a supplier (idempotent; mirrors SupplierMapService).</summary>
+    private static async Task MapUserToSupplierAsync(AppDbContext db, Guid appUserId, Guid supplierId, Guid seccodeId)
+    {
+        if (await db.SupplierUserMaps.IgnoreQueryFilters()
+                .AnyAsync(m => m.SupplierId == supplierId && m.AppUserId == appUserId && !m.IsDeleted))
+            return;
+        var userCode = await db.AppUsers.IgnoreQueryFilters().Where(u => u.Id == appUserId).Select(u => u.UserCode).FirstAsync();
+        var now = DateTime.UtcNow;
+        var secRight = new SecRight { Id = Guid.NewGuid(), SeccodeId = seccodeId, UserCode = userCode, CanRead = true, CanWrite = false, CreatedBy = "seed", CreatedOn = now };
+        db.SecRights.Add(secRight);
+        db.SupplierUserMaps.Add(new SupplierUserMap { Id = Guid.NewGuid(), SupplierId = supplierId, AppUserId = appUserId, SecRightId = secRight.Id, CreatedBy = "seed", CreatedOn = now });
         await db.SaveChangesAsync();
     }
 
@@ -178,6 +199,7 @@ public static class ProcureToPayFlow
         var sendBody = await ReadHelper<AsnDetailDto>(send);
         if (sendBody.ConfirmationRequired) return send;   // Warning confirm — not yet PendingApproval.
 
+        // The buyer was mapped to this supplier at AssignBuyerAsync (approval is scoped by admin.SupplierUserMap).
         var buyer = await SecurityTestHarness.ClientAsAsync(fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
         return await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest(overrideReason));
     }

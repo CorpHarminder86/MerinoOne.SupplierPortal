@@ -247,9 +247,11 @@ public class AsnSerialLotTests
         // (→ Accepted) here as the supplier would before shipping, keeping the ship-gate open.
         po.PoStatus = PoStatus.Accepted;
         po.AcceptedAt = DateTime.UtcNow;
-        // R5 — assign the fixture Buyer so the Approve→Submit gate resolves for these tests.
-        po.BuyerUserId = SecurityTestHarness.BuyerUserId;
         await db.SaveChangesAsync();
+
+        // R5 — assign + MAP the fixture Buyer to the PO's supplier so the Approve→Submit gate resolves (approval is
+        // scoped by admin.SupplierUserMap).
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, po.Id);
 
         return new PoCtx(po.Id, serialLineId, lotLineId, poNumber);
     }

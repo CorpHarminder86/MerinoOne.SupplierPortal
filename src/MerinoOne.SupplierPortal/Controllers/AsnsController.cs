@@ -49,11 +49,11 @@ Returns: PagedResult<AsnListItemDto>. Requires permission **Asn.Read**.")]
     [HttpGet("pending-approvals")]
     [Authorize(Policy = "Asn.Approve")]
     [EndpointSummary("ASN approval queue")]
-    [EndpointDescription(@"R5 (review gap C2) — the ASNs awaiting approval. Like the PO-negotiation reviewer queue,
-any caller (all callers hold Asn.Approve — the endpoint is policy-gated) sees ALL ASNs in AsnStatus=PendingApproval
-in the tenant. (Per-buyer routing was removed — nothing populates PurchaseOrder.BuyerUserId, so it always yielded
-an empty buyer queue.) Tenant-scoped (a reviewer holds no supplier seccode, so the seccode/company filters are
-bypassed and re-scoped to the caller's tenant). Ordered by the latest Pending approval's SubmittedOn DESC.
+    [EndpointDescription(@"R5 (review gap C2) — the ASNs awaiting approval, scoped by the SUPPLIER-USER MAPPING: an
+internal approver (all callers hold Asn.Approve — the endpoint is policy-gated) sees the PendingApproval ASNs of the
+suppliers they are mapped to (admin.SupplierUserMap), so multiple buyers with hierarchy access each see their own
+suppliers' ASNs. An Admin sees ALL. (Per-buyer routing by PurchaseOrder.BuyerUserId was removed — nothing populates
+it.) Tenant-scoped. Ordered by the latest Pending approval's SubmittedOn DESC.
 Returns: Result<List<AsnApprovalListItemDto>>. Requires permission **Asn.Approve** (same policy as approve/reject).")]
     public async Task<Result<List<AsnApprovalListItemDto>>> PendingApprovals(CancellationToken ct)
     {

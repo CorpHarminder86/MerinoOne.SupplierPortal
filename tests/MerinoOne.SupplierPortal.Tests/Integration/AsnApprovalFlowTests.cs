@@ -311,33 +311,32 @@ public class AsnApprovalFlowTests : IAsyncLifetime
 
     // ════════════════════════════ C2 — buyer-facing approval queue ════════════════════════════
 
-    // ── C2 — the approval queue shows ALL PendingApproval ASNs to ANY approver (any Asn.Approve holder), mirroring
-    //    the PO-negotiation reviewer queue. Per-buyer routing was removed (nothing populates PurchaseOrder
-    //    .BuyerUserId, so a buyer queue was always empty). Both the (non-admin) Buyer and an Admin see both ASNs. ──
+    // ── C2 — the approval queue is scoped by the SUPPLIER-USER MAPPING: a buyer sees the PendingApproval ASNs of
+    //    the suppliers they are mapped to (admin.SupplierUserMap), not others'. An admin sees all. ──
     [SkippableFact]
-    public async Task Pending_approvals_queue_shows_all_pending_to_any_approver()
+    public async Task Pending_approvals_queue_scoped_by_supplier_mapping_admin_sees_all()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
-        // Two independent ASNs, both sent for approval → PendingApproval.
+        // ASN-1's supplier is mapped to the fixture Buyer; ASN-2's supplier is NOT (mapBuyer:false). Both sent.
         var (asn1, _, supplier1) = await NewDraftWithBuyerAsync(orderQty: 10m);
         await SendOkAsync(supplier1, asn1);
-        var (asn2, _, supplier2) = await NewDraftWithBuyerAsync(orderQty: 10m);
+        var (asn2, _, supplier2) = await NewDraftWithBuyerAsync(orderQty: 10m, mapBuyer: false);
         await SendOkAsync(supplier2, asn2);
 
-        // Buyer (a non-admin Asn.Approve principal) sees BOTH pending ASNs (reviewer-sees-all).
+        // Buyer sees ASN-1 (its supplier is mapped to them) but NOT ASN-2 (unmapped supplier).
         var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
         var buyerResp = await buyer.GetAsync("/api/asns/pending-approvals");
         buyerResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(buyerResp));
         var mine = (await Read<List<AsnApprovalListItemDto>>(buyerResp)).Data!;
         var row = mine.SingleOrDefault(r => r.AsnId == asn1);
-        row.Should().NotBeNull(because: "a PendingApproval ASN appears for any approver");
+        row.Should().NotBeNull(because: "the buyer is mapped to ASN-1's supplier");
         row!.SubmittedBy.Should().Be(SecurityTestHarness.Users.Supplier);
         row.SubmittedOn.Should().NotBeNull();
         row.PoCount.Should().Be(1);
-        mine.Should().Contain(r => r.AsnId == asn2, because: "the approver sees ALL pending ASNs, not a buyer-routed subset");
+        mine.Should().NotContain(r => r.AsnId == asn2, because: "the buyer is NOT mapped to ASN-2's supplier");
 
-        // An Admin also sees both.
+        // An Admin sees both (admin-sees-all).
         var admin = await _fx.ClientAsAsync(SecurityTestHarness.Users.Admin, IntegrationTestFixture.CompanyId);
         var adminResp = await admin.GetAsync("/api/asns/pending-approvals");
         adminResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(adminResp));
@@ -364,10 +363,12 @@ public class AsnApprovalFlowTests : IAsyncLifetime
     // ════════════════════════════ helpers ════════════════════════════
 
     private async Task<(Guid AsnId, ProcureToPayFlow.Setup Setup, HttpClient SupplierClient)> NewDraftWithBuyerAsync(
-        decimal orderQty = 10m, Guid? buyerUserId = null)
+        decimal orderQty = 10m, Guid? buyerUserId = null, bool mapBuyer = true)
     {
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx, orderQty: orderQty);
-        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId, buyerUserId);
+        // AssignBuyerAsync also maps the buyer to the PO's supplier (approval is scoped by admin.SupplierUserMap);
+        // map:false leaves the buyer UNMAPPED so the ASN does NOT appear in its queue (the negative-scope case).
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId, buyerUserId, map: mapBuyer);
         var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
         var create = await client.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
         create.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(create));
