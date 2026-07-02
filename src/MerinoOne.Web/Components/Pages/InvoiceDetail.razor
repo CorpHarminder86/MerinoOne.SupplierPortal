@@ -45,20 +45,20 @@ else
                    attaches the cookie-JWT as bearer; page access already implies Invoice.Read. ?company= carries
                    the circuit's active company (the <a download> bypasses ApiClient's X-Active-Company stamping,
                    so the proxy forwards it as the header — without it a multi-company principal 404s). *@
-                <a class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);text-decoration:none;" href="@InvoicePdfHref" download>
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">download</span> Download PDF
+                <a class="mbtn mbtn--outline" href="@InvoicePdfHref" download>
+                    <span class="material-symbols-outlined">download</span> Download PDF
                 </a>
                 @if (Token.HasPermission("Invoice.Submit") && detail.InvoiceStatus == "Draft")
                 {
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenEdit" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">edit</span> Edit
+                    <button class="mbtn mbtn--outline" @onclick="OpenEdit" disabled="@busy">
+                        <span class="material-symbols-outlined">edit</span> Edit
                     </button>
                     @* R6 — the DRAFT-{asn}-{n} (and legacy INV-DRAFT-) placeholder is rejected server-side; block
                        the affordance client-side too until the supplier keys the real number via Edit. *@
-                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenSubmit"
+                    <button class="mbtn mbtn--primary-success" @onclick="OpenSubmit"
                             disabled="@(busy || HasPlaceholderNumber)"
                             title="@(HasPlaceholderNumber ? "Replace the draft placeholder with the real invoice number (Edit) before submitting." : null)">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">send</span> Submit
+                        <span class="material-symbols-outlined">send</span> Submit
                     </button>
                 }
                 @* R6 — submit now lands Matched|MatchExceptions (never Submitted), so the pre-post gates must
@@ -71,32 +71,32 @@ else
                 @if (Token.HasPermission("Invoice.Revoke") && !detail.ErpPostedAt.HasValue
                      && detail.InvoiceStatus is "Submitted" or "Matched" or "MatchExceptions")
                 {
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-warning);background:var(--mer-surface);color:var(--mer-warning);cursor:pointer;" @onclick="OpenRevoke" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">undo</span> Revoke to Draft
+                    <button class="mbtn mbtn--outline" @onclick="OpenRevoke" disabled="@busy">
+                        <span class="material-symbols-outlined">undo</span> Revoke to Draft
                     </button>
                 }
                 @if (Token.HasPermission("Invoice.Review") && detail.InvoiceStatus == "Submitted")
                 {
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenReview" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">fact_check</span> Mark Under Review
+                    <button class="mbtn mbtn--outline" @onclick="OpenReview" disabled="@busy">
+                        <span class="material-symbols-outlined">fact_check</span> Mark Under Review
                     </button>
                 }
                 @if (Token.HasPermission("Invoice.Approve") && detail.InvoiceStatus is "Submitted" or "UnderReview" or "Matched")
                 {
-                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                    <button class="mbtn mbtn--success" @onclick="OpenApprove" disabled="@busy">
+                        <span class="material-symbols-outlined">task_alt</span> Approve
                     </button>
                 }
                 @if (Token.HasPermission("Invoice.Approve") && detail.InvoiceStatus is "Submitted" or "UnderReview" or "Matched" or "MatchExceptions")
                 {
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenReject" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject
+                    <button class="mbtn mbtn--danger" @onclick="OpenReject" disabled="@busy">
+                        <span class="material-symbols-outlined">cancel</span> Reject
                     </button>
                 }
                 @if (Token.HasPermission("CreditDebitNote.Write"))
                 {
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenCreateNote" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">request_quote</span> Create Credit/Debit Note
+                    <button class="mbtn mbtn--outline" @onclick="OpenCreateNote" disabled="@busy">
+                        <span class="material-symbols-outlined">request_quote</span> Create Credit/Debit Note
                     </button>
                 }
             </div>

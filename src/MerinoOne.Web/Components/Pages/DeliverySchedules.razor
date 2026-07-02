@@ -29,12 +29,11 @@
                other ship-tos are disabled; the server invariant (§9.3) is the authoritative fallback. *@
             @if (CanCreateAsn)
             {
-                <button class="rz-button rz-primary"
-                        style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:@(selected.Count == 0 ? "not-allowed" : "pointer");opacity:@(selected.Count == 0 ? ".55" : "1");"
+                <button class="mbtn mbtn--primary"
                         disabled="@(selected.Count == 0)"
                         title="@(selected.Count == 0 ? "Select one or more lines sharing a single ship-to" : $"Create an ASN from {selected.Count} selected line(s)")"
                         @onclick="OpenCreateAsn">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">local_shipping</span> Create ASN@(selected.Count > 0 ? $" ({selected.Count})" : "")
+                    <span class="material-symbols-outlined">local_shipping</span> Create ASN@(selected.Count > 0 ? $" ({selected.Count})" : "")
                 </button>
             }
         </div>

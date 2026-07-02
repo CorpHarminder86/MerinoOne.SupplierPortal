@@ -48,7 +48,7 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 1.2fr 110px 90px 150px 110px 90px 1.4fr 110px; --tl-min-width: 1280px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 1.2fr 110px 90px 150px 110px 90px 1.4fr 150px; --tl-min-width: 1320px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Entity</div>
                     <div class="tlg-col">Direction</div>
@@ -84,11 +84,11 @@ else
                         <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
                             @if (Token.HasPermission("Integration.Manage"))
                             {
-                                <button @onclick="() => OpenEdit(ep)" disabled="@busy" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit URL / BOD">
-                                    <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                                <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(ep)" disabled="@busy" title="Edit URL / BOD">
+                                    <span class="material-symbols-outlined">edit</span> Edit
                                 </button>
-                                <button @onclick="() => Toggle(ep)" disabled="@busy" style="background:transparent;border:0;cursor:pointer;color:@(ep.IsEnabled ? "var(--mer-red)" : "var(--mer-green-dark)");" title="@(ep.IsEnabled ? "Disable" : "Enable")">
-                                    <span class="material-symbols-outlined" style="font-size:18px;">@(ep.IsEnabled ? "toggle_on" : "toggle_off")</span>
+                                <button class="mbtn mbtn--row @(ep.IsEnabled ? "mbtn--danger" : "mbtn--success")" @onclick="() => Toggle(ep)" disabled="@busy" title="@(ep.IsEnabled ? "Disable" : "Enable")">
+                                    <span class="material-symbols-outlined">@(ep.IsEnabled ? "toggle_on" : "toggle_off")</span> @(ep.IsEnabled ? "Off" : "On")
                                 </button>
                             }
                         </div>

@@ -19,8 +19,8 @@
         <div class="tl-header__actions">
             @if (Token.HasPermission("Settings.Write"))
             {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> New company
+                <button class="mbtn mbtn--primary" @onclick="OpenNew">
+                    <span class="material-symbols-outlined">add</span> New company
                 </button>
             }
         </div>
@@ -46,7 +46,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.6fr 110px 150px 120px; --tl-min-width: 820px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.6fr 110px 150px 150px; --tl-min-width: 850px;">
             <div class="tlg-header">
                 <div class="tlg-col">Code</div>
                 <div class="tlg-col">Name</div>
@@ -64,19 +64,19 @@
                     <div class="tlg-col tlg-col--actions">
                         @if (Token.HasPermission("Settings.Write"))
                         {
-                            <button @onclick="() => OpenEdit(r)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit">
-                                <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(r)" title="Edit">
+                                <span class="material-symbols-outlined">edit</span> Edit
                             </button>
                             @if (r.IsActive)
                             {
-                                <button @onclick="() => Deactivate(r)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
-                                    <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                                <button class="mbtn mbtn--row mbtn--danger" @onclick="() => Deactivate(r)" title="Deactivate">
+                                    <span class="material-symbols-outlined">block</span> Off
                                 </button>
                             }
                             else
                             {
-                                <button @onclick="() => Reactivate(r)" style="background:transparent;border:0;color:var(--mer-green-dark);cursor:pointer;" title="Reactivate">
-                                    <span class="material-symbols-outlined" style="font-size:18px;">check_circle</span>
+                                <button class="mbtn mbtn--row mbtn--success" @onclick="() => Reactivate(r)" title="Reactivate">
+                                    <span class="material-symbols-outlined">check_circle</span> On
                                 </button>
                             }
                         }

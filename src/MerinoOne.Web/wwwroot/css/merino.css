@@ -140,6 +140,67 @@
 .rz-button.rz-danger { background: var(--mer-red, #A32D2D) !important; color: #fff !important; border-color: var(--mer-red, #A32D2D); }
 .rz-button:disabled, .rz-button.rz-state-disabled { opacity: 0.5; cursor: not-allowed; }
 .rz-button .material-symbols-outlined { font-size: 16px !important; line-height: 1; vertical-align: middle; }
+
+/* ---------------------------------------------------------------------------
+   Merino compact button system (.mbtn) — app-wide action buttons.
+   Combo: #2 outline family for PAGE-HEADER action bars (exactly one filled
+   .mbtn--primary* per bar, everything else outline/semantic) and #4
+   icon+micro-label (.mbtn--row) for IN-GRID row actions. A migrated button
+   DROPS its rz-button/rz-primary classes and oversized inline padding — only
+   class + behaviour attributes (@onclick/disabled/title/href/type/@ref) stay.
+   Works on both <button> and <a> (text-decoration:none).
+--------------------------------------------------------------------------- */
+.mbtn {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: var(--mer-radius);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--mer-ink-700);
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background var(--mer-transition), border-color var(--mer-transition), color var(--mer-transition);
+}
+.mbtn .material-symbols-outlined { font-size: 16px !important; line-height: 1; }
+.mbtn:disabled, .mbtn.mbtn--disabled { opacity: .5; cursor: not-allowed; }
+.mbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(46,91,183,.25); }
+
+/* Filled — the single dominant CTA per bar (#2: exactly one filled). */
+.mbtn--primary { background: var(--mer-blue); border-color: var(--mer-blue); color: #fff; }
+.mbtn--primary:hover:not(:disabled) { background: var(--mer-blue-bright); border-color: var(--mer-blue-bright); }
+.mbtn--primary-success { background: var(--mer-green); border-color: var(--mer-green); color: #fff; }
+.mbtn--primary-success:hover:not(:disabled) { background: var(--mer-green-dark); border-color: var(--mer-green-dark); }
+.mbtn--primary-danger { background: var(--mer-red, #C0392B); border-color: var(--mer-red, #C0392B); color: #fff; }
+.mbtn--primary-danger:hover:not(:disabled) { background: var(--mer-red-hover, #A5281C); border-color: var(--mer-red-hover, #A5281C); }
+
+/* Outline — every non-primary action: neutral + three semantic tints. */
+.mbtn--outline { border-color: var(--mer-ink-300); color: var(--mer-ink-700); background: var(--mer-surface); }
+.mbtn--outline:hover:not(:disabled) { background: var(--mer-ink-50); border-color: var(--mer-ink-400); }
+.mbtn--accent { border-color: var(--mer-blue); color: var(--mer-blue); background: var(--mer-surface); }
+.mbtn--accent:hover:not(:disabled) { background: var(--mer-blue-50, #E3EBFA); }
+.mbtn--success { border-color: var(--mer-green-dark); color: var(--mer-green-dark); background: var(--mer-surface); }
+.mbtn--success:hover:not(:disabled) { background: var(--mer-green-50, #EAF3DE); }
+.mbtn--danger { border-color: var(--mer-red, #C0392B); color: var(--mer-red, #C0392B); background: var(--mer-surface); }
+.mbtn--danger:hover:not(:disabled) { background: var(--mer-red-50, #FCEBEB); }
+
+/* #4 — in-grid row action: icon + micro-label, tight. Combine with a variant. */
+.mbtn--row { padding: 5px 9px; font-size: 12px; gap: 5px; }
+.mbtn--row .material-symbols-outlined { font-size: 14px !important; }
+
+/* Icon-only (square) — label supplied via title/aria-label. */
+.mbtn--icon { padding: 6px; }
+.mbtn--icon.mbtn--row { padding: 5px; }
+
+/* Optional wrapper so a row/header action cluster packs tightly. */
+.mbtn-bar { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rz-card { background: var(--mer-surface); border: 1px solid var(--mer-line); border-radius: var(--mer-radius-lg); box-shadow: var(--mer-shadow-sm); }
 .rz-textbox, .rz-password, .rz-spinner, .rz-dropdown, .rz-datepicker { border-radius: var(--mer-radius); border: 1px solid var(--mer-ink-300); background: var(--mer-surface); }
 .rz-textbox:focus-within, .rz-password:focus-within, .rz-spinner:focus-within, .rz-dropdown:focus-within, .rz-datepicker:focus-within { border-color: var(--mer-blue); box-shadow: 0 0 0 3px rgba(46,91,183,.12); outline: 0; }

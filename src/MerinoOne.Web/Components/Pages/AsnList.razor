@@ -17,8 +17,8 @@
         <div class="tl-header__actions">
             @if (Token.IsSupplier || Token.HasPermission("Asn.Write"))
             {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NewAsn">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> New ASN
+                <button class="mbtn mbtn--primary" @onclick="NewAsn">
+                    <span class="material-symbols-outlined">add</span> New ASN
                 </button>
             }
         </div>

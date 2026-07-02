@@ -31,17 +31,17 @@ else
             <div class="tl-header__actions" style="display:flex;gap:8px;">
                 @if (!string.IsNullOrEmpty(publicApiBaseUrl))
                 {
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="OpenInteractiveReference">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">menu_book</span> Open interactive reference
+                    <button class="mbtn mbtn--outline" @onclick="OpenInteractiveReference">
+                        <span class="material-symbols-outlined">menu_book</span> Open interactive reference
                     </button>
                 }
-                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="() => ExportPdf(selectedScopes, null)" disabled="@(selectedScopes.Count == 0)">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">picture_as_pdf</span> Export PDF
+                <button class="mbtn mbtn--outline" @onclick="() => ExportPdf(selectedScopes, null)" disabled="@(selectedScopes.Count == 0)">
+                    <span class="material-symbols-outlined">picture_as_pdf</span> Export PDF
                 </button>
                 @if (Token.HasPermission("Integration.ApiKeys"))
                 {
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenGenerate" disabled="@(selectedScopes.Count == 0)">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">key</span> Generate key for selection
+                    <button class="mbtn mbtn--primary" @onclick="OpenGenerate" disabled="@(selectedScopes.Count == 0)">
+                        <span class="material-symbols-outlined">key</span> Generate key for selection
                     </button>
                 }
             </div>

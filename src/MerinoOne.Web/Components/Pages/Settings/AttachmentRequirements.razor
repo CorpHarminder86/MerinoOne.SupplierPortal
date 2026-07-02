@@ -41,8 +41,8 @@
                         <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">Attachment types (@types.Count)</h3>
                         <p style="color:var(--mer-ink-500);font-size:12px;">The catalogue of attachment types policies can reference. Code aligns with the upload documentType and is immutable.</p>
                     </div>
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewType">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add type
+                    <button class="mbtn mbtn--primary" @onclick="OpenNewType">
+                        <span class="material-symbols-outlined">add</span> Add type
                     </button>
                 </div>
 
@@ -56,7 +56,7 @@
                 }
                 else
                 {
-                    <div class="tl-grid-wrapper" style="--tl-cols: 200px 1.4fr 110px 110px; --tl-min-width: 760px;">
+                    <div class="tl-grid-wrapper" style="--tl-cols: 200px 1.4fr 110px 150px; --tl-min-width: 800px;">
                         <div class="tlg-header">
                             <div class="tlg-col">Code</div>
                             <div class="tlg-col">Name</div>
@@ -71,7 +71,7 @@
                                 <div class="tlg-col tlg-desc">@type.Name</div>
                                 <div class="tlg-col"><span class="tlg-status @(type.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(type.IsActive ? "Yes" : "No")</span></div>
                                 <div class="tlg-col tlg-col--actions">
-                                    <button @onclick="() => OpenEditType(type)" title="Rename / toggle" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
+                                    <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEditType(type)" title="Rename / toggle"><span class="material-symbols-outlined">edit</span> Edit</button>
                                 </div>
                             </div>
                         }
@@ -170,10 +170,10 @@
                                         <td style="padding:8px 4px;"><span class="tlg-status @ReqClass(row.EffectiveRequirement)">@row.EffectiveRequirement</span></td>
                                     }
                                     <td style="padding:8px 4px;text-align:right;">
-                                        <button @onclick="() => SavePolicy(row)" disabled="@busy" title="Save" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:18px;">save</span></button>
+                                        <button class="mbtn mbtn--row mbtn--success" @onclick="() => SavePolicy(row)" disabled="@busy" title="Save"><span class="material-symbols-outlined">save</span> Save</button>
                                         @if (row.HasRowAtThisTier)
                                         {
-                                            <button @onclick="() => ClearPolicy(row)" disabled="@busy" title="Clear (revert to default/Optional)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;"><span class="material-symbols-outlined" style="font-size:18px;">backspace</span></button>
+                                            <button class="mbtn mbtn--row mbtn--danger" @onclick="() => ClearPolicy(row)" disabled="@busy" title="Clear (revert to default/Optional)"><span class="material-symbols-outlined">backspace</span> Clear</button>
                                         }
                                     </td>
                                 </tr>

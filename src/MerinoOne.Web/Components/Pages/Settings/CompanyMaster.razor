@@ -92,7 +92,7 @@
                 }
                 else
                 {
-                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 110px 1.6fr 90px 110px; --tl-min-width: 920px;">
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 110px 1.6fr 90px 150px; --tl-min-width: 960px;">
                         <div class="tlg-header">
                             <div class="tlg-col">Address name</div>
                             <div class="tlg-col">ERP code</div>
@@ -113,13 +113,13 @@
                                 <div class="tlg-col tlg-col--actions">
                                     @if (CanWrite)
                                     {
-                                        <button @onclick="() => OpenEditAddress(addr)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit">
-                                            <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                                        <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEditAddress(addr)" title="Edit">
+                                            <span class="material-symbols-outlined">edit</span> Edit
                                         </button>
                                         @if (addr.IsActive)
                                         {
-                                            <button @onclick="() => DeactivateAddress(addr)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
-                                                <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                                            <button class="mbtn mbtn--row mbtn--danger" @onclick="() => DeactivateAddress(addr)" title="Deactivate">
+                                                <span class="material-symbols-outlined">block</span> Off
                                             </button>
                                         }
                                     }

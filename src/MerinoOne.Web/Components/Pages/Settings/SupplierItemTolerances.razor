@@ -61,7 +61,7 @@
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.4fr 130px 200px 130px 110px; --tl-min-width: 1040px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.4fr 130px 200px 130px 160px; --tl-min-width: 1090px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Item code</div>
                     <div class="tlg-col">Description</div>
@@ -87,13 +87,13 @@
                             <span class="tlg-status @(row.SupplierOverridePct.HasValue ? "tlg-status--active" : "tlg-status--info")">@row.ResolvedTolerancePct.ToString("0.##")%</span>
                         </div>
                         <div class="tlg-col tlg-col--actions">
-                            <button @onclick="() => SaveRow(row)" disabled="@busy" title="Save override" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;">
-                                <span class="material-symbols-outlined" style="font-size:18px;">save</span>
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => SaveRow(row)" disabled="@busy" title="Save override">
+                                <span class="material-symbols-outlined">save</span> Save
                             </button>
                             @if (row.SupplierItemId.HasValue)
                             {
-                                <button @onclick="() => ClearRow(row)" disabled="@busy" title="Clear override (inherit master)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;">
-                                    <span class="material-symbols-outlined" style="font-size:18px;">backspace</span>
+                                <button class="mbtn mbtn--row mbtn--danger" @onclick="() => ClearRow(row)" disabled="@busy" title="Clear override (inherit master)">
+                                    <span class="material-symbols-outlined">backspace</span> Clear
                                 </button>
                             }
                         </div>

@@ -20,8 +20,8 @@
         <div class="tl-header__actions">
             @if (Token.HasPermission("Supplier.Invite"))
             {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">mail</span>
+                <button class="mbtn mbtn--primary" @onclick="OpenNew">
+                    <span class="material-symbols-outlined">mail</span>
                     New invite
                 </button>
             }
@@ -67,7 +67,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.2fr 130px 130px 130px 110px 130px; --tl-min-width: 1130px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.2fr 130px 130px 130px 110px 160px; --tl-min-width: 1180px;">
             <div class="tlg-header">
                 <div class="tlg-col">Legal name</div>
                 <div class="tlg-col">Email</div>
@@ -90,16 +90,14 @@
                     <div class="tlg-col" style="display:flex;gap:6px;align-items:center;">
                         @if (Token.HasPermission("Supplier.Invite") && (inv.Status == "Pending" || inv.Status == "Expired"))
                         {
-                            <button title="Resend invite" @onclick="() => DoResend(inv)" disabled="@busy"
-                                    style="background:transparent;border:1px solid var(--mer-ink-300);border-radius:4px;padding:2px 6px;cursor:pointer;color:var(--mer-blue);">
-                                <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">refresh</span>
+                            <button class="mbtn mbtn--row mbtn--accent" title="Resend invite" @onclick="() => DoResend(inv)" disabled="@busy">
+                                <span class="material-symbols-outlined">refresh</span> Resend
                             </button>
                         }
                         @if (Token.HasPermission("Supplier.Invite") && inv.Status == "Pending")
                         {
-                            <button title="Cancel invite" @onclick="() => DoCancel(inv)" disabled="@busy"
-                                    style="background:transparent;border:1px solid var(--mer-ink-300);border-radius:4px;padding:2px 6px;cursor:pointer;color:var(--mer-red);">
-                                <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span>
+                            <button class="mbtn mbtn--row mbtn--danger" title="Cancel invite" @onclick="() => DoCancel(inv)" disabled="@busy">
+                                <span class="material-symbols-outlined">cancel</span> Cancel
                             </button>
                         }
                     </div>

@@ -49,8 +49,8 @@
                     <div class="tlg-col tlg-col--actions">
                         @if (Token.HasPermission("Settings.Write"))
                         {
-                            <button @onclick="() => OpenEdit(r)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit">
-                                <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(r)" title="Edit">
+                                <span class="material-symbols-outlined">edit</span> Edit
                             </button>
                         }
                     </div>

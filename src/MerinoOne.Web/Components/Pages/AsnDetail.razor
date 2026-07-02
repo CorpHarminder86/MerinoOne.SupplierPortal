@@ -50,11 +50,11 @@
             {
                 @* §6.2 — a buyer cannot approve OR reject while the ASN's PO is not shippable (e.g. reset to Released
                    by an ERP Modify); both actions are disabled with the reason until the PO is re-confirmed. *@
-                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenRejectDialog" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : null)">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject…
+                <button class="mbtn mbtn--danger" @onclick="OpenRejectDialog" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : null)">
+                    <span class="material-symbols-outlined">cancel</span> Reject…
                 </button>
-                <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApproveDialog" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : null)">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                <button class="mbtn mbtn--primary-success" @onclick="OpenApproveDialog" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : null)">
+                    <span class="material-symbols-outlined">task_alt</span> Approve
                 </button>
             }
             @* Cancel — supplier-side, available on any of the supplier's active states (Draft / Rejected / PendingApproval).
@@ -62,11 +62,11 @@
                view (IsLocked=true) but the supplier can still withdraw it via Cancel, so this is gated on status, not IsLocked. *@
             @if (!IsNew && detail != null && CanWrite && CanCancel)
             {
-                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenCancelDialog" disabled="@busy">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span> Cancel ASN
+                <button class="mbtn mbtn--danger" @onclick="OpenCancelDialog" disabled="@busy">
+                    <span class="material-symbols-outlined">block</span> Cancel ASN
                 </button>
             }
-            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="BackToList">Close</button>
+            <button class="mbtn mbtn--outline" @onclick="BackToList">Close</button>
         </div>
     </header>
 

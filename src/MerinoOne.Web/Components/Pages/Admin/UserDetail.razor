@@ -44,14 +44,14 @@ else
                 {
                     if (detail.IsActive)
                     {
-                        <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenDeactivate">
-                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span> Deactivate
+                        <button class="mbtn mbtn--danger" @onclick="OpenDeactivate">
+                            <span class="material-symbols-outlined">block</span> Deactivate
                         </button>
                     }
                     else
                     {
-                        <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Reactivate" disabled="@busy">
-                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">check_circle</span> Reactivate
+                        <button class="mbtn mbtn--primary-success" @onclick="Reactivate" disabled="@busy">
+                            <span class="material-symbols-outlined">check_circle</span> Reactivate
                         </button>
                     }
                 }
@@ -216,8 +216,8 @@ else
                                     <td style="padding:8px 4px;text-align:right;">
                                         @if (canProvision)
                                         {
-                                            <button @onclick="() => RevokeCompany(a.TenantEntityId, accessLabel)" disabled="@busy" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Revoke company access">
-                                                <span class="material-symbols-outlined" style="font-size:18px;">link_off</span>
+                                            <button class="mbtn mbtn--row mbtn--danger" @onclick="() => RevokeCompany(a.TenantEntityId, accessLabel)" disabled="@busy" title="Revoke company access">
+                                                <span class="material-symbols-outlined">link_off</span> Del
                                             </button>
                                         }
                                     </td>
@@ -287,8 +287,8 @@ else
                                     <td style="padding:8px 4px;text-align:right;">
                                         @if (canProvision)
                                         {
-                                            <button @onclick="() => UnmapSupplier(m.SupplierId, m.SupplierCode)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Remove">
-                                                <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
+                                            <button class="mbtn mbtn--row mbtn--danger" @onclick="() => UnmapSupplier(m.SupplierId, m.SupplierCode)" title="Remove">
+                                                <span class="material-symbols-outlined">delete</span> Del
                                             </button>
                                         }
                                     </td>

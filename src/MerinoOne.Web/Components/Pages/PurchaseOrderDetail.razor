@@ -36,20 +36,20 @@ else
                    manual Ack/Accept/Reject affordances are hidden (req 3 / §0 Q8). *@
                 @if (ManualResponse && Token.HasPermission("PurchaseOrder.Acknowledge") && detail.PoStatus == "Released")
                 {
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenAcknowledge" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">check_circle</span> Acknowledge
+                    <button class="mbtn mbtn--outline" @onclick="OpenAcknowledge" disabled="@busy">
+                        <span class="material-symbols-outlined">check_circle</span> Acknowledge
                     </button>
                 }
                 @if (ManualResponse && Token.HasPermission("PurchaseOrder.Accept") && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
                 {
-                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenAccept" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Accept
+                    <button class="mbtn mbtn--primary-success" @onclick="OpenAccept" disabled="@busy">
+                        <span class="material-symbols-outlined">task_alt</span> Accept
                     </button>
                     @* R4 (2026-06-26) — D1 / §3.4: Reject/Decline is hidden when the supplier config has AllowReject=false. *@
                     @if (detail.AllowReject)
                     {
-                        <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenReject" disabled="@busy">
-                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject
+                        <button class="mbtn mbtn--danger" @onclick="OpenReject" disabled="@busy">
+                            <span class="material-symbols-outlined">cancel</span> Reject
                         </button>
                     }
                 }
@@ -58,8 +58,8 @@ else
                    Hidden once a negotiation is open (PoStatus == "Negotiation") so only "Cancel Negotiation" shows. *@
                 @if (detail.AllowNegotiate && Token.HasPermission("PurchaseOrder.Negotiate") && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))
                 {
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-blue);background:var(--mer-surface);color:var(--mer-blue);cursor:pointer;" @onclick="EnterNegotiation" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">handshake</span> Negotiation
+                    <button class="mbtn mbtn--accent" @onclick="EnterNegotiation" disabled="@busy">
+                        <span class="material-symbols-outlined">handshake</span> Negotiation
                     </button>
                 }
                 @* While a negotiation is open the PO is locked in "Negotiation" — Ack/Accept/Reject/Negotiation
@@ -67,8 +67,8 @@ else
                    only withdraw it (req 3 / state machine §2). *@
                 @if (Token.HasPermission("PurchaseOrder.Negotiate") && detail.PoStatus == "Negotiation")
                 {
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="CancelNegotiation" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">undo</span> Cancel Negotiation
+                    <button class="mbtn mbtn--danger" @onclick="CancelNegotiation" disabled="@busy">
+                        <span class="material-symbols-outlined">undo</span> Cancel Negotiation
                     </button>
                 }
                 @if (!ManualResponse && (detail.PoStatus == "Released" || detail.PoStatus == "Acknowledged"))

@@ -71,11 +71,11 @@
                     <div class="tlg-col tlg-col--actions">
                         @if (editable)
                         {
-                            <button @onclick="() => Edit(row)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit / submit"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => Edit(row)" title="Edit / submit"><span class="material-symbols-outlined">edit</span> Edit</button>
                         }
                         else
                         {
-                            <button @onclick="() => View(row)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="View"><span class="material-symbols-outlined" style="font-size:18px;">visibility</span></button>
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => View(row)" title="View"><span class="material-symbols-outlined">visibility</span> View</button>
                         }
                     </div>
                 </div>

@@ -29,8 +29,8 @@ else
             <div class="tl-header__actions">
                 @if (Token.HasPermission("Integration.ApiKeys"))
                 {
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">key</span> Generate key
+                    <button class="mbtn mbtn--primary" @onclick="OpenNew">
+                        <span class="material-symbols-outlined">key</span> Generate key
                     </button>
                 }
             </div>
@@ -56,7 +56,7 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 1.2fr 1.4fr 150px 110px 130px; --tl-min-width: 1220px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 1.2fr 1.4fr 150px 110px 170px; --tl-min-width: 1260px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Label</div>
                     <div class="tlg-col">Prefix</div>
@@ -91,11 +91,11 @@ else
                         <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
                             @if (Token.HasPermission("Integration.ApiKeys") && key.IsActive && key.RevokedAt == null)
                             {
-                                <button @onclick="() => Rotate(key)" disabled="@busy" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Rotate (mint successor, revoke this)">
-                                    <span class="material-symbols-outlined" style="font-size:18px;">autorenew</span>
+                                <button class="mbtn mbtn--row mbtn--accent" @onclick="() => Rotate(key)" disabled="@busy" title="Rotate (mint successor, revoke this)">
+                                    <span class="material-symbols-outlined">autorenew</span> Rotate
                                 </button>
-                                <button @onclick="() => Revoke(key)" disabled="@busy" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Revoke">
-                                    <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                                <button class="mbtn mbtn--row mbtn--danger" @onclick="() => Revoke(key)" disabled="@busy" title="Revoke">
+                                    <span class="material-symbols-outlined">block</span> Off
                                 </button>
                             }
                         </div>

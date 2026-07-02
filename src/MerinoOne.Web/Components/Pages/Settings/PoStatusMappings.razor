@@ -26,8 +26,8 @@
         <div class="tl-header__actions">
             @if (CanWrite)
             {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add mapping
+                <button class="mbtn mbtn--primary" @onclick="OpenNew">
+                    <span class="material-symbols-outlined">add</span> Add mapping
                 </button>
             }
         </div>
@@ -54,7 +54,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.4fr 90px 110px; --tl-min-width: 640px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.4fr 90px 150px; --tl-min-width: 680px;">
             <div class="tlg-header">
                 <div class="tlg-col">ERP status</div>
                 <div class="tlg-col">Portal status</div>
@@ -72,13 +72,13 @@
                     </div>
                     <div class="tlg-col"><span class="tlg-status @(row.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(row.IsActive ? "Yes" : "No")</span></div>
                     <div class="tlg-col tlg-col--actions">
-                        <button @onclick="() => OpenEdit(row)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Re-target / toggle active">
-                            <span class="material-symbols-outlined" style="font-size:18px;">edit</span>
+                        <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(row)" title="Re-target / toggle active">
+                            <span class="material-symbols-outlined">edit</span> Edit
                         </button>
                         @if (row.IsActive)
                         {
-                            <button @onclick="() => Deactivate(row)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate">
-                                <span class="material-symbols-outlined" style="font-size:18px;">block</span>
+                            <button class="mbtn mbtn--row mbtn--danger" @onclick="() => Deactivate(row)" title="Deactivate">
+                                <span class="material-symbols-outlined">block</span> Off
                             </button>
                         }
                     </div>

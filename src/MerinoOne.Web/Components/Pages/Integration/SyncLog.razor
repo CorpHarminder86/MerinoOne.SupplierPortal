@@ -84,7 +84,7 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 130px 150px 90px 90px 130px 1fr 150px 60px 60px; --tl-min-width: 1320px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 130px 150px 90px 90px 130px 1fr 150px 60px 90px; --tl-min-width: 1350px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Entity</div>
                     <div class="tlg-col">Entity ID</div>
@@ -111,8 +111,8 @@ else
                         <div class="tlg-col tlg-col--actions">
                             @if (row.HasPayload)
                             {
-                                <button @onclick="() => ViewPayload(row)" disabled="@busy" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="View stored request JSON">
-                                    <span class="material-symbols-outlined" style="font-size:18px;">data_object</span>
+                                <button class="mbtn mbtn--row mbtn--accent" @onclick="() => ViewPayload(row)" disabled="@busy" title="View stored request JSON">
+                                    <span class="material-symbols-outlined">data_object</span> View
                                 </button>
                             }
                         </div>

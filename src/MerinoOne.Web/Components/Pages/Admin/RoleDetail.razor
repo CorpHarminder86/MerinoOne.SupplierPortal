@@ -36,7 +36,7 @@ else
             <div class="tl-header__actions">
                 @if (canWrite)
                 {
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Save" disabled="@busy">
+                    <button class="mbtn mbtn--primary" @onclick="Save" disabled="@busy">
                         @(busy ? "Saving…" : "Save permissions")
                     </button>
                 }

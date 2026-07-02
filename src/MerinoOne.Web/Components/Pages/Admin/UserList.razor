@@ -17,8 +17,8 @@
         <div class="tl-header__actions">
             @if (Token.HasPermission("User.Write"))
             {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="GoNew">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">person_add</span>
+                <button class="mbtn mbtn--primary" @onclick="GoNew">
+                    <span class="material-symbols-outlined">person_add</span>
                     New user
                 </button>
             }

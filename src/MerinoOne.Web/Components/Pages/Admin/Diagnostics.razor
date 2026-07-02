@@ -15,8 +15,8 @@
             <p class="tl-sub">Tenant / company / sources / bypass flags as the always-on filters see this session — for debugging row visibility</p>
         </div>
         <div class="tl-header__actions">
-            <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Load" disabled="@loading">
-                <span class="material-symbols-outlined @(loading ? "mer-spin" : "")" style="font-size:16px;vertical-align:middle;">refresh</span> Refresh
+            <button class="mbtn mbtn--outline" @onclick="Load" disabled="@loading">
+                <span class="material-symbols-outlined @(loading ? "mer-spin" : "")">refresh</span> Refresh
             </button>
         </div>
     </header>

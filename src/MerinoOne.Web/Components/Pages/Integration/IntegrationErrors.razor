@@ -68,8 +68,8 @@ else
                         <div class="tlg-col">
                             @if (!e.Resolved)
                             {
-                                <button class="rz-button rz-primary" style="padding:4px 8px;border-radius:4px;border:0;color:#fff;cursor:pointer;font-size:11px;" @onclick="() => Retry(e.Id)" disabled="@busy">
-                                    <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">refresh</span> Retry
+                                <button class="mbtn mbtn--row mbtn--success" @onclick="() => Retry(e.Id)" disabled="@busy">
+                                    <span class="material-symbols-outlined">refresh</span> Retry
                                 </button>
                             }
                         </div>

@@ -15,7 +15,7 @@
         <div class="tl-header__actions">
             @if (Token.HasPermission("Settings.Write"))
             {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> Add</button>
+                <button class="mbtn mbtn--primary" @onclick="OpenNew"><span class="material-symbols-outlined">add</span> Add</button>
             }
         </div>
     </header>
@@ -27,7 +27,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 90px 1.4fr 70px 80px 90px 90px 110px; --tl-min-width: 880px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 90px 1.4fr 70px 80px 90px 90px 150px; --tl-min-width: 920px;">
             <div class="tlg-header">
                 <div class="tlg-col">Code</div><div class="tlg-col">Description</div><div class="tlg-col">ISO2</div><div class="tlg-col">Tel</div><div class="tlg-col">Currency</div><div class="tlg-col">Active</div><div class="tlg-col tlg-col--actions">Actions</div>
             </div>
@@ -43,8 +43,8 @@
                     <div class="tlg-col tlg-col--actions">
                         @if (Token.HasPermission("Settings.Write"))
                         {
-                            <button @onclick="() => OpenEdit(r)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
-                            @if (r.IsActive) { <button @onclick="() => Deactivate(r.Id, r.Code)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Deactivate"><span class="material-symbols-outlined" style="font-size:18px;">block</span></button> }
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(r)" title="Edit"><span class="material-symbols-outlined">edit</span> Edit</button>
+                            @if (r.IsActive) { <button class="mbtn mbtn--row mbtn--danger" @onclick="() => Deactivate(r.Id, r.Code)" title="Deactivate"><span class="material-symbols-outlined">block</span> Off</button> }
                         }
                     </div>
                 </div>

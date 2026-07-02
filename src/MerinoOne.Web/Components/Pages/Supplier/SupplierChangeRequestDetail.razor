@@ -46,14 +46,14 @@ else
             @if (CanReview && SupplierChangeStatus.IsReviewable(detail.ChangeStatus))
             {
                 <div class="tl-header__actions">
-                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);cursor:pointer;" @onclick="OpenRequestChanges" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">undo</span> Request changes
+                    <button class="mbtn mbtn--outline" @onclick="OpenRequestChanges" disabled="@busy">
+                        <span class="material-symbols-outlined">undo</span> Request changes
                     </button>
-                    <button class="rz-button rz-danger" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenReject" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span> Reject
+                    <button class="mbtn mbtn--danger" @onclick="OpenReject" disabled="@busy">
+                        <span class="material-symbols-outlined">block</span> Reject
                     </button>
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                    <button class="mbtn mbtn--primary-success" @onclick="OpenApprove" disabled="@busy">
+                        <span class="material-symbols-outlined">task_alt</span> Approve
                     </button>
                 </div>
             }

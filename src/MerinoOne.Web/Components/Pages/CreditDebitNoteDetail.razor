@@ -33,8 +33,8 @@ else
             <div class="tl-header__actions">
                 @if (Token.HasPermission("CreditDebitNote.Approve") && detail.NoteStatus == "Submitted")
                 {
-                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                    <button class="mbtn mbtn--primary-success" @onclick="OpenApprove" disabled="@busy">
+                        <span class="material-symbols-outlined">task_alt</span> Approve
                     </button>
                 }
             </div>

@@ -27,8 +27,8 @@ else
             <div class="tl-header__actions">
                 @if (CanManage)
                 {
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNew">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">hub</span> New share group
+                    <button class="mbtn mbtn--primary" @onclick="OpenNew">
+                        <span class="material-symbols-outlined">hub</span> New share group
                     </button>
                 }
             </div>
@@ -71,7 +71,7 @@ else
                         <span class="tl-count-chip">@group.Count()</span>
                     </div>
 
-                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 2fr 110px 150px; --tl-min-width: 880px;border:0;border-radius:0;">
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 2fr 110px 230px; --tl-min-width: 960px;border:0;border-radius:0;">
                         <div class="tlg-header">
                             <div class="tlg-col">Group / source company</div>
                             <div class="tlg-col">Member companies</div>
@@ -120,17 +120,14 @@ else
                                 <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
                                     @if (CanManage)
                                     {
-                                        <button @onclick="() => OpenAddMember(grp)" disabled="@busy" title="Add member"
-                                                style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;">
-                                            <span class="material-symbols-outlined" style="font-size:18px;">person_add</span>
+                                        <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenAddMember(grp)" disabled="@busy" title="Add member">
+                                            <span class="material-symbols-outlined">person_add</span> Add
                                         </button>
-                                        <button @onclick="() => Toggle(grp)" disabled="@busy" title="@(grp.IsEnabled ? "Disable" : "Enable")"
-                                                style="background:transparent;border:0;cursor:pointer;color:@(grp.IsEnabled ? "var(--mer-red)" : "var(--mer-green-dark)");">
-                                            <span class="material-symbols-outlined" style="font-size:18px;">@(grp.IsEnabled ? "toggle_on" : "toggle_off")</span>
+                                        <button class="mbtn mbtn--row @(grp.IsEnabled ? "mbtn--danger" : "mbtn--success")" @onclick="() => Toggle(grp)" disabled="@busy" title="@(grp.IsEnabled ? "Disable" : "Enable")">
+                                            <span class="material-symbols-outlined">@(grp.IsEnabled ? "toggle_on" : "toggle_off")</span> @(grp.IsEnabled ? "Off" : "On")
                                         </button>
-                                        <button @onclick="() => DeleteGroup(grp)" disabled="@busy" title="Delete group"
-                                                style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;">
-                                            <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
+                                        <button class="mbtn mbtn--row mbtn--danger" @onclick="() => DeleteGroup(grp)" disabled="@busy" title="Delete group">
+                                            <span class="material-symbols-outlined">delete</span> Del
                                         </button>
                                     }
                                 </div>

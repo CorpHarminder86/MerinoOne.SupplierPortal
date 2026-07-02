@@ -61,7 +61,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 44px 140px 1.3fr 90px 130px 120px 120px 105px 115px 110px 70px; --tl-min-width: 1420px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 90px 140px 1.3fr 90px 130px 120px 120px 105px 115px 110px 70px; --tl-min-width: 1466px;">
             <div class="tlg-header">
                 <div class="tlg-col"></div>
                 <div class="tlg-col">PO #</div>
@@ -90,9 +90,8 @@
                     <div class="tlg-col" @onclick:stopPropagation="true">
                         @if (canRespond)
                         {
-                            <button @onclick="() => OpenDetail(item.Id)" title="Respond to this PO"
-                                    style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:transparent;border:1px solid var(--mer-ink-300);border-radius:6px;color:var(--mer-blue);cursor:pointer;">
-                                <span class="material-symbols-outlined" style="font-size:16px;">reply</span>
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenDetail(item.Id)" title="Respond to this PO">
+                                <span class="material-symbols-outlined">reply</span> Reply
                             </button>
                         }
                     </div>

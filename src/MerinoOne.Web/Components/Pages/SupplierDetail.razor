@@ -34,26 +34,26 @@ else
             <div class="tl-header__actions">
                 @if (CanRaiseChangeRequest)
                 {
-                    <a href="suppliers/@Id/change-request" class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;text-decoration:none;">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">edit_note</span> Request a change
+                    <a href="suppliers/@Id/change-request" class="mbtn mbtn--accent">
+                        <span class="material-symbols-outlined">edit_note</span> Request a change
                     </a>
                 }
                 @if (Token.HasPermission("Supplier.ApproveChange"))
                 {
-                    <a href="supplier-change-requests" class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);cursor:pointer;text-decoration:none;">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">rule_settings</span> Change requests
+                    <a href="supplier-change-requests" class="mbtn mbtn--outline">
+                        <span class="material-symbols-outlined">rule_settings</span> Change requests
                     </a>
                 }
                 @if (Token.HasPermission("Supplier.VerifyNic"))
                 {
-                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="VerifyAll" disabled="@busy">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">verified</span> Verify NIC
+                    <button class="mbtn mbtn--accent" @onclick="VerifyAll" disabled="@busy">
+                        <span class="material-symbols-outlined">verified</span> Verify NIC
                     </button>
                 }
                 @if (Token.HasPermission("Supplier.Approve") && detail.RegistrationStatus != "Active" && detail.RegistrationStatus != "Approved")
                 {
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
+                    <button class="mbtn mbtn--primary" @onclick="OpenApprove">
+                        <span class="material-symbols-outlined">task_alt</span> Approve
                     </button>
                 }
             </div>
@@ -110,7 +110,7 @@ else
                 }
                 else
                 {
-                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.2fr 1fr 90px 1fr 80px 110px; --tl-min-width: 980px;">
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 1.2fr 1fr 90px 1fr 80px 150px; --tl-min-width: 1020px;">
                         <div class="tlg-header">
                             <div class="tlg-col">Bank</div>
                             <div class="tlg-col">Account name</div>
@@ -133,8 +133,8 @@ else
                                 <div class="tlg-col tlg-col--actions">
                                     @if (CanWriteMaster)
                                     {
-                                        <button @onclick="() => OpenEditBank(bank)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
-                                        <button @onclick="() => DeleteBank(bank)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Delete"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>
+                                        <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEditBank(bank)" title="Edit"><span class="material-symbols-outlined">edit</span> Edit</button>
+                                        <button class="mbtn mbtn--row mbtn--danger" @onclick="() => DeleteBank(bank)" title="Delete"><span class="material-symbols-outlined">delete</span> Del</button>
                                     }
                                 </div>
                             </div>
@@ -182,7 +182,7 @@ else
                 }
                 else
                 {
-                    <div class="tl-grid-wrapper" style="--tl-cols: 1.2fr 1fr 1.4fr 110px 110px 1fr 110px; --tl-min-width: 1080px;">
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.2fr 1fr 1.4fr 110px 110px 1fr 150px; --tl-min-width: 1120px;">
                         <div class="tlg-header">
                             <div class="tlg-col">License no.</div>
                             <div class="tlg-col">Type</div>
@@ -231,8 +231,8 @@ else
                                 <div class="tlg-col tlg-col--actions">
                                     @if (CanWriteMaster)
                                     {
-                                        <button @onclick="() => OpenEditLicense(lic)" style="background:transparent;border:0;color:var(--mer-blue);cursor:pointer;" title="Edit"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>
-                                        <button @onclick="() => DeleteLicense(lic)" style="background:transparent;border:0;color:var(--mer-red);cursor:pointer;" title="Delete"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>
+                                        <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEditLicense(lic)" title="Edit"><span class="material-symbols-outlined">edit</span> Edit</button>
+                                        <button class="mbtn mbtn--row mbtn--danger" @onclick="() => DeleteLicense(lic)" title="Delete"><span class="material-symbols-outlined">delete</span> Del</button>
                                     }
                                 </div>
                             </div>
@@ -280,8 +280,8 @@ else
                                     <span class="tlg-status @(usr.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(usr.IsActive ? "Active" : "Inactive")</span>
                                 </td>
                                 <td style="padding:8px 4px;text-align:right;">
-                                    <a href="admin/users/@usr.UserId" class="rz-link" style="color:var(--mer-blue);text-decoration:none;font-size:12px;">
-                                        <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">open_in_new</span> Manage
+                                    <a href="admin/users/@usr.UserId" class="mbtn mbtn--row mbtn--accent">
+                                        <span class="material-symbols-outlined">open_in_new</span> Manage
                                     </a>
                                 </td>
                             </tr>

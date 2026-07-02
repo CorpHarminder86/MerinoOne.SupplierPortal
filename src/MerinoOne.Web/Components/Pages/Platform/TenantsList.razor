@@ -26,8 +26,8 @@ else
                 <p class="tl-sub">Cross-tenant onboarding — create tenants, their companies, and the first Tenant Admin</p>
             </div>
             <div class="tl-header__actions">
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewTenant">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add_business</span>
+                <button class="mbtn mbtn--primary" @onclick="OpenNewTenant">
+                    <span class="material-symbols-outlined">add_business</span>
                     New tenant
                 </button>
             </div>
@@ -67,11 +67,11 @@ else
                         <div class="tlg-col"><span class="tlg-status @(tn.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(tn.IsActive ? "Active" : "Inactive")</span></div>
                         <div class="tlg-col tlg-code">@tn.CreatedOn.ToString("yyyy-MM-dd")</div>
                         <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;flex-wrap:wrap;">
-                            <button class="rz-button" style="padding:4px 10px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="() => OpenCompanies(tn)">
-                                <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">apartment</span> Companies
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenCompanies(tn)" title="Companies">
+                                <span class="material-symbols-outlined">apartment</span> Companies
                             </button>
-                            <button class="rz-button" style="padding:4px 10px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="() => OpenNewAdmin(tn)">
-                                <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">admin_panel_settings</span> Add admin
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenNewAdmin(tn)" title="Add admin">
+                                <span class="material-symbols-outlined">admin_panel_settings</span> Admin
                             </button>
                         </div>
                     </div>
