@@ -30,12 +30,21 @@ else
                 <p class="tl-sub">@detail.SupplierName · @PoHeaderText · @detail.InvoiceDate.ToString("yyyy-MM-dd")</p>
             </div>
             <div class="tl-header__actions">
+                @* R6 — frozen-snapshot PDF, any status. Same-origin proxy (/files/invoice-pdf/{id} in Program.cs)
+                   attaches the cookie-JWT as bearer; page access already implies Invoice.Read. *@
+                <a class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);text-decoration:none;" href="files/invoice-pdf/@Id" download>
+                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">download</span> Download PDF
+                </a>
                 @if (Token.HasPermission("Invoice.Submit") && detail.InvoiceStatus == "Draft")
                 {
                     <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;color:var(--mer-ink-700);" @onclick="OpenEdit" disabled="@busy">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">edit</span> Edit
                     </button>
-                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenSubmit" disabled="@busy">
+                    @* R6 — the DRAFT-{asn}-{n} (and legacy INV-DRAFT-) placeholder is rejected server-side; block
+                       the affordance client-side too until the supplier keys the real number via Edit. *@
+                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenSubmit"
+                            disabled="@(busy || HasPlaceholderNumber)"
+                            title="@(HasPlaceholderNumber ? "Replace the draft placeholder with the real invoice number (Edit) before submitting." : null)">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">send</span> Submit
                     </button>
                 }
@@ -111,6 +120,17 @@ else
                             else { <span style="font-family:Inter,monospace;">@detail.AsnNumber</span> }
                         </dd>
                     }
+                    <dt style="color:var(--mer-ink-500);">Origin</dt>
+                    <dd>
+                        @if (detail.InvoiceOrigin == "AsnGenerated")
+                        {
+                            <span class="tlg-status tlg-status--info" title="Auto-generated from the ASN at approval">ASN-generated</span>
+                        }
+                        else
+                        {
+                            <span class="tlg-status tlg-status--off">Manual entry</span>
+                        }
+                    </dd>
                     <dt style="color:var(--mer-ink-500);">Invoice date</dt><dd style="font-family:Inter,monospace;">@detail.InvoiceDate.ToString("yyyy-MM-dd")</dd>
                     <dt style="color:var(--mer-ink-500);">Matching</dt><dd>@detail.MatchingType</dd>
                     @if (!string.IsNullOrEmpty(detail.GrnReference))
@@ -176,8 +196,28 @@ else
             </div>
         </div>
 
+        @* R6 (D14) — ASN-seeded Draft editing lives HERE (not a separate page): when the invoice is Draft and the
+           caller holds Invoice.Submit, Billed Qty (capped at the LIVE RemainingQty) and Tax (reselect from the
+           governed active list — the rate is display-only, NEVER typed) become editable per line. Amounts shown
+           are a client-side preview (round(qty×price,2); tax = round(lineAmount×rate/100,2)) — the server
+           recompute on save is authoritative. *@
         <div class="rz-card" style="padding:20px;margin-top:16px;">
-            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)</h3>
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
+                <div>
+                    <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)</h3>
+                    @if (CanEditLines && detail.Lines.Count > 0)
+                    {
+                        <p style="font-size:12px;color:var(--mer-ink-500);margin:0;">Billed quantity is capped at each PO line's remaining invoiceable balance. Tax is reselected from the governed list — the rate follows the selection.</p>
+                    }
+                </div>
+                @if (CanEditLines && detail.Lines.Count > 0)
+                {
+                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;flex:none;" @onclick="SaveLines"
+                            disabled="@(busy || AnyLineErrors)" title="@(AnyLineErrors ? "Fix the highlighted line errors first." : null)">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">save</span> @(busy ? "Saving…" : "Save lines")
+                    </button>
+                }
+            </div>
             @if (detail.Lines.Count == 0)
             {
                 <p style="font-size:13px;color:var(--mer-ink-500);">No lines on this invoice.</p>
@@ -189,9 +229,11 @@ else
                         <tr style="border-bottom:1px solid var(--mer-line);">
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Description</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">PO</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Billed Qty</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Unit Price</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Tax</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Rate %</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Tax Amt</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Line Amt</th>
                         </tr>
@@ -199,31 +241,88 @@ else
                     <tbody>
                     @foreach (var ln in detail.Lines.OrderBy(l => l.ItemCode))
                     {
+                        var ed = CanEditLines && lineEdits.TryGetValue(ln.Id, out var st) ? st : null;
                         <tr style="border-bottom:1px solid var(--mer-line-soft);">
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
                             <td style="padding:6px 4px;">@ln.ItemDescription</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.BilledQty.ToString("0.###")</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.UnitPrice.ToString("0.00")</td>
-                            <td style="padding:6px 4px;font-family:Inter,monospace;">@(ln.TaxCode ?? "—")</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.TaxAmount.ToString("0.00")</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;">@ln.LineAmount.ToString("0.00")</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;">
+                                @if (ln.PurchaseOrderId.HasValue && !string.IsNullOrEmpty(ln.PoNumber))
+                                {
+                                    <a href="purchase-orders/@ln.PurchaseOrderId" style="color:var(--mer-blue);">@ln.PoNumber</a>
+                                }
+                                else { <span>—</span> }
+                            </td>
+                            @if (ed != null)
+                            {
+                                <td style="padding:6px 4px;text-align:right;">
+                                    <input type="number" min="0" max="@ed.RemainingQty.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)" step="0.0001"
+                                           class="rz-textbox" style="width:110px;padding:6px 8px;font-family:Inter,monospace;text-align:right;@(ed.Error != null ? "border-color:var(--mer-red);" : "")"
+                                           @bind="ed.BilledQty" @bind:after="() => OnQtyChanged(ed)" />
+                                    <div style="font-size:10.5px;color:var(--mer-ink-500);font-family:Inter,monospace;margin-top:2px;">of @ed.RemainingQty.ToString("0.####") remaining</div>
+                                    @if (ed.Error != null)
+                                    {
+                                        <div style="font-size:10.5px;color:var(--mer-red);font-weight:600;margin-top:2px;white-space:normal;">@ed.Error</div>
+                                    }
+                                </td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.UnitPrice.ToString("0.00")</td>
+                                <td style="padding:6px 4px;">
+                                    <select class="rz-dropdown" style="max-width:230px;padding:6px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);font-size:12px;"
+                                            @bind="ed.TaxIdStr" @bind:after="() => OnTaxChanged(ed)">
+                                        <option value="">(no tax)</option>
+                                        @* The line's current tax stays selectable even when it is missing from the
+                                           active list (inactive / rate-less) so "keep current" always round-trips. *@
+                                        @if (ed.SnapshotTaxIdStr.Length > 0 && taxes.All(t => t.Id.ToString() != ed.SnapshotTaxIdStr))
+                                        {
+                                            <option value="@ed.SnapshotTaxIdStr">@ed.SnapshotLabel</option>
+                                        }
+                                        @foreach (var t in taxes)
+                                        {
+                                            <option value="@t.Id">@($"{t.Code} — {t.Description} ({t.TaxRate!.Value:0.####}%)")</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ed.Rate?.ToString("0.####") ?? "—")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@EditTaxAmount(ed).ToString("N2")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;">@EditLineAmount(ed).ToString("N2")</td>
+                            }
+                            else
+                            {
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.BilledQty.ToString("0.###")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.UnitPrice.ToString("0.00")</td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;" title="@ln.TaxDescription">@(ln.TaxCode ?? "—")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.TaxRatePct?.ToString("0.####") ?? "—")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.TaxAmount.ToString("0.00")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;">@ln.LineAmount.ToString("0.00")</td>
+                            }
                         </tr>
                     }
                     </tbody>
+                    <tfoot>
+                        <tr style="border-top:2px solid var(--mer-line);">
+                            <td colspan="6" style="padding:8px 4px;text-align:right;font-weight:700;color:var(--mer-ink-700);">Totals</td>
+                            <td></td>
+                            <td style="padding:8px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;">@DisplayTaxTotal.ToString("N2")</td>
+                            <td style="padding:8px 4px;text-align:right;font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@DisplayLineTotal.ToString("N2")</td>
+                        </tr>
+                        <tr>
+                            <td colspan="8" style="padding:2px 4px 6px;text-align:right;font-size:11.5px;color:var(--mer-ink-500);">Net (amount + tax)</td>
+                            <td style="padding:2px 4px 6px;text-align:right;font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@((DisplayLineTotal + DisplayTaxTotal).ToString("N2"))</td>
+                        </tr>
+                    </tfoot>
                 </table>
             }
         </div>
 
         @* R5 (§13 / §13.7) — the reusable policy-driven Attachment Panel on the Invoice entity. Same component as the
            ASN screen, keyed by EntityCode="Invoice". Renders nothing when no AttachmentRequirementPolicy rows exist for
-           the Invoice entity. Read-only here: the shared /api/document-uploads/attach endpoint currently only accepts
-           ownerEntityType Asn/SupplierLicense/Staging (see hand-off note), so Invoice uploads are a backend gap — the
-           panel still lists/views/downloads any Invoice-tagged documents the read-model returns. Enforcement (if/when
-           an Invoice attachment policy exists) stays at the invoice-submit site (§13.7), not in the panel. *@
+           the Invoice entity. R6 (D16) — /api/document-uploads/attach + DELETE now accept ownerEntityType=Invoice for
+           DRAFT invoices, so the panel is editable exactly while the invoice is Draft and the caller can submit it
+           (mirrors the ASN Draft-only rule). Enforcement of any attachment policy stays at the invoice-submit site
+           (§13.7), not in the panel. *@
         <div style="margin-top:16px;">
             <AttachmentPanel EntityCode="Invoice"
                              EntityId="@detail.Id"
-                             Editable="false"
+                             Editable="@(detail.InvoiceStatus == "Draft" && Token.HasPermission("Invoice.Submit"))"
                              SupplierId="@detail.SupplierId" />
         </div>
         }
@@ -373,7 +472,7 @@ else
                     <div class="merino-dialog__head-text">
                         <div class="merino-dialog__eyebrow">Invoice · Draft</div>
                         <h2 class="merino-dialog__title">Edit @detail.InvoiceNumber</h2>
-                        <p class="merino-dialog__subtitle">Amounts and lines are inherited from the ASN. Edit the invoice metadata.</p>
+                        <p class="merino-dialog__subtitle">Edit the invoice metadata here. Line quantities and tax are edited on the Lines table — saving here also saves any pending line edits.</p>
                     </div>
                     <button class="merino-dialog__close" @onclick="() => showEdit = false"><span class="material-symbols-outlined">close</span></button>
                 </header>
@@ -506,6 +605,35 @@ else
             </div>
         </div>
     }
+
+    @* R6 — submit 409: another invoice consumed the PO line's remaining quantity between draft and submit
+       (the atomic per-line reservation rolled back). Closing reloads so the lines show the fresh RemainingQty. *@
+    @if (showConflict)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="danger" data-size="md" style="width:540px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">sync_problem</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Invoice · Submit</div>
+                        <h2 class="merino-dialog__title">Quantity no longer available</h2>
+                        <p class="merino-dialog__subtitle">The submit was rolled back — nothing was reserved.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="CloseConflict"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@conflictMessage</p>
+                    <p style="font-size:12px;color:var(--mer-ink-500);margin-top:8px;">Review the refreshed remaining balances on the lines, adjust the billed quantities and submit again.</p>
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="CloseConflict">Refresh &amp; review</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -544,6 +672,137 @@ else
     // Admin revoke
     private string revokeReason = string.Empty;
 
+    // ---- R6 (D14) — Draft line editing state ----
+    // One edit row per invoice line, seeded from the DTO snapshot on every Load. BilledQty is FE-capped at the
+    // line's LIVE RemainingQty; Rate is display-only (snapshot until the tax is reselected, then the governed
+    // list's rate). The server recompute on PUT is authoritative — everything here is preview.
+    private readonly Dictionary<Guid, LineEditState> lineEdits = new();
+    private List<TaxDto> taxes = new();
+    private bool taxesLoaded;
+
+    // R6 — submit 409 reservation-conflict dialog.
+    private bool showConflict;
+    private string conflictMessage = string.Empty;
+
+    private bool CanEditLines => detail?.InvoiceStatus == "Draft" && Token.HasPermission("Invoice.Submit");
+    private bool AnyLineErrors => lineEdits.Values.Any(e => e.Error != null);
+
+    // R6 (D5) — both provisional prefixes are rejected server-side on submit; mirror the block client-side.
+    private bool HasPlaceholderNumber =>
+        detail != null &&
+        (detail.InvoiceNumber.StartsWith("DRAFT-", StringComparison.OrdinalIgnoreCase) ||
+         detail.InvoiceNumber.StartsWith("INV-DRAFT-", StringComparison.OrdinalIgnoreCase));
+
+    private sealed class LineEditState
+    {
+        public Guid LineId { get; init; }
+        public decimal RemainingQty { get; init; }
+        public decimal UnitPrice { get; init; }
+        public decimal BilledQty { get; set; }
+        public string TaxIdStr { get; set; } = string.Empty;   // "" = (no tax) → TaxId null CLEARS the tax
+        public decimal? Rate { get; set; }                      // display-only; never typed
+        public string? Error { get; set; }
+        public string SnapshotTaxIdStr { get; init; } = string.Empty;
+        public string SnapshotLabel { get; init; } = string.Empty;
+        public decimal? SnapshotRate { get; init; }
+    }
+
+    private void BuildLineEdits()
+    {
+        lineEdits.Clear();
+        if (detail == null || !CanEditLines) return;
+        foreach (var ln in detail.Lines)
+        {
+            var st = new LineEditState
+            {
+                LineId = ln.Id,
+                RemainingQty = ln.RemainingQty,
+                UnitPrice = ln.UnitPrice,
+                BilledQty = ln.BilledQty,
+                TaxIdStr = ln.TaxId?.ToString() ?? string.Empty,
+                Rate = ln.TaxRatePct,
+                SnapshotTaxIdStr = ln.TaxId?.ToString() ?? string.Empty,
+                SnapshotLabel = $"{ln.TaxCode ?? "?"} — {ln.TaxDescription} ({ln.TaxRatePct?.ToString("0.####") ?? "?"}%)",
+                SnapshotRate = ln.TaxRatePct,
+            };
+            // A sibling submit may have shrunk the live balance below this draft's billed qty — flag immediately.
+            ValidateQty(st);
+            lineEdits[ln.Id] = st;
+        }
+    }
+
+    private static void ValidateQty(LineEditState e)
+    {
+        if (e.BilledQty < 0) e.BilledQty = 0;
+        e.Error = e.BilledQty > e.RemainingQty
+            ? $"Exceeds the remaining invoiceable balance ({e.RemainingQty:0.####})."
+            : null;
+    }
+
+    private void OnQtyChanged(LineEditState e) => ValidateQty(e);
+
+    private void OnTaxChanged(LineEditState e)
+    {
+        if (!Guid.TryParse(e.TaxIdStr, out var tid)) { e.Rate = null; return; }
+        var t = taxes.FirstOrDefault(x => x.Id == tid);
+        // Reselecting the (inactive) snapshot tax falls back to the frozen snapshot rate.
+        e.Rate = t?.TaxRate ?? (e.TaxIdStr == e.SnapshotTaxIdStr ? e.SnapshotRate : null);
+    }
+
+    private static decimal EditLineAmount(LineEditState e) => decimal.Round(e.BilledQty * e.UnitPrice, 2);
+    private static decimal EditTaxAmount(LineEditState e)
+        => e.Rate is { } r ? decimal.Round(EditLineAmount(e) * r / 100m, 2) : 0m;
+
+    private decimal DisplayLineTotal =>
+        CanEditLines && lineEdits.Count > 0 ? lineEdits.Values.Sum(EditLineAmount) : detail?.Lines.Sum(l => l.LineAmount) ?? 0m;
+    private decimal DisplayTaxTotal =>
+        CanEditLines && lineEdits.Count > 0 ? lineEdits.Values.Sum(EditTaxAmount) : detail?.Lines.Sum(l => l.TaxAmount) ?? 0m;
+
+    // Always sends EVERY line's current (billedQty, taxId) — TaxId null clears the tax server-side, so the
+    // line's current selection must round-trip even when the user never touched it.
+    private List<UpdateInvoiceLineRequest>? BuildLineRequests() =>
+        !CanEditLines || lineEdits.Count == 0
+            ? null
+            : lineEdits.Values
+                .Select(e => new UpdateInvoiceLineRequest(
+                    e.LineId,
+                    e.BilledQty,
+                    Guid.TryParse(e.TaxIdStr, out var tid) ? tid : null))
+                .ToList();
+
+    // Line-only save from the Lines card — same PUT as the Edit modal, header metadata unchanged.
+    private async Task SaveLines()
+    {
+        if (detail == null || !CanEditLines) return;
+        if (AnyLineErrors)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Fix line errors", Detail = "One or more billed quantities exceed the remaining invoiceable balance." });
+            return;
+        }
+        busy = true;
+        var req = new UpdateInvoiceRequest(
+            detail.InvoiceNumber, detail.InvoiceDate,
+            detail.EInvoiceIrn, detail.EInvoiceAckNo, detail.EWayBillNumber, detail.Notes,
+            BuildLineRequests());
+        var resp = await Api.PutAsync<InvoiceDetailDto, UpdateInvoiceRequest>($"api/invoices/{Id}", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Lines saved" });
+            await Load();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Save failed", Detail = resp?.Errors?.FirstOrDefault() ?? "The lines could not be saved (the invoice may no longer be Draft, or a quantity exceeds the live remaining balance)." });
+        }
+        busy = false;
+    }
+
+    private async Task CloseConflict()
+    {
+        showConflict = false;
+        await Load(); // refresh the lines' RemainingQty after the losing race
+    }
+
     // PO header label tolerant of the nullable single-PO header (multi-PO uses PoSummary on the list DTO).
     private string PoHeaderText =>
         detail == null ? "" :
@@ -559,6 +818,15 @@ else
         loading = true;
         var resp = await Api.GetAsync<InvoiceDetailDto>($"api/invoices/{Id}");
         detail = resp?.Data;
+        // R6 — rebuild the Draft edit rows from the fresh snapshot; load the governed active tax list once.
+        BuildLineEdits();
+        if (CanEditLines && !taxesLoaded)
+        {
+            taxesLoaded = true;
+            var t = await Api.GetAsync<List<TaxDto>>("api/masters/taxes?isActive=true");
+            // Rate-less rows are excluded — the server 400s a reselect onto a tax with no rate anyway.
+            taxes = (t?.Data ?? new List<TaxDto>()).Where(x => x.TaxRate.HasValue).OrderBy(x => x.Code).ToList();
+        }
         loading = false;
     }
 
@@ -588,14 +856,18 @@ else
     {
         if (string.IsNullOrWhiteSpace(editInvoiceNumber)) { dialogError = "Invoice number is required."; return; }
         if (!editInvoiceDate.HasValue) { dialogError = "Invoice date is required."; return; }
+        if (AnyLineErrors) { dialogError = "Fix the highlighted line errors on the Lines table before saving."; return; }
         busy = true; dialogError = string.Empty;
+        // R6 (D14) — the PUT always carries the CURRENT line state (billedQty + taxId per line) in Draft, so a
+        // metadata save can never silently discard pending inline line edits (Load() after save rebuilds them).
         var req = new UpdateInvoiceRequest(
             editInvoiceNumber.Trim(),
             editInvoiceDate.Value,
             string.IsNullOrWhiteSpace(editEInvoiceIrn) ? null : editEInvoiceIrn.Trim(),
             string.IsNullOrWhiteSpace(editEInvoiceAckNo) ? null : editEInvoiceAckNo.Trim(),
             string.IsNullOrWhiteSpace(editEWayBillNumber) ? null : editEWayBillNumber.Trim(),
-            string.IsNullOrWhiteSpace(editNotes) ? null : editNotes.Trim());
+            string.IsNullOrWhiteSpace(editNotes) ? null : editNotes.Trim(),
+            BuildLineRequests());
         var resp = await Api.PutAsync<InvoiceDetailDto, UpdateInvoiceRequest>($"api/invoices/{Id}", req);
         if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invoice saved" }); showEdit = false; await Load(); }
         else { dialogError = resp?.Errors?.FirstOrDefault() ?? "Save failed (the invoice may no longer be Draft, or the number is a duplicate)."; }
@@ -615,14 +887,20 @@ else
     private async Task DoSubmitInternal(bool acknowledgeMissingAttachments)
     {
         busy = true; dialogError = string.Empty;
-        var resp = await Api.PostAsync<InvoiceDetailDto, SubmitInvoiceRequest>(
+        // R6 — the notices-aware envelope: advisory rate-drift lines ride a SUCCESSFUL submit; a folded non-2xx
+        // keeps its HTTP status so the 409 reservation conflict gets its own dialog.
+        var resp = await Api.PostWithNoticesAsync<InvoiceDetailDto, SubmitInvoiceRequest>(
             $"api/invoices/{Id}/submit", new SubmitInvoiceRequest(acknowledgeMissingAttachments));
 
-        // (1) Success.
+        // (1) Success — status lands on Matched or MatchExceptions; drift notices toast as warnings.
         if (resp?.Success == true)
         {
             showAttachConfirm = false; showSubmit = false;
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Invoice submitted" });
+            foreach (var n in resp.Notices)
+            {
+                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Tax rate re-resolved", Detail = n, Duration = 8000 });
+            }
             await Load();
         }
         // (2) Warning attachments missing — 200 ConfirmationRequired, nothing committed. Confirm to proceed.
@@ -635,7 +913,15 @@ else
             showSubmit = false;
             showAttachConfirm = true;
         }
-        // (3) Blocking error (incl. mandatory-missing 400) — show on whichever dialog is open.
+        // (3) R6 — 409: another invoice consumed the remaining PO-line quantity; the whole submit rolled back.
+        else if (resp?.StatusCode == 409)
+        {
+            showSubmit = false; showAttachConfirm = false;
+            conflictMessage = resp.Errors?.FirstOrDefault()
+                ?? "Another invoice already reserved the remaining quantity on one or more PO lines.";
+            showConflict = true;
+        }
+        // (4) Blocking error (incl. mandatory-missing 400) — show on whichever dialog is open.
         else
         {
             dialogError = resp?.Errors?.FirstOrDefault() ?? "Submit failed (mandatory invoice number + date, a missing mandatory attachment, or the invoice is no longer Draft).";
@@ -715,8 +1001,11 @@ else
         busy = false;
     }
 
+    // R6 — Draft is the muted/off chip (SupplierChangeStatus convention, mirrored in InvoiceList); "Matched"
+    // stays in the pending/positive arm (submit now lands on Matched or MatchExceptions, never "Submitted").
     private string StatusClass(string status) => status switch
     {
+        "Draft" => "tlg-status--off",
         "Approved" or "Paid" => "tlg-status--active",
         "Submitted" or "UnderReview" or "Matched" or "PartiallyPaid" => "tlg-status--pending",
         "Rejected" or "Cancelled" or "MatchExceptions" => "tlg-status--danger",

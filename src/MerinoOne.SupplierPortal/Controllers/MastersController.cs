@@ -159,13 +159,15 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
 
     // ---------------- Taxes (R4 Module 6) ----------------
 
+    // [[r6]] Read side is any-authenticated (was Settings.Read): suppliers reselect tax codes on Draft
+    // invoice lines, and the row set is already tenant/company-scoped by the global filters.
     [HttpGet("taxes")]
-    [Authorize(Policy = Perm.SettingsRead)]
+    [Authorize]
     [EndpointSummary("Tax master list")]
     [EndpointDescription(@"All tax codes (company-shared master) used on PO / invoice lines.
 Filters / params:
 - **isActive**: Optional — true active only, false inactive only, omit for all.
-Returns: List<TaxDto>. Requires permission **Settings.Read**.")]
+Returns: List<TaxDto>. Requires an authenticated user (rows are tenant/company-scoped).")]
     public async Task<Result<List<TaxDto>>> ListTaxes([FromQuery] bool? isActive, CancellationToken ct)
     {
         var data = await _mediator.Send(new GetTaxesQuery(isActive), ct);
@@ -173,12 +175,12 @@ Returns: List<TaxDto>. Requires permission **Settings.Read**.")]
     }
 
     [HttpGet("taxes/{id:guid}")]
-    [Authorize(Policy = Perm.SettingsRead)]
+    [Authorize]
     [EndpointSummary("Tax detail")]
     [EndpointDescription(@"Single tax code by GUID.
 Filters / params:
 - **id**: Required — tax GUID.
-Returns: TaxDto on success; 404 if not found. Requires permission **Settings.Read**.")]
+Returns: TaxDto on success; 404 if not found. Requires an authenticated user (rows are tenant/company-scoped).")]
     public async Task<Result<TaxDto>> GetTax(Guid id, CancellationToken ct)
     {
         var data = await _mediator.Send(new GetTaxByIdQuery(id), ct);

@@ -91,6 +91,43 @@ public class ApiClient
                  resp => ReadEnvelopeAsync<ApiResult<T>>(resp),
                  errors => new ApiResult<T> { Success = false, Errors = errors });
 
+    /// <summary>
+    /// R6 — POST that binds the response into the Web-side <see cref="NoticedApiResult{T}"/> envelope
+    /// (advisory <c>notices</c> on success — e.g. invoice-submit tax-rate drift) and, unlike the other
+    /// methods, preserves the HTTP status of a folded non-2xx failure in <c>StatusCode</c> so the caller
+    /// can branch on it (the invoice-submit 409 reservation conflict needs its own dialog). Same
+    /// never-throws contract as every other ApiClient method.
+    /// </summary>
+    public async Task<NoticedApiResult<T>?> PostWithNoticesAsync<T, TBody>(string url, TBody body)
+    {
+        EnsureAuth();
+        HttpResponseMessage? resp = null;
+        try
+        {
+            resp = await _http.PostAsJsonAsync(url, body);
+            return await ReadEnvelopeAsync<NoticedApiResult<T>>(resp);
+        }
+        catch (ApiException ex)
+        {
+            if (ex.StatusCode == 401) _token.NotifySessionExpired();
+            var errors = ex.Errors.Length > 0 ? ex.Errors.ToList() : new List<string> { ex.Title };
+            return new NoticedApiResult<T> { Success = false, Errors = errors, StatusCode = ex.StatusCode };
+        }
+        catch (HttpRequestException ex)
+        {
+            return new NoticedApiResult<T> { Success = false, Errors = new List<string> { "Cannot reach server. " + ex.Message } };
+        }
+        catch (TaskCanceledException ex)
+        {
+            return new NoticedApiResult<T> { Success = false, Errors = new List<string> { "Request timed out. " + ex.Message } };
+        }
+        catch (Exception ex)
+        {
+            return new NoticedApiResult<T> { Success = false, Errors = new List<string> { ex.Message } };
+        }
+        finally { resp?.Dispose(); }
+    }
+
     public Task<ApiResult?> PutAsync<TBody>(string url, TBody body) =>
         RunAsync(() => _http.PutAsJsonAsync(url, body),
                  resp => ReadEnvelopeAsync<ApiResult>(resp),

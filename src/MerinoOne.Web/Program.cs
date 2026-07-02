@@ -136,6 +136,13 @@ app.MapGet("/files/proxy/{id:guid}", (Guid id, HttpContext http, IHttpClientFact
 app.MapGet("/files/proxy/{id:guid}/by-token/{token}", (Guid id, string token, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
     => ProxyApiAsync(http, factory, $"api/document-uploads/{id}/by-token/{token}", requireAuth: false, ct));
 
+// R6 — invoice PDF (frozen snapshot). Same cookie-JWT → bearer proxy as /files/proxy: the API endpoint
+// (GET api/invoices/{id}/pdf, policy Invoice.Read, seccode-scoped) returns application/pdf with a
+// Content-Disposition filename ({invoiceNumber}.pdf) — both forwarded by ProxyApiAsync, so a plain
+// <a download> on InvoiceDetail streams the file same-origin.
+app.MapGet("/files/invoice-pdf/{id:guid}", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
+    => ProxyApiAsync(http, factory, $"api/invoices/{id}/pdf", requireAuth: true, ct));
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

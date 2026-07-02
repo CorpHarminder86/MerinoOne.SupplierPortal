@@ -138,15 +138,49 @@
     else if (IsLocked && detail != null)
     {
         @* ---------------- Read-only (Submitted/Cancelled) view ---------------- *@
-        @if (detail.DraftInvoiceId.HasValue)
+        @* R6 — grouped draft-invoice generation surface. "Blocked" (a PO-line tax has no resolvable rate) shows
+           the note + a Retry (POST api/invoices/from-asn — the same idempotent generator); "Generated" lists ALL
+           the drafts (one per PO currency/payment-term group). Legacy rows predating InvoiceGenerationStatus fall
+           back to the scalar DraftInvoiceId. *@
+        var draftInvoiceIds = detail.DraftInvoiceIds is { Count: > 0 } genIds
+            ? genIds.ToList()
+            : (detail.DraftInvoiceId.HasValue ? new List<Guid> { detail.DraftInvoiceId.Value } : new List<Guid>());
+
+        @if (detail.InvoiceGenerationStatus == "Blocked")
         {
-            <div class="rz-card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;background:var(--mer-green-50);border:1px solid var(--mer-green);">
-                <span class="material-symbols-outlined" style="font-size:22px;color:var(--mer-green-dark);">receipt_long</span>
+            <div class="rz-card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:flex-start;gap:12px;background:var(--mer-red-50);border:1px solid var(--mer-red);">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--mer-red);">report</span>
                 <div style="flex:1;">
-                    <div style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);">Draft invoice created</div>
-                    <div style="font-size:12px;color:var(--mer-ink-600);">A draft invoice spanning this ASN's PO(s) was generated on submit.</div>
+                    <div style="font-size:13px;font-weight:700;color:var(--mer-red);">Invoice generation blocked</div>
+                    <div style="font-size:12.5px;color:var(--mer-ink-700);white-space:pre-wrap;margin-top:2px;">@(string.IsNullOrWhiteSpace(detail.InvoiceGenerationNote) ? "Draft invoice generation could not run for this ASN." : detail.InvoiceGenerationNote)</div>
+                    @if (!string.IsNullOrEmpty(invoiceRetryError))
+                    {
+                        <div style="font-size:12px;color:var(--mer-red);font-weight:600;margin-top:6px;">@invoiceRetryError</div>
+                    }
+                    <div style="font-size:12px;color:var(--mer-ink-600);margin-top:6px;">Once the named tax code has a rate in the tax master, retry the generation.</div>
                 </div>
-                <a href="invoices/@detail.DraftInvoiceId" class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;text-decoration:none;">Open draft invoice</a>
+                @if (Token.IsSupplier || Token.HasPermission("Invoice.Submit"))
+                {
+                    <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;flex:none;" @onclick="RetryInvoiceGeneration" disabled="@invoiceRetryBusy">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">refresh</span> @(invoiceRetryBusy ? "Retrying…" : "Retry generation")
+                    </button>
+                }
+            </div>
+        }
+        else if (draftInvoiceIds.Count > 0)
+        {
+            <div class="rz-card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--mer-green-50);border:1px solid var(--mer-green);">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--mer-green-dark);">receipt_long</span>
+                <div style="flex:1;min-width:240px;">
+                    <div style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);">@(draftInvoiceIds.Count == 1 ? "Draft invoice created" : $"{draftInvoiceIds.Count} draft invoices created")</div>
+                    <div style="font-size:12px;color:var(--mer-ink-600);">@(draftInvoiceIds.Count == 1 ? "A draft invoice spanning this ASN's PO(s) was generated on approval." : "One draft invoice per PO currency / payment-term group was generated on approval.")</div>
+                </div>
+                @for (var i = 0; i < draftInvoiceIds.Count; i++)
+                {
+                    var draftId = draftInvoiceIds[i];
+                    var draftLabel = draftInvoiceIds.Count == 1 ? "Open draft invoice" : $"Draft invoice #{i + 1}";
+                    <a href="invoices/@draftId" class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;text-decoration:none;flex:none;">@draftLabel</a>
+                }
             </div>
         }
 
@@ -962,6 +996,29 @@
     private string rejectReason = string.Empty;
     private string approveError = string.Empty;
     private string rejectError = string.Empty;
+
+    // R6 — Retry generation for a Blocked ASN (POST api/invoices/from-asn; idempotent). A still-blocked
+    // generator returns 400 with the reason — surfaced inline in the Blocked banner, not a dialog.
+    private bool invoiceRetryBusy = false;
+    private string invoiceRetryError = string.Empty;
+
+    private async Task RetryInvoiceGeneration()
+    {
+        if (detail == null) return;
+        invoiceRetryBusy = true; invoiceRetryError = string.Empty;
+        var resp = await Api.PostAsync<InvoiceDetailDto, CreateInvoiceFromAsnRequest>(
+            "api/invoices/from-asn", new CreateInvoiceFromAsnRequest(detail.Id));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft invoice(s) generated" });
+            await Reload();
+        }
+        else
+        {
+            invoiceRetryError = resp?.Errors?.FirstOrDefault() ?? "Generation is still blocked.";
+        }
+        invoiceRetryBusy = false;
+    }
 
     private bool IsNew => !Id.HasValue;
     private bool IsLocked => detail?.IsLocked == true;

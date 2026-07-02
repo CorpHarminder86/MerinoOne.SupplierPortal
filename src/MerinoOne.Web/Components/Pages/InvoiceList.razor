@@ -54,7 +54,10 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 160px 150px 1.5fr 130px 140px 140px; --tl-min-width: 1100px;">
+        @* R6 — the AsnGenerated origin badge rides the Invoice # cell (no extra column: --tl-cols stays
+           six columns; the first is widened to fit the chip). Draft rows carry the stored provisional
+           DRAFT-{asn}-{n} number as-is. *@
+        <div class="tl-grid-wrapper" style="--tl-cols: 195px 150px 1.5fr 130px 140px 140px; --tl-min-width: 1135px;">
             <div class="tlg-header">
                 <div class="tlg-col">Invoice #</div>
                 <div class="tlg-col">PO #</div>
@@ -66,7 +69,13 @@
             @foreach (var inv in paged.Items)
             {
                 <div class="tlg-row" @onclick="() => OpenDetail(inv.Id)" style="cursor:pointer">
-                    <div class="tlg-col tlg-code">@inv.InvoiceNumber</div>
+                    <div class="tlg-col tlg-code">
+                        @inv.InvoiceNumber
+                        @if (inv.InvoiceOrigin == "AsnGenerated")
+                        {
+                            <span class="tlg-status tlg-status--info" style="margin-left:6px;padding:1px 6px;font-size:10px;" title="Generated from an ASN">ASN</span>
+                        }
+                    </div>
                     <div class="tlg-col tlg-code" title="@inv.PoSummary">@(inv.PoCount > 1 ? $"{inv.PoSummary} ({inv.PoCount})" : inv.PoSummary)</div>
                     <div class="tlg-col tlg-name">@inv.SupplierName</div>
                     <div class="tlg-col tlg-code">@inv.InvoiceDate.ToString("yyyy-MM-dd")</div>
@@ -111,8 +120,11 @@
     private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/invoices/{id}");
     private void NewInvoice() => Nav.NavigateToRoute("/invoices/new");
 
+    // R6 — Draft is the muted/off chip (SupplierChangeStatus convention); "Matched" stays in the
+    // pending/positive arm (submit now lands on Matched or MatchExceptions, never "Submitted").
     private string StatusClass(string status) => status switch
     {
+        "Draft" => "tlg-status--off",
         "Approved" or "Paid" => "tlg-status--active",
         "Submitted" or "UnderReview" or "Matched" or "PartiallyPaid" => "tlg-status--pending",
         "Rejected" or "Cancelled" or "MatchExceptions" => "tlg-status--danger",
