@@ -1,6 +1,12 @@
 @*
     R5 (TSD R5 Addendum §13) — Component 9: the reusable, policy-driven Attachment Panel.
 
+    R7 (TSD R7 §1) — slots render as a COLLAPSED ACCORDION: a single-line header (fulfilment status indicator +
+    type name + requirement pill + file count + chevron) with the body (file list ± dropzone) revealed on click /
+    Enter / Space. Editable hosts auto-expand required-and-empty slots on the FIRST load only; read-only hosts
+    auto-expand nothing. Colliding display names append "· TypeCode" (D-R7-5). Client render change only — no
+    API/DTO change. OnSummaryChanged (optional) publishes the fulfilment summary for the R7 DocumentRail pill.
+
     A THIN CLIENT. It renders the slots a server read-model hands it
     (GET /api/attachments/panel?entity=&id=) and performs upload / remove via the EXISTING
     document-uploads API. It does NOT enforce Mandatory/Warning/Optional — enforcement lives at
@@ -54,76 +60,105 @@
                 var reqClass = "att-req--" + s.Requirement.ToLowerInvariant();
                 var busyOnSlot = _busyType == s.TypeCode;
                 var over = _dragType == s.TypeCode;
-                <div class="att-slot">
-                    <div class="att-slot__head">
-                        <span class="att-slot__name">@s.TypeName</span>
+                var open = _expanded.Contains(s.TypeCode);
+                var filled = s.Documents.Count > 0;
+                @* R7 (§1.2) — fulfilment status indicator on the collapsed header: filled check when the slot has
+                   ≥1 file; hollow ring (red Mandatory / amber Warning) when empty and required; neutral hollow dot
+                   when empty and Optional. Display only — never an enforcement signal. *@
+                var indClass = filled ? "att-ind--done"
+                    : s.Requirement == "Mandatory" ? "att-ind--need-m"
+                    : s.Requirement == "Warning" ? "att-ind--need-w"
+                    : "att-ind--none";
+                @* R7 (§1) collapsed accordion. The wrapper carries a native onkeydown attribute purely to cancel the
+                   page-scroll default of Space when the target is the header (Blazor's @@onkeydown:preventDefault is
+                   all-or-nothing and would break Tab); the toggle itself is handled in C# on the header. *@
+                <div class="att-slot"
+                     onkeydown="if((event.key===' '||event.key==='Spacebar')&&event.target.classList.contains('att-slot__head'))event.preventDefault();">
+                    <div class="att-slot__head att-slot__head--acc" role="button" tabindex="0"
+                         aria-expanded="@(open ? "true" : "false")"
+                         @onclick="() => ToggleSlot(s.TypeCode)"
+                         @onkeydown="e => OnSlotHeadKey(e, s.TypeCode)">
+                        <span class="att-ind @indClass" aria-hidden="true">
+                            @if (filled)
+                            {
+                                <span class="material-symbols-outlined" style="font-size:12px;">check</span>
+                            }
+                        </span>
+                        @* R7 (D-R7-5) — append the TypeCode ONLY when two visible slots share a display name. *@
+                        <span class="att-slot__name">@s.TypeName@(_dupNames.Contains(s.TypeName) ? $" · {s.TypeCode}" : "")</span>
                         <span class="att-req @reqClass"><span class="att-req__dot"></span>@s.Requirement</span>
                         <div style="flex:1;"></div>
                         <span class="att-slot__count">@s.Documents.Count file@(s.Documents.Count == 1 ? "" : "s")</span>
+                        <span class="material-symbols-outlined att-chev @(open ? "att-chev--open" : "")" aria-hidden="true">expand_more</span>
                     </div>
 
-                    @if (s.Documents.Count > 0)
+                    @if (open)
                     {
-                        <div class="att-filelist">
-                            @foreach (var doc in s.Documents)
+                        <div class="att-slot__body">
+                            @if (s.Documents.Count > 0)
                             {
-                                var d = doc;
-                                <div class="att-file">
-                                    <div class="att-file__ic"><span class="material-symbols-outlined" style="font-size:18px;">@FileIcon(d.MimeType)</span></div>
-                                    <div class="att-file__meta">
-                                        <div class="att-file__fn" title="@d.FileName">@d.FileName</div>
-                                        <div class="att-file__fm">@FmtSize(d.SizeBytes)@(string.IsNullOrEmpty(d.UploadedBy) ? "" : $" · {d.UploadedBy}") · @d.UploadedOn.ToString("yyyy-MM-dd HH:mm")</div>
-                                    </div>
-                                    <div class="att-file__acts">
-                                        <button type="button" class="att-iconbtn" title="View" @onclick="() => PreviewFile(d)"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>
-                                        <a class="att-iconbtn" href="@d.DownloadUrl" download="@d.FileName" title="Download"><span class="material-symbols-outlined" style="font-size:17px;">download</span></a>
-                                        @if (Editable)
-                                        {
-                                            <button type="button" class="att-iconbtn att-iconbtn--danger" title="Remove" disabled="@busyOnSlot" @onclick="() => RemoveFile(s, d)"><span class="material-symbols-outlined" style="font-size:17px;">delete</span></button>
-                                        }
-                                    </div>
+                                <div class="att-filelist">
+                                    @foreach (var doc in s.Documents)
+                                    {
+                                        var d = doc;
+                                        <div class="att-file">
+                                            <div class="att-file__ic"><span class="material-symbols-outlined" style="font-size:18px;">@FileIcon(d.MimeType)</span></div>
+                                            <div class="att-file__meta">
+                                                <div class="att-file__fn" title="@d.FileName">@d.FileName</div>
+                                                <div class="att-file__fm">@FmtSize(d.SizeBytes)@(string.IsNullOrEmpty(d.UploadedBy) ? "" : $" · {d.UploadedBy}") · @d.UploadedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                                            </div>
+                                            <div class="att-file__acts">
+                                                <button type="button" class="att-iconbtn" title="View" @onclick="() => PreviewFile(d)"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>
+                                                <a class="att-iconbtn" href="@d.DownloadUrl" download="@d.FileName" title="Download"><span class="material-symbols-outlined" style="font-size:17px;">download</span></a>
+                                                @if (Editable)
+                                                {
+                                                    <button type="button" class="att-iconbtn att-iconbtn--danger" title="Remove" disabled="@busyOnSlot" @onclick="() => RemoveFile(s, d)"><span class="material-symbols-outlined" style="font-size:17px;">delete</span></button>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
                                 </div>
                             }
-                        </div>
-                    }
 
-                    @if (Editable)
-                    {
-                        @if (EntityId == Guid.Empty)
-                        {
-                            <div class="att-hint">Save the draft to attach files to this slot.</div>
-                        }
-                        else
-                        {
-                            <label class="att-drop @(over ? "att-drop--over" : "")"
-                                   @ondragover="() => _dragType = s.TypeCode" @ondragover:preventDefault="true"
-                                   @ondragleave="() => _dragType = null" @ondragleave:preventDefault="true"
-                                   @ondrop:preventDefault="true">
-                                @if (busyOnSlot)
+                            @if (Editable)
+                            {
+                                @if (EntityId == Guid.Empty)
                                 {
-                                    <span class="material-symbols-outlined att-drop__spin" style="font-size:22px;">progress_activity</span>
-                                    <div class="att-drop__t">Uploading…</div>
+                                    <div class="att-hint">Save the draft to attach files to this slot.</div>
                                 }
                                 else
                                 {
-                                    <span class="material-symbols-outlined" style="font-size:22px;">upload</span>
-                                    <div class="att-drop__t">Drop files or click to upload</div>
-                                    <div class="att-drop__s">PDF, JPG or PNG · multiple files allowed</div>
+                                    <label class="att-drop @(over ? "att-drop--over" : "")"
+                                           @ondragover="() => _dragType = s.TypeCode" @ondragover:preventDefault="true"
+                                           @ondragleave="() => _dragType = null" @ondragleave:preventDefault="true"
+                                           @ondrop:preventDefault="true">
+                                        @if (busyOnSlot)
+                                        {
+                                            <span class="material-symbols-outlined att-drop__spin" style="font-size:22px;">progress_activity</span>
+                                            <div class="att-drop__t">Uploading…</div>
+                                        }
+                                        else
+                                        {
+                                            <span class="material-symbols-outlined" style="font-size:22px;">upload</span>
+                                            <div class="att-drop__t">Drop files or click to upload</div>
+                                            <div class="att-drop__s">PDF, JPG or PNG · multiple files allowed</div>
+                                        }
+                                        <InputFile multiple accept=".pdf,.jpg,.jpeg,.png" disabled="@(busyOnSlot)"
+                                                   OnChange="@((InputFileChangeEventArgs e) => UploadFiles(s, e))"
+                                                   style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
+                                    </label>
                                 }
-                                <InputFile multiple accept=".pdf,.jpg,.jpeg,.png" disabled="@(busyOnSlot)"
-                                           OnChange="@((InputFileChangeEventArgs e) => UploadFiles(s, e))"
-                                           style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
-                            </label>
-                        }
-                    }
-                    else if (s.Documents.Count == 0)
-                    {
-                        <div class="att-empty-ro">No file uploaded</div>
-                    }
+                            }
+                            else if (s.Documents.Count == 0)
+                            {
+                                <div class="att-empty-ro">No file uploaded</div>
+                            }
 
-                    @if (_slotErrors.TryGetValue(s.TypeCode, out var slotErr) && !string.IsNullOrEmpty(slotErr))
-                    {
-                        <div class="att-error">@slotErr</div>
+                            @if (_slotErrors.TryGetValue(s.TypeCode, out var slotErr) && !string.IsNullOrEmpty(slotErr))
+                            {
+                                <div class="att-error">@slotErr</div>
+                            }
+                        </div>
                     }
                 </div>
             }
@@ -142,9 +177,32 @@
     .att-panel__body { padding:14px 16px; display:flex; flex-direction:column; gap:12px; }
 
     .att-slot { border:1px solid var(--mer-line); border-radius:var(--mer-radius-md); overflow:hidden; }
-    .att-slot__head { display:flex; align-items:center; gap:10px; padding:9px 12px; background:var(--mer-ink-50); border-bottom:1px solid var(--mer-line); }
+    .att-slot__head { display:flex; align-items:center; gap:10px; padding:9px 12px; background:var(--mer-ink-50); }
     .att-slot__name { font-size:13px; font-weight:600; color:var(--mer-ink-900); }
     .att-slot__count { font:600 11px Inter,monospace; color:var(--mer-ink-500); }
+
+    /* R7 (§1) — the slot header is the accordion toggle. Border-bottom only when the body is revealed. */
+    .att-slot__head--acc { cursor:pointer; user-select:none; transition:background var(--mer-transition); }
+    .att-slot__head--acc:hover { background:var(--mer-ink-100); }
+    /* Inset ring — .att-slot clips overflow, so an outer ring would be cut off. */
+    .att-slot__head--acc:focus-visible { outline:none; box-shadow:var(--mer-focus-ring) inset; }
+    .att-slot__head--acc[aria-expanded="true"] { border-bottom:1px solid var(--mer-line); }
+
+    /* R7 (§1.2) — fulfilment status indicator (display only). */
+    .att-ind { flex:none; width:16px; height:16px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; }
+    .att-ind--done { background:var(--mer-green-dark); color:#fff; }
+    .att-ind--need-m { border:2px solid var(--mer-red); }
+    .att-ind--need-w { border:2px solid var(--mer-amber-800); }
+    .att-ind--none { border:2px solid var(--mer-ink-300); }
+
+    .att-chev { font-size:18px; color:var(--mer-ink-400); transition:transform var(--mer-transition); }
+    .att-chev--open { transform:rotate(180deg); }
+    .att-slot__body { animation:att-slide .16s ease; }
+    @@keyframes att-slide { from { opacity:0; transform:translateY(-3px); } to { opacity:1; transform:none; } }
+    @@media (prefers-reduced-motion: reduce) {
+        .att-chev, .att-slot__head--acc { transition:none !important; }
+        .att-slot__body { animation:none !important; }
+    }
 
     .att-req { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font:700 10.5px 'Plus Jakarta Sans',sans-serif; letter-spacing:.02em; }
     .att-req__dot { width:6px; height:6px; border-radius:50%; }
@@ -201,10 +259,22 @@
     /// <summary>Raised after every successful upload/remove so the host can refresh its own attachment count.</summary>
     [Parameter] public EventCallback OnChanged { get; set; }
 
+    /// <summary>R7 (§2.2) — raised after EVERY load/refresh with the panel's fulfilment summary so a rail/pill host
+    /// can show the live count and derive the §2.3 default open state. Optional; hosts that don't pass it see no
+    /// behaviour change.</summary>
+    [Parameter] public EventCallback<AttachmentPanelSummary> OnSummaryChanged { get; set; }
+
     private const long MaxBytes = 5L * 1024 * 1024;
 
     private List<AttachmentPanelSlotDto> _slots = new();
     private bool _loaded;
+
+    // R7 (§1) — accordion state, keyed by TypeCode so an open slot SURVIVES the post-upload LoadPanel() refresh.
+    private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
+    // R7 (D-R7-5) — display names shared by 2+ visible slots; colliding headers append "· {TypeCode}".
+    private HashSet<string> _dupNames = new(StringComparer.Ordinal);
+    // R7 (§1.2) — the required-and-empty auto-expand runs on the FIRST load only (never on later refetches).
+    private bool _autoExpandApplied;
     private string? _busyType;          // TypeCode currently mid upload/remove (drives per-slot busy UI)
     private string? _dragType;          // TypeCode the user is dragging over (drives dropzone highlight)
     private readonly Dictionary<string, string> _slotErrors = new(StringComparer.Ordinal);
@@ -231,8 +301,54 @@
         var resp = await Api.GetAsync<List<AttachmentPanelSlotDto>>(
             $"api/attachments/panel?entity={Uri.EscapeDataString(EntityCode)}&id={idForQuery}");
         _slots = resp?.Data ?? new();
+
+        // R7 (D-R7-5) — recompute the colliding-display-name set over the visible slots on every load.
+        _dupNames = _slots.GroupBy(s => s.TypeName, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // R7 (§1.2) — auto-expand exception, FIRST load only: in an editable host open the slots that still need
+        // action (required and empty). A read-only host auto-expands nothing. Later refetches (post-upload, or the
+        // draft→saved identity change) never re-run this, so the user's open/closed choices stick.
+        if (!_autoExpandApplied)
+        {
+            _autoExpandApplied = true;
+            if (Editable)
+            {
+                foreach (var s in _slots)
+                {
+                    if (s.Requirement != "Optional" && s.Documents.Count == 0) _expanded.Add(s.TypeCode);
+                }
+            }
+        }
+
         _loaded = true;
         StateHasChanged();
+        await RaiseSummaryAsync();
+    }
+
+    // R7 (§2.2) — publish the fulfilment summary after every load/refresh (upload/remove re-enter via LoadPanel).
+    private async Task RaiseSummaryAsync()
+    {
+        if (!OnSummaryChanged.HasDelegate) return;
+        await OnSummaryChanged.InvokeAsync(new AttachmentPanelSummary(
+            SatisfiedSlots: _slots.Count(s => s.Documents.Count > 0),
+            TotalSlots: _slots.Count,
+            TotalFiles: _slots.Sum(s => s.Documents.Count),
+            AnyMandatoryEmpty: _slots.Any(s => s.Requirement == "Mandatory" && s.Documents.Count == 0),
+            AnyRequiredEmpty: _slots.Any(s => s.Requirement != "Optional" && s.Documents.Count == 0)));
+    }
+
+    // R7 (§1.3) — header toggle. Click plus Enter/Space (the wrapper's native onkeydown cancels the Space scroll).
+    private void ToggleSlot(string typeCode)
+    {
+        if (!_expanded.Add(typeCode)) _expanded.Remove(typeCode);
+    }
+
+    private void OnSlotHeadKey(KeyboardEventArgs e, string typeCode)
+    {
+        if (e.Key is "Enter" or " " or "Spacebar") ToggleSlot(typeCode);
     }
 
     private async Task UploadFiles(AttachmentPanelSlotDto slot, InputFileChangeEventArgs e)

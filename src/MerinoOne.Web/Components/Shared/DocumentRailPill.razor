@@ -1,0 +1,69 @@
+@*
+    R7 (TSD R7 §2.2) — the DocumentRail toggle pill. Lives in the HOST page's header actions (next to the
+    existing buttons) and shows the live fulfilment count ("Attachments 3/4") so the reviewer sees slot
+    fulfilment without opening the rail. Two-way Open binding is shared with the sibling DocumentRail.
+
+    Focus return: when the rail closes from INSIDE (Escape / close button / backdrop), the Open parameter
+    transitions true→false here and the pill refocuses itself — keyboard focus always lands back on the toggle.
+    A close triggered by clicking this pill leaves focus where it already is (refocus is a no-op).
+*@
+
+<button type="button" class="docrail-pill @(Open ? "docrail-pill--on" : "")" @ref="_btnRef"
+        aria-pressed="@(Open ? "true" : "false")" @onclick="Toggle">
+    <span class="material-symbols-outlined" style="font-size:16px;">attach_file</span>
+    <span>Attachments</span>
+    <span class="docrail-pill__count">@Satisfied/@Total</span>
+</button>
+
+<style>
+    .docrail-pill {
+        display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px;
+        border: 1px solid var(--mer-ink-300); background: var(--mer-surface); color: var(--mer-ink-700);
+        font: 600 12.5px 'Plus Jakarta Sans', sans-serif; cursor: pointer;
+        transition: background var(--mer-transition), color var(--mer-transition), border-color var(--mer-transition);
+    }
+    .docrail-pill:hover { background: var(--mer-ink-100); }
+    .docrail-pill--on { background: var(--mer-blue-50); border-color: var(--mer-blue); color: var(--mer-blue-700); }
+    .docrail-pill:focus-visible { outline: none; box-shadow: var(--mer-focus-ring); }
+    .docrail-pill__count { font: 600 11px Inter, monospace; background: var(--mer-blue-50); color: var(--mer-blue-700); padding: 2px 8px; border-radius: 999px; }
+    @@media (prefers-reduced-motion: reduce) { .docrail-pill { transition: none !important; } }
+</style>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Slots with ≥1 file (from <see cref="AttachmentPanelSummary.SatisfiedSlots"/>).</summary>
+    [Parameter] public int Satisfied { get; set; }
+
+    /// <summary>Total policy slots (from <see cref="AttachmentPanelSummary.TotalSlots"/>).</summary>
+    [Parameter] public int Total { get; set; }
+
+    private ElementReference _btnRef;
+    private bool _prevOpen;
+    private bool _paramsSeen;
+    private bool _refocusPending;
+
+    protected override void OnParametersSet()
+    {
+        if (!_paramsSeen)
+        {
+            _paramsSeen = true;
+            _prevOpen = Open;
+            return;
+        }
+        if (_prevOpen && !Open) _refocusPending = true; // rail just closed → return focus to the toggle
+        _prevOpen = Open;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_refocusPending)
+        {
+            _refocusPending = false;
+            try { await _btnRef.FocusAsync(); } catch { /* circuit not interactive yet — ignore */ }
+        }
+    }
+
+    private Task Toggle() => OpenChanged.InvokeAsync(!Open);
+}

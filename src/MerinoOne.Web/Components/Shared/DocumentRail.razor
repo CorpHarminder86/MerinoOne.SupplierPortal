@@ -1,0 +1,196 @@
+@*
+    R7 (TSD R7 §2 + §3) — the fixed-width, collapsible document-control RIGHT RAIL.
+
+    Shell component only: it owns the rail placement + the two-tab strip and hosts the (§1 accordion)
+    AttachmentPanel as fixed content, forwarding the panel parameters verbatim. It adds NO behaviour to the
+    panel — upload/remove/enforcement semantics are unchanged.
+
+    Layout contract (§2.2):
+      - Desktop (>800px): fixed 360px column that PUSHES the main content narrower (never overlays). The HOST
+        page wraps its main column + this rail in a flex row and gives the main child `flex:1;min-width:0;`.
+        Closed ⇒ width 0 + visibility hidden (nothing focusable — the closed rail can never trap keyboard focus).
+      - Mobile (≤800px, D15): the rail is not persistent — when Open it renders as a right-anchored overlay sheet
+        (min(360px,100vw)) over a backdrop, with a close button, Escape-to-close, focus moved into the sheet on
+        open (and returned to the pill by DocumentRailPill on close) and a basic sentinel focus trap. The
+        desktop/mobile branch is pure CSS on the same markup; the mobile-only affordances (close button,
+        sentinels) are display:none on desktop, which also disables their focus behaviour there — no JS interop.
+
+    Tabs (§3, D-R7-3): "Attachments" live; "Discussion" present but INERT — dimmed, aria-disabled, out of the tab
+    order, with no click handler and no ETA/"coming soon" copy anywhere. No code path enables it (activation is a
+    future TSD's migration, §3.4).
+
+    Default open/closed (§2.3) is derived BY THE HOST (it knows its editable state) from OnSummaryChanged; this
+    component just honours the two-way Open/OpenChanged binding. The toggle pill lives in the host header — see
+    DocumentRailPill.razor.
+*@
+
+<div class="docrail-root @(Open ? "docrail-root--open" : "")">
+    <div class="docrail-backdrop" aria-hidden="true" @onclick="CloseFromUi"></div>
+    <aside class="docrail" aria-label="Documents" @onkeydown="OnRailKeyDown">
+        <div class="docrail__inner">
+            <div class="docrail__sentinel" tabindex="0" @onfocus="OnTopSentinelFocus"></div>
+            <div class="docrail__head">
+                <div class="docrail__tabs" role="tablist" aria-label="Document rail">
+                    <button type="button" class="docrail__tab docrail__tab--active" role="tab" aria-selected="true" @ref="_attachTabRef">Attachments</button>
+                    <button type="button" class="docrail__tab docrail__tab--inert" role="tab" aria-selected="false" aria-disabled="true" tabindex="-1">Discussion</button>
+                </div>
+                <button type="button" class="docrail__close" aria-label="Close" @ref="_closeRef" @onclick="CloseFromUi">
+                    <span class="material-symbols-outlined" style="font-size:18px;">close</span>
+                </button>
+            </div>
+            <div class="docrail__body">
+                @if (!string.IsNullOrEmpty(GuardMessage))
+                {
+                    <div class="docrail__guard">@GuardMessage</div>
+                }
+                else
+                {
+                    <AttachmentPanel EntityCode="@EntityCode"
+                                     EntityId="@EntityId"
+                                     Editable="@Editable"
+                                     SupplierId="@SupplierId"
+                                     OnChanged="@OnChanged"
+                                     OnSummaryChanged="HandleSummary" />
+                }
+            </div>
+            <div class="docrail__sentinel" tabindex="0" @onfocus="OnBottomSentinelFocus"></div>
+        </div>
+    </aside>
+</div>
+
+<style>
+    .docrail-root { display: contents; }
+    .docrail-backdrop { display: none; }
+
+    /* Desktop: a push column inside the host's flex row. Closed = zero width + hidden (unfocusable). */
+    .docrail {
+        flex: none; width: 0; margin-left: 0; align-self: stretch;
+        visibility: hidden; overflow: hidden;
+        transition: width var(--mer-transition), margin-left var(--mer-transition), visibility var(--mer-transition);
+    }
+    .docrail-root--open .docrail { width: 360px; margin-left: 16px; visibility: visible; }
+    /* Inner keeps the full rail width so content never reflows mid-transition. */
+    .docrail__inner { width: 360px; display: flex; flex-direction: column; gap: 12px; }
+
+    .docrail__head { display: flex; align-items: center; border-bottom: 1px solid var(--mer-line); }
+    .docrail__tabs { display: flex; flex: 1; }
+    .docrail__tab { padding: 10px 16px; background: transparent; border: 0; border-bottom: 2px solid transparent; cursor: pointer; font: 600 13px/1 'Plus Jakarta Sans', sans-serif; color: var(--mer-ink-700); }
+    .docrail__tab--active { border-bottom-color: var(--mer-blue); color: var(--mer-blue); }
+    /* D-R7-3 — Discussion: dimmed + inert. Neutral state only; no ETA copy, no tooltip. */
+    .docrail__tab--inert { color: var(--mer-ink-400); cursor: not-allowed; }
+    .docrail__tab:focus-visible { outline: none; box-shadow: var(--mer-focus-ring); border-radius: var(--mer-radius); }
+
+    .docrail__close { display: none; background: transparent; border: 0; color: var(--mer-ink-500); cursor: pointer; padding: 6px; border-radius: var(--mer-radius); align-items: center; justify-content: center; }
+    .docrail__close:hover { background: var(--mer-ink-100); color: var(--mer-ink-700); }
+    .docrail__close:focus-visible { outline: none; box-shadow: var(--mer-focus-ring); }
+
+    .docrail__body { min-height: 0; }
+    .docrail__guard { border: 1px dashed var(--mer-ink-300); border-radius: var(--mer-radius-md); background: var(--mer-ink-50); color: var(--mer-ink-500); font-size: 12px; padding: 12px; }
+
+    /* Focus-trap sentinels are a mobile-sheet concern; display:none also makes them unfocusable on desktop. */
+    .docrail__sentinel { display: none; }
+
+    /* Mobile (D15: 800px, the largest existing merino.css breakpoint): overlay sheet, not push. */
+    @@media (max-width: 800px) {
+        .docrail {
+            position: fixed; top: 0; right: 0; bottom: 0; z-index: 960; /* above content, below merino-dialog (1000) */
+            width: min(360px, 100vw); margin-left: 0;
+            background: var(--mer-canvas); box-shadow: var(--mer-shadow-lg);
+            transform: translateX(100%);
+            transition: transform var(--mer-transition), visibility var(--mer-transition);
+            overflow-y: auto; padding: 12px;
+        }
+        .docrail-root--open .docrail { transform: none; width: min(360px, 100vw); margin-left: 0; }
+        .docrail-root--open .docrail-backdrop { display: block; position: fixed; inset: 0; z-index: 959; background: var(--mer-modal-backdrop); }
+        .docrail__inner { width: 100%; }
+        .docrail__close { display: inline-flex; }
+        .docrail__sentinel { display: block; width: 0; height: 0; overflow: hidden; }
+    }
+
+    @@media (prefers-reduced-motion: reduce) {
+        .docrail { transition: none !important; }
+    }
+</style>
+
+@code {
+    // ---- AttachmentPanel pass-through (see AttachmentPanel.razor for semantics) ----
+    [Parameter, EditorRequired] public string EntityCode { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public Guid EntityId { get; set; }
+    [Parameter] public bool Editable { get; set; }
+    [Parameter] public Guid? SupplierId { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <summary>Re-exposed panel summary (fired after every panel load/refresh) — hosts use it to feed the
+    /// DocumentRailPill count and to derive the §2.3 default open state.</summary>
+    [Parameter] public EventCallback<AttachmentPanelSummary> OnSummaryChanged { get; set; }
+
+    /// <summary>Two-way open state. The HOST owns the default (§2.3): editable + any Mandatory slot empty ⇒ open;
+    /// locked/read-only review ⇒ closed.</summary>
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>When set, renders this message in the rail body INSTEAD of the panel (e.g. the ASN wizard's
+    /// "Choose a supplier first." pre-condition). Null/empty ⇒ the panel renders normally.</summary>
+    [Parameter] public string? GuardMessage { get; set; }
+
+    private ElementReference _attachTabRef;
+    private ElementReference _closeRef;
+    private bool _prevOpen;
+    private bool _paramsSeen;
+    private bool _focusIntoRailPending;
+
+    protected override void OnParametersSet()
+    {
+        if (!_paramsSeen)
+        {
+            // First parameter set (component creation) is state restoration, not a user open — never steal focus.
+            _paramsSeen = true;
+            _prevOpen = Open;
+            return;
+        }
+        if (Open && !_prevOpen) _focusIntoRailPending = true;
+        _prevOpen = Open;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusIntoRailPending)
+        {
+            _focusIntoRailPending = false;
+            // Mobile-only by construction: the close button is display:none above the 800px breakpoint and
+            // element.focus() on an undisplayed element is a browser no-op — the desktop push rail never
+            // steals the user's focus on open.
+            try { await _closeRef.FocusAsync(); } catch { /* circuit not interactive yet — ignore */ }
+        }
+    }
+
+    private async Task HandleSummary(AttachmentPanelSummary summary)
+    {
+        if (OnSummaryChanged.HasDelegate) await OnSummaryChanged.InvokeAsync(summary);
+    }
+
+    private async Task CloseFromUi()
+    {
+        if (!Open) return;
+        Open = false;
+        _prevOpen = false;
+        await OpenChanged.InvokeAsync(false);
+    }
+
+    private async Task OnRailKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await CloseFromUi();
+    }
+
+    // Basic sentinel focus trap (mobile sheet only — sentinels are display:none, hence unfocusable, on desktop):
+    // Tab past the last focusable wraps to the tab strip; Shift+Tab past the first wraps to the close button.
+    private async Task OnTopSentinelFocus()
+    {
+        try { await _closeRef.FocusAsync(); } catch { }
+    }
+
+    private async Task OnBottomSentinelFocus()
+    {
+        try { await _attachTabRef.FocusAsync(); } catch { }
+    }
+}

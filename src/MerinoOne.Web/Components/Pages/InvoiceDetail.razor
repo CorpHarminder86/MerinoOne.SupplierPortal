@@ -30,6 +30,14 @@ else
                 <p class="tl-sub">@detail.SupplierName · @PoHeaderText · @detail.InvoiceDate.ToString("yyyy-MM-dd")</p>
             </div>
             <div class="tl-header__actions">
+                @* R7 (§2.2) — document-rail toggle pill with the live fulfilment count. Overview tab only — the
+                   rail (and its panel) is mounted inside the overview branch; History is unaffected. *@
+                @if (tab == "overview")
+                {
+                    <DocumentRailPill Open="@railOpen" OpenChanged="OnRailOpenChanged"
+                                      Satisfied="@(railSummary?.SatisfiedSlots ?? 0)"
+                                      Total="@(railSummary?.TotalSlots ?? 0)" />
+                }
                 @* R6 — frozen-snapshot PDF, any status. Same-origin proxy (/files/invoice-pdf/{id} in Program.cs)
                    attaches the cookie-JWT as bearer; page access already implies Invoice.Read. *@
                 <a class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);text-decoration:none;" href="files/invoice-pdf/@Id" download>
@@ -89,6 +97,11 @@ else
         }
         else
         {
+        @* ---- R7 (§2) — document-rail push row over the OVERVIEW tab content only: main column (details +
+              totals + lines) beside the 360px rail. min-width:0 lets the main column shrink so the rail pushes
+              without horizontal scroll. History tab renders outside this row and is unaffected. ---- *@
+        <div style="display:flex;align-items:stretch;">
+        <div style="flex:1;min-width:0;">
         <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;">
             <div class="rz-card" style="padding:20px;">
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Invoice details</h3>
@@ -313,17 +326,18 @@ else
             }
         </div>
 
-        @* R5 (§13 / §13.7) — the reusable policy-driven Attachment Panel on the Invoice entity. Same component as the
-           ASN screen, keyed by EntityCode="Invoice". Renders nothing when no AttachmentRequirementPolicy rows exist for
-           the Invoice entity. R6 (D16) — /api/document-uploads/attach + DELETE now accept ownerEntityType=Invoice for
-           DRAFT invoices, so the panel is editable exactly while the invoice is Draft and the caller can submit it
-           (mirrors the ASN Draft-only rule). Enforcement of any attachment policy stays at the invoice-submit site
-           (§13.7), not in the panel. *@
-        <div style="margin-top:16px;">
-            <AttachmentPanel EntityCode="Invoice"
-                             EntityId="@detail.Id"
-                             Editable="@(detail.InvoiceStatus == "Draft" && Token.HasPermission("Invoice.Submit"))"
-                             SupplierId="@detail.SupplierId" />
+        </div>
+        @* R5 (§13 / §13.7) semantics unchanged, R7 placement — the policy-driven Attachment Panel now lives in the
+           document rail. Same component keyed by EntityCode="Invoice"; renders nothing when no policy rows exist.
+           R6 (D16) editability rides through: editable exactly while the invoice is Draft and the caller can submit
+           it (mirrors the ASN Draft-only rule). Enforcement stays at the invoice-submit site (§13.7), never here. *@
+        <DocumentRail EntityCode="Invoice"
+                      EntityId="@detail.Id"
+                      Editable="@(detail.InvoiceStatus == "Draft" && Token.HasPermission("Invoice.Submit"))"
+                      SupplierId="@detail.SupplierId"
+                      Open="@railOpen"
+                      OpenChanged="OnRailOpenChanged"
+                      OnSummaryChanged="OnRailSummary" />
         </div>
         }
     </div>
@@ -683,6 +697,27 @@ else
     // R6 — submit 409 reservation-conflict dialog.
     private bool showConflict;
     private string conflictMessage = string.Empty;
+
+    // ---- R7 (§2) — document-rail state (header pill + overview-tab rail) ----
+    // §2.3 default is host-derived: starts closed; the FIRST panel summary flips it open when the panel is
+    // editable here (Draft + Invoice.Submit — the same D16 expression) AND any Mandatory slot is empty. A manual
+    // toggle (pill / Escape / close / backdrop) wins permanently.
+    private bool railOpen;
+    private bool _railUserToggled;
+    private AttachmentPanelSummary? railSummary;
+
+    private void OnRailOpenChanged(bool open)
+    {
+        railOpen = open;
+        _railUserToggled = true;
+    }
+
+    private void OnRailSummary(AttachmentPanelSummary summary)
+    {
+        railSummary = summary;
+        if (!_railUserToggled && !railOpen && CanEditLines && summary.AnyMandatoryEmpty)
+            railOpen = true;
+    }
 
     private bool CanEditLines => detail?.InvoiceStatus == "Draft" && Token.HasPermission("Invoice.Submit");
     private bool AnyLineErrors => lineEdits.Values.Any(e => e.Error != null);

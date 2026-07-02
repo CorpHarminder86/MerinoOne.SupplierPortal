@@ -34,6 +34,14 @@
             <p class="tl-sub">@HeaderSubtitle</p>
         </div>
         <div class="tl-header__actions">
+            @* R7 (§2.2) — document-rail toggle pill with the live fulfilment count. Rendered whenever the rail is
+               (both the locked view and the wizard host one); the two-way Open state is shared with the rail. *@
+            @if (!loading && (IsNew || detail != null))
+            {
+                <DocumentRailPill Open="@railOpen" OpenChanged="OnRailOpenChanged"
+                                  Satisfied="@(railSummary?.SatisfiedSlots ?? 0)"
+                                  Total="@(railSummary?.TotalSlots ?? 0)" />
+            }
             @* R5 (§10.2) — buyer decision actions on a PendingApproval ASN. Any mapped PO buyer may decide (Phase 1);
                the server gate (AsnApprovalGate) is authoritative, so we only gate the affordance on Asn.Approve. *@
             @if (!IsNew && detail != null && CanApprove && detail.AsnStatus == "PendingApproval")
@@ -146,6 +154,13 @@
             ? genIds.ToList()
             : (detail.DraftInvoiceId.HasValue ? new List<Guid> { detail.DraftInvoiceId.Value } : new List<Guid>());
 
+        @* ---- R7 (§2) — document-rail push row: main column (banners + cards) beside the 360px rail. The
+              min-width:0 on the main flex child lets it shrink so the rail pushes, never overlays/overflows.
+              The read-only host defaults the rail CLOSED (§2.3 — the Mandatory check already passed at
+              Send-for-Approval); the header pill still shows the live count. ---- *@
+        <div style="display:flex;align-items:stretch;">
+        <div style="flex:1;min-width:0;">
+
         @if (detail.InvoiceGenerationStatus == "Blocked")
         {
             <div class="rz-card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:flex-start;gap:12px;background:var(--mer-red-50);border:1px solid var(--mer-red);">
@@ -184,8 +199,9 @@
             </div>
         }
 
-        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;">
-            <div class="rz-card" style="padding:20px;">
+        @* R7 (§2/§3.2) — the old 1.4fr/1fr grid (Shipment beside the always-expanded panel) is gone: the document
+           surface moved into the right rail, and the Shipment card spans the full main column. *@
+        <div class="rz-card" style="padding:20px;">
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Shipment</h3>
                 <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
                     <dt style="color:var(--mer-ink-500);">Purchase order(s)</dt><dd>@PoSummaryText</dd>
@@ -204,17 +220,6 @@
                     <h4 style="font-size:12px;font-weight:700;margin:16px 0 6px;color:var(--mer-ink-700);">Notes</h4>
                     <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@detail.Notes</p>
                 }
-            </div>
-
-            @* R5 (§13.5) — read-only Attachment Panel on the locked view (PendingApproval shows it to the supplier as
-               read-only AND to the buyer who is deciding; Submitted+ shows it view-only to everyone). The panel renders
-               nothing when no policy rows exist for the ASN entity. Editable=false ⇒ no upload/remove affordances. *@
-            <div>
-                <AttachmentPanel EntityCode="Asn"
-                                 EntityId="@detail.Id"
-                                 Editable="false"
-                                 SupplierId="@detail.SupplierId" />
-            </div>
         </div>
 
         <div class="rz-card" style="padding:20px;margin-top:16px;">
@@ -282,10 +287,28 @@
                 </tbody>
             </table>
         </div>
+
+        </div>
+        @* R7 (§13.5 semantics unchanged) — the read-only document surface for the locked view (PendingApproval:
+           supplier read-only + deciding buyer; Submitted+: view-only for everyone) now lives in the rail. The
+           panel inside still renders nothing when no policy rows exist; Editable=false ⇒ no upload/remove. *@
+        <DocumentRail EntityCode="Asn"
+                      EntityId="@detail.Id"
+                      Editable="false"
+                      SupplierId="@detail.SupplierId"
+                      Open="@railOpen"
+                      OpenChanged="OnRailOpenChanged"
+                      OnSummaryChanged="OnRailSummary" />
+        </div>
     }
     else
     {
         @* ---------------- Draft wizard (editable) ---------------- *@
+        @* R7 (§2) — the wizard adopts the document rail too: PERSISTENT across all four steps (the old step-3
+           embedded panel is removed). Same push-row plumbing as the locked view; the editable host defaults the
+           rail OPEN when any Mandatory slot is empty (§2.3, learned from the panel's first summary). *@
+        <div style="display:flex;align-items:stretch;">
+        <div style="flex:1;min-width:0;">
         <div class="rz-card" style="padding:20px;">
             <!-- Stepper -->
             <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--mer-line);">
@@ -630,28 +653,9 @@
                 <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:12px;display:block;">Notes</label>
                 <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="notes"></textarea>
 
-                @* ---------------- Attachments (R5 §13 — policy-driven Attachment Panel) ----------------
-                   The reusable panel renders slots from the server read-model (one per active AttachmentRequirementPolicy
-                   row) and performs upload/remove via the existing /api/document-uploads/attach + DELETE endpoints. It is
-                   a THIN CLIENT: it DISPLAYS the requirement badge but never enforces — the Mandatory/Warning block fires
-                   only at Send-for-Approval (the server AttachmentSubmitGuard, §13.6). No policy rows → it renders nothing.
-                   A brand-new ASN has no id yet, so the panel shows a "save the draft to attach" hint per slot (§13.2);
-                   once saved (Draft) it is live and editable while Draft/Rejected (§13.5). *@
-                <div style="margin-top:18px;border-top:1px solid var(--mer-line-soft);padding-top:14px;">
-                    @if (IsNew && selectedSupplierId == Guid.Empty)
-                    {
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachments</label>
-                        <p style="font-size:11px;color:var(--mer-ink-500);margin-top:6px;">Choose a supplier first.</p>
-                    }
-                    else
-                    {
-                        <AttachmentPanel EntityCode="Asn"
-                                         EntityId="@(Id ?? Guid.Empty)"
-                                         Editable="@(CanWrite)"
-                                         SupplierId="@attachSupplierId"
-                                         OnChanged="OnPanelChanged" />
-                    }
-                </div>
+                @* R7 — the R5 §13 Attachment Panel that used to be embedded here (step 3 only) moved into the
+                   DocumentRail beside the wizard, where it is reachable from EVERY step. All its semantics
+                   (thin client, "save the draft to attach" hint, Draft/Rejected editability) are unchanged. *@
             }
             else if (currentStep == 4)
             {
@@ -716,6 +720,22 @@
                     }
                 </div>
             </div>
+        </div>
+
+        </div>
+        @* R7 — editable-host rail. Wiring is IDENTICAL to the old step-3 embed: EntityId=Guid.Empty for a
+           brand-new ASN (policy slots + "save the draft" hint), attachSupplierId stamps the upload seccode,
+           OnPanelChanged keeps the step-4 review count fresh. The "Choose a supplier first." pre-condition
+           renders inside the rail body via GuardMessage (same condition as before). *@
+        <DocumentRail EntityCode="Asn"
+                      EntityId="@(Id ?? Guid.Empty)"
+                      Editable="@(CanWrite)"
+                      SupplierId="@attachSupplierId"
+                      OnChanged="OnPanelChanged"
+                      GuardMessage="@(IsNew && selectedSupplierId == Guid.Empty ? "Choose a supplier first." : null)"
+                      Open="@railOpen"
+                      OpenChanged="OnRailOpenChanged"
+                      OnSummaryChanged="OnRailSummary" />
         </div>
     }
 </div>
@@ -970,6 +990,27 @@
     // ASN's attachments (for the step-4 review summary), refreshed from the by-asn list endpoint on panel changes.
     private readonly List<DocumentAttachmentDto> attachments = new();
     private Guid attachSupplierId;
+
+    // ---- R7 (§2) — document-rail state (shared by the pill in the header and the rail in either branch) ----
+    // §2.3 default is host-derived: starts closed; the FIRST panel summary flips it open when this is the
+    // editable host AND any Mandatory slot is empty. A manual toggle (pill / Escape / close / backdrop) wins
+    // permanently — the auto-default never fights the user.
+    private bool railOpen;
+    private bool _railUserToggled;
+    private AttachmentPanelSummary? railSummary;
+
+    private void OnRailOpenChanged(bool open)
+    {
+        railOpen = open;
+        _railUserToggled = true;
+    }
+
+    private void OnRailSummary(AttachmentPanelSummary summary)
+    {
+        railSummary = summary;
+        if (!_railUserToggled && !railOpen && !IsLocked && CanWrite && summary.AnyMandatoryEmpty)
+            railOpen = true;
+    }
     // R4 (2026-06-23) — deferred-upload staging key for create-mode attachments (rebound onto the ASN by CreateAsn).
     private Guid _stagingKey = Guid.NewGuid();
 
