@@ -176,11 +176,14 @@ public static class AsnDtoBuilder
             })
             .ToList();
 
-        // The auto-created draft invoice (1:1 with the ASN via asnId).
-        var draftInvoiceId = await db.Invoices
+        // R6 — ALL generated draft invoices for the ASN (one per (currency, payment-term) group since 0042
+        // dropped the unique index). Scalar DraftInvoiceId stays = first for back-compat.
+        var draftInvoiceIds = await db.Invoices
             .Where(i => i.AsnId == asnId && !i.IsDeleted)
-            .Select(i => (Guid?)i.Id)
-            .FirstOrDefaultAsync(ct);
+            .OrderBy(i => i.CreatedOn).ThenBy(i => i.InvoiceNumber)
+            .Select(i => i.Id)
+            .ToListAsync(ct);
+        Guid? draftInvoiceId = draftInvoiceIds.Count > 0 ? draftInvoiceIds[0] : null;
 
         var attachments = await BuildAttachmentsAsync(db, asnId, ct);
 
@@ -221,7 +224,8 @@ public static class AsnDtoBuilder
             draftInvoiceId, IsLocked(a.AsnStatus),
             lines, attachments,
             a.ShipToAddressId, shipToName, approval,
-            shipBlockReason is not null, shipBlockReason);
+            shipBlockReason is not null, shipBlockReason,
+            a.InvoiceGenerationStatus, a.InvoiceGenerationNote, draftInvoiceIds);
     }
 
     public static async Task<IReadOnlyList<DocumentAttachmentDto>> BuildAttachmentsAsync(

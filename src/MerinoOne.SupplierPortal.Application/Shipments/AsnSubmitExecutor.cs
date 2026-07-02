@@ -15,16 +15,17 @@ namespace MerinoOne.SupplierPortal.Application.Shipments;
 /// from the R4 <c>SubmitAsnCommand</c> so the <b>Approve → Submit</b> path (the only way an ASN reaches Submitted in
 /// R5) reuses the EXACT same logic. In ONE transaction it:
 /// <list type="number">
-///   <item>validates serial/lot (per Item flags), intra/cross-ASN uniqueness, the nominal over-ship message, the
-///         PO confirmation gate, and the single-currency guard;</item>
+///   <item>validates serial/lot (per Item flags), intra/cross-ASN uniqueness, the nominal over-ship message and the
+///         PO confirmation gate;</item>
 ///   <item><b>runs the authoritative atomic over-ship guard</b> — the R4 conditional <c>UPDATE</c>
 ///         (<c>orderQty×factor − shippedQtyToDate ≥ shipQty</c>, behind <c>Fulfilment.EnforceOverShipGuard</c>, WITH
 ///         the rounded-cap pre-check) — that <b>consumes <c>shippedQtyToDate</c></b>. This is the move from R4 §4.3:
 ///         the guard NO LONGER fires at ASN create; it fires ONCE, here, at final Submit (§10.4). If the guard
 ///         returns 0 rows (balance lost post-approval, UC-AP-05) the submit fails with the R4 over-ship message;</item>
 ///   <item>flips the ASN to <c>Submitted</c>, stamps <c>submittedAt/by</c> + the ERP correlation key;</item>
-///   <item>creates EXACTLY ONE draft invoice (<see cref="DraftInvoiceFromAsnFactory"/>, upsert-or-skip) and enqueues
-///         the ASN→ERP outbox post (post-commit dispatch).</item>
+///   <item>runs the R6 grouped draft-invoice generation (<see cref="DraftInvoiceFromAsnFactory"/> — one Draft per
+///         (currency, payment-term) group, idempotent per ASN; a tax-gate Blocked outcome does NOT abort the
+///         submit) and enqueues the ASN→ERP outbox post (post-commit dispatch).</item>
 /// </list>
 ///
 /// <para><b>What it does NOT do (moved out in R5):</b> the attachment-requirement check — that now fires at
@@ -348,7 +349,9 @@ public sealed class AsnSubmitExecutor
         asn.UpdatedBy = _user.UserCode;
         asn.UpdatedOn = now;
 
-        // ---- Single draft invoice spanning all the ASN's POs (R16 currency guard inside; upsert-or-skip) -
+        // ---- Grouped draft-invoice generation (R6, plan D3/D4) — one Draft per (currency, payment-term) group,
+        // idempotent per ASN. A tax-gate BLOCK flags the ASN (InvoiceGenerationStatus="Blocked" + buyer emails)
+        // WITHOUT throwing — the submit continues and commits; generation is retried via POST /invoices/from-asn.
         await _invoiceFactory.EnsureDraftAsync(asn, now, ct);
 
         // ---- Outbox: ASN -> ERP post, dispatched POST-COMMIT --------------------------------------------

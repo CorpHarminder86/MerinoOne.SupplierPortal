@@ -15,7 +15,14 @@ public static class SubmitOutcomeResultExtensions
 {
     public static Result<T> ToResult<T>(this SubmitOutcome<T> outcome, string? traceId = null)
         => outcome.IsCompleted
-            ? Result<T>.Ok(outcome.Data!, traceId)
+            // R6 — carry any advisory notices (e.g. tax-rate drift) onto the success envelope.
+            ? new Result<T>
+            {
+                Success = true,
+                Data = outcome.Data,
+                TraceId = traceId,
+                Notices = outcome.Notices.ToList(),
+            }
             : Result<T>.NeedsConfirmation(
                 outcome.ConfirmationMessage ?? SubmitOutcome<T>.DefaultConfirmationMessage,
                 outcome.MissingWarning, traceId);

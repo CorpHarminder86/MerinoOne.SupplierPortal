@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Documents;
+using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Application.Invoices.Commands;
 using MerinoOne.SupplierPortal.Application.Invoices.Queries;
@@ -52,11 +53,29 @@ Returns: PagedResult<InvoiceListItemDto>. Requires permission **Invoice.Read**."
     [EndpointDescription(@"Full invoice header + line items + linked PO / GR references + attachments.
 Filters / params:
 - **id**: Required — invoice GUID.
+R6: header carries **invoiceOrigin** (SupplierManual | AsnGenerated); each line carries the frozen tax snapshot
+(taxId / taxRatePct / taxDescription), its owning PO (purchaseOrderId / poNumber) and **remainingQty** — the LIVE
+invoiceable balance of the PO line (shippedQtyToDate − invoicedQtyToDate) used as the Draft billedQty edit cap
+(0 once the invoice is locked).
 Returns: InvoiceDetailDto on success; 404 if not found; 403 if seccode mismatch. Requires permission **Invoice.Read**.")]
     public async Task<Result<InvoiceDetailDto>> GetById(Guid id, CancellationToken ct)
     {
         var data = await _mediator.Send(new GetInvoiceByIdQuery(id), ct);
         return Result<InvoiceDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpGet("{id:guid}/pdf")]
+    [Authorize(Policy = Perm.InvoiceRead)]
+    [EndpointSummary("Invoice PDF (frozen snapshot)")]
+    [EndpointDescription(@"Renders the invoice's FROZEN snapshot (header, supplier, lines with tax rate/amounts,
+per-line PO, totals, IRN/ack/e-way) as a PDF. Seccode-scoped through the normal detail query (404 via filters,
+never a leak). Returns: application/pdf file named '{invoiceNumber}.pdf'. Requires **Invoice.Read**.")]
+    public async Task<IActionResult> GetPdf(
+        Guid id, [FromServices] IInvoicePdfGenerator pdfGenerator, CancellationToken ct)
+    {
+        var invoice = await _mediator.Send(new GetInvoiceByIdQuery(id), ct);
+        var bytes = pdfGenerator.Generate(invoice);
+        return File(bytes, "application/pdf", $"{invoice.InvoiceNumber}.pdf");
     }
 
     [HttpPost]
@@ -76,13 +95,17 @@ Returns: InvoiceDetailDto (Draft) on success; 400 on validation; 403 if seccode 
 
     [HttpPost("from-asn")]
     [Authorize(Policy = Perm.InvoiceSubmit)]
-    [EndpointSummary("Create draft invoice from an ASN")]
-    [EndpointDescription(@"Manually creates the ONE draft invoice spanning a Submitted ASN's POs (the same draft
-the ASN submit auto-creates). Idempotent: returns the existing draft if one already exists (UQ_Invoice_asnId).
+    [EndpointSummary("Create draft invoice(s) from an ASN (also the Blocked-generation Retry)")]
+    [EndpointDescription(@"R6 — runs the grouped draft-invoice generation for a Submitted ASN (the same generator
+that runs automatically at ASN approval): ONE Draft invoice per PO (currency, payment-term) group, numbered
+DRAFT-{asnNumber}-{n}; per line billedQty = shippedQtyToDate − invoicedQtyToDate (live). Idempotent: existing
+invoices for the ASN are returned, never re-created. Doubles as the **Retry generation** action for an ASN whose
+InvoiceGenerationStatus is 'Blocked' — success clears the flag; a still-missing tax rate returns 400 with the
+blocking reason (and re-persists the Blocked note).
 Body:
 - **body**: CreateInvoiceFromAsnRequest with the AsnId.
-Returns: InvoiceDetailDto (Draft) on success; 404 if ASN not found; 409 if ASN not Submitted; 400 on mixed
-currency. Requires **Invoice.Submit**.")]
+Returns: InvoiceDetailDto (the FIRST draft) on success; 404 if ASN not found; 409 if ASN not Submitted; 400 when
+generation is blocked (tax rate gap) or nothing remains to invoice. Requires **Invoice.Submit**.")]
     public async Task<Result<InvoiceDetailDto>> CreateFromAsn([FromBody] CreateInvoiceFromAsnRequest body, CancellationToken ct)
     {
         var data = await _mediator.Send(new CreateInvoiceFromAsnCommand(body), ct);
@@ -92,9 +115,13 @@ currency. Requires **Invoice.Submit**.")]
     [HttpPut("{id:guid}")]
     [Authorize(Policy = Perm.InvoiceSubmit)]
     [EndpointSummary("Update invoice (Draft only)")]
-    [EndpointDescription(@"Edits a DRAFT invoice (409 once Submitted). Editable: invoiceNumber, invoiceDate,
-eInvoiceIrn, eInvoiceAckNo, eWayBillNumber, notes. Amounts/lines are inherited from the ASN.
-Returns: InvoiceDetailDto on success; 404 if not found; 409 if not Draft; 400 on duplicate number. Requires **Invoice.Submit**.")]
+    [EndpointDescription(@"Edits a DRAFT invoice (409 once Submitted). Header editable: invoiceNumber, invoiceDate,
+eInvoiceIrn, eInvoiceAckNo, eWayBillNumber, notes.
+R6 — optional **lines** array ({ invoiceLineId, billedQty, taxId }): billedQty must be ≥ 0 and ≤ the line's LIVE
+remainingQty (shippedQtyToDate − invoicedQtyToDate; 400 over cap naming the line); taxId reselect re-resolves
+code/description/rate server-side (a selected tax with no rate is a 400; taxId null clears the line's tax); line
+and header amounts (invoiceAmount / taxAmount / netAmount = lines + tax) are recomputed server-side.
+Returns: InvoiceDetailDto on success; 404 if not found; 409 if not Draft; 400 on duplicate number / cap breach. Requires **Invoice.Submit**.")]
     public async Task<Result<InvoiceDetailDto>> Update(Guid id, [FromBody] UpdateInvoiceRequest body, CancellationToken ct)
     {
         var data = await _mediator.Send(new UpdateInvoiceCommand(id, body), ct);
@@ -103,16 +130,20 @@ Returns: InvoiceDetailDto on success; 404 if not found; 409 if not Draft; 400 on
 
     [HttpPost("{id:guid}/submit")]
     [Authorize(Policy = Perm.InvoiceSubmit)]
-    [EndpointSummary("Submit invoice (Draft -> Submitted)")]
-    [EndpointDescription(@"Submits a DRAFT invoice. Validates the mandatory fields (invoiceNumber + invoiceDate;
-the draft placeholder number must be replaced). Marks it ELIGIBLE for LN posting but does NOT post (posting is
-GRN-gated, Module 5).
-Attachment governance (§8.3): a missing MANDATORY attachment blocks (400, message names the types). A missing
-WARNING attachment on the first call returns 200 with **confirmationRequired=true** + confirmationMessage +
-missingAttachments (NOT an error, nothing committed); re-submit with AcknowledgeMissingAttachments=true to proceed
-(the skip is audited).
-Returns: InvoiceDetailDto (Submitted) on success; 200 confirmationRequired on a Warning skip; 404 if not found; 409
-if not Draft; 400 on missing mandatory fields / mandatory attachment. Requires **Invoice.Submit**.")]
+    [EndpointSummary("Submit invoice (Draft -> Matched | MatchExceptions)")]
+    [EndpointDescription(@"R6 — submits a DRAFT invoice. Guard order: real invoice number (the 'DRAFT-' / legacy
+'INV-DRAFT-' placeholder prefixes are rejected) → invoiceDate → IRN / e-way bill when the Invoicing settings
+(RequireIrn / RequireEWayBill) demand them → (supplier, invoiceNumber) uniqueness → attachment governance (§8.3:
+mandatory-missing 400; warning-missing returns 200 **confirmationRequired=true**, nothing committed).
+Then, atomically: each line's tax rate is RE-RESOLVED and FROZEN (a drift vs the draft rate is applied and
+surfaced as an advisory in the response **notices** array, e.g. 'Tax GST18: rate changed 18% → 12%'); the
+per-PO-line over-invoice reservation is taken (billed ≤ shippedQtyToDate − invoicedQtyToDate; a lost race returns
+409 and nothing is reserved); local matching runs — TwoWay: reservation = matched; ThreeWay: additionally billed ≤
+Σ receivedQty of the covering GRNs. Header lands **Matched** (all pass) or **MatchExceptions**; submittedAt/by are
+stamped regardless. NOT posted to ERP here — posting stays GRN-gated (the auto-post claim accepts Submitted or
+Matched; MatchExceptions never auto-posts).
+Returns: InvoiceDetailDto (Matched/MatchExceptions) + notices[] on success; 200 confirmationRequired on a Warning
+skip; 404 if not found; 409 if not Draft / reservation lost; 400 on validation. Requires **Invoice.Submit**.")]
     public async Task<Result<InvoiceDetailDto>> Submit(Guid id, [FromBody] SubmitInvoiceRequest? body, CancellationToken ct)
     {
         var outcome = await _mediator.Send(new SubmitInvoiceCommand(id, body ?? new SubmitInvoiceRequest()), ct);
@@ -122,12 +153,14 @@ if not Draft; 400 on missing mandatory fields / mandatory attachment. Requires *
     [HttpPost("{id:guid}/revoke")]
     [Authorize(Policy = Perm.InvoiceRevoke)]
     [EndpointSummary("Revoke invoice (admin, pre-post)")]
-    [EndpointDescription(@"Admin PRE-POST revoke: Submitted -> Draft (pure status flip, NO LN reversal). Guards:
-state (Submitted AND not yet posted) and optimistic concurrency via RowVersion (a stale token yields 409 against
-a racing auto-post).
+    [EndpointDescription(@"Admin PRE-POST revoke: Submitted/Matched/MatchExceptions -> Draft (NO LN reversal —
+nothing was posted). Guards: state (a submit-side status AND not yet posted) and optimistic concurrency via
+RowVersion (a stale token yields 409 against a racing auto-post). R6 — releases the invoice's per-PO-line
+invoiced-qty reservation (invoicedQtyToDate is decremented, floored at 0) in the same transaction, so the
+quantities become re-invoiceable.
 Body:
 - **body**: RevokeInvoiceRequest with an optional reason + the RowVersion (base64, from the detail DTO).
-Returns: InvoiceDetailDto (Draft) on success; 404 if not found; 409 if not Submitted/already posted/stale
+Returns: InvoiceDetailDto (Draft) on success; 404 if not found; 409 if not revocable/already posted/stale
 RowVersion. Requires **Invoice.Revoke** (admin/Finance).")]
     public async Task<Result<InvoiceDetailDto>> Revoke(Guid id, [FromBody] RevokeInvoiceRequest body, CancellationToken ct)
     {

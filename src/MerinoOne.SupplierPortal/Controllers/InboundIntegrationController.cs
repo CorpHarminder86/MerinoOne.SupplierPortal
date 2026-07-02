@@ -146,6 +146,9 @@ Behaviour: 200 + UpsertResultDto (per-row Inserted/Updated/Failed); 400 unknown 
     [EndpointDescription(@"Upserts company-shared Tax master rows pushed by Infor LN (Q6: ICompanyScoped, ERP-fed). CompanyCode is resolved + normalized to the share-group source; upsert keyed on (sourceId, Code). PO/invoice lines resolve taxId by code.
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.Tax` and be bound to the source company the body resolves to.
 Body: { companyCode, taxes:[{ code, description, taxRate?, isActive }] }.
+R6 override rule: an admin rate edit in the portal PINS the row (isRateOverridden) — the sync then SKIPS writing
+taxRate for that row (the pinned rate wins) but ALWAYS updates lastSyncedRate to the pushed value, so the drift is
+visible and the admin can reset the override back to the synced rate. Un-pinned rows take the pushed taxRate as before.
 Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
     public async Task<Result<UpsertResultDto>> Taxes([FromBody] PushTaxesRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertTaxesCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);

@@ -141,7 +141,14 @@ public record AsnDetailDto(
     // (a covered PO is not shippable, or another ASN for the same PO is pending buyer approval). ShipBlockReason
     // carries the human message. False/null for locked ASNs and when shipping is permitted.
     bool ShipBlocked = false,
-    string? ShipBlockReason = null);
+    string? ShipBlockReason = null,
+    // R6 (2026-07-02) — outcome of the grouped draft-invoice generation at ASN approval: "Generated" / "Blocked"
+    // / null (never attempted). InvoiceGenerationNote carries the Blocked cause (names the tax code(s)).
+    // DraftInvoiceIds lists ALL invoices generated for this ASN (one per (currency, payment-term) group);
+    // the scalar DraftInvoiceId above stays = first for back-compat.
+    string? InvoiceGenerationStatus = null,
+    string? InvoiceGenerationNote = null,
+    IReadOnlyList<Guid>? DraftInvoiceIds = null);
 
 /// <summary>One covered PO on a (possibly multi-PO) ASN.</summary>
 public record AsnPurchaseOrderDto(

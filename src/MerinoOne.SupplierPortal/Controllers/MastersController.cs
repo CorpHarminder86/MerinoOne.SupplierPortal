@@ -204,8 +204,11 @@ Returns: TaxDto on success; 400 on validation; 409 if code exists. Requires perm
     [EndpointDescription(@"Updates an existing tax code (Code immutable).
 Filters / params:
 - **id**: Required — tax GUID.
-- **body**: UpdateTaxRequest with revised Description / TaxRate / IsActive.
-Returns: TaxDto on success; 404 if not found. Requires permission **Settings.Write**.")]
+- **body**: UpdateTaxRequest with revised Description / TaxRate / IsActive (+ optional ResetRateOverride).
+R6 — changing the TaxRate VALUE pins the rate (**isRateOverridden=true**): the inbound LN tax sync then skips
+writing taxRate for this row while still updating **lastSyncedRate**. Send **resetRateOverride=true** to clear the
+pin and restore TaxRate = LastSyncedRate.
+Returns: TaxDto (incl. isRateOverridden + lastSyncedRate) on success; 404 if not found. Requires permission **Settings.Write**.")]
     public async Task<Result<TaxDto>> UpdateTax(Guid id, [FromBody] UpdateTaxRequest body, CancellationToken ct)
     {
         var data = await _mediator.Send(new UpdateTaxCommand(id, body), ct);

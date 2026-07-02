@@ -49,6 +49,7 @@ public class CreateTaxCommandHandler : IRequestHandler<CreateTaxCommand, TaxDto>
         };
         _db.Taxes.Add(entity);
         await _db.SaveChangesAsync(ct);
-        return new TaxDto(entity.Id, entity.Seq, entity.Code, entity.Description, entity.TaxRate, entity.IsActive, entity.CreatedOn);
+        return new TaxDto(entity.Id, entity.Seq, entity.Code, entity.Description, entity.TaxRate, entity.IsActive, entity.CreatedOn,
+            entity.IsRateOverridden, entity.LastSyncedRate);
     }
 }

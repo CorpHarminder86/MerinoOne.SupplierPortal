@@ -6,6 +6,7 @@ using MerinoOne.SupplierPortal.Application.Invoices.Queries;
 using MerinoOne.SupplierPortal.Contracts.Invoices;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using ConflictException = MerinoOne.SupplierPortal.Application.Common.Exceptions.ConflictException;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
 
@@ -49,10 +50,12 @@ public class RevokeInvoiceCommandHandler : IRequestHandler<RevokeInvoiceCommand,
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly IMediator _mediator;
+    private readonly ILogger<RevokeInvoiceCommandHandler> _logger;
 
-    public RevokeInvoiceCommandHandler(IAppDbContext db, ICurrentUser user, IMediator mediator)
+    public RevokeInvoiceCommandHandler(
+        IAppDbContext db, ICurrentUser user, IMediator mediator, ILogger<RevokeInvoiceCommandHandler> logger)
     {
-        _db = db; _user = user; _mediator = mediator;
+        _db = db; _user = user; _mediator = mediator; _logger = logger;
     }
 
     public async Task<InvoiceDetailDto> Handle(RevokeInvoiceCommand request, CancellationToken ct)
@@ -60,11 +63,17 @@ public class RevokeInvoiceCommandHandler : IRequestHandler<RevokeInvoiceCommand,
         var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == request.Id, ct)
                       ?? throw new NotFoundException("Invoice", request.Id);
 
-        // Pre-post only (Q9): must be Submitted and not yet posted to ERP.
-        if (invoice.InvoiceStatus != InvoiceStatus.Submitted || invoice.ErpPostedAt.HasValue)
+        // Pre-post only (Q9): not yet posted to ERP, and in a submit-side state. R6 — local matching at Submit
+        // (plan D9) advances the header straight to Matched/MatchExceptions, so the revoke window covers those
+        // states too (Submitted remains for legacy/ERP-fed rows). Approved/Paid stay non-revocable.
+        var revocable = invoice.InvoiceStatus
+            is InvoiceStatus.Submitted or InvoiceStatus.Matched or InvoiceStatus.MatchExceptions;
+        if (!revocable || invoice.ErpPostedAt.HasValue)
             throw new ConflictException(
-                $"Only a Submitted, not-yet-posted invoice can be revoked; current state '{invoice.InvoiceStatus}'" +
+                $"Only a Submitted/Matched/MatchExceptions, not-yet-posted invoice can be revoked; current state '{invoice.InvoiceStatus}'" +
                 (invoice.ErpPostedAt.HasValue ? " (already posted to ERP)." : "."));
+
+        var priorStatus = invoice.InvoiceStatus;
 
         // Apply the client's RowVersion as the concurrency token so a stale revoke (vs. a racing auto-post) fails 409.
         if (!string.IsNullOrWhiteSpace(request.Body.RowVersion))
@@ -114,7 +123,14 @@ public class RevokeInvoiceCommandHandler : IRequestHandler<RevokeInvoiceCommand,
 
         try
         {
+            // R6 (plan D8) — the reservation release (immediate conditional ExecuteUpdates) and the tracked
+            // revoke mutation must commit ATOMICALLY: a SaveChanges failure (e.g. the RowVersion 409 below)
+            // rolls the already-applied per-line releases back with the transaction.
+            await using var tx = await _db.BeginTransactionAsync(ct);
+            if (InvoiceReservationRelease.HoldsReservation(priorStatus))
+                await InvoiceReservationRelease.ReleaseAsync(_db, invoice.Id, _logger, ct);
             await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
         }
         catch (DbUpdateConcurrencyException)
         {

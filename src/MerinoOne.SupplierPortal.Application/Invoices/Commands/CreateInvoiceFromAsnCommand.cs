@@ -7,15 +7,16 @@ using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using ConflictException = MerinoOne.SupplierPortal.Application.Common.Exceptions.ConflictException;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
+using ValidationException = MerinoOne.SupplierPortal.Application.Common.Exceptions.ValidationException;
 
 namespace MerinoOne.SupplierPortal.Application.Invoices.Commands;
 
 /// <summary>
-/// R4 (2026-06-22) — Module 4. Manually create the ONE draft invoice spanning an ASN's POs (Q1b). The same
-/// creation also runs automatically inside <c>SubmitAsnCommand</c>; both go through
-/// <see cref="DraftInvoiceFromAsnFactory"/> so the UQ_Invoice_asnId upsert-or-skip and the mixed-currency guard
-/// (R16) are enforced in one place. If a draft already exists for the ASN it is returned (idempotent), never a
-/// second insert. NO ERP post on create (posting is GRN-gated in Module 5).
+/// R6 (2026-07-02) — manual/Retry trigger for the grouped draft-invoice generation (the same generator runs
+/// automatically inside the ASN approve transaction). Idempotent: existing (non-deleted) invoices for the ASN are
+/// returned, never a second insert. Doubles as the <b>Retry generation</b> endpoint for a Blocked ASN (plan D10):
+/// a successful run clears the Blocked flag; a still-blocked run persists the refreshed note and returns 400 with
+/// the reason. NO ERP post on create (posting is GRN-gated, Module 5).
 /// </summary>
 public record CreateInvoiceFromAsnCommand(CreateInvoiceFromAsnRequest Body) : IRequest<InvoiceDetailDto>;
 
@@ -40,16 +41,32 @@ public class CreateInvoiceFromAsnCommandHandler : IRequestHandler<CreateInvoiceF
         var asn = await _db.Asns.FirstOrDefaultAsync(a => a.Id == request.Body.AsnId, ct)
                   ?? throw new NotFoundException("Asn", request.Body.AsnId);
 
-        // An invoice is only meaningful for a submitted ASN (the auto path fires on submit). Allow manual create
-        // for Submitted ASNs that somehow have no invoice yet; reject Draft/Cancelled.
+        // Generation is only meaningful for a submitted ASN (the auto path fires at approve→submit).
         if (asn.AsnStatus != AsnStatus.Submitted)
             throw new ConflictException($"ASN is '{asn.AsnStatus}'; an invoice can only be created from a Submitted ASN.");
 
         var now = DateTime.UtcNow;
-        var result = await _factory.EnsureDraftAsync(asn, now, ct);
-        if (result.Created)
-            await _db.SaveChangesAsync(ct);
+        var outcome = await _factory.EnsureDraftAsync(asn, now, ct);
 
-        return await _mediator.Send(new GetInvoiceByIdQuery(result.Invoice.Id), ct);
+        // Persist whatever the generator staged: new drafts + Generated flag, OR the (re-)Blocked flag/note +
+        // buyer notification rows. Saving BEFORE the Blocked throw keeps the ASN flag authoritative for the UI.
+        await _db.SaveChangesAsync(ct);
+
+        if (outcome.Blocked)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["invoiceGeneration"] = new[] { outcome.BlockNote ?? "Invoice generation is blocked for this ASN." }
+            });
+
+        if (outcome.Invoices.Count == 0)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["invoiceGeneration"] = new[]
+                {
+                    "Nothing to invoice: every shipped quantity on this ASN's PO lines is already invoiced."
+                }
+            });
+
+        return await _mediator.Send(new GetInvoiceByIdQuery(outcome.Invoices[0].Id), ct);
     }
 }

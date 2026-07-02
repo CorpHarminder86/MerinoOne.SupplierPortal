@@ -41,9 +41,14 @@ public static class DependencyInjection
         // Create/Update ASN command's transaction. Scoped (per-request IAppDbContext).
         services.AddScoped<AsnAttachmentRebinder>();
 
-        // R4 Module 4 — single source of truth for the ONE draft invoice spanning an ASN's POs (Q1b). Used by
-        // the ASN submit path (AsnSubmitExecutor, via Approve) and CreateInvoiceFromAsnCommand (manual). Scoped.
+        // R4 Module 4 / R6 — single source of truth for the GROUPED draft-invoice generation from an ASN (one
+        // Draft per (currency, payment-term) group). Used by the ASN submit path (AsnSubmitExecutor, via Approve)
+        // and CreateInvoiceFromAsnCommand (manual/Retry). Scoped.
         services.AddScoped<Invoices.DraftInvoiceFromAsnFactory>();
+
+        // R6 — batch proc.Tax rate resolution (IgnoreQueryFilters + tenant guard, plan D12) shared by the
+        // generation, Draft line-edit and Submit rate-freeze paths. Scoped (per-request IAppDbContext).
+        services.AddScoped<Invoices.TaxRateResolver>();
 
         // R5 (TSD R5 Addendum §10.2 / §10.4) — the shared ASN final-submit executor. The over-ship atomic guard
         // lives here now (moved from ASN create); the Approve→Submit path reuses it. Scoped (per-request context).

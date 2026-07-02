@@ -20,7 +20,9 @@ public record InvoiceListItemDto(
     string CurrencyCode,
     string MatchingType,
     string InvoiceStatus,
-    DateTime CreatedOn);
+    DateTime CreatedOn,
+    // R6 (2026-07-02) — provenance: "SupplierManual" (wizard) vs "AsnGenerated" (grouped ASN generator).
+    string InvoiceOrigin = "SupplierManual");
 
 // R4 (2026-06-22) — Module 4. Nullable PO header (multi-PO), covered-PO list, posting-lifecycle fields
 // (SubmittedAt, Revoked*, ErpPostedAt/ErpSyncId/ErpCode), IsLocked (true once Submitted — edits rejected),
@@ -63,13 +65,19 @@ public record InvoiceDetailDto(
     string? RowVersion,
     string? Notes,
     DateTime CreatedOn,
-    List<InvoiceLineDto> Lines);
+    List<InvoiceLineDto> Lines,
+    // R6 (2026-07-02) — provenance: "SupplierManual" (wizard) vs "AsnGenerated" (grouped ASN generator).
+    string InvoiceOrigin = "SupplierManual");
 
 /// <summary>One PO covered by a (possibly multi-PO) invoice, derived from the distinct PO lines.</summary>
 public record InvoicePurchaseOrderDto(
     Guid PurchaseOrderId,
     string PoNumber);
 
+// R6 (2026-07-02) — line-level tax snapshot (taxRatePct/taxId/taxDescription frozen on the row), the owning
+// PO reference per line (multi-PO invoices), and RemainingQty = the LIVE invoiceable balance of the PO line
+// (max(0, shippedQtyToDate − invoicedQtyToDate)) at READ time — the FE cap for Draft billedQty edits; 0 once
+// the invoice is locked (non-Draft).
 public record InvoiceLineDto(
     Guid Id,
     Guid PurchaseOrderLineId,
@@ -79,7 +87,13 @@ public record InvoiceLineDto(
     decimal UnitPrice,
     decimal LineAmount,
     string? TaxCode,
-    decimal TaxAmount);
+    decimal TaxAmount,
+    decimal? TaxRatePct = null,
+    Guid? TaxId = null,
+    string? TaxDescription = null,
+    Guid? PurchaseOrderId = null,
+    string? PoNumber = null,
+    decimal RemainingQty = 0);
 
 public record CreateInvoiceRequest(
     Guid PurchaseOrderId,
@@ -110,15 +124,26 @@ public record CreateInvoiceLineRequest(
 // R4 (2026-06-22) — Module 4. Manual create-from-ASN trigger (the auto path runs inside SubmitAsnCommand).
 public record CreateInvoiceFromAsnRequest(Guid AsnId);
 
-// R4 (2026-06-22) — Module 4. Draft-only edit: header fields editable in Draft. Amounts/lines are inherited
-// from the ASN at create; this edits the supplier-supplied invoice metadata + e-invoice fields in Draft.
+// R4 (2026-06-22) — Module 4. Draft-only edit: header fields editable in Draft.
+// R6 (2026-07-02) — optional Lines: per-line billedQty (server-capped at the LIVE shippedQtyToDate −
+// invoicedQtyToDate; 400 over cap) + tax reselect (taxId is re-resolved server-side — code/description/rate are
+// NEVER client-typed). LineAmount/TaxAmount + the header totals are recomputed server-side. Null Lines = header
+// metadata edit only (back-compat).
 public record UpdateInvoiceRequest(
     string InvoiceNumber,
     DateTime InvoiceDate,
     string? EInvoiceIrn,
     string? EInvoiceAckNo,
     string? EWayBillNumber,
-    string? Notes);
+    string? Notes,
+    List<UpdateInvoiceLineRequest>? Lines = null);
+
+// R6 (2026-07-02) — one Draft line edit. TaxId null = clear the line's tax (rate/description/amount reset);
+// a supplied TaxId is re-resolved against the governed proc.Tax master (400 when it has no rate).
+public record UpdateInvoiceLineRequest(
+    Guid InvoiceLineId,
+    decimal BilledQty,
+    Guid? TaxId);
 
 // R4 (2026-06-26) — Phase 4 / §8.3 / UC-ATT-03: AcknowledgeMissingAttachments confirms proceeding past any
 // Warning-level attachment requirement on the Invoice entity. First submit (false) with a missing Warning

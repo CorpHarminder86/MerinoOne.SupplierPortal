@@ -54,7 +54,9 @@ public static class IntegrationCatalog
             "Upsert item master rows (unit + group referenced by code) for the resolved source company. isSerialized / isLotControlled are LN-fed control flags (default false) that drive ASN serial / lot capture; they are mutually exclusive (an item is serial- or lot-controlled, not both). overShipTolerancePct (optional, default 0) is the LN-fed item-master over-ship tolerance floor (%, 0–999.99); a SupplierItem override (Settings) wins.",
             Json(new { companyCode = "3000", items = new[] { new { code = "ITM-00001", description = "Sample item", unitCode = "KG", itemGroupCode = "RAW", hsnCode = "39021000", isActive = true, isSerialized = false, isLotControlled = false, overShipTolerancePct = 5.0 } } })),
         new IntegrationEndpointDocDto("Taxes", "Integration.Inbound.Tax", "POST", $"{Base}/taxes", true,
-            "Upsert tax-code master rows (company-shared) for the resolved source company. PO/invoice lines resolve taxId by code.",
+            "Upsert tax-code master rows (company-shared) for the resolved source company. PO/invoice lines resolve taxId by code. " +
+            "R6 override rule: when an admin has pinned a row's rate in the portal (isRateOverridden), the sync does NOT overwrite taxRate; " +
+            "lastSyncedRate is ALWAYS updated to the pushed value so the drift stays visible and the admin can reset the override.",
             Json(new { companyCode = "3000", taxes = new[] { new { code = "GST18", description = "GST 18%", taxRate = 18.0, isActive = true } } })),
 
         // ── Tenant-scoped (no CompanyCode; bound to the key's tenant) ──

@@ -27,8 +27,9 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 /// on re-seeing an already-approved row), AND (b) ALL GRN lines covering that invoice's PO lines are
 /// <see cref="GrnStatus.GrnApproved"/> (<see cref="AllCoveringGrnsApprovedAsync"/> via the InvoiceId FK,
 /// tenant-scoped — review N1), AND (c) the post is won by an ATOMIC CLAIM (review S1): a single conditional
-/// <c>ExecuteUpdateAsync</c> stamps <c>erpPostInitiatedAt = now WHERE invoiceStatus = Submitted AND
-/// erpPostInitiatedAt IS NULL</c> and the post is enqueued ONLY when that affected exactly one row — so a
+/// <c>ExecuteUpdateAsync</c> stamps <c>erpPostInitiatedAt = now WHERE invoiceStatus IN (Submitted, Matched) AND
+/// erpPostInitiatedAt IS NULL</c> (R6 widened per plan D9 — MatchExceptions is NOT auto-posted) and the post is
+/// enqueued ONLY when that affected exactly one row — so a
 /// concurrent/duplicate webhook that already initiated the post loses the claim and is skipped (no double-post, no
 /// batch-nuking exception). The post is enqueued on the outbox with the TENANT+SUPPLIER-qualified deterministic
 /// key <c>sha256("&lt;tenantId&gt;|Invoice|&lt;supplierId&gt;|&lt;invoiceNumber&gt;|post")</c> (review B2; the worker calls
@@ -255,7 +256,7 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
 
                 // GUARD (c) + S1 — ATOMIC post claim. Instead of read-then-write under RowVersion (which 500s the
                 // whole batch on a concurrency clash), gate the post with a single conditional server-side update:
-                // stamp erpPostInitiatedAt ONLY when it is still NULL AND the invoice is Submitted. We enqueue the
+                // stamp erpPostInitiatedAt ONLY when it is still NULL AND the invoice is Submitted/Matched. We enqueue the
                 // outbox post ONLY when this affected exactly one row. A concurrent/duplicate GRN webhook that
                 // already initiated the post loses the claim (rowcount==0) and is skipped — no double-post, no
                 // batch-nuking exception. The claim runs inside the executor's transaction, so it commits/rolls
@@ -265,11 +266,14 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                 // erpPostedAt is set later by the dispatcher on a confirmed Dispatched/erp-ack; a dispatch FAILURE
                 // therefore leaves the invoice re-postable (a future GRN re-approval re-claims it once a manual
                 // retry/operator clears erpPostInitiatedAt, or the dispatcher's retry path replays the outbox row).
+                // R6 (plan D9) — local matching at Submit advances the header to Matched (all lines pass) or
+                // MatchExceptions. The claim accepts Submitted (legacy/ERP-fed) OR Matched; MatchExceptions is
+                // deliberately NOT auto-posted (the exception must be resolved first).
                 var claimed = await db.Invoices
                     .IgnoreQueryFilters()
                     .Where(i => i.Id == inv.Id
                                 && i.TenantId == tenantId
-                                && i.InvoiceStatus == InvoiceStatus.Submitted
+                                && (i.InvoiceStatus == InvoiceStatus.Submitted || i.InvoiceStatus == InvoiceStatus.Matched)
                                 && i.ErpPostInitiatedAt == null)
                     .ExecuteUpdateAsync(s => s
                         .SetProperty(i => i.ErpPostInitiatedAt, now)

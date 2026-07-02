@@ -3,6 +3,7 @@ using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Application.SystemSettings;
 using MerinoOne.SupplierPortal.Application.SystemSettings.EmailConfig;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Invoicing;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Registry;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Scope;
 using MerinoOne.SupplierPortal.Application.SystemSettings.SupplierInvite;
@@ -83,6 +84,12 @@ public static class DependencyInjection
         // Stage 2 will swap to Azure Blob behind the same IFileStorageService interface.
         services.AddSingleton<IFileStorageService, LocalDiskFileStorageService>();
 
+        // R6 (plan D13) — invoice PDF rendering (QuestPDF). The Community license is asserted ONCE here (both
+        // hosts call AddInfrastructure). NOTE: Community licensing is revenue-gated (<$1M USD/yr) — flagged to
+        // the owner in the build plan; WeasyPrint is the documented fallback if the terms stop fitting.
+        QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+        services.AddSingleton<IInvoicePdfGenerator, Services.InvoiceQuestPdfGenerator>();
+
         // In-process memory cache — backs the IEmailTemplateRenderer 60s lookup. Safe to call
         // twice; Microsoft.Extensions registers a single MemoryCache + IMemoryCache pair.
         services.AddMemoryCache();
@@ -161,9 +168,11 @@ public static class DependencyInjection
         services.AddSingleton<EmailConfigSeed>();
         services.AddSingleton<SupplierInviteSeed>();
         services.AddSingleton<FulfilmentSeed>();
+        services.AddSingleton<InvoicingSeed>();
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<EmailConfigSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<SupplierInviteSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<FulfilmentSeed>());
+        services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<InvoicingSeed>());
         services.AddSingleton<SettingsSeedRegistry>();
 
         // Cached readers — singleton so the cache persists across requests; expose both the
@@ -180,6 +189,11 @@ public static class DependencyInjection
         services.AddSingleton<FulfilmentSettingsService>();
         services.AddSingleton<IFulfilmentSettings>(sp => sp.GetRequiredService<FulfilmentSettingsService>());
         services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<FulfilmentSettingsService>());
+
+        // R6 (plan D11) — invoice-submit e-invoice compliance gates (Invoicing.RequireIrn / RequireEWayBill).
+        services.AddSingleton<InvoicingSettingsService>();
+        services.AddSingleton<IInvoicingSettings>(sp => sp.GetRequiredService<InvoicingSettingsService>());
+        services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<InvoicingSettingsService>());
 
         // R5 (TSD R5 Addendum §11 / Component 7) — cached ERP→portal PO-status map (per tenant). Singleton so the
         // map persists across requests with zero DB I/O on the inbound hot path; invalidated like the other cached

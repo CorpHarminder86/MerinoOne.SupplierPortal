@@ -52,7 +52,12 @@ public class UpsertTaxesCommandHandler(InboundUpsertExecutor exec) : IRequestHan
                 {
                     row.TenantId = tenantId; row.TenantEntityId = sourceId;
                     row.Description = (rec.Description ?? "").Trim();
-                    row.TaxRate = rec.TaxRate; row.IsActive = rec.IsActive;
+                    // R6 — an admin-pinned rate (IsRateOverridden) WINS over the sync: TaxRate is written only
+                    // when not overridden. LastSyncedRate ALWAYS tracks the latest inbound value regardless, so
+                    // the drift stays visible and the admin can reset the override back to the synced rate.
+                    if (!row.IsRateOverridden) row.TaxRate = rec.TaxRate;
+                    row.LastSyncedRate = rec.TaxRate;
+                    row.IsActive = rec.IsActive;
                     row.UpdatedBy = "infor:inbound"; row.UpdatedOn = now;
                     results.Add(new RowResult(code, RowOutcome.Updated, null));
                 }
@@ -62,6 +67,7 @@ public class UpsertTaxesCommandHandler(InboundUpsertExecutor exec) : IRequestHan
                     {
                         Id = Guid.NewGuid(), TenantId = tenantId, TenantEntityId = sourceId, Code = code,
                         Description = (rec.Description ?? "").Trim(), TaxRate = rec.TaxRate, IsActive = rec.IsActive,
+                        LastSyncedRate = rec.TaxRate,
                         CreatedBy = "infor:inbound", CreatedOn = now
                     });
                     results.Add(new RowResult(code, RowOutcome.Inserted, null));

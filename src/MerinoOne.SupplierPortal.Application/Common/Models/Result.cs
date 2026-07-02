@@ -16,6 +16,11 @@ public class Result<T>
     public string? ConfirmationMessage { get; init; }
     public List<string> MissingAttachments { get; init; } = new();
 
+    // R6 (2026-07-02) — ADVISORY notes on a SUCCESSFUL response (e.g. invoice-submit tax-rate drift:
+    // "Tax GST18: rate changed 18% → 12%"). Informational only — Success stays true, Errors stays empty; the
+    // client surfaces them as toasts. Empty when there is nothing to say.
+    public List<string> Notices { get; init; } = new();
+
     public static Result<T> Ok(T data, string? traceId = null) => new() { Success = true, Data = data, TraceId = traceId };
     public static Result<T> Fail(params string[] errors) => new() { Success = false, Errors = errors.ToList() };
     public static Result<T> Fail(IEnumerable<string> errors) => new() { Success = false, Errors = errors.ToList() };

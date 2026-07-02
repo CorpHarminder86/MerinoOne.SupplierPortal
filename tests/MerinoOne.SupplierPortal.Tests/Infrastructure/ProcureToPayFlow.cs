@@ -30,7 +30,10 @@ public static class ProcureToPayFlow
         int PoPositionNo,
         string ItemCode,
         decimal OrderQty,
-        decimal PriceUnit);
+        decimal PriceUnit,
+        // R6 — the tagged proc.Tax the PO line resolves its taxId against (null when seedTax:false).
+        string? TaxCode = null,
+        Guid? TaxId = null);
 
     /// <summary>
     /// Pushes a single-line PO (qty 10 @ price-unit 100, a plain non-serial/non-lot item) for a fresh tagged
@@ -38,9 +41,13 @@ public static class ProcureToPayFlow
     /// By default the PO is CONFIRMED to Accepted (ship-gate open) so the lifecycle suites can ship immediately;
     /// pass <paramref name="confirm"/>=false to leave it at the ingested PoStatus (used by the gate suite to drive
     /// the supplier confirmation flow itself).
+    /// <para>R6 — a tagged <c>proc.Tax</c> (rate <paramref name="taxRate"/>, default 18%) is seeded and stamped on
+    /// the PO line so the grouped draft-invoice generation resolves its tax gate. Pass <c>taxRate: null</c> to
+    /// seed a NULL-rate tax (drives the Blocked path) or <c>seedTax: false</c> for a tax-less PO line.</para>
     /// </summary>
     public static async Task<Setup> SeedPoAsync(
-        IntegrationTestFixture fx, decimal orderQty = 10m, decimal priceUnit = 100m, bool confirm = true)
+        IntegrationTestFixture fx, decimal orderQty = 10m, decimal priceUnit = 100m, bool confirm = true,
+        decimal? taxRate = 18m, bool seedTax = true, string currencyCode = "INR")
     {
         var tag = Guid.NewGuid().ToString("N")[..8];
 
@@ -48,8 +55,27 @@ public static class ProcureToPayFlow
             IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
             grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
 
+        return await SeedPoCoreAsync(fx, tag, supplier, IntegrationTestFixture.ShipToErpCode,
+            orderQty, priceUnit, confirm, taxRate, seedTax, currencyCode, itemCodeSuffix: null);
+    }
+
+    /// <summary>Shared PO push + tax seed used by <see cref="SeedPoAsync"/> and <see cref="SeedPoForSupplierAsync"/>.</summary>
+    private static async Task<Setup> SeedPoCoreAsync(
+        IntegrationTestFixture fx, string tag, SecurityTestHarness.SeededSupplier supplier, string shipToErpCode,
+        decimal orderQty, decimal priceUnit, bool confirm, decimal? taxRate, bool seedTax, string currencyCode,
+        string? itemCodeSuffix)
+    {
         // A plain item (no serial/lot) so the ASN happy path needs no per-line capture.
-        var item = await fx.CreateItemAsync($"P2P-{tag}");
+        var item = await fx.CreateItemAsync($"P2P-{itemCodeSuffix ?? tag}");
+
+        // R6 — tagged tax master row; the inbound PO upsert resolves the line's taxId by (company, code).
+        string? taxCode = null;
+        Guid? taxId = null;
+        if (seedTax)
+        {
+            taxCode = $"GST-{tag}";
+            taxId = await fx.CreateTaxAsync(taxCode, taxRate);
+        }
 
         var inbound = fx.CreateInboundClient();
         var poNumber = $"PO-P2P-{tag}";
@@ -61,10 +87,11 @@ public static class ProcureToPayFlow
                 Lines: new[]
                 {
                     new PoLineRecord(PositionNo: positionNo, SequenceNo: 1, ItemCode: item.ItemCode,
-                        OrderUnit: "EA", OrderQty: orderQty, PriceUnit: priceUnit, Price: priceUnit * orderQty),
+                        OrderUnit: "EA", OrderQty: orderQty, PriceUnit: priceUnit, Price: priceUnit * orderQty,
+                        TaxCode: taxCode),
                 },
-                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
-                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+                ShipToAddress: shipToErpCode,
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: currencyCode),
         });
         var poResp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", poBody);
         poResp.StatusCode.Should().Be(HttpStatusCode.OK,
@@ -88,7 +115,8 @@ public static class ProcureToPayFlow
             await db.SaveChangesAsync();
         }
 
-        return new Setup(tag, supplier, po.Id, poNumber, line.Id, positionNo, item.ItemCode, orderQty, priceUnit);
+        return new Setup(tag, supplier, po.Id, poNumber, line.Id, positionNo, item.ItemCode, orderQty, priceUnit,
+            taxCode, taxId);
     }
 
     /// <summary>
@@ -98,35 +126,12 @@ public static class ProcureToPayFlow
     /// </summary>
     public static async Task<Setup> SeedPoForSupplierAsync(
         IntegrationTestFixture fx, SecurityTestHarness.SeededSupplier supplier, string? shipToErpCode = null,
-        decimal orderQty = 10m, decimal priceUnit = 100m, string? itemCodeSuffix = null)
+        decimal orderQty = 10m, decimal priceUnit = 100m, string? itemCodeSuffix = null,
+        decimal? taxRate = 18m, bool seedTax = true, string currencyCode = "INR", bool confirm = false)
     {
         var tag = Guid.NewGuid().ToString("N")[..8];
-        var item = await fx.CreateItemAsync($"P2P-{itemCodeSuffix ?? tag}");
-
-        var inbound = fx.CreateInboundClient();
-        var poNumber = $"PO-P2P-{tag}";
-        const int positionNo = 10;
-        var poBody = new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
-        {
-            new PoRecord(
-                PoNumber: poNumber, SupplierCode: supplier.SupplierCode, PoDate: DateTime.UtcNow.Date,
-                Lines: new[]
-                {
-                    new PoLineRecord(PositionNo: positionNo, SequenceNo: 1, ItemCode: item.ItemCode,
-                        OrderUnit: "EA", OrderQty: orderQty, PriceUnit: priceUnit, Price: priceUnit * orderQty),
-                },
-                ShipToAddress: shipToErpCode ?? IntegrationTestFixture.ShipToErpCode,
-                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
-        });
-        var poResp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", poBody);
-        poResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await poResp.Content.ReadAsStringAsync());
-
-        using var scope = fx.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var po = await db.PurchaseOrders.IgnoreQueryFilters().Include(p => p.Lines)
-            .FirstAsync(p => p.PoNumber == poNumber && p.TenantId == IntegrationTestFixture.TenantId);
-        var line = po.Lines.Single(l => l.PositionNo == positionNo);
-        return new Setup(tag, supplier, po.Id, poNumber, line.Id, positionNo, item.ItemCode, orderQty, priceUnit);
+        return await SeedPoCoreAsync(fx, tag, supplier, shipToErpCode ?? IntegrationTestFixture.ShipToErpCode,
+            orderQty, priceUnit, confirm, taxRate, seedTax, currencyCode, itemCodeSuffix);
     }
 
     /// <summary>A single-line ASN against the seeded PO line, shipping the full ordered qty.</summary>

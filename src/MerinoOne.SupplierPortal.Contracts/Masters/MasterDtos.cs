@@ -30,6 +30,8 @@ public record PaymentTermDto(
     DateTime CreatedOn);
 
 // ---- Tax (R4 Module 6) — company-shared (ICompanyScoped) master, cloned from DeliveryTerm. ----
+// R6 (2026-07-02) — IsRateOverridden: an admin rate edit pins the rate (the LN tax sync then skips writing
+// TaxRate); LastSyncedRate always tracks the latest inbound value so the drift is visible + resettable.
 public record TaxDto(
     Guid Id,
     int Seq,
@@ -37,10 +39,13 @@ public record TaxDto(
     string Description,
     decimal? TaxRate,
     bool IsActive,
-    DateTime CreatedOn);
+    DateTime CreatedOn,
+    bool IsRateOverridden = false,
+    decimal? LastSyncedRate = null);
 
 public record CreateTaxRequest(string Code, string Description, decimal? TaxRate = null, bool IsActive = true);
-public record UpdateTaxRequest(string Description, decimal? TaxRate, bool IsActive);
+// R6 — ResetRateOverride=true clears the admin pin and restores TaxRate = LastSyncedRate.
+public record UpdateTaxRequest(string Description, decimal? TaxRate, bool IsActive, bool ResetRateOverride = false);
 
 public record ItemDto(
     Guid Id,

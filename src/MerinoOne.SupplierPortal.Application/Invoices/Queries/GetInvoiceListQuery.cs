@@ -62,6 +62,7 @@ public class GetInvoiceListQueryHandler : IRequestHandler<GetInvoiceListQuery, P
                 x.inv.InvoiceDate, x.inv.InvoiceAmount, x.inv.TaxAmount, x.inv.NetAmount,
                 x.inv.CurrencyCode, MatchingType = x.inv.MatchingType.ToString(),
                 Status = x.inv.InvoiceStatus.ToString(), x.inv.CreatedOn,
+                Origin = x.inv.InvoiceOrigin.ToString(),
             })
             .ToListAsync(ct);
 
@@ -92,7 +93,7 @@ public class GetInvoiceListQueryHandler : IRequestHandler<GetInvoiceListQuery, P
                 x.Id, x.Seq, x.InvoiceNumber, x.PurchaseOrderId, headerPoNumber, summary, nums.Count,
                 x.SupplierId, x.SupplierName,
                 x.InvoiceDate, x.InvoiceAmount, x.TaxAmount, x.NetAmount,
-                x.CurrencyCode, x.MatchingType, x.Status, x.CreatedOn);
+                x.CurrencyCode, x.MatchingType, x.Status, x.CreatedOn, x.Origin);
         }).ToList();
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling((double)total / pageSize);

@@ -24,7 +24,8 @@ public class GetTaxesQueryHandler : IRequestHandler<GetTaxesQuery, List<TaxDto>>
             q = q.Where(t => t.IsActive == request.IsActive.Value);
 
         return await q.OrderBy(t => t.Code)
-            .Select(t => new TaxDto(t.Id, t.Seq, t.Code, t.Description, t.TaxRate, t.IsActive, t.CreatedOn))
+            .Select(t => new TaxDto(t.Id, t.Seq, t.Code, t.Description, t.TaxRate, t.IsActive, t.CreatedOn,
+                t.IsRateOverridden, t.LastSyncedRate))
             .ToListAsync(ct);
     }
 }

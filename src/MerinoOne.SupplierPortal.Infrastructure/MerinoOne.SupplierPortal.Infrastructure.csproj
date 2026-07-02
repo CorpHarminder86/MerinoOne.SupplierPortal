@@ -24,6 +24,7 @@
          the startup project's user-secrets store; this class library doesn't get the extension transitively). -->
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <PackageReference Include="QuestPDF" Version="2026.6.1" />
     <!-- SECURITY (NU1903): pin the transitive System.Security.Cryptography.Xml (pulled in at the vulnerable 9.0.0
          via Azure.Identity / IdentityModel) to a patched 9.0.x servicing release.
          Advisories GHSA-37gx-xxp4-5rgx, GHSA-w3x6-4m5h-cxqf. -->

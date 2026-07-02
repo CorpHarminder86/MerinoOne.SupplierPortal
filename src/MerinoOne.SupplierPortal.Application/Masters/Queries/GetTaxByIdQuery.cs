@@ -17,6 +17,7 @@ public class GetTaxByIdQueryHandler : IRequestHandler<GetTaxByIdQuery, TaxDto>
     {
         var t = await _db.Taxes.FirstOrDefaultAsync(x => x.Id == request.Id, ct)
                 ?? throw new NotFoundException("Tax", request.Id);
-        return new TaxDto(t.Id, t.Seq, t.Code, t.Description, t.TaxRate, t.IsActive, t.CreatedOn);
+        return new TaxDto(t.Id, t.Seq, t.Code, t.Description, t.TaxRate, t.IsActive, t.CreatedOn,
+            t.IsRateOverridden, t.LastSyncedRate);
     }
 }

@@ -22,11 +22,18 @@ public sealed record SubmitOutcome<T>
     public string? ConfirmationMessage { get; init; }
     public IReadOnlyList<string> MissingWarning { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// R6 (2026-07-02) — ADVISORY notes riding a COMPLETED submit (e.g. "Tax GST18: rate changed 18% → 12%").
+    /// The transition happened; these are informational only. Mapped onto <c>Result&lt;T&gt;.Notices</c>.
+    /// </summary>
+    public IReadOnlyList<string> Notices { get; init; } = Array.Empty<string>();
+
     /// <summary>The standard confirm prompt (UC-ATT-03), shared so every entity reads identically.</summary>
     public const string DefaultConfirmationMessage =
         "One or more required attachments were not uploaded, do you wish to proceed?";
 
-    public static SubmitOutcome<T> Completed(T data) => new() { IsCompleted = true, Data = data };
+    public static SubmitOutcome<T> Completed(T data, IReadOnlyList<string>? notices = null)
+        => new() { IsCompleted = true, Data = data, Notices = notices ?? Array.Empty<string>() };
 
     public static SubmitOutcome<T> Confirm(IReadOnlyList<string> missingWarning) => new()
     {

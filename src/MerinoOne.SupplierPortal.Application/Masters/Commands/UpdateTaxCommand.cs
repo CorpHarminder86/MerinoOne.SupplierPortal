@@ -7,7 +7,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MerinoOne.SupplierPortal.Application.Masters.Commands;
 
-/// <summary>Updates a Tax master row (code immutable to keep FK lookups stable, mirroring DeliveryTerm).</summary>
+/// <summary>
+/// Updates a Tax master row (code immutable to keep FK lookups stable, mirroring DeliveryTerm).
+/// R6 (2026-07-02) — a TaxRate VALUE change pins the rate (<c>IsRateOverridden = true</c>; the LN tax sync then
+/// skips writing TaxRate). <c>ResetRateOverride = true</c> clears the pin and restores
+/// <c>TaxRate = LastSyncedRate</c>.
+/// </summary>
 public record UpdateTaxCommand(Guid Id, UpdateTaxRequest Body) : IRequest<TaxDto>;
 
 public class UpdateTaxCommandValidator : AbstractValidator<UpdateTaxCommand>
@@ -31,11 +36,23 @@ public class UpdateTaxCommandHandler : IRequestHandler<UpdateTaxCommand, TaxDto>
                 ?? throw new NotFoundException("Tax", request.Id);
 
         t.Description = request.Body.Description.Trim();
-        t.TaxRate = request.Body.TaxRate;
+        if (request.Body.ResetRateOverride)
+        {
+            // Clear the admin pin: the rate snaps back to the last LN-synced value and the sync owns it again.
+            t.IsRateOverridden = false;
+            t.TaxRate = t.LastSyncedRate;
+        }
+        else
+        {
+            // A VALUE change pins the rate against the LN sync (an unchanged rate does not).
+            if (t.TaxRate != request.Body.TaxRate) t.IsRateOverridden = true;
+            t.TaxRate = request.Body.TaxRate;
+        }
         t.IsActive = request.Body.IsActive;
         t.UpdatedBy = _user.UserCode;
         t.UpdatedOn = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        return new TaxDto(t.Id, t.Seq, t.Code, t.Description, t.TaxRate, t.IsActive, t.CreatedOn);
+        return new TaxDto(t.Id, t.Seq, t.Code, t.Description, t.TaxRate, t.IsActive, t.CreatedOn,
+            t.IsRateOverridden, t.LastSyncedRate);
     }
 }

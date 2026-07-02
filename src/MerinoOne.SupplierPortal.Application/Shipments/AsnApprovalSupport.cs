@@ -71,6 +71,27 @@ public static class AsnApprovalSupport
                 BuyerBody(asn.AsnNumber), now));
     }
 
+    /// <summary>
+    /// R6 (2026-07-02) — best-effort: notify each mapped buyer that draft-invoice generation for a just-submitted
+    /// ASN was BLOCKED by the tax gate (a PO-line tax code with no usable rate). Staged on the SAME context as the
+    /// approval transaction, so the rows commit (or roll back) with it.
+    /// </summary>
+    public static async Task NotifyBuyersInvoiceGenerationBlockedAsync(
+        IAppDbContext db, Asn asn, IReadOnlyCollection<Guid> buyerUserIds, string note, DateTime now, CancellationToken ct)
+    {
+        if (buyerUserIds.Count == 0) return;
+        var emails = await db.AppUsers.IgnoreQueryFilters()
+            .Where(u => buyerUserIds.Contains(u.Id) && !u.IsDeleted && u.IsActive && u.Email != null && u.Email != "")
+            .Select(u => u.Email)
+            .Distinct()
+            .ToListAsync(ct);
+
+        foreach (var email in emails)
+            db.EmailOutbox.Add(BuildOutbox(asn.TenantId, email!.Trim(),
+                $"Invoice generation blocked for ASN {asn.AsnNumber}",
+                InvoiceGenerationBlockedBody(asn.AsnNumber, note), now));
+    }
+
     /// <summary>Best-effort: notify the supplier user who submitted the ASN that the buyer rejected it (with reason).</summary>
     public static async Task NotifySupplierRejectedAsync(
         IAppDbContext db, Asn asn, string submittedBy, string reason, DateTime now, CancellationToken ct)
@@ -125,6 +146,16 @@ public static class AsnApprovalSupport
   <h2 style="color:#0f3b5e;">ASN {WebUtility.HtmlEncode(asnNumber)} awaiting approval</h2>
   <p>A supplier has sent advance shipment notice <b>{WebUtility.HtmlEncode(asnNumber)}</b> for your approval.</p>
   <p>Please open the portal to review and approve or reject the shipment.</p>
+</body></html>
+""";
+
+    private static string InvoiceGenerationBlockedBody(string asnNumber, string note) => $"""
+<!DOCTYPE html>
+<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
+  <h2 style="color:#0f3b5e;">Invoice generation blocked for ASN {WebUtility.HtmlEncode(asnNumber)}</h2>
+  <p>The shipment <b>{WebUtility.HtmlEncode(asnNumber)}</b> was submitted, but no draft invoice could be generated.</p>
+  <p><b>Reason:</b> {WebUtility.HtmlEncode(note)}</p>
+  <p>Fix the tax master rate(s) in the portal, then use <b>Retry generation</b> on the ASN.</p>
 </body></html>
 """;
 

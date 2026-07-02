@@ -63,7 +63,9 @@ public class GrnAutoPostPaymentChainTests
 
         var invSubmitResp = await supplierClient.PostAsJsonAsync($"/api/invoices/{draftInvoiceId}/submit", new SubmitInvoiceRequest());
         invSubmitResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(invSubmitResp));
-        (await Read<InvoiceDetailDto>(invSubmitResp)).Data!.InvoiceStatus.Should().Be(nameof(InvoiceStatus.Submitted));
+        // R6 — local matching at submit: the TwoWay draft (no GRN existed at generation) passes its reservation
+        // and lands Matched. The GRN auto-post claim accepts Submitted OR Matched (plan D9), so the chain holds.
+        (await Read<InvoiceDetailDto>(invSubmitResp)).Data!.InvoiceStatus.Should().Be(nameof(InvoiceStatus.Matched));
 
         // 3. Create the covering GRN inbound (NotApproved), linked to the ASN so the GRN→Invoice link resolves.
         var inbound = _fx.CreateInboundClient();
@@ -93,7 +95,7 @@ public class GrnAutoPostPaymentChainTests
         var statusResult = await Read<UpsertGrnStatusResultDto>(statusResp);
         statusResult.Data!.Failed.Should().Be(0);
         statusResult.Data!.AutoPostsEnqueued.Should().Be(1,
-            because: "approving the sole covering GRN of a Submitted invoice enqueues its ERP post");
+            because: "approving the sole covering GRN of a Submitted/Matched invoice enqueues its ERP post (R6 widened claim)");
 
         // Assert the auto-post side-effects at the SQL boundary.
         using (var scope = _fx.Factory.Services.CreateScope())

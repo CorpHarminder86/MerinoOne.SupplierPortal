@@ -138,6 +138,9 @@ public class DocumentUploadsController : ControllerBase
     ///         saved license (the license must belong to <c>supplierId</c>); DocumentType.License.</item>
     ///   <item><c>ownerEntityType="Asn"</c>, <c>ownerEntityId=&lt;asnId&gt;</c> — direct attach to a DRAFT ASN (the
     ///         ASN must belong to <c>supplierId</c> and be Draft — attach is LOCKED once Submitted); DocumentType.AsnAttachment.</item>
+    ///   <item><c>ownerEntityType="Invoice"</c>, <c>ownerEntityId=&lt;invoiceId&gt;</c> — R6 (plan D16): direct attach
+    ///         to a DRAFT invoice (the invoice must belong to <c>supplierId</c> and be Draft — attach is LOCKED once
+    ///         Submitted); DocumentType.Invoice.</item>
     ///   <item><c>ownerEntityType="Staging"</c>, <c>ownerEntityId=&lt;clientDraftGuid&gt;</c> — deferred upload before
     ///         the owner is first saved; the owning command (license / ASN) re-points the row on save.</item>
     /// </list>
@@ -146,14 +149,15 @@ public class DocumentUploadsController : ControllerBase
     [HttpPost("attach")]
     [Authorize(Policy = Perm.SupplierWrite)]
     [RequestSizeLimit(MaxBytes + 4096)]
-    [EndpointSummary("Attach a document to a supplier license or ASN (authenticated)")]
+    [EndpointSummary("Attach a document to a supplier license, ASN or Draft invoice (authenticated)")]
     [EndpointDescription(@"Uploads a file and binds it to a SupplierLicense (ownerEntityType='SupplierLicense'), a
-Draft ASN (ownerEntityType='Asn' — LOCKED once Submitted), or a deferred-upload staging slot
-(ownerEntityType='Staging' + a client-generated draft GUID). 5 MB cap. canWrite-gated against the supplier's
-seccode (403 on mismatch).
+Draft ASN (ownerEntityType='Asn' — LOCKED once Submitted), a Draft INVOICE (ownerEntityType='Invoice' — R6, LOCKED
+once Submitted), or a deferred-upload staging slot (ownerEntityType='Staging' + a client-generated draft GUID).
+5 MB cap. canWrite-gated against the supplier's seccode (403 on mismatch).
 documentType (optional, §3.6): when supplied it is validated against the tenant's ACTIVE doc.AttachmentType master
 (NOT the legacy enum) — an admin-added type works immediately; an inactive/absent code is rejected (400). When
-omitted the owner-mode default is used (License for SupplierLicense/Staging, AsnAttachment for Asn).
+omitted the owner-mode default is used (License for SupplierLicense/Staging, AsnAttachment for Asn, Invoice for
+Invoice).
 Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
     public async Task<Result<DocumentAttachmentDto>> Attach(
         [FromForm] IFormFile file,
@@ -174,8 +178,11 @@ Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
         var isStaging = string.Equals(ownerEntityType, DocumentOwnerTypes.Staging, StringComparison.OrdinalIgnoreCase);
         var isLicense = string.Equals(ownerEntityType, DocumentOwnerTypes.SupplierLicense, StringComparison.OrdinalIgnoreCase);
         var isAsn = string.Equals(ownerEntityType, DocumentOwnerTypes.Asn, StringComparison.OrdinalIgnoreCase);
-        if (!isStaging && !isLicense && !isAsn)
-            return Result<DocumentAttachmentDto>.Fail($"ownerEntityType must be '{DocumentOwnerTypes.SupplierLicense}', '{DocumentOwnerTypes.Asn}' or '{DocumentOwnerTypes.Staging}'.");
+        var isInvoice = string.Equals(ownerEntityType, DocumentOwnerTypes.Invoice, StringComparison.OrdinalIgnoreCase);
+        if (!isStaging && !isLicense && !isAsn && !isInvoice)
+            return Result<DocumentAttachmentDto>.Fail(
+                $"ownerEntityType must be '{DocumentOwnerTypes.SupplierLicense}', '{DocumentOwnerTypes.Asn}', " +
+                $"'{DocumentOwnerTypes.Invoice}' or '{DocumentOwnerTypes.Staging}'.");
         if (ownerEntityId == Guid.Empty)
             return Result<DocumentAttachmentDto>.Fail("ownerEntityId is required.");
 
@@ -224,6 +231,20 @@ Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
                 return Result<DocumentAttachmentDto>.Fail("ASN is not Draft; attachments are locked once it is Submitted.");
         }
 
+        // R6 (plan D16) — direct attach to an INVOICE: must belong to this supplier AND be Draft (mirrors the
+        // ASN Draft-only rule; the invoice snapshot is immutable once Submitted, attachments included).
+        if (isInvoice)
+        {
+            var inv = await _db.Invoices
+                .Where(i => i.Id == ownerEntityId && i.SupplierId == supplier.Id)
+                .Select(i => new { i.InvoiceStatus })
+                .FirstOrDefaultAsync(ct);
+            if (inv is null)
+                return Result<DocumentAttachmentDto>.Fail("Invoice not found for this supplier.");
+            if (inv.InvoiceStatus != InvoiceStatus.Draft)
+                return Result<DocumentAttachmentDto>.Fail("Invoice is not Draft; attachments are locked once it is Submitted.");
+        }
+
         var now = DateTime.UtcNow;
         var mime = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType;
 
@@ -237,6 +258,7 @@ Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
         var (resolvedOwnerType, defaultDocType) =
             isLicense ? (DocumentOwnerTypes.SupplierLicense, nameof(DocumentType.License))
             : isAsn ? (DocumentOwnerTypes.Asn, nameof(DocumentType.AsnAttachment))
+            : isInvoice ? (DocumentOwnerTypes.Invoice, nameof(DocumentType.Invoice))
             : (DocumentOwnerTypes.Staging, nameof(DocumentType.License));   // Staging keeps License as a neutral default; rebind sets the real type.
         var resolvedDocType = requestedType ?? defaultDocType;
 
@@ -330,15 +352,17 @@ Returns List<DocumentAttachmentDto> ordered by upload time. Requires **Asn.Read*
 
     /// <summary>
     /// Soft-deletes an attachment (the AuditableEntityInterceptor flips IsDeleted). canWrite-gated against the
-    /// owning supplier's seccode. Works for <c>SupplierLicense</c>-, <c>Asn</c>- and <c>Staging</c>-owned rows
-    /// (a user discarding a draft upload). ASN-owned attachments are LOCKED once the ASN is Submitted.
+    /// owning supplier's seccode. Works for <c>SupplierLicense</c>-, <c>Asn</c>-, <c>Invoice</c>- (R6, plan D16)
+    /// and <c>Staging</c>-owned rows (a user discarding a draft upload). ASN- and Invoice-owned attachments are
+    /// LOCKED once the owner is Submitted.
     /// </summary>
     [HttpDelete("{id:guid}")]
     [Authorize(Policy = Perm.SupplierWrite)]
     [EndpointSummary("Delete a document attachment (authenticated, soft-delete)")]
-    [EndpointDescription(@"Soft-deletes a DocumentUpload (SupplierLicense, Asn or Staging owned). canWrite-gated
-against the owning supplier's seccode (403). ASN attachments are locked once the ASN is Submitted. Returns empty
-success; 404 if not found; 409 if the owning ASN is locked. Requires **Supplier.Write**.")]
+    [EndpointDescription(@"Soft-deletes a DocumentUpload (SupplierLicense, Asn, Invoice or Staging owned).
+canWrite-gated against the owning supplier's seccode (403). ASN and Invoice attachments are locked once the owner
+is Submitted. Returns empty success; 404 if not found; error if the owning ASN/Invoice is locked. Requires
+**Supplier.Write**.")]
     public async Task<Result> Delete(
         Guid id,
         [FromServices] SupplierWriteGuard guard,
@@ -349,8 +373,9 @@ success; 404 if not found; 409 if the owning ASN is locked. Requires **Supplier.
             return Result.Fail("Attachment not found.");
         if (doc.OwnerEntityType != DocumentOwnerTypes.SupplierLicense
             && doc.OwnerEntityType != DocumentOwnerTypes.Asn
+            && doc.OwnerEntityType != DocumentOwnerTypes.Invoice
             && doc.OwnerEntityType != DocumentOwnerTypes.Staging)
-            return Result.Fail("Attachment is not a deletable supplier/ASN attachment.");
+            return Result.Fail("Attachment is not a deletable supplier/ASN/invoice attachment.");
 
         // Resolve the supplier that owns this attachment so we can canWrite-gate. SupplierLicense rows resolve
         // via the license -> supplier; Asn rows via the ASN -> supplier; Staging rows carry the supplier's
@@ -371,6 +396,16 @@ success; 404 if not found; 409 if the owning ASN is locked. Requires **Supplier.
                 return Result.Fail("ASN is not Draft; attachments are locked once it is Submitted.");
             supplierId = asn.SupplierId;
             seccodeId = asn.SeccodeId;
+        }
+        else if (doc.OwnerEntityType == DocumentOwnerTypes.Invoice)
+        {
+            // R6 (plan D16) — mirror the ASN rule: deletable only while the owning invoice is Draft.
+            var inv = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == doc.OwnerEntityId, ct);
+            if (inv is null) return Result.Fail("Owning invoice not found.");
+            if (inv.InvoiceStatus != InvoiceStatus.Draft)
+                return Result.Fail("Invoice is not Draft; attachments are locked once it is Submitted.");
+            supplierId = inv.SupplierId;
+            seccodeId = inv.SeccodeId;
         }
         else
         {
