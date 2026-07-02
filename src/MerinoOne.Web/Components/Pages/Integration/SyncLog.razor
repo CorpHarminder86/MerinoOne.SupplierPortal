@@ -60,7 +60,7 @@ else
             <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:4px;">To
                 <input type="date" class="rz-textbox" style="padding:7px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;" @bind="toDate" @bind:after="OnFilterChanged" />
             </label>
-            <button class="rz-button" style="padding:7px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;font-size:12px;" @onclick="ClearDates">Clear dates</button>
+            <button class="mbtn mbtn--outline" @onclick="ClearDates">Clear dates</button>
         </div>
 
         @if (loading)

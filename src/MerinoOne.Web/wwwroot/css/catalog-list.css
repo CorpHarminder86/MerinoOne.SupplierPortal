@@ -67,7 +67,8 @@
 .merino-dialog__body { padding: var(--mer-modal-pad-y) var(--mer-modal-pad-x); color: var(--mer-ink-900); font-size: 13px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 .merino-dialog__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px var(--mer-modal-pad-x); border-top: 1px solid var(--mer-line); background: var(--mer-modal-footer-bg); flex-shrink: 0; }
 .merino-dialog__actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.merino-dialog__btn { height: 36px; padding: 0 16px; border-radius: var(--mer-radius-md); font: 500 13px/1 'Plus Jakarta Sans', sans-serif; cursor: pointer; transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; user-select: none; }
+/* Compacted to match the .mbtn system (height 32 / 12px pad / weight 600); intents already map to mbtn colours. */
+.merino-dialog__btn { height: 32px; padding: 0 12px; border-radius: var(--mer-radius); font: 600 13px/1 'Plus Jakarta Sans', sans-serif; cursor: pointer; transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; user-select: none; }
 .merino-dialog__btn[data-intent="primary"] { background: var(--mer-blue); color: #fff; border-color: var(--mer-blue); }
 .merino-dialog__btn[data-intent="primary"]:hover:not(:disabled) { background: var(--mer-blue-hover); border-color: var(--mer-blue-hover); }
 .merino-dialog__btn[data-intent="primary"]:disabled { background: var(--mer-blue-disabled); border-color: var(--mer-blue-disabled); color: #fff; }

@@ -179,14 +179,14 @@
             }
 
             <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--mer-line);">
-                <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="PrevStep" disabled="@(currentStep == 1)">Back</button>
+                <button class="mbtn mbtn--outline" @onclick="PrevStep" disabled="@(currentStep == 1)">Back</button>
                 @if (currentStep < 4)
                 {
-                    <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NextStep" disabled="@(!CanProceed)">Next</button>
+                    <button class="mbtn mbtn--primary" @onclick="NextStep" disabled="@(!CanProceed)">Next</button>
                 }
                 else
                 {
-                    <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="Submit" disabled="@busy">@(busy ? "Submitting…" : "Submit invoice")</button>
+                    <button class="mbtn mbtn--primary-success" @onclick="Submit" disabled="@busy">@(busy ? "Submitting…" : "Submit invoice")</button>
                 }
             </div>
         </div>
