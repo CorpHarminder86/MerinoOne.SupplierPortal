@@ -158,9 +158,10 @@ public class UpsertPurchaseOrdersCommandHandler(
                     .Select(c => new { c.Code, c.Id }).ToListAsync(token)).ToDictionary(c => c.Code, c => c.Id, StringComparer.OrdinalIgnoreCase);
 
             var itemCodes = recs.SelectMany(r => r.Lines).Where(l => !string.IsNullOrWhiteSpace(l.ItemCode)).Select(l => l.ItemCode.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            var itemMap = itemCodes.Count == 0 ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
+            var itemMap = itemCodes.Count == 0 ? new Dictionary<string, (Guid Id, string Desc)>(StringComparer.OrdinalIgnoreCase)
                 : (await db.Items.IgnoreQueryFilters().Where(i => !i.IsDeleted && i.TenantEntityId == sourceId && itemCodes.Contains(i.Code))
-                    .Select(i => new { i.Code, i.Id }).ToListAsync(token)).ToDictionary(i => i.Code, i => i.Id, StringComparer.OrdinalIgnoreCase);
+                    .Select(i => new { i.Code, i.Id, i.Description }).ToListAsync(token))
+                    .ToDictionary(i => i.Code, i => (i.Id, i.Description), StringComparer.OrdinalIgnoreCase);
 
             var taxCodes = recs.SelectMany(r => r.Lines).Where(l => !string.IsNullOrWhiteSpace(l.TaxCode)).Select(l => l.TaxCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             // code → (id, description). The description feeds the WRITE-TIME snapshot on the line so the read side
@@ -474,7 +475,7 @@ public class UpsertPurchaseOrdersCommandHandler(
     // navigation in the handler — that aggregate is all-Added.)
     private static void SyncLines(IAppDbContext db, PurchaseOrder po, PoRecord rec,
         IReadOnlyDictionary<int, ResolvedPoLine> resolvedByPosition,
-        IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
+        IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
     {
         // Existing stored lines keyed by positionNo (seq is always 1 in our store; last-wins guards any legacy dup).
         var byPosition = new Dictionary<int, PurchaseOrderLine>();
@@ -545,7 +546,7 @@ public class UpsertPurchaseOrdersCommandHandler(
         return (resolved, null);
     }
 
-    private static PurchaseOrderLine NewLine(PoLineRecord l, IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
+    private static PurchaseOrderLine NewLine(PoLineRecord l, IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
     {
         var line = new PurchaseOrderLine { Id = Guid.NewGuid(), CreatedBy = "infor:inbound", CreatedOn = now };
         Apply(line, l, itemMap, taxMap);
@@ -555,12 +556,25 @@ public class UpsertPurchaseOrdersCommandHandler(
     // Applies an inbound line's attributes onto a stored line. sequenceNo is FORCED to 1 (storage key is positionNo);
     // additionalQty is echoed for audit. OrderQty, Price and DiscountAmount are NOT set here — the caller sets the
     // RESOLVED folded values (replace on orderQty>0, signed-add on additionalQty≠0) from ResolvePoLineQuantities.
-    private static void Apply(PurchaseOrderLine line, PoLineRecord l, IReadOnlyDictionary<string, Guid> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap)
+    private static void Apply(PurchaseOrderLine line, PoLineRecord l, IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap)
     {
         line.PositionNo = l.PositionNo; line.SequenceNo = 1;   // ALWAYS 1 — index unchanged; seq is not a storage key.
         line.AdditionalQty = l.AdditionalQty;                  // echo of the last received delta (signed; audit only).
-        line.ItemCode = l.ItemCode.Trim(); line.ItemDescription = l.ItemDescription;
-        line.ItemId = !string.IsNullOrWhiteSpace(l.ItemCode) && itemMap.TryGetValue(l.ItemCode.Trim(), out var iid) ? iid : null;
+        line.ItemCode = l.ItemCode.Trim();
+        // Item snapshot-on-write (mirrors the tax / payment / delivery-term snapshot): resolve the code to the master
+        // (id + description) and store the pushed description when the ERP sent one, else snapshot the master's — so the
+        // read side always shows the line's item description even when the push omitted it. Unresolved code → keep the
+        // pushed value (may be null) and no FK.
+        if (!string.IsNullOrWhiteSpace(l.ItemCode) && itemMap.TryGetValue(l.ItemCode.Trim(), out var im))
+        {
+            line.ItemId = im.Id;
+            line.ItemDescription = !string.IsNullOrWhiteSpace(l.ItemDescription) ? l.ItemDescription : im.Desc;
+        }
+        else
+        {
+            line.ItemId = null;
+            line.ItemDescription = l.ItemDescription;
+        }
         line.OrderUnit = string.IsNullOrWhiteSpace(l.OrderUnit) ? "EA" : l.OrderUnit.Trim();
         line.PriceUnit = l.PriceUnit;               // unit RATE (replaced); the extended Price is folded by the caller.
         line.DiscountPct = l.DiscountPct; line.DeliveryDate = l.DeliveryDate;   // DiscountAmount folded by the caller.

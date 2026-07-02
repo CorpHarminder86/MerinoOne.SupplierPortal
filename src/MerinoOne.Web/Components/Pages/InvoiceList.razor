@@ -15,12 +15,7 @@
             <p class="tl-sub">Supplier invoices and matching status</p>
         </div>
         <div class="tl-header__actions">
-            @if (Token.HasPermission("Invoice.Submit"))
-            {
-                <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="NewInvoice">
-                    <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add</span> New invoice
-                </button>
-            }
+            @* "New invoice" hidden — invoices are generated from an ASN, not created manually here. *@
         </div>
     </header>
 

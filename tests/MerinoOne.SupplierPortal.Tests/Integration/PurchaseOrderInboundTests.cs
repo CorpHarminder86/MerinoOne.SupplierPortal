@@ -566,6 +566,53 @@ public class PurchaseOrderInboundTests
         (await StoredAsync()).Should().Be((70m, 700m, 35m), because: "0/0 is a no-op — qty, price and discountAmount are all left unchanged");
     }
 
+    /// <summary>
+    /// R4 (2026-07-01) — item-description snapshot-on-write (mirrors payment/delivery-term snapshots): when the
+    /// inbound line omits ItemDescription, the stored line snapshots the Item master's Description; an explicit
+    /// pushed description wins.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_line_snapshots_item_description_from_master_when_push_omits_it()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var itemCode = $"ITM-{tag}";
+        await _fx.CreateItemAsync(itemCode);          // Item master Description = "Test item {itemCode}".
+        var poNumber = $"PO-IDESC-{tag}";
+
+        PushPurchaseOrdersRequest Body(string? itemDesc) =>
+            new(IntegrationTestFixture.CompanyCode, new[]
+            {
+                new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                    new[] { new PoLineRecord(PositionNo: 10, SequenceNo: 1, ItemCode: itemCode,
+                        ItemDescription: itemDesc, OrderUnit: "EA", OrderQty: 5, PriceUnit: 1, Price: 5) },
+                    ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                    PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+            });
+
+        async Task<string?> StoredDescAsync()
+        {
+            using var s = _fx.Factory.Services.CreateScope();
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await db.PurchaseOrderLines.IgnoreQueryFilters()
+                .Where(l => l.PurchaseOrder!.PoNumber == poNumber && !l.IsDeleted && l.PositionNo == 10)
+                .Select(l => l.ItemDescription).FirstAsync();
+        }
+
+        // Push with NO line description → snapshot the master's.
+        await PushAsync(Body(itemDesc: null));
+        (await StoredDescAsync()).Should().Be($"Test item {itemCode}",
+            because: "when the ERP omits the line description, snapshot it from the Item master");
+
+        // Push WITH an explicit description → the pushed value wins.
+        await PushAsync(Body(itemDesc: "ERP-supplied description"));
+        (await StoredDescAsync()).Should().Be("ERP-supplied description",
+            because: "an explicit pushed description overrides the master snapshot");
+    }
+
     // ════════════════════════════════════════════════════════════════════════════════════════════════
     // Phase 3 — PO-Change Sync Hardening (TSD R4 Addendum §5 / §6.3 / §6.4; UC-PO-06/07, UC-ASN-08/10, DI-01/03).
     // ════════════════════════════════════════════════════════════════════════════════════════════════
