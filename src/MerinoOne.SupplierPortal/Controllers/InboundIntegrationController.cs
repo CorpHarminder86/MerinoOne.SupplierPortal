@@ -191,7 +191,7 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
     [RequestSizeLimit(2_000_000)]
     [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundInvoiceStatus)]
     [EndpointSummary("Push invoice status (Infor LN)")]
-    [EndpointDescription(@"Advances invoice status from Infor LN (Matched|MatchExceptions|Approved|Rejected|PartiallyPaid|Paid). The writer never regresses a portal-owned state (Draft/Submitted/Cancelled).
+    [EndpointDescription(@"Advances invoice status from Infor LN (Matched|MatchExceptions|Approved|Rejected|PartiallyPaid|Paid). The writer never regresses a portal-owned state (Draft/Submitted/Cancelled) and never advances a Rejected invoice (terminal for this writer — its per-PO-line reservation was already released; such rows are reported failed). Advancing TO Rejected releases the invoice's reservation atomically with the status flip.
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.InvoiceStatus` and be bound to the resolved company.
 Body:
 - **CompanyCode**: Infor LN logistic company (resolved to the literal company).

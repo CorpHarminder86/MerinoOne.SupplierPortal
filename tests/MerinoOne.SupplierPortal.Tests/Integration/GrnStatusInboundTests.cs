@@ -5,6 +5,7 @@ using FluentAssertions;
 using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Contracts.Integration;
+using MerinoOne.SupplierPortal.Contracts.Shipments;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
 using MerinoOne.SupplierPortal.Tests.Infrastructure;
@@ -196,7 +197,95 @@ public class GrnStatusInboundTests
         SyncLogCount().Should().Be(afterFirst, because: "a replayed batch must not write a second Success SyncLog");
     }
 
+    // -------------------- (d) R6 grouped invoices: the GRN links to the LINE-correlated invoice --------------------
+
+    [SkippableFact]
+    public async Task GrnStatus_on_grouped_asn_links_grn_to_the_invoice_billing_its_po_line()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        // ONE supplier, TWO Accepted POs in different currencies → the ASN generates TWO grouped draft invoices.
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poInr = await ProcureToPayFlow.SeedPoForSupplierAsync(_fx, supplier, currencyCode: "INR", confirm: true);
+        var poUsd = await ProcureToPayFlow.SeedPoForSupplierAsync(_fx, supplier, currencyCode: "USD", confirm: true);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, poInr.PoId);
+
+        var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var create = new CreateAsnRequest(
+            PurchaseOrderId: null, PurchaseOrderIds: new[] { poInr.PoId, poUsd.PoId },
+            ExpectedDeliveryDate: DateTime.UtcNow.Date.AddDays(1),
+            TimeWindow: null, CarrierName: "Carrier", TrackingNumber: "TRK",
+            VehicleNumber: null, DriverName: null, DriverPhone: null, Notes: null,
+            Lines: new List<CreateAsnLineRequest>
+            {
+                new(poInr.PoLineId, ShippedQty: poInr.OrderQty, BatchNumber: null, ExpiryDate: null),
+                new(poUsd.PoLineId, ShippedQty: poUsd.OrderQty, BatchNumber: null, ExpiryDate: null),
+            });
+        var createResp = await supplierClient.PostAsJsonAsync("/api/asns", create);
+        createResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createResp));
+        var asn = (await Read<AsnDetailDto>(createResp)).Data!;
+
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asn.Id);
+        submitResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(submitResp));
+        (await Read<AsnDetailDto>(submitResp)).Data!.DraftInvoiceIds.Should().HaveCount(2);
+
+        Guid invoiceInrId, invoiceUsdId;
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var invoices = await db.Invoices.IgnoreQueryFilters()
+                .Where(i => i.AsnId == asn.Id && !i.IsDeleted)
+                .Select(i => new { i.Id, i.CurrencyCode })
+                .ToListAsync();
+            invoiceInrId = invoices.Single(i => i.CurrencyCode == "INR").Id;
+            invoiceUsdId = invoices.Single(i => i.CurrencyCode == "USD").Id;
+        }
+
+        // A GRN for the USD (group-B) PO line, linked to the ASN, then a status push (which stamps InvoiceId).
+        var inbound = _fx.CreateInboundClient();
+        var grnNumber = $"GRN-LINK-{tag}";
+        var grnCreate = new PushGoodsReceiptsRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new GoodsReceiptRecord(grnNumber, poUsd.PoNumber, poUsd.PoPositionNo,
+                ReceivedQty: poUsd.OrderQty, GrnDate: DateTime.UtcNow.Date, AsnNumber: asn.AsnNumber),
+        });
+        var grnCreateResp = await inbound.PostAsJsonAsync("/api/integration/inbound/goods-receipts", grnCreate);
+        grnCreateResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(grnCreateResp));
+        (await Read<UpsertResultDto>(grnCreateResp)).Data!.Failed.Should().Be(0);
+
+        var statusBody = new PushGrnStatusRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new GrnStatusRecord(grnNumber, nameof(GrnStatus.GrnApproved), AsnNumber: asn.AsnNumber),
+        });
+        var statusReq = new HttpRequestMessage(HttpMethod.Post, "/api/integration/inbound/grn-status")
+        {
+            Content = JsonContent.Create(statusBody),
+        };
+        statusReq.Headers.Add("Idempotency-Key", $"grn-link-{tag}-{Guid.NewGuid():N}");
+        var statusResp = await inbound.SendAsync(statusReq);
+        statusResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(statusResp));
+        (await Read<UpsertGrnStatusResultDto>(statusResp)).Data!.Failed.Should().Be(0);
+
+        // The link must be LINE-correlated: the GRN bills the USD PO line ⇒ invoice B (USD), never the sibling.
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var linked = await db.GoodsReceipts.IgnoreQueryFilters()
+                .Where(g => g.GrnNumber == grnNumber && !g.IsDeleted)
+                .Select(g => g.InvoiceId)
+                .FirstAsync();
+            linked.Should().Be(invoiceUsdId,
+                because: "with N grouped invoices per ASN, the GRN links to the invoice whose lines bill its PO line");
+            linked.Should().NotBe(invoiceInrId);
+        }
+    }
+
     // -------------------- helpers --------------------
+
+    private static async Task<string> Body(HttpResponseMessage resp) => await resp.Content.ReadAsStringAsync();
 
     private static async Task<Result<T>> Read<T>(HttpResponseMessage resp)
     {

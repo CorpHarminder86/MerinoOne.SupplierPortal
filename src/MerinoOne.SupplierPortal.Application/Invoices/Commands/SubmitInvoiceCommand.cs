@@ -156,7 +156,9 @@ public class SubmitInvoiceCommandHandler : IRequestHandler<SubmitInvoiceCommand,
                 .Select(g => new { PoLineId = g.Key, Qty = g.Sum(x => x.BilledQty), ItemCode = g.First().ItemCode })
                 .ToList();
 
-            foreach (var x in perPoLine.Where(x => x.Qty > 0))
+            // DI-02 — lock ordering: X-lock the PO lines in ascending PurchaseOrderLineId so concurrent
+            // multi-line submitters never acquire them in opposite orders (deadlock).
+            foreach (var x in perPoLine.Where(x => x.Qty > 0).OrderBy(x => x.PoLineId))
             {
                 var qty = x.Qty;
                 var affected = await _db.PurchaseOrderLines

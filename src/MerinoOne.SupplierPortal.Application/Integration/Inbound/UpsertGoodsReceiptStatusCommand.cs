@@ -20,7 +20,8 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 /// endpoint gate, canonical-hash idempotency, transactional SyncLog/IntegrationError, endpoint-session
 /// telemetry). GRN rows are matched by <c>grnNumber</c> within the resolved company; the status is updated and
 /// the deterministic <c>GoodsReceipt.InvoiceId</c> link is stamped from the GRN's ASN (<c>GoodsReceipt.AsnId</c>
-/// → the Invoice with that <c>asnId</c>) — NO fuzzy/string match; null invoice ⇒ left null.</para>
+/// → the ASN's invoice whose LINES bill the GRN's PO line — R6 grouped invoices; Seq-ordered any-invoice
+/// fallback) — NO fuzzy/string match; null invoice ⇒ left null.</para>
 ///
 /// <para><b>Auto-post cascade — THREE independent idempotency guards (ALL required):</b> the invoice post fires
 /// ONLY when (a) a GRN <i>transitions into</i> <see cref="GrnStatus.GrnApproved"/> (tracked on the row — never
@@ -183,10 +184,23 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                     }
                     if (grn.InvoiceId is null && grn.AsnId is not null)
                     {
+                        // R6 (plan D4) — an ASN can now carry N grouped invoices (one per currency/payment-term
+                        // group), so "any invoice on the ASN" would mislink a GRN to a sibling group's invoice
+                        // and poison the auto-post coverage check. Link the GRN row to the invoice that actually
+                        // BILLS its PO line; fall back to the old any-invoice-for-ASN match (Seq-ordered for
+                        // determinism) only when no line-correlated invoice exists.
                         var invId = await db.Invoices.IgnoreQueryFilters()
-                            .Where(i => !i.IsDeleted && i.AsnId == grn.AsnId)
-                            .Select(i => (Guid?)i.Id)
-                            .FirstOrDefaultAsync(token);
+                                        .Where(i => !i.IsDeleted && i.AsnId == grn.AsnId
+                                                    && i.Lines.Any(l => !l.IsDeleted
+                                                                        && l.PurchaseOrderLineId == grn.PurchaseOrderLineId))
+                                        .OrderBy(i => i.Seq)
+                                        .Select(i => (Guid?)i.Id)
+                                        .FirstOrDefaultAsync(token)
+                                    ?? await db.Invoices.IgnoreQueryFilters()
+                                        .Where(i => !i.IsDeleted && i.AsnId == grn.AsnId)
+                                        .OrderBy(i => i.Seq)
+                                        .Select(i => (Guid?)i.Id)
+                                        .FirstOrDefaultAsync(token);
                         if (invId is not null) grn.InvoiceId = invId;
                     }
 

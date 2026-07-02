@@ -248,7 +248,9 @@ public sealed class AsnSubmitExecutor
 
         await using var tx = await _db.BeginTransactionAsync(ct);
 
-        foreach (var (poLineId, info) in shipQtyByPoLine)
+        // DI-02 — lock ordering: X-lock the PO lines in ascending PurchaseOrderLineId (a Dictionary enumerates
+        // in undefined order) so concurrent multi-line submitters never acquire them in opposite orders.
+        foreach (var (poLineId, info) in shipQtyByPoLine.OrderBy(kv => kv.Key))
         {
             var shipQty = info.Qty;
             if (enforceGuard)

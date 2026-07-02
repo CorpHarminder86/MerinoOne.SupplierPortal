@@ -42,7 +42,9 @@ public static class InvoiceReservationRelease
             .Select(g => new { PoLineId = g.Key, Qty = g.Sum(x => x.BilledQty) })
             .ToListAsync(ct);
 
-        foreach (var x in perPoLine.Where(x => x.Qty > 0))
+        // DI-02 — lock ordering: release in ascending PurchaseOrderLineId, the same order the acquisition
+        // loops use, so concurrent multi-line acquire/release never deadlock on opposite lock orders.
+        foreach (var x in perPoLine.Where(x => x.Qty > 0).OrderBy(x => x.PoLineId))
         {
             var affected = await db.PurchaseOrderLines
                 .Where(l => l.Id == x.PoLineId && l.InvoicedQtyToDate >= x.Qty)

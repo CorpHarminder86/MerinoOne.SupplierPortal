@@ -84,7 +84,7 @@ public static class IntegrationCatalog
             "Write payment / remittance rows from the ERP (invoice resolved by erpSyncId/invoiceNumber).",
             Json(new { companyCode = "3000", payments = new[] { new { paymentReference = "PAY-3000-000001", netPaid = 2500.0, invoiceNumber = "INV-0001", paymentAmount = 2500.0, tdsDeducted = 0.0, paymentMode = "NEFT", erpSyncId = "LN-PAY-1", erpCode = (string?)null } } })),
         new IntegrationEndpointDocDto("Invoice status", "Integration.Inbound.InvoiceStatus", "POST", $"{Base}/invoice-status", true,
-            "Advance invoice status (Matched/MatchExceptions/Approved/Rejected/PartiallyPaid/Paid). Never regresses a portal-owned state.",
+            "Advance invoice status (Matched/MatchExceptions/Approved/Rejected/PartiallyPaid/Paid). Never regresses a portal-owned state (Draft/Submitted/Cancelled) nor advances a Rejected invoice (terminal - reservation already released). Advancing to Rejected releases the reservation.",
             Json(new { companyCode = "3000", invoices = new[] { new { invoiceStatus = "Paid", invoiceNumber = "INV-0001", erpCode = (string?)null } } })),
         new IntegrationEndpointDocDto("ERP ack", "Integration.Inbound.ErpAck", "POST", $"{Base}/erp-ack", false,
             "ERP acknowledgement + erpCode write-back for a Portal->ERP transaction (tenant-scoped; resolves portalRef -> outbox row).",

@@ -17,9 +17,12 @@ namespace MerinoOne.SupplierPortal.Application.Invoices.Commands;
 /// (supplier, invoiceNumber) uniqueness rule.
 ///
 /// <para>R6 (2026-07-02) — optional <c>Lines</c>: per line, <c>BilledQty</c> (≥ 0 and ≤ the LIVE invoiceable
-/// balance <c>shippedQtyToDate − invoicedQtyToDate</c>; 400 over cap, naming the line) and a tax reselect
-/// (<c>TaxId</c> re-resolved via <see cref="TaxRateResolver"/> — code/description/rate are NEVER client-typed;
-/// an explicitly selected tax with no rate is a 400). LineAmount/TaxAmount and the header
+/// balance <c>shippedQtyToDate − invoicedQtyToDate</c>; 400 over cap, naming the line) and CHANGE-DETECTION tax
+/// edit semantics: <c>ClearTax</c> explicitly clears the tax; a null or UNCHANGED <c>TaxId</c> preserves the
+/// line's tax snapshot untouched (never hits the resolver — a since-deleted / rate-less master cannot block
+/// unrelated edits, and a code-only tax [TaxCode set, TaxId null] survives round-trips); only a genuinely
+/// RESELECTED <c>TaxId</c> is re-resolved via <see cref="TaxRateResolver"/> — code/description/rate are NEVER
+/// client-typed; a reselected tax that is missing or rate-less is a 400. LineAmount/TaxAmount and the header
 /// InvoiceAmount/TaxAmount/NetAmount (= lines + tax) are recomputed server-side.</para>
 /// </summary>
 public record UpdateInvoiceCommand(Guid Id, UpdateInvoiceRequest Body) : IRequest<InvoiceDetailDto>;
@@ -97,8 +100,14 @@ public class UpdateInvoiceCommandHandler : IRequestHandler<UpdateInvoiceCommand,
                 .Select(p => new { p.Id, p.ShippedQtyToDate, p.InvoicedQtyToDate })
                 .ToDictionaryAsync(p => p.Id, ct);
 
-            var resolved = await _taxResolver.ResolveAsync(
-                body.Lines.Where(r => r.TaxId.HasValue).Select(r => r.TaxId!.Value), invoice.TenantId, ct);
+            // Change-detection: ONLY a genuinely reselected tax (non-null TaxId differing from the line's
+            // current TaxId, not an explicit clear) hits the resolver. An unchanged/null TaxId preserves the
+            // line's snapshot untouched, so a since-deleted or rate-less master can never block unrelated edits.
+            var reselectTaxIds = body.Lines
+                .Where(r => !r.ClearTax && r.TaxId.HasValue
+                            && byId.TryGetValue(r.InvoiceLineId, out var l) && r.TaxId != l.TaxId)
+                .Select(r => r.TaxId!.Value);
+            var resolved = await _taxResolver.ResolveAsync(reselectTaxIds, invoice.TenantId, ct);
 
             var errors = new Dictionary<string, string[]>();
             foreach (var req in body.Lines)
@@ -123,11 +132,29 @@ public class UpdateInvoiceCommandHandler : IRequestHandler<UpdateInvoiceCommand,
                 }
 
                 line.BilledQty = req.BilledQty;
+                line.LineAmount = decimal.Round(line.BilledQty * line.UnitPrice, 2);
 
-                if (req.TaxId.HasValue)
+                if (req.ClearTax)
                 {
-                    // Reselect ⇒ re-resolve — the client NEVER types a rate. An explicitly selected tax with no
-                    // usable rate is rejected (the Draft must stay submittable).
+                    // Explicit clear — the ONLY path that wipes the tax snapshot (incl. a code-only tax).
+                    line.TaxId = null;
+                    line.TaxRatePct = null;
+                    line.TaxCode = null;
+                    line.TaxDescription = null;
+                    line.TaxAmount = 0m;
+                }
+                else if (req.TaxId is null || req.TaxId == line.TaxId)
+                {
+                    // No change — PRESERVE the snapshot untouched (never resolves). Recompute the amount only
+                    // when the snapshot rate is known; a code-only tax (TaxCode set, TaxId null, no rate) keeps
+                    // its stored TaxAmount as-is — it cannot be recomputed without a rate.
+                    if (line.TaxRatePct is { } snapshotRate)
+                        line.TaxAmount = decimal.Round(line.LineAmount * snapshotRate / 100m, 2);
+                }
+                else
+                {
+                    // Genuine reselect ⇒ re-resolve — the client NEVER types a rate. An explicitly selected tax
+                    // with no usable rate is rejected (the Draft must stay submittable).
                     if (!resolved.TryGetValue(req.TaxId.Value, out var tax))
                     {
                         errors[$"lines[{req.InvoiceLineId}]"] = new[] { "The selected tax code was not found." };
@@ -145,20 +172,9 @@ public class UpdateInvoiceCommandHandler : IRequestHandler<UpdateInvoiceCommand,
                     line.TaxRatePct = tax.Rate;
                     line.TaxCode = tax.Code;
                     line.TaxDescription = tax.Description;
-                }
-                else
-                {
-                    // TaxId null = clear the line's tax.
-                    line.TaxId = null;
-                    line.TaxRatePct = null;
-                    line.TaxCode = null;
-                    line.TaxDescription = null;
+                    line.TaxAmount = decimal.Round(line.LineAmount * tax.Rate.Value / 100m, 2);
                 }
 
-                line.LineAmount = decimal.Round(line.BilledQty * line.UnitPrice, 2);
-                line.TaxAmount = line.TaxRatePct is { } rate
-                    ? decimal.Round(line.LineAmount * rate / 100m, 2)
-                    : 0m;
                 line.UpdatedBy = _user.UserCode;
                 line.UpdatedOn = now;
             }

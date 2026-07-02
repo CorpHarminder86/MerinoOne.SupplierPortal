@@ -49,7 +49,9 @@ public class CreateInvoiceFromAsnCommandHandler : IRequestHandler<CreateInvoiceF
         var outcome = await _factory.EnsureDraftAsync(asn, now, ct);
 
         // Persist whatever the generator staged: new drafts + Generated flag, OR the (re-)Blocked flag/note +
-        // buyer notification rows. Saving BEFORE the Blocked throw keeps the ASN flag authoritative for the UI.
+        // buyer notification rows, OR a stale-Blocked reconciliation (Blocked → Generated on the idempotent
+        // path / Blocked → null on nothing-to-invoice). Saving BEFORE the throws below keeps the ASN flag
+        // authoritative for the UI even when this request answers 400.
         await _db.SaveChangesAsync(ct);
 
         if (outcome.Blocked)

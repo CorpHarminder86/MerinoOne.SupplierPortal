@@ -58,7 +58,17 @@ public sealed class DraftInvoiceFromAsnFactory
             .OrderBy(i => i.CreatedOn).ThenBy(i => i.InvoiceNumber)
             .ToListAsync(ct);
         if (existing.Count > 0)
+        {
+            // Stale-Blocked reconciliation: invoices exist, so "Blocked" no longer describes reality (e.g. a
+            // manual draft was created against the blocked ASN, or a racing retry won). Flip to Generated and
+            // drop the note so the ASN banner + retry affordance stop lying. The caller's SaveChanges persists it.
+            if (asn.InvoiceGenerationStatus == StatusBlocked)
+            {
+                asn.InvoiceGenerationStatus = StatusGenerated;
+                asn.InvoiceGenerationNote = null;
+            }
             return new Outcome(existing, Created: false, Blocked: false, BlockNote: null);
+        }
 
         // ASN lines joined to their PO lines + PO headers — price, tax and the grouping key (currency/payment
         // term). BilledQty reads the LIVE PO-line cumulatives, so lines are DEDUPED per PO line (two ASN lines on
@@ -116,12 +126,19 @@ public sealed class DraftInvoiceFromAsnFactory
                 $"Invoice generation blocked — tax code(s) without a usable rate: {string.Join(", ", offenders)}. " +
                 "Fix the tax master rate(s), then retry generation from the ASN.", 500);
 
+            // Notify the buyers ONLY when the blocked state is NEW or its reason changed — a still-blocked
+            // retry with the same note must not spam a duplicate EmailOutbox row per attempt.
+            var notifyBuyers = asn.InvoiceGenerationStatus != StatusBlocked || asn.InvoiceGenerationNote != note;
+
             asn.InvoiceGenerationStatus = StatusBlocked;
             asn.InvoiceGenerationNote = note;
 
-            // Best-effort buyer notification (mapped internal users, same resolution as the approval flow).
-            var buyers = await AsnApprovalSupport.ResolveApproverUserIdsAsync(_db, asn, ct);
-            await AsnApprovalSupport.NotifyBuyersInvoiceGenerationBlockedAsync(_db, asn, buyers.ToList(), note, now, ct);
+            if (notifyBuyers)
+            {
+                // Best-effort buyer notification (mapped internal users, same resolution as the approval flow).
+                var buyers = await AsnApprovalSupport.ResolveApproverUserIdsAsync(_db, asn, ct);
+                await AsnApprovalSupport.NotifyBuyersInvoiceGenerationBlockedAsync(_db, asn, buyers.ToList(), note, now, ct);
+            }
 
             // NO invoice, NO throw — the ASN approval transaction continues and commits with the Blocked flag.
             return new Outcome(Array.Empty<Invoice>(), Created: false, Blocked: true, BlockNote: note);
@@ -219,7 +236,15 @@ public sealed class DraftInvoiceFromAsnFactory
 
         if (invoices.Count == 0)
         {
-            // Every group's remaining balance is 0 — nothing to invoice. Quiet no-op; status untouched.
+            // Every group's remaining balance is 0 — nothing to invoice. Quiet no-op; status untouched —
+            // EXCEPT a stale Blocked flag: the tax gate above passed, so the block is resolved yet nothing
+            // generates (fully invoiced elsewhere). Clear both fields; CreateInvoiceFromAsnCommand saves BEFORE
+            // its "Nothing to invoice" 400, so the clear persists on that path too.
+            if (asn.InvoiceGenerationStatus == StatusBlocked)
+            {
+                asn.InvoiceGenerationStatus = null;
+                asn.InvoiceGenerationNote = null;
+            }
             return new Outcome(Array.Empty<Invoice>(), Created: false, Blocked: false, BlockNote: null);
         }
 

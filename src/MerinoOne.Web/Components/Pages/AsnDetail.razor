@@ -732,7 +732,7 @@
                       Editable="@(CanWrite)"
                       SupplierId="@attachSupplierId"
                       OnChanged="OnPanelChanged"
-                      GuardMessage="@(IsNew && selectedSupplierId == Guid.Empty ? "Choose a supplier first." : null)"
+                      GuardMessage="@(IsNew && (selectedSupplierId is null || selectedSupplierId == Guid.Empty) ? "Choose a supplier first." : null)"
                       Open="@railOpen"
                       OpenChanged="OnRailOpenChanged"
                       OnSummaryChanged="OnRailSummary" />

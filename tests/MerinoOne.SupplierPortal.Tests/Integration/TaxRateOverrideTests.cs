@@ -98,6 +98,30 @@ public class TaxRateOverrideTests
             because: "only a rate VALUE change pins the row");
     }
 
+    // ── (fix 9) ResetRateOverride with no synced rate must 400, never NULL a live rate ─────────────────
+    [SkippableFact]
+    public async Task Reset_rate_override_with_null_last_synced_rate_is_400_and_keeps_the_rate()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var code = $"TAXNOSYNC-{tag}";
+        // Seeded directly (never LN-synced) ⇒ LastSyncedRate is NULL; the live rate is 18.
+        var taxId = await _fx.CreateTaxAsync(code, 18m);
+        var admin = await _fx.ClientAsAsync(SecurityTestHarness.Users.Admin, IntegrationTestFixture.CompanyId);
+
+        var resp = await admin.PutAsJsonAsync($"/api/masters/taxes/{taxId}",
+            new UpdateTaxRequest("Reset attempt", 18m, IsActive: true, ResetRateOverride: true));
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "there is no synced rate to restore — silently NULLing the live rate would be data loss");
+        (await Read<TaxDto>(resp)).Errors.Should().Contain(e =>
+            e.Contains("No synced rate", StringComparison.OrdinalIgnoreCase));
+
+        var tax = await LoadTaxAsync(code);
+        tax.TaxRate.Should().Be(18m, because: "the failed reset must not have erased the live rate");
+        tax.IsRateOverridden.Should().BeFalse();
+    }
+
     // -------------------- helpers --------------------
 
     /// <summary>Seeds the "Tax" inbound endpoint map + a tagged API key carrying Integration.Inbound.Tax.</summary>

@@ -38,6 +38,14 @@ public class UpdateTaxCommandHandler : IRequestHandler<UpdateTaxCommand, TaxDto>
         t.Description = request.Body.Description.Trim();
         if (request.Body.ResetRateOverride)
         {
+            // Nothing to restore — a never-synced tax has no LastSyncedRate; "resetting" would silently NULL a
+            // live rate (data loss). 400 instead.
+            if (t.LastSyncedRate is null)
+                throw new Common.Exceptions.ValidationException(new Dictionary<string, string[]>
+                {
+                    ["resetRateOverride"] = new[] { "No synced rate to restore for this tax." }
+                });
+
             // Clear the admin pin: the rate snaps back to the last LN-synced value and the sync owns it again.
             t.IsRateOverridden = false;
             t.TaxRate = t.LastSyncedRate;

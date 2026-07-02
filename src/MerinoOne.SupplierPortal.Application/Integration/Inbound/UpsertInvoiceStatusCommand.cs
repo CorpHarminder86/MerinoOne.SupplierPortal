@@ -1,9 +1,11 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Invoices;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 
@@ -12,7 +14,9 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 /// <c>Invoice.InvoiceStatus</c> to the ERP-driven states (Matched / PartiallyPaid / Paid / Approved /
 /// MatchExceptions / Rejected) pushed by Infor LN, resolving the invoice by <c>InvoiceErpSyncId</c> (preferred)
 /// else <c>InvoiceNumber</c>. The writer NEVER moves an invoice backwards into Draft/Submitted (those are
-/// portal-owned lifecycle states) — an attempt is a failed row. Reuses <see cref="InboundUpsertExecutor"/>
+/// portal-owned lifecycle states) and NEVER re-advances a Rejected invoice (terminal — its reservation was
+/// already released) — an attempt is a failed row. Moving a reservation-holding invoice TO Rejected releases the
+/// per-PO-line invoiced-qty reservation (plan D8) inside the executor's transaction. Reuses <see cref="InboundUpsertExecutor"/>
 /// (company resolution, anti-spoof, endpoint gate, canonical-hash idempotency, transactional
 /// SyncLog/IntegrationError, endpoint-session telemetry).
 /// </summary>
@@ -52,7 +56,9 @@ public class UpsertInvoiceStatusCommandValidator : AbstractValidator<UpsertInvoi
     }
 }
 
-public class UpsertInvoiceStatusCommandHandler(InboundUpsertExecutor exec) : IRequestHandler<UpsertInvoiceStatusCommand, UpsertResultDto>
+public class UpsertInvoiceStatusCommandHandler(
+    InboundUpsertExecutor exec,
+    ILogger<UpsertInvoiceStatusCommandHandler> logger) : IRequestHandler<UpsertInvoiceStatusCommand, UpsertResultDto>
 {
     public Task<UpsertResultDto> Handle(UpsertInvoiceStatusCommand request, CancellationToken ct)
     {
@@ -101,11 +107,18 @@ public class UpsertInvoiceStatusCommandHandler(InboundUpsertExecutor exec) : IRe
 
                 // Never regress a portal-owned lifecycle state — the ERP only advances forward through
                 // matching/payment. An invoice still in Draft/Submitted that the ERP claims is Matched/Paid is a
-                // correlation error (we expect it to be posted first via the GRN cascade).
-                if (inv.InvoiceStatus is InvoiceStatus.Draft or InvoiceStatus.Submitted or InvoiceStatus.Cancelled)
+                // correlation error (we expect it to be posted first via the GRN cascade). Rejected is TERMINAL
+                // for this writer: a portal/inbound rejection already RELEASED the invoice's per-PO-line
+                // reservation (plan D8), so letting LN re-advance it would leave a paid invoice holding no
+                // reservation (and a second rejection would double-release).
+                if (inv.InvoiceStatus is InvoiceStatus.Draft or InvoiceStatus.Submitted or InvoiceStatus.Cancelled
+                    or InvoiceStatus.Rejected)
                 {
                     results.Add(new RowResult(code, RowOutcome.Failed,
-                        $"Invoice '{inv.InvoiceNumber}' is '{inv.InvoiceStatus}' (portal-owned); the ERP cannot advance it to '{newStatus}' until it is posted."));
+                        $"Invoice '{inv.InvoiceNumber}' is '{inv.InvoiceStatus}' (portal-owned/terminal); the ERP cannot advance it to '{newStatus}'" +
+                        (inv.InvoiceStatus == InvoiceStatus.Rejected
+                            ? " — a Rejected invoice's reservation was already released; re-submit it in the portal instead."
+                            : " until it is posted.")));
                     continue;
                 }
 
@@ -118,6 +131,15 @@ public class UpsertInvoiceStatusCommandHandler(InboundUpsertExecutor exec) : IRe
                     results.Add(new RowResult(code, RowOutcome.Skipped, null));
                     continue;
                 }
+
+                // R6 (plan D8) — leaving the reservation-holding set via an ERP rejection releases the invoice's
+                // per-PO-line invoiced-qty reservation. After the guard above the current status is always one of
+                // the reservation-holding states, but re-assert via HoldsReservation for symmetry with the portal
+                // Reject/Revoke paths. The release's conditional ExecuteUpdates run IMMEDIATELY — inside the
+                // executor's wrapping transaction (BeginTransactionAsync … Commit) — so they commit or roll back
+                // ATOMICALLY with the tracked status flip below.
+                if (newStatus == InvoiceStatus.Rejected && InvoiceReservationRelease.HoldsReservation(inv.InvoiceStatus))
+                    await InvoiceReservationRelease.ReleaseAsync(db, inv.Id, logger, token);
 
                 inv.InvoiceStatus = newStatus;
                 if (!string.IsNullOrWhiteSpace(rec.ErpCode)) inv.ErpCode = rec.ErpCode!.Trim();

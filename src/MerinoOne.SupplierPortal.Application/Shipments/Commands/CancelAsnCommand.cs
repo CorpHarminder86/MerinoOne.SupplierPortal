@@ -57,7 +57,9 @@ public class CancelAsnCommandHandler : IRequestHandler<CancelAsnCommand, Unit>
 
             await using var tx = await _db.BeginTransactionAsync(ct);
 
-            foreach (var r in reversalByPoLine)
+            // DI-02 — lock ordering: reverse in ascending PurchaseOrderLineId, matching the acquisition loops,
+            // so concurrent multi-line cancel/submit never acquire the line X-locks in opposite orders.
+            foreach (var r in reversalByPoLine.OrderBy(r => r.PoLineId))
             {
                 await _db.PurchaseOrderLines
                     .Where(l => l.Id == r.PoLineId)

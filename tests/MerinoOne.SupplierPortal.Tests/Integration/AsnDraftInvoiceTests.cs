@@ -213,6 +213,96 @@ public class AsnDraftInvoiceTests
         (await Read<InvoiceDetailDto>(retryAgain)).Data!.Id.Should().Be(draft.Id);
     }
 
+    // ── (fix 7) idempotent retry path reconciles a stale Blocked flag when invoices already exist ──────
+    [SkippableFact]
+    public async Task Retry_on_blocked_asn_with_existing_invoice_flips_blocked_to_generated()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var (supplierClient, asnId, asnNumber, setup) = await CreateBlockedAsnAsync();
+
+        // While generation is Blocked, the supplier keys a MANUAL invoice against the ASN (legitimate — the
+        // generator's tax gate does not stop manual entry). The Blocked flag is now stale.
+        var lineAmount = decimal.Round(setup.OrderQty * setup.PriceUnit, 2);
+        var manual = new CreateInvoiceRequest(
+            setup.PoId, asnId, $"INV-MANBLK-{setup.Tag}", DateTime.UtcNow.Date,
+            InvoiceAmount: lineAmount, TaxAmount: 0m, NetAmount: lineAmount,
+            CurrencyCode: "INR", MatchingType: nameof(MatchingType.TwoWay),
+            EInvoiceIrn: null, EInvoiceAckNo: null, EWayBillNumber: null, Notes: null,
+            Lines: new List<CreateInvoiceLineRequest>
+            {
+                new(setup.PoLineId, setup.ItemCode, null, setup.OrderQty, setup.PriceUnit, lineAmount, null, 0m),
+            });
+        var createResp = await supplierClient.PostAsJsonAsync("/api/invoices", manual);
+        createResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createResp));
+        var manualId = (await Read<InvoiceDetailDto>(createResp)).Data!.Id;
+
+        // Retry hits the factory's IDEMPOTENT early-return (invoices exist) — it must reconcile the stale flag.
+        var retryResp = await supplierClient.PostAsJsonAsync("/api/invoices/from-asn",
+            new CreateInvoiceFromAsnRequest(asnId));
+        retryResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(retryResp));
+        (await Read<InvoiceDetailDto>(retryResp)).Data!.Id.Should().Be(manualId,
+            because: "the idempotent path returns the existing invoice, never a second insert");
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = await db.Asns.IgnoreQueryFilters().FirstAsync(a => a.Id == asnId);
+        asn.InvoiceGenerationStatus.Should().Be("Generated",
+            because: "invoices exist, so a stale Blocked flag must reconcile to Generated on the idempotent path");
+        asn.InvoiceGenerationNote.Should().BeNull();
+        asnNumber.Should().NotBeNullOrEmpty();
+    }
+
+    // ── (fix 8) a still-blocked retry with the same reason does NOT stage duplicate buyer e-mails ──────
+    [SkippableFact]
+    public async Task Second_still_blocked_retry_does_not_add_a_second_email_outbox_row()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var (supplierClient, asnId, asnNumber, _) = await CreateBlockedAsnAsync();
+
+        var baseline = await BlockedMailCountAsync(asnNumber);
+        baseline.Should().BeGreaterThanOrEqualTo(1, because: "the FIRST block staged the buyer notification");
+
+        // Nothing was fixed — the retry re-blocks with the SAME note ⇒ 400 and NO new EmailOutbox rows.
+        var retryResp = await supplierClient.PostAsJsonAsync("/api/invoices/from-asn",
+            new CreateInvoiceFromAsnRequest(asnId));
+        retryResp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "the tax gate still blocks: " + await Body(retryResp));
+
+        (await BlockedMailCountAsync(asnNumber)).Should().Be(baseline,
+            because: "an unchanged Blocked state must not spam a duplicate notification per retry");
+    }
+
+    // -------------------- helpers --------------------
+
+    /// <summary>NULL-rate tax PO → ASN → approve-submit ⇒ ASN Submitted with InvoiceGenerationStatus=Blocked.</summary>
+    private async Task<(HttpClient SupplierClient, Guid AsnId, string AsnNumber, ProcureToPayFlow.Setup Setup)>
+        CreateBlockedAsnAsync()
+    {
+        var setup = await ProcureToPayFlow.SeedPoAsync(_fx, taxRate: null);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
+        var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+
+        var createResp = await supplierClient.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
+        createResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createResp));
+        var asnId = (await Read<AsnDetailDto>(createResp)).Data!.Id;
+
+        var submitResp = await ProcureToPayFlow.SubmitViaApprovalAsync(_fx, supplierClient, asnId);
+        submitResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(submitResp));
+        var submitted = (await Read<AsnDetailDto>(submitResp)).Data!;
+        submitted.InvoiceGenerationStatus.Should().Be("Blocked");
+        return (supplierClient, asnId, submitted.AsnNumber, setup);
+    }
+
+    private async Task<int> BlockedMailCountAsync(string asnNumber)
+    {
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.EmailOutbox.IgnoreQueryFilters()
+            .CountAsync(m => m.Subject == $"Invoice generation blocked for ASN {asnNumber}");
+    }
+
     private static async Task<Result<T>> Read<T>(HttpResponseMessage resp)
     {
         var stream = await resp.Content.ReadAsStreamAsync();

@@ -138,12 +138,20 @@ public record UpdateInvoiceRequest(
     string? Notes,
     List<UpdateInvoiceLineRequest>? Lines = null);
 
-// R6 (2026-07-02) — one Draft line edit. TaxId null = clear the line's tax (rate/description/amount reset);
-// a supplied TaxId is re-resolved against the governed proc.Tax master (400 when it has no rate).
+// R6 (2026-07-02) — one Draft line edit. CHANGE-DETECTION tax semantics (review fix — a null TaxId must never
+// silently wipe a code-only tax snapshot):
+//  - ClearTax = true             ⇒ explicitly clear the line's tax (taxId/code/description/rate null, taxAmount 0).
+//  - TaxId null OR == current    ⇒ PRESERVE the line's tax snapshot untouched; taxAmount recomputed only when the
+//                                  snapshot rate is known (a code-only tax keeps its stored taxAmount). An
+//                                  unchanged TaxId NEVER hits the resolver, so a since-deleted / rate-less master
+//                                  no longer blocks unrelated edits (submit still fail-closes on rate-less).
+//  - TaxId != current (non-null) ⇒ genuine reselect — re-resolved against the governed proc.Tax master
+//                                  (400 when missing or rate-less). Code/description/rate are NEVER client-typed.
 public record UpdateInvoiceLineRequest(
     Guid InvoiceLineId,
     decimal BilledQty,
-    Guid? TaxId);
+    Guid? TaxId,
+    bool ClearTax = false);
 
 // R4 (2026-06-26) — Phase 4 / §8.3 / UC-ATT-03: AcknowledgeMissingAttachments confirms proceeding past any
 // Warning-level attachment requirement on the Invoice entity. First submit (false) with a missing Warning

@@ -3,6 +3,7 @@
 @inject TokenAccessor Token
 @inject NavigationManager Nav
 @inject NotificationService Notif
+@inject CompanyState Company
 
 <PageTitle>@detail?.InvoiceNumber</PageTitle>
 
@@ -39,8 +40,10 @@ else
                                       Total="@(railSummary?.TotalSlots ?? 0)" />
                 }
                 @* R6 — frozen-snapshot PDF, any status. Same-origin proxy (/files/invoice-pdf/{id} in Program.cs)
-                   attaches the cookie-JWT as bearer; page access already implies Invoice.Read. *@
-                <a class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);text-decoration:none;" href="files/invoice-pdf/@Id" download>
+                   attaches the cookie-JWT as bearer; page access already implies Invoice.Read. ?company= carries
+                   the circuit's active company (the <a download> bypasses ApiClient's X-Active-Company stamping,
+                   so the proxy forwards it as the header — without it a multi-company principal 404s). *@
+                <a class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);text-decoration:none;" href="@InvoicePdfHref" download>
                     <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">download</span> Download PDF
                 </a>
                 @if (Token.HasPermission("Invoice.Submit") && detail.InvoiceStatus == "Draft")
@@ -56,7 +59,15 @@ else
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">send</span> Submit
                     </button>
                 }
-                @if (Token.HasPermission("Invoice.Revoke") && detail.InvoiceStatus == "Submitted" && !detail.ErpPostedAt.HasValue)
+                @* R6 — submit now lands Matched|MatchExceptions (never Submitted), so the pre-post gates must
+                   cover those states or the buttons dead-end. Windows mirror the server commands: Revoke =
+                   Submitted/Matched/MatchExceptions + not ERP-posted (RevokeInvoiceCommand); Approve =
+                   Submitted (legacy rows)/UnderReview/Matched (ApproveInvoiceCommand); Reject = Submitted/
+                   UnderReview/Matched/MatchExceptions (RejectInvoiceCommand blocks only Approved/Paid/
+                   PartiallyPaid/Cancelled — Rejected shows no button since re-reject is pointless);
+                   Mark-Under-Review stays Submitted-only (server constraint). *@
+                @if (Token.HasPermission("Invoice.Revoke") && !detail.ErpPostedAt.HasValue
+                     && detail.InvoiceStatus is "Submitted" or "Matched" or "MatchExceptions")
                 {
                     <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-warning);background:var(--mer-surface);color:var(--mer-warning);cursor:pointer;" @onclick="OpenRevoke" disabled="@busy">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">undo</span> Revoke to Draft
@@ -68,11 +79,14 @@ else
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">fact_check</span> Mark Under Review
                     </button>
                 }
-                @if (Token.HasPermission("Invoice.Approve") && (detail.InvoiceStatus == "UnderReview" || detail.InvoiceStatus == "Matched"))
+                @if (Token.HasPermission("Invoice.Approve") && detail.InvoiceStatus is "Submitted" or "UnderReview" or "Matched")
                 {
                     <button class="rz-button rz-secondary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenApprove" disabled="@busy">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">task_alt</span> Approve
                     </button>
+                }
+                @if (Token.HasPermission("Invoice.Approve") && detail.InvoiceStatus is "Submitted" or "UnderReview" or "Matched" or "MatchExceptions")
+                {
                     <button class="rz-button" style="padding:8px 14px;border-radius:6px;border:1px solid var(--mer-red);background:var(--mer-surface);color:var(--mer-red);cursor:pointer;" @onclick="OpenReject" disabled="@busy">
                         <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">cancel</span> Reject
                     </button>
@@ -279,11 +293,23 @@ else
                                 </td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.UnitPrice.ToString("0.00")</td>
                                 <td style="padding:6px 4px;">
+                                    @if (ed.IsCodeOnly)
+                                    {
+                                        @* Code-only tax (TaxCode set, TaxId null — ERP-fed, no governed master):
+                                           show the code read-only; the select defaults to a synthesized
+                                           "keep as-is" option — saving PRESERVES the code + stored tax amount. *@
+                                        <div style="font-family:Inter,monospace;font-size:11.5px;color:var(--mer-ink-500);margin-bottom:2px;" title="@ln.TaxDescription">@($"{ln.TaxCode} (code only)")</div>
+                                    }
                                     <select class="rz-dropdown" style="max-width:230px;padding:6px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);font-size:12px;"
                                             @bind="ed.TaxIdStr" @bind:after="() => OnTaxChanged(ed)">
+                                        @if (ed.IsCodeOnly)
+                                        {
+                                            <option value="@KeepCodeOnlyValue">@ed.SnapshotLabel</option>
+                                        }
                                         <option value="">(no tax)</option>
                                         @* The line's current tax stays selectable even when it is missing from the
-                                           active list (inactive / rate-less) so "keep current" always round-trips. *@
+                                           active list (inactive / rate-less) so "keep current" always round-trips
+                                           (the server preserves an unchanged TaxId without re-resolving it). *@
                                         @if (ed.SnapshotTaxIdStr.Length > 0 && taxes.All(t => t.Id.ToString() != ed.SnapshotTaxIdStr))
                                         {
                                             <option value="@ed.SnapshotTaxIdStr">@ed.SnapshotLabel</option>
@@ -722,11 +748,23 @@ else
     private bool CanEditLines => detail?.InvoiceStatus == "Draft" && Token.HasPermission("Invoice.Submit");
     private bool AnyLineErrors => lineEdits.Values.Any(e => e.Error != null);
 
+    // R6 — same-origin PDF proxy href. The plain <a download> bypasses ApiClient (which stamps X-Active-Company
+    // per call), so the active company rides a ?company= query param that the /files/invoice-pdf proxy converts
+    // back into the header. No selection ⇒ no param ⇒ the proxy behaves as before.
+    private string InvoicePdfHref =>
+        Company.ActiveCompanyId is { } c && c != Guid.Empty
+            ? $"files/invoice-pdf/{Id}?company={c}"
+            : $"files/invoice-pdf/{Id}";
+
     // R6 (D5) — both provisional prefixes are rejected server-side on submit; mirror the block client-side.
     private bool HasPlaceholderNumber =>
         detail != null &&
         (detail.InvoiceNumber.StartsWith("DRAFT-", StringComparison.OrdinalIgnoreCase) ||
          detail.InvoiceNumber.StartsWith("INV-DRAFT-", StringComparison.OrdinalIgnoreCase));
+
+    // R6 (change-detection tax contract) — synthesized select value for a code-only line's "keep as-is" option.
+    // Never a real Guid, so it can share the <select> with governed tax ids and the "" (no tax) sentinel.
+    private const string KeepCodeOnlyValue = "__keep-code-only__";
 
     private sealed class LineEditState
     {
@@ -734,12 +772,17 @@ else
         public decimal RemainingQty { get; init; }
         public decimal UnitPrice { get; init; }
         public decimal BilledQty { get; set; }
-        public string TaxIdStr { get; set; } = string.Empty;   // "" = (no tax) → TaxId null CLEARS the tax
+        // Select value: a Guid = selected tax; "" = (no tax); KeepCodeOnlyValue = keep the code-only tax as-is.
+        public string TaxIdStr { get; set; } = string.Empty;
         public decimal? Rate { get; set; }                      // display-only; never typed
         public string? Error { get; set; }
-        public string SnapshotTaxIdStr { get; init; } = string.Empty;
+        public string SnapshotTaxIdStr { get; init; } = string.Empty;   // ORIGINAL TaxId ("" when none)
         public string SnapshotLabel { get; init; } = string.Empty;
         public decimal? SnapshotRate { get; init; }
+        // Code-only tax: TaxCode set but TaxId null (ERP-fed, no governed master row, no rate).
+        public bool IsCodeOnly { get; init; }
+        // The stored TaxAmount — the preview "keep as-is" value for code-only / rate-less snapshots.
+        public decimal OriginalTaxAmount { get; init; }
     }
 
     private void BuildLineEdits()
@@ -748,17 +791,24 @@ else
         if (detail == null || !CanEditLines) return;
         foreach (var ln in detail.Lines)
         {
+            var isCodeOnly = ln.TaxId is null && !string.IsNullOrEmpty(ln.TaxCode);
             var st = new LineEditState
             {
                 LineId = ln.Id,
                 RemainingQty = ln.RemainingQty,
                 UnitPrice = ln.UnitPrice,
                 BilledQty = ln.BilledQty,
-                TaxIdStr = ln.TaxId?.ToString() ?? string.Empty,
+                // A code-only line defaults to the synthesized "keep as-is" option, NOT "(no tax)" — saving
+                // without touching the select must preserve the code-only tax (server change-detection).
+                TaxIdStr = isCodeOnly ? KeepCodeOnlyValue : (ln.TaxId?.ToString() ?? string.Empty),
                 Rate = ln.TaxRatePct,
                 SnapshotTaxIdStr = ln.TaxId?.ToString() ?? string.Empty,
-                SnapshotLabel = $"{ln.TaxCode ?? "?"} — {ln.TaxDescription} ({ln.TaxRatePct?.ToString("0.####") ?? "?"}%)",
+                SnapshotLabel = isCodeOnly
+                    ? $"{ln.TaxCode} — keep as-is (code only)"
+                    : $"{ln.TaxCode ?? "?"} — {ln.TaxDescription} ({ln.TaxRatePct?.ToString("0.####") ?? "?"}%)",
                 SnapshotRate = ln.TaxRatePct,
+                IsCodeOnly = isCodeOnly,
+                OriginalTaxAmount = ln.TaxAmount,
             };
             // A sibling submit may have shrunk the live balance below this draft's billed qty — flag immediately.
             ValidateQty(st);
@@ -778,6 +828,7 @@ else
 
     private void OnTaxChanged(LineEditState e)
     {
+        // Keep-as-is (code-only) has no governed rate — the preview keeps the stored amount instead.
         if (!Guid.TryParse(e.TaxIdStr, out var tid)) { e.Rate = null; return; }
         var t = taxes.FirstOrDefault(x => x.Id == tid);
         // Reselecting the (inactive) snapshot tax falls back to the frozen snapshot rate.
@@ -785,24 +836,40 @@ else
     }
 
     private static decimal EditLineAmount(LineEditState e) => decimal.Round(e.BilledQty * e.UnitPrice, 2);
+
+    // Client-side preview mirroring the server change-detection recompute: known rate ⇒ recompute; "(no tax)" /
+    // cleared ⇒ 0; code-only keep-as-is or an unchanged rate-less snapshot ⇒ the stored amount survives as-is.
     private static decimal EditTaxAmount(LineEditState e)
-        => e.Rate is { } r ? decimal.Round(EditLineAmount(e) * r / 100m, 2) : 0m;
+    {
+        if (e.TaxIdStr == KeepCodeOnlyValue) return e.OriginalTaxAmount;
+        if (e.Rate is { } r) return decimal.Round(EditLineAmount(e) * r / 100m, 2);
+        if (e.TaxIdStr.Length == 0) return 0m;
+        return e.TaxIdStr == e.SnapshotTaxIdStr ? e.OriginalTaxAmount : 0m;
+    }
 
     private decimal DisplayLineTotal =>
         CanEditLines && lineEdits.Count > 0 ? lineEdits.Values.Sum(EditLineAmount) : detail?.Lines.Sum(l => l.LineAmount) ?? 0m;
     private decimal DisplayTaxTotal =>
         CanEditLines && lineEdits.Count > 0 ? lineEdits.Values.Sum(EditTaxAmount) : detail?.Lines.Sum(l => l.TaxAmount) ?? 0m;
 
-    // Always sends EVERY line's current (billedQty, taxId) — TaxId null clears the tax server-side, so the
-    // line's current selection must round-trip even when the user never touched it.
+    // Always sends EVERY line's current (billedQty, taxId, clearTax). Change-detection contract:
+    //   keep-as-is (code-only sentinel)        ⇒ TaxId null + ClearTax false — the server PRESERVES the code-only tax;
+    //   "(no tax)" when the line HAD a tax     ⇒ ClearTax true — the ONLY way the tax snapshot is wiped;
+    //   "(no tax)" when it never had one       ⇒ TaxId null + ClearTax false (nothing to clear);
+    //   a selected Guid                        ⇒ TaxId — the server preserves it when unchanged (no resolver hit)
+    //                                            and re-resolves only a genuine reselect.
     private List<UpdateInvoiceLineRequest>? BuildLineRequests() =>
         !CanEditLines || lineEdits.Count == 0
             ? null
             : lineEdits.Values
-                .Select(e => new UpdateInvoiceLineRequest(
-                    e.LineId,
-                    e.BilledQty,
-                    Guid.TryParse(e.TaxIdStr, out var tid) ? tid : null))
+                .Select(e =>
+                {
+                    Guid? taxId = e.TaxIdStr != KeepCodeOnlyValue && Guid.TryParse(e.TaxIdStr, out var tid)
+                        ? tid : null;
+                    var hadTax = e.SnapshotTaxIdStr.Length > 0 || e.IsCodeOnly;
+                    var clearTax = taxId is null && e.TaxIdStr != KeepCodeOnlyValue && hadTax;
+                    return new UpdateInvoiceLineRequest(e.LineId, e.BilledQty, taxId, clearTax);
+                })
                 .ToList();
 
     // Line-only save from the Lines card — same PUT as the Edit modal, header metadata unchanged.

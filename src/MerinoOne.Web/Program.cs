@@ -96,7 +96,8 @@ app.MapStaticAssets();
 // from a fresh minimal-API HTTP scope).
 //
 // Anonymous /by-token variant exists for Register.razor previews before login — no cookie needed.
-async Task<IResult> ProxyApiAsync(HttpContext http, IHttpClientFactory factory, string apiPath, bool requireAuth, CancellationToken ct)
+async Task<IResult> ProxyApiAsync(HttpContext http, IHttpClientFactory factory, string apiPath, bool requireAuth, CancellationToken ct,
+    Guid? activeCompanyId = null)
 {
     var apiBase = http.RequestServices.GetRequiredService<IConfiguration>()["SUPPLIERPORTAL_API_BASE_URL"]
                   ?? http.RequestServices.GetRequiredService<IConfiguration>()["SupplierPortal:ApiBaseUrl"]
@@ -112,6 +113,11 @@ async Task<IResult> ProxyApiAsync(HttpContext http, IHttpClientFactory factory, 
         if (string.IsNullOrEmpty(jwt)) return Results.Unauthorized();
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", jwt);
     }
+    // Forward the caller's active company (same header ApiClient stamps on circuit-scoped calls). Without it a
+    // multi-company principal's server-side company filter scopes to a default company and the entity 404s.
+    // Optional — absent/empty preserves the pre-existing behaviour for callers that don't pass it.
+    if (activeCompanyId is { } companyId && companyId != Guid.Empty)
+        req.Headers.Add("X-Active-Company", companyId.ToString());
 
     using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
     if (!resp.IsSuccessStatusCode)
@@ -139,9 +145,12 @@ app.MapGet("/files/proxy/{id:guid}/by-token/{token}", (Guid id, string token, Ht
 // R6 — invoice PDF (frozen snapshot). Same cookie-JWT → bearer proxy as /files/proxy: the API endpoint
 // (GET api/invoices/{id}/pdf, policy Invoice.Read, seccode-scoped) returns application/pdf with a
 // Content-Disposition filename ({invoiceNumber}.pdf) — both forwarded by ProxyApiAsync, so a plain
-// <a download> on InvoiceDetail streams the file same-origin.
+// <a download> on InvoiceDetail streams the file same-origin. The ?company=<guid> query param (stamped by
+// InvoiceDetail from CompanyState) is forwarded as X-Active-Company so a multi-company principal's company
+// filter resolves the invoice's company instead of 404ing; absent/invalid ⇒ header omitted (legacy behaviour).
 app.MapGet("/files/invoice-pdf/{id:guid}", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
-    => ProxyApiAsync(http, factory, $"api/invoices/{id}/pdf", requireAuth: true, ct));
+    => ProxyApiAsync(http, factory, $"api/invoices/{id}/pdf", requireAuth: true, ct,
+        activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null));
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
