@@ -106,3 +106,5 @@ node_modules/
 .playwright-mcp/*
 
 .claude/skills/*
+.codex*
+.agents*
