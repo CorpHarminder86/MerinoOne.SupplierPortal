@@ -32,8 +32,10 @@ else
             </div>
             <div class="tl-header__actions">
                 @* R7 (§2.2) — document-rail toggle pill with the live fulfilment count. Overview tab only — the
-                   rail (and its panel) is mounted inside the overview branch; History is unaffected. *@
-                @if (tab == "overview")
+                   rail (and its panel) is mounted inside the overview branch; History is unaffected.
+                   Hidden when the invoice has NO attachment-policy slots (no master requirement → no control):
+                   the mounted rail's first summary sets railSummary; TotalSlots>0 gates the pill on. *@
+                @if (tab == "overview" && railSummary is { TotalSlots: > 0 })
                 {
                     <DocumentRailPill Open="@railOpen" OpenChanged="OnRailOpenChanged"
                                       Satisfied="@(railSummary?.SatisfiedSlots ?? 0)"
@@ -741,6 +743,8 @@ else
     private void OnRailSummary(AttachmentPanelSummary summary)
     {
         railSummary = summary;
+        // No policy slots (no master requirement) => no control: keep the rail collapsed; the header pill hides too.
+        if (summary.TotalSlots == 0) { railOpen = false; return; }
         if (!_railUserToggled && !railOpen && CanEditLines && summary.AnyMandatoryEmpty)
             railOpen = true;
     }

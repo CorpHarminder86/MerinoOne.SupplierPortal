@@ -35,8 +35,10 @@
         </div>
         <div class="tl-header__actions">
             @* R7 (§2.2) — document-rail toggle pill with the live fulfilment count. Rendered whenever the rail is
-               (both the locked view and the wizard host one); the two-way Open state is shared with the rail. *@
-            @if (!loading && (IsNew || detail != null))
+               (both the locked view and the wizard host one); the two-way Open state is shared with the rail.
+               Hidden entirely when the entity has NO attachment-policy slots (no master requirement → no control):
+               railSummary is null until the mounted rail's panel first reports, and TotalSlots>0 gates it on. *@
+            @if (!loading && (IsNew || detail != null) && railSummary is { TotalSlots: > 0 })
             {
                 <DocumentRailPill Open="@railOpen" OpenChanged="OnRailOpenChanged"
                                   Satisfied="@(railSummary?.SatisfiedSlots ?? 0)"
@@ -942,6 +944,7 @@
     // R4 #6 — "Create ASN from selected POs" on the PO list deep-links here with ?pos=id1,id2 (comma-separated).
     [SupplyParameterFromQuery(Name = "pos")] public string? PreselectPos { get; set; }
     // R5 (§9.2) — the delivery-schedule flow lands on /asns/{id}?step=2 so the supplier opens directly on Lines.
+    // Also used by the save-draft create path (?step=4) to keep the supplier on Review after the save re-navigation.
     // Applied ONCE, only for an existing ASN with lines already present; a brand-new ASN always starts at step 1.
     [SupplyParameterFromQuery(Name = "step")] public int? StartStep { get; set; }
     private AsnDetailDto? detail;
@@ -1008,6 +1011,8 @@
     private void OnRailSummary(AttachmentPanelSummary summary)
     {
         railSummary = summary;
+        // No policy slots (no master requirement) => no control: keep the rail collapsed; the header pill hides too.
+        if (summary.TotalSlots == 0) { railOpen = false; return; }
         if (!_railUserToggled && !railOpen && !IsLocked && CanWrite && summary.AnyMandatoryEmpty)
             railOpen = true;
     }
@@ -1549,7 +1554,9 @@
             showGateOverride = false;
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft ASN created" });
             // Navigate to the saved draft so attachments (ownerEntityType='Asn') become available + submit is enabled.
-            NavMgr.NavigateToRoute($"/asns/{resp.Data.Id}");
+            // ?step=4 keeps the reused component on Review instead of resetting to step 1 (PO select) — it reuses the
+            // one-shot StartStep machinery, so saving a draft leaves the supplier on the review page.
+            NavMgr.NavigateToRoute($"/asns/{resp.Data.Id}?step=4");
             return;
         }
         var err = resp?.Errors?.FirstOrDefault();
