@@ -27,9 +27,25 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
         var supplier = await _db.Suppliers.Where(s => s.Id == inv.SupplierId)
             .Select(s => new { s.LegalName, s.SupplierCode }).FirstOrDefaultAsync(ct);
 
+        // Ship-to for the PDF: the ASN's live ship-to (regular entity, loaded whole per GetPurchaseOrderByIdQuery
+        // precedent) preferred over the header PO's point-in-time ShipTo snapshot (owned VO — same load-then-read
+        // pattern as GetPurchaseOrderByIdQuery.cs, which avoids projecting owned types inside an anonymous Select).
         string? asnNumber = null;
+        (string? Name, string? Line1, string? Line2, string? City, string? State, string? Pincode, string? Country)? shipTo = null;
         if (inv.AsnId.HasValue)
-            asnNumber = await _db.Asns.Where(a => a.Id == inv.AsnId.Value).Select(a => a.AsnNumber).FirstOrDefaultAsync(ct);
+        {
+            var asn = await _db.Asns.Include(a => a.ShipToAddress)
+                .FirstOrDefaultAsync(a => a.Id == inv.AsnId.Value, ct);
+            asnNumber = asn?.AsnNumber;
+            if (asn?.ShipToAddress is { } sa)
+                shipTo = (sa.AddressName, sa.AddressLine1, sa.AddressLine2, sa.City, sa.State, sa.Pincode, sa.Country);
+        }
+        if (shipTo is null && inv.PurchaseOrderId.HasValue)
+        {
+            var po = await _db.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == inv.PurchaseOrderId.Value, ct);
+            if (po?.ShipTo is { } st)
+                shipTo = (st.AddressName, st.Line1, st.Line2, st.City, st.State, st.Pincode, st.Country);
+        }
 
         var isLocked = inv.InvoiceStatus != InvoiceStatus.Draft;
 
@@ -88,6 +104,7 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
             inv.ErpPostedAt, inv.ErpSyncId, inv.ErpCode,
             isLocked, rowVersion,
             inv.Notes, inv.CreatedOn, lines,
-            inv.InvoiceOrigin.ToString());
+            inv.InvoiceOrigin.ToString(),
+            shipTo?.Name, shipTo?.Line1, shipTo?.Line2, shipTo?.City, shipTo?.State, shipTo?.Pincode, shipTo?.Country);
     }
 }

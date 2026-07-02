@@ -43,4 +43,11 @@
     <InternalsVisibleTo Include="MerinoOne.SupplierPortal.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- R6 (2026-07-02, PDF branding) — the MerinoOne mark for InvoiceQuestPdfGenerator's letterhead. Embedded
+         (not wwwroot-copied) so Infrastructure stays self-contained: it must not depend on MerinoOne.Web. Same
+         source asset as src/MerinoOne.Web/wwwroot/img/merino-logo.png. -->
+    <EmbeddedResource Include="Assets\merino-logo.png" />
+  </ItemGroup>
+
 </Project>

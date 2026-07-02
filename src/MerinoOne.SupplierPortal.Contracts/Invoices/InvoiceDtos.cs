@@ -67,7 +67,17 @@ public record InvoiceDetailDto(
     DateTime CreatedOn,
     List<InvoiceLineDto> Lines,
     // R6 (2026-07-02) — provenance: "SupplierManual" (wizard) vs "AsnGenerated" (grouped ASN generator).
-    string InvoiceOrigin = "SupplierManual");
+    string InvoiceOrigin = "SupplierManual",
+    // R6 (2026-07-02, PDF ship-to) — resolved ship-to for the PDF: the ASN's live ship-to (AsnId set) else the
+    // header PO's point-in-time ShipTo snapshot (PurchaseOrderId set); null when neither resolves. Same field
+    // naming as PurchaseOrderDetailDto's ShipTo* block.
+    string? ShipToAddressName = null,
+    string? ShipToLine1 = null,
+    string? ShipToLine2 = null,
+    string? ShipToCity = null,
+    string? ShipToState = null,
+    string? ShipToPincode = null,
+    string? ShipToCountry = null);
 
 /// <summary>One PO covered by a (possibly multi-PO) invoice, derived from the distinct PO lines.</summary>
 public record InvoicePurchaseOrderDto(

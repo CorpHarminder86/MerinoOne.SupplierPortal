@@ -1,3 +1,4 @@
+using System.Reflection;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.Invoices;
 using QuestPDF.Fluent;
@@ -7,11 +8,12 @@ using QuestPDF.Infrastructure;
 namespace MerinoOne.SupplierPortal.Infrastructure.Services;
 
 /// <summary>
-/// R6 (2026-07-02, plan D13) — QuestPDF renderer for the invoice snapshot: header (number, dates, supplier,
-/// status, origin, IRN/ack/e-way, currency), lines table (item, description, billedQty, unitPrice, taxCode,
-/// taxRatePct, taxAmount, lineAmount, per-line PO number) and the totals block. Renders EXACTLY what the detail
-/// DTO carries — the frozen snapshot, never a live recomputation. <c>QuestPDF.Settings.License =
-/// LicenseType.Community</c> is set once in <see cref="DependencyInjection.AddInfrastructure"/>.
+/// R6 (2026-07-02, plan D13) — QuestPDF renderer for the invoice snapshot: branded letterhead (logo + number +
+/// status), header facts (supplier, dates, IRN/ack/e-way), a ship-to block (ASN's live ship-to else the header
+/// PO's point-in-time snapshot), the lines table, totals, and a signatory block. Renders EXACTLY what the detail
+/// DTO carries — the frozen snapshot, never a live recomputation. Deliberately no amount-in-words line.
+/// <c>QuestPDF.Settings.License = LicenseType.Community</c> is set once in
+/// <see cref="DependencyInjection.AddInfrastructure"/>.
 /// </summary>
 public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
 {
@@ -19,6 +21,19 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
     private const string Accent = "#0f3b5e";
     private const string Muted = "#6b7280";
     private const string RuleColor = "#d1d5db";
+
+    // Loaded once per process from the embedded resource (Assets/merino-logo.png) — see the csproj comment.
+    private static readonly byte[] LogoBytes = LoadLogo();
+
+    private static byte[] LoadLogo()
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        var name = asm.GetManifestResourceNames().First(n => n.EndsWith("merino-logo.png", StringComparison.Ordinal));
+        using var stream = asm.GetManifestResourceStream(name)!;
+        using var mem = new MemoryStream();
+        stream.CopyTo(mem);
+        return mem.ToArray();
+    }
 
     public byte[] Generate(InvoiceDetailDto invoice)
     {
@@ -34,8 +49,11 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
                 {
                     header.Item().Row(row =>
                     {
+                        row.ConstantItem(46).Height(46).Image(LogoBytes).FitArea();
+                        row.ConstantItem(10);
                         row.RelativeItem().Column(c =>
                         {
+                            c.Item().Text("MerinoOne Supplier Portal").FontSize(9).FontColor(Muted);
                             c.Item().Text("Invoice").FontSize(18).SemiBold().FontColor(Accent);
                             c.Item().Text(invoice.InvoiceNumber).FontSize(12).SemiBold();
                         });
@@ -54,7 +72,7 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
                     // ── Header facts ─────────────────────────────────────────────────────────────
                     col.Item().Row(row =>
                     {
-                        row.RelativeItem().Column(c =>
+                        row.RelativeItem(1.3f).Column(c =>
                         {
                             c.Item().Text("Supplier").FontColor(Muted).FontSize(8);
                             c.Item().Text($"{invoice.SupplierName} ({invoice.SupplierCode})").SemiBold();
@@ -76,6 +94,29 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
                             Fact(c, "e-Invoice IRN", Blank(invoice.EInvoiceIrn));
                             Fact(c, "e-Invoice Ack No", Blank(invoice.EInvoiceAckNo));
                             Fact(c, "e-Way bill", Blank(invoice.EWayBillNumber));
+                        });
+                        row.RelativeItem(1.2f).Column(c =>
+                        {
+                            c.Item().Text("Ship to").FontColor(Muted).FontSize(8);
+                            if (string.IsNullOrWhiteSpace(invoice.ShipToAddressName) && string.IsNullOrWhiteSpace(invoice.ShipToLine1))
+                            {
+                                c.Item().PaddingTop(1).Text("—");
+                            }
+                            else
+                            {
+                                if (!string.IsNullOrWhiteSpace(invoice.ShipToAddressName))
+                                    c.Item().PaddingTop(1).Text(invoice.ShipToAddressName!).SemiBold();
+                                if (!string.IsNullOrWhiteSpace(invoice.ShipToLine1))
+                                    c.Item().Text(invoice.ShipToLine1!);
+                                if (!string.IsNullOrWhiteSpace(invoice.ShipToLine2))
+                                    c.Item().Text(invoice.ShipToLine2!);
+                                var cityLine = string.Join(", ", new[] { invoice.ShipToCity, invoice.ShipToState, invoice.ShipToPincode }
+                                    .Where(s => !string.IsNullOrWhiteSpace(s)));
+                                if (!string.IsNullOrWhiteSpace(cityLine))
+                                    c.Item().Text(cityLine);
+                                if (!string.IsNullOrWhiteSpace(invoice.ShipToCountry))
+                                    c.Item().Text(invoice.ShipToCountry!);
+                            }
                         });
                     });
 
@@ -143,6 +184,18 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
                             c.Item().Text(invoice.Notes!);
                         });
                     }
+
+                    // ── Signatory block ──────────────────────────────────────────────────────────
+                    col.Item().PaddingTop(28).Row(row =>
+                    {
+                        row.RelativeItem();
+                        row.ConstantItem(200).Column(c =>
+                        {
+                            c.Item().Text($"For {invoice.SupplierName}").SemiBold();
+                            c.Item().PaddingTop(30).BorderTop(0.8f).BorderColor(RuleColor);
+                            c.Item().PaddingTop(3).AlignCenter().Text("Authorized Signatory").FontSize(8).FontColor(Muted);
+                        });
+                    });
                 });
 
                 page.Footer().Row(row =>
