@@ -36,6 +36,13 @@ public class PurchaseOrderLine : AuditableEntity
     // DISTINCT from AsnLine.ShippedQty, which is "this ASN's ship qty" — the two must never be summed together.
     public decimal ShippedQtyToDate { get; set; }
 
+    // R6 (2026-07-02) — CUMULATIVE billed quantity across all reservation-holding invoice lines for this PO
+    // line (= Σ InvoiceLine.BilledQty over invoices past Draft, excluding Rejected/Cancelled). Maintained
+    // transactionally by the invoice submit/revoke/reject atomic guard (conditional ExecuteUpdateAsync) —
+    // NEVER read-then-written. The invoiceable balance (shippedQtyToDate − invoicedQtyToDate) is DERIVED at
+    // query time and never persisted.
+    public decimal InvoicedQtyToDate { get; set; }
+
     // R4 (2026-06-30) — last-received inbound additive delta echo (signed; may be negative to reduce). The
     // AUTHORITATIVE order quantity is always OrderQty: the inbound upsert applies the delta to OrderQty (OrderQty=0
     // & AdditionalQty≠0 → OrderQty += AdditionalQty) and stores the delta here for audit/traceability only. NOT a

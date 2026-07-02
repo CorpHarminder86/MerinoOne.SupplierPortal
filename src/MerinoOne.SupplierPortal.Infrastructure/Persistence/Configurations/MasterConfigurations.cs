@@ -128,6 +128,12 @@ public class TaxConfiguration : IEntityTypeConfiguration<Tax>
         b.Property(x => x.TaxRate).HasColumnName("taxRate").HasColumnType("decimal(9,4)");
         b.Property(x => x.IsActive).HasColumnName("isActive").HasDefaultValue(true);
 
+        // R6 (2026-07-02) — admin-pinned rate wins over LN sync (sync skips taxRate while overridden);
+        // lastSyncedRate ALWAYS tracks the latest inbound value. NOT NULL DEFAULT 0 (EF-auto-named default);
+        // migration 0042 backfills lastSyncedRate = taxRate (rates to date all came from sync/seed).
+        b.Property(x => x.IsRateOverridden).HasColumnName("isRateOverridden").HasDefaultValue(false);
+        b.Property(x => x.LastSyncedRate).HasColumnName("lastSyncedRate").HasColumnType("decimal(9,4)");
+
         // Company-shared (sharing-aware), ERP-fed (Q6 FINAL) — mirrors DeliveryTerm/PaymentTerm.
         // Per-company (source) uniqueness, soft-delete-aware.
         b.HasIndex(x => new { x.TenantEntityId, x.Code })

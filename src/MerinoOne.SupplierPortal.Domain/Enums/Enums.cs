@@ -103,6 +103,13 @@ public enum InvoiceStatus
     Cancelled
 }
 
+/// <summary>
+/// R6 (2026-07-02) — invoice provenance: <c>SupplierManual</c> = entered via the manual wizard;
+/// <c>AsnGenerated</c> = auto-drafted by the grouped ASN generator at ASN approval. Persisted as the enum
+/// name (string), no DB CHECK — the C# enum is the guard. APPEND-ONLY.
+/// </summary>
+public enum InvoiceOrigin { SupplierManual, AsnGenerated }
+
 public enum NoteType { CN, DN }
 public enum NoteStatus { Draft, Submitted, Approved, Rejected }
 

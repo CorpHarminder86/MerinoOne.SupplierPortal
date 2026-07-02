@@ -18,4 +18,13 @@ public class InvoiceLine : AuditableEntity
     public decimal LineAmount { get; set; }
     public string? TaxCode { get; set; }
     public decimal TaxAmount { get; set; }
+
+    // R6 (2026-07-02) — Invoice generation from ASN. Frozen tax snapshot per line: taxRatePct is the rate
+    // resolved from proc.Tax at draft/submit time (re-resolved + frozen at submit); taxId links the governed
+    // master (FK RESTRICT — may point at an unshared source company's row, resolved via IgnoreQueryFilters);
+    // taxDescription is the display snapshot (snapshot-on-write — read never joins).
+    public decimal? TaxRatePct { get; set; }
+    public Guid? TaxId { get; set; }
+    public Tax? Tax { get; set; }
+    public string? TaxDescription { get; set; }
 }

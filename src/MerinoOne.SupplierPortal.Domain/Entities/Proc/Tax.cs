@@ -24,4 +24,10 @@ public class Tax : AuditableEntity, ICompanyScoped
     public string Description { get; set; } = string.Empty;
     public decimal? TaxRate { get; set; }
     public bool IsActive { get; set; } = true;
+
+    // R6 (2026-07-02) — admin-pinned rate wins over LN sync: when true, the inbound tax sync skips writing
+    // TaxRate (the admin's rate is pinned); LastSyncedRate ALWAYS tracks the latest inbound value regardless,
+    // so the admin can see the drift and reset the override back to the synced rate.
+    public bool IsRateOverridden { get; set; }
+    public decimal? LastSyncedRate { get; set; }
 }

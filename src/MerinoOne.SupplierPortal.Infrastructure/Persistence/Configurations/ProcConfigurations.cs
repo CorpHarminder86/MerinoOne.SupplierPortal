@@ -115,6 +115,13 @@ public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseO
         b.Property(x => x.AdditionalQty).HasColumnName("additionalQty").HasColumnType("decimal(18,4)")
             .HasDefaultValue(0m);
 
+        // R6 (2026-07-02) — CUMULATIVE billed qty across reservation-holding invoice lines for this PO line.
+        // NOT NULL DEFAULT 0 (EF-auto-named default); backfilled in migration 0042 (excludes Draft/Rejected/
+        // Cancelled invoices per the reservation-release invariant, plan D8). Maintained by the invoice
+        // submit/revoke/reject atomic guard — never read-then-written. Mirrors shippedQtyToDate.
+        b.Property(x => x.InvoicedQtyToDate).HasColumnName("invoicedQtyToDate").HasColumnType("decimal(18,4)")
+            .HasDefaultValue(0m);
+
         b.HasOne(x => x.PurchaseOrder).WithMany(p => p.Lines).HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_PurchaseOrderLine_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId)
@@ -285,6 +292,11 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.SubmittedBy).HasColumnName("submittedBy").HasMaxLength(100);
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
+        // R6 (2026-07-02) — draft-invoice generation outcome: 'Generated' / 'Blocked' / NULL (never attempted).
+        // Plain string (not enum), no DB CHECK — per spec DDL nvarchar(20)/nvarchar(500).
+        b.Property(x => x.InvoiceGenerationStatus).HasColumnName("invoiceGenerationStatus").HasMaxLength(20);
+        b.Property(x => x.InvoiceGenerationNote).HasColumnName("invoiceGenerationNote").HasMaxLength(500);
 
         // R5 (TSD R5 Addendum §4.5 / §9) — ship-to grouping key. The ASN header is grouped by
         // (supplierId, shipToAddressId) in the R5 creation flow; PurchaseOrderId is deprecated as
@@ -496,6 +508,12 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
 
+        // R6 (2026-07-02) — provenance. String-persisted enum (no DB CHECK — C# enum is the guard);
+        // NOT NULL DEFAULT 'SupplierManual' (EF-auto-named default); migration 0042 backfills
+        // 'AsnGenerated' onto existing rows with asnId set.
+        b.Property(x => x.InvoiceOrigin).HasColumnName("invoiceOrigin").HasConversion<string>()
+            .HasMaxLength(20).HasDefaultValue(InvoiceOrigin.SupplierManual);
+
         b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_Invoice_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Asn).WithMany().HasForeignKey(x => x.AsnId)
@@ -508,10 +526,10 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         b.HasIndex(x => x.InvoiceStatus).HasDatabaseName("IX_Invoice_invoiceStatus");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Invoice_tenant_company");
-        // R4 (2026-06-22) — Module 4 (Q1b): exactly one (non-deleted) invoice per ASN. Filtered so the
-        // legacy non-ASN invoices (asnId NULL) and soft-deleted rows are excluded from the uniqueness.
-        b.HasIndex(x => x.AsnId).HasDatabaseName("UQ_Invoice_asnId").IsUnique()
-            .HasFilter("[asnId] IS NOT NULL AND [isDeleted] = 0");
+        // R6 (2026-07-02, D4) — REPLACES the R4 filtered-unique UQ_Invoice_asnId (one invoice per ASN):
+        // grouped generation creates ONE draft per (currencyId, paymentTermId) group, so an ASN may now
+        // carry N invoices. Plain non-unique look-up index on the FK.
+        b.HasIndex(x => x.AsnId).HasDatabaseName("IX_Invoice_asnId");
     }
 }
 
@@ -531,12 +549,23 @@ public class InvoiceLineConfiguration : IEntityTypeConfiguration<InvoiceLine>
         b.Property(x => x.TaxCode).HasColumnName("taxCode").HasMaxLength(20);
         b.Property(x => x.TaxAmount).HasColumnName("taxAmount").HasColumnType("decimal(18,4)");
 
+        // R6 (2026-07-02) — frozen per-line tax snapshot (rate + description) + FK to the governed proc.Tax
+        // master (mirrors PurchaseOrderLine's tax block: snapshot strings stay for display when the FK points
+        // at an unshared source company's row).
+        b.Property(x => x.TaxRatePct).HasColumnName("taxRatePct").HasColumnType("decimal(9,4)");
+        b.Property(x => x.TaxId).HasColumnName("taxId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.TaxDescription).HasColumnName("taxDescription").HasMaxLength(200);
+
         b.HasOne(x => x.Invoice).WithMany(i => i.Lines).HasForeignKey(x => x.InvoiceId)
             .HasConstraintName("FK_InvoiceLine_Invoice_InvoiceId").OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)
             .HasConstraintName("FK_InvoiceLine_PurchaseOrderLine_PurchaseOrderLineId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId)
             .HasConstraintName("FK_InvoiceLine_Item_ItemId").OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.Tax).WithMany().HasForeignKey(x => x.TaxId)
+            .HasConstraintName("FK_InvoiceLine_Tax_TaxId").OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.TaxId).HasDatabaseName("IX_InvoiceLine_taxId");
     }
 }
 

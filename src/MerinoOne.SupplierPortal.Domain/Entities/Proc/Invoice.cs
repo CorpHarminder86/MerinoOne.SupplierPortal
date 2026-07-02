@@ -56,5 +56,10 @@ public class Invoice : BaseAggregateRoot
     public string? ErpSyncId { get; set; }
     public string? ErpCode { get; set; }
 
+    // R6 (2026-07-02) — provenance: SupplierManual (wizard-entered) vs AsnGenerated (auto-drafted by the
+    // grouped ASN generator). Persisted as the enum name (string), no DB CHECK — the C# enum is the guard.
+    // Backfilled in migration 0042: existing rows with asnId set become AsnGenerated.
+    public InvoiceOrigin InvoiceOrigin { get; set; } = InvoiceOrigin.SupplierManual;
+
     public ICollection<InvoiceLine> Lines { get; set; } = new List<InvoiceLine>();
 }

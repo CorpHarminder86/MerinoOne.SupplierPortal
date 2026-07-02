@@ -45,6 +45,12 @@ public class Asn : BaseAggregateRoot
     public string? ErpSyncId { get; set; }
     public string? ErpCode { get; set; }
 
+    // R6 (2026-07-02) — outcome of the draft-invoice generation attempt at ASN approval:
+    // "Generated" (drafts created) / "Blocked" (tax gap — no invoice created, note names the cause) / null
+    // (never attempted, e.g. pre-R6 ASNs). String, not enum — 2 values + null, spec-typed as NVARCHAR.
+    public string? InvoiceGenerationStatus { get; set; }
+    public string? InvoiceGenerationNote { get; set; }
+
     public ICollection<AsnLine> Lines { get; set; } = new List<AsnLine>();
 
     // R4 (2026-06-22) — Module 3 (Q1): multi-PO junction. Child of the ASN aggregate (rows carry the ASN's
