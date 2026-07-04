@@ -191,9 +191,11 @@
 .mbtn--danger { border-color: var(--mer-red, #C0392B); color: var(--mer-red, #C0392B); background: var(--mer-surface); }
 .mbtn--danger:hover:not(:disabled) { background: var(--mer-red-50, #FCEBEB); }
 
-/* #4 — in-grid row action: icon + micro-label, tight. Combine with a variant. */
-.mbtn--row { padding: 5px 9px; font-size: 12px; gap: 5px; }
-.mbtn--row .material-symbols-outlined { font-size: 14px !important; }
+/* In-grid row action: ICON-ONLY (labels de-cluttered). The text label stays in the DOM
+   at font-size:0 — invisible on screen but still read by screen readers, and every row
+   button carries a title= tooltip — so hover + a11y keep the meaning. Combine with a variant. */
+.mbtn--row { padding: 5px; gap: 0; font-size: 0; }
+.mbtn--row .material-symbols-outlined { font-size: 16px !important; }
 
 /* Icon-only (square) — label supplied via title/aria-label. */
 .mbtn--icon { padding: 6px; }
