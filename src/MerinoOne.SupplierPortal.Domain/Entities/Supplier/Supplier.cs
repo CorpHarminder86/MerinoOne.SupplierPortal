@@ -48,6 +48,10 @@ public class Supplier : BaseAggregateRoot
     public PoConfirmationMode PoConfirmationMode { get; set; } = PoConfirmationMode.AcceptToShip;
     public string? ErpCode { get; set; }
 
+    // 2026-07-05 — TSD R8: LN company code, mirroring Invoice/Asn.ErpCompany (IDM integration — a future
+    // Supplier snapshot provider would key MDS_AccountingEntity off this the same way Invoice/Asn do).
+    public string? ErpCompany { get; set; }
+
     // R4 (2026-06-26) — TSD R4 Addendum §3.4, Component 3 (PO Confirmation Gate). Per-supplier action toggles
     // that accompany the confirmation mode: whether the supplier may negotiate (propose new terms) or reject/
     // decline a PO. NOT NULL DEFAULT 1 so existing rows are safe. AllowReject gates /reject; AllowNegotiate gates
