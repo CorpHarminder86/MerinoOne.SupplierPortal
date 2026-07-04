@@ -49,6 +49,7 @@ public static class PermissionCatalog
         new PermissionSeed(Perm.PaymentRead,                 "View payments",             "Payment",        "View payments and remittance advice"),
         new PermissionSeed(Perm.CommunicationRead,           "View messages",             "Communication",  "View messages and threads"),
         new PermissionSeed(Perm.CommunicationWrite,          "Send messages",             "Communication",  "Send messages"),
+        new PermissionSeed(Perm.DocumentRead,                "View documents",            "Communication",  "View the cross-module attachment register (RLS-scoped)"),
         new PermissionSeed(Perm.UserRead,                    "View users",                "Administration", "View portal users"),
         new PermissionSeed(Perm.UserWrite,                   "Manage users",              "Administration", "Create and manage portal users"),
         new PermissionSeed(Perm.RoleRead,                    "View roles",                "Administration", "View roles and permissions"),
@@ -127,6 +128,8 @@ public static class PermissionCatalog
         [Perm.PaymentRead]                  = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer, RoleNames.Finance, RoleNames.Supplier, RoleNames.ReadOnly },
         [Perm.CommunicationRead]            = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer, RoleNames.Finance, RoleNames.Supplier, RoleNames.ReadOnly },
         [Perm.CommunicationWrite]           = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer, RoleNames.Finance, RoleNames.Supplier },
+        // Cross-module document register — all roles (RLS scopes each to its own seccode rows).
+        [Perm.DocumentRead]                 = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer, RoleNames.Finance, RoleNames.Supplier, RoleNames.ReadOnly },
         [Perm.UserRead]                     = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.UserWrite]                    = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.RoleRead]                     = new[] { RoleNames.SuperAdmin, RoleNames.Admin },

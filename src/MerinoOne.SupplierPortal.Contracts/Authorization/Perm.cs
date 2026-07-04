@@ -59,6 +59,9 @@ public static class Perm
     public const string CommunicationRead = "Communication.Read";
     public const string CommunicationWrite = "Communication.Write";
 
+    // Documents — cross-module attachment register (read-only). RLS (seccode) scopes each caller's rows.
+    public const string DocumentRead = "Document.Read";
+
     // Administration
     public const string UserRead = "User.Read";
     public const string UserWrite = "User.Write";
@@ -116,6 +119,7 @@ public static class Perm
         CreditDebitNoteRead, CreditDebitNoteWrite, CreditDebitNoteApprove,
         PaymentRead,
         CommunicationRead, CommunicationWrite,
+        DocumentRead,
         UserRead, UserWrite, RoleRead, RoleWrite, SettingsRead, SettingsWrite,
         IntegrationRead, IntegrationManage, IntegrationApiKeys,
         IntegrationIdmSyncView, IntegrationIdmSyncManage,
