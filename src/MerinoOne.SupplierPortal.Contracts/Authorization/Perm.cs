@@ -72,6 +72,11 @@ public static class Perm
     public const string IntegrationManage = "Integration.Manage";
     public const string IntegrationApiKeys = "Integration.ApiKeys";
 
+    // R8 (2026-07-04) — Infor IDM document sync. View is WIDE (all roles incl. Supplier — the sync-log screen is
+    // RLS-scoped, so each role sees only its own rows). Manage (retry / re-push / backfill) is admin-only.
+    public const string IntegrationIdmSyncView = "Integration.IdmSync.View";
+    public const string IntegrationIdmSyncManage = "Integration.IdmSync.Manage";
+
     // Integration — inbound service-to-service scopes (X-APIKey only; not granted to human roles)
     public const string IntegrationInboundErpAck = "Integration.Inbound.ErpAck";
     public const string IntegrationInboundGrn = "Integration.Inbound.Grn";
@@ -113,6 +118,7 @@ public static class Perm
         CommunicationRead, CommunicationWrite,
         UserRead, UserWrite, RoleRead, RoleWrite, SettingsRead, SettingsWrite,
         IntegrationRead, IntegrationManage, IntegrationApiKeys,
+        IntegrationIdmSyncView, IntegrationIdmSyncManage,
         IntegrationInboundErpAck, IntegrationInboundGrn, IntegrationInboundPayment,
         IntegrationInboundInvoiceStatus, IntegrationInboundPo, IntegrationInboundDeliverySchedule,
         IntegrationInboundGrnReceipt, IntegrationInboundTax,

@@ -96,6 +96,7 @@ public static class DependencyInjection
         services.AddSingleton<IEligibilityGate, JsonPathEligibilityGate>();
         services.AddSingleton<IIdmAckParser, IdmAckParser>();
         services.AddSingleton<IdmDefaultExpressions>();
+        services.AddSingleton<IIdmExpressionCatalog>(sp => sp.GetRequiredService<IdmDefaultExpressions>());
         // Per-entity snapshot assembly + registry (scoped — ctor-inject the per-scope IAppDbContext).
         services.AddScoped<IFileContentProvider, Base64FileContentProvider>();
         services.AddScoped<IEntitySnapshotProvider, InvoiceSnapshotProvider>();

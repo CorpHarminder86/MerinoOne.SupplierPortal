@@ -1,0 +1,130 @@
+using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Models;
+using MerinoOne.SupplierPortal.Application.Integration.Idm.Commands;
+using MerinoOne.SupplierPortal.Application.Integration.Idm.Queries;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
+using MerinoOne.SupplierPortal.Contracts.Integration;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace MerinoOne.SupplierPortal.Controllers;
+
+/// <summary>
+/// R8 (2026-07-04) — TSD R8 §7. Infor IDM document-sync: per-type mapping/gate config (Settings), transport
+/// endpoints + validate/test bench (Integration), and the RLS-scoped sync log with retry/re-push. All actions are
+/// portal-JWT (not X-APIKey), so they are NOT listed in the inbound IntegrationCatalog.
+/// </summary>
+[ApiController]
+[Authorize]
+[Route("api/integration/idm")]
+public class IdmIntegrationController : ControllerBase
+{
+    private readonly IMediator _mediator;
+    public IdmIntegrationController(IMediator mediator) => _mediator = mediator;
+
+    // ── Settings › Infor IDM (per-attachment-type config) ─────────────────────────────────────────────
+    [HttpGet("attachment-type-configs")]
+    [Authorize(Policy = Perm.SettingsRead)]
+    [EndpointSummary("List IDM attachment-type configs")]
+    [EndpointDescription("Per-attachment-type IDM mapping + eligibility-gate config for the tenant, with a drift flag (row expression ≠ repo default). Requires Settings.Read.")]
+    public async Task<Result<IReadOnlyList<IdmAttachmentTypeConfigDto>>> GetAttachmentTypeConfigs(CancellationToken ct)
+        => Result<IReadOnlyList<IdmAttachmentTypeConfigDto>>.Ok(await _mediator.Send(new GetIdmAttachmentTypeConfigsQuery(), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("attachment-type-configs")]
+    [Authorize(Policy = Perm.SettingsWrite)]
+    [EndpointSummary("Create/update an IDM attachment-type config")]
+    [EndpointDescription("Upserts (by id, else by tenant+attachmentType) the mapping/gate config. Validates the attachment type is active and the JSONata expressions compile. Requires Settings.Write.")]
+    public async Task<Result<Guid>> SaveAttachmentTypeConfig([FromBody] SaveIdmAttachmentTypeConfigRequest body, CancellationToken ct)
+        => Result<Guid>.Ok(await _mediator.Send(new SaveIdmAttachmentTypeConfigCommand(body), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("attachment-type-configs/{id:guid}/restore-default")]
+    [Authorize(Policy = Perm.SettingsWrite)]
+    [EndpointSummary("Restore an IDM mapping expression to the repo default")]
+    [EndpointDescription("Overwrites the row's create/mutate expressions from the source-controlled default and re-stamps the seed hash (D6). Requires Settings.Write.")]
+    public async Task<Result<bool>> RestoreDefault(Guid id, CancellationToken ct)
+        => Result<bool>.Ok(await _mediator.Send(new RestoreIdmDefaultExpressionCommand(id), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("attachment-type-configs/backfill")]
+    [Authorize(Policy = Perm.IntegrationIdmSyncManage)]
+    [EndpointSummary("Backfill DocumentUpload.idmEntityType")]
+    [EndpointDescription("Stamps idmEntityType on existing documents whose type maps to an enabled config and are not yet classified. Returns the updated count. Requires Integration.IdmSync.Manage.")]
+    public async Task<Result<int>> Backfill(CancellationToken ct)
+        => Result<int>.Ok(await _mediator.Send(new BackfillIdmEntityTypeCommand(), ct), HttpContext.TraceIdentifier);
+
+    // ── Integration › Endpoints ───────────────────────────────────────────────────────────────────────
+    [HttpGet("endpoints")]
+    [Authorize(Policy = Perm.IntegrationRead)]
+    [EndpointSummary("List IDM transport endpoints")]
+    [EndpointDescription("The tenant's IDM transport endpoint config (Create/Update/Delete). Auth + base URL are resolved from the Infor connection (D3), not stored here. Requires Integration.Read.")]
+    public async Task<Result<IReadOnlyList<OutboundEndpointConfigDto>>> GetEndpoints(CancellationToken ct)
+        => Result<IReadOnlyList<OutboundEndpointConfigDto>>.Ok(await _mediator.Send(new GetOutboundEndpointConfigsQuery(), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("endpoints")]
+    [Authorize(Policy = Perm.IntegrationManage)]
+    [EndpointSummary("Create/update an IDM transport endpoint")]
+    [EndpointDescription("Upserts (by id, else by tenant+endpointKey) an endpoint's method/relativePath/static headers/ack parser/ACL/enabled flag. Requires Integration.Manage.")]
+    public async Task<Result<Guid>> SaveEndpoint([FromBody] SaveOutboundEndpointConfigRequest body, CancellationToken ct)
+        => Result<Guid>.Ok(await _mediator.Send(new SaveOutboundEndpointConfigCommand(body), ct), HttpContext.TraceIdentifier);
+
+    [HttpDelete("endpoints/{id:guid}")]
+    [Authorize(Policy = Perm.IntegrationManage)]
+    [EndpointSummary("Delete an IDM transport endpoint")]
+    [EndpointDescription("Soft-deletes an endpoint config row. Requires Integration.Manage.")]
+    public async Task<Result<bool>> DeleteEndpoint(Guid id, CancellationToken ct)
+        => Result<bool>.Ok(await _mediator.Send(new DeleteOutboundEndpointConfigCommand(id), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("endpoints/{id:guid}/validate")]
+    [Authorize(Policy = Perm.IntegrationManage)]
+    [EndpointSummary("Validate an IDM endpoint")]
+    [EndpointDescription("Checks the tenant OAuth token and reports the resolved target URL (flags a suspicious /LN-suffixed base URL). Requires Integration.Manage.")]
+    public async Task<Result<ValidateOutboundEndpointResultDto>> ValidateEndpoint(Guid id, CancellationToken ct)
+        => Result<ValidateOutboundEndpointResultDto>.Ok(await _mediator.Send(new ValidateOutboundEndpointCommand(id), ct), HttpContext.TraceIdentifier);
+
+    [HttpGet("test-bench/documents")]
+    [Authorize(Policy = Perm.IntegrationManage)]
+    [EndpointSummary("Search documents for the IDM test bench")]
+    [EndpointDescription("RLS-scoped document search (by filename/type) for the mapping test bench. Requires Integration.Manage.")]
+    public async Task<Result<IReadOnlyList<IdmDocumentPickDto>>> SearchTestDocuments([FromQuery] string? search, CancellationToken ct)
+        => Result<IReadOnlyList<IdmDocumentPickDto>>.Ok(await _mediator.Send(new SearchIdmTestDocumentsQuery(search), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("test-bench")]
+    [Authorize(Policy = Perm.IntegrationManage)]
+    [EndpointSummary("Render the IDM envelope for a sample document")]
+    [EndpointDescription("Assembles the snapshot for a chosen document, renders the exact Create envelope (base64 elided), reports gate satisfaction, and optionally dry-run POSTs the real payload. Requires Integration.Manage.")]
+    public async Task<Result<IdmTestBenchResultDto>> TestBench([FromBody] IdmTestBenchRequest body, CancellationToken ct)
+        => Result<IdmTestBenchResultDto>.Ok(await _mediator.Send(new TestIdmEnvelopeCommand(body), ct), HttpContext.TraceIdentifier);
+
+    // ── IDM Sync Log (RLS-scoped; one screen for every role) ──────────────────────────────────────────
+    [HttpGet("sync-log")]
+    [Authorize(Policy = Perm.IntegrationIdmSyncView)]
+    [EndpointSummary("IDM document sync log")]
+    [EndpointDescription("Paged, RLS-scoped IDM document-outbox history (status/operation/type/filename/date filters). Requires Integration.IdmSync.View — each role sees only its own rows.")]
+    public async Task<Result<PagedResult<IdmSyncLogDto>>> SyncLog([FromQuery] int page = 1, [FromQuery] int pageSize = 50,
+        [FromQuery] string? status = null, [FromQuery] string? operation = null, [FromQuery] string? idmEntityType = null,
+        [FromQuery] string? fileName = null, [FromQuery] DateTime? fromDate = null, [FromQuery] DateTime? toDate = null,
+        CancellationToken ct = default)
+        => Result<PagedResult<IdmSyncLogDto>>.Ok(
+            await _mediator.Send(new GetIdmSyncLogQuery(page, pageSize, status, operation, idmEntityType, fileName, fromDate, toDate), ct),
+            HttpContext.TraceIdentifier);
+
+    [HttpGet("sync-log/{id:guid}/detail")]
+    [Authorize(Policy = Perm.IntegrationIdmSyncView)]
+    [EndpointSummary("IDM sync-log row detail")]
+    [EndpointDescription("The elided request snapshot + raw IDM (XML) response for one row, fetched on demand. Requires Integration.IdmSync.View.")]
+    public async Task<Result<IdmSyncLogDetailDto?>> SyncLogDetail(Guid id, CancellationToken ct)
+        => Result<IdmSyncLogDetailDto?>.Ok(await _mediator.Send(new GetIdmSyncLogDetailQuery(id), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("sync-log/{id:guid}/retry")]
+    [Authorize(Policy = Perm.IntegrationIdmSyncManage)]
+    [EndpointSummary("Retry a failed IDM row")]
+    [EndpointDescription("Re-arms a Failed/Unresolvable row to Pending (clears backoff + attempt count). Idempotency prevents an IDM duplicate. Requires Integration.IdmSync.Manage.")]
+    public async Task<Result<bool>> Retry(Guid id, CancellationToken ct)
+        => Result<bool>.Ok(await _mediator.Send(new RetryIdmOutboxRowCommand(id), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("sync-log/{id:guid}/repush")]
+    [Authorize(Policy = Perm.IntegrationIdmSyncManage)]
+    [EndpointSummary("Re-push a synced IDM document")]
+    [EndpointDescription("Queues a NEW Update push for a Success row's document (carrying its pid; the Create row stays terminal). Requires Integration.IdmSync.Manage.")]
+    public async Task<Result<bool>> Repush(Guid id, CancellationToken ct)
+        => Result<bool>.Ok(await _mediator.Send(new RepushIdmDocumentCommand(id), ct), HttpContext.TraceIdentifier);
+}

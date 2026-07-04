@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using MerinoOne.SupplierPortal.Application.Integration.Idm;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Idm;
 
@@ -10,7 +11,7 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Idm;
 /// seeder can idempotently write config rows and the UI can compute drift (row text hash ≠ repo default hash).
 /// Line endings are normalised before hashing so a CRLF/LF checkout difference never reads as drift.
 /// </summary>
-public sealed class IdmDefaultExpressions
+public sealed class IdmDefaultExpressions : IIdmExpressionCatalog
 {
     public sealed record Entry(string IdmEntityType, string CreateExpression, string MutateExpression, string CreateHash, string MutateHash);
 
@@ -39,6 +40,14 @@ public sealed class IdmDefaultExpressions
     public Entry? TryGet(string idmEntityType) => _byType.TryGetValue(idmEntityType, out var e) ? e : null;
 
     public IReadOnlyCollection<Entry> All => _byType.Values;
+
+    // IIdmExpressionCatalog (Application-facing view).
+    IdmExpressionDefault? IIdmExpressionCatalog.TryGet(string idmEntityType)
+        => _byType.TryGetValue(idmEntityType, out var e)
+            ? new IdmExpressionDefault(e.IdmEntityType, e.CreateExpression, e.MutateExpression, e.CreateHash, e.MutateHash)
+            : null;
+
+    string IIdmExpressionCatalog.Hash(string expression) => Hash(expression);
 
     /// <summary>Normalised SHA-256 (hex, lower-case) of an expression — line endings folded to LF + trimmed.</summary>
     public static string Hash(string text)

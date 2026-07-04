@@ -90,3 +90,19 @@ public interface IJsonataValidator
     /// <summary>Returns null when the expression compiles, else the compile error message.</summary>
     string? Validate(string expression);
 }
+
+/// <summary>The repo-embedded default mapping expression for one IDM entity type (D6).</summary>
+public sealed record IdmExpressionDefault(string IdmEntityType, string CreateExpression, string MutateExpression, string CreateHash, string MutateHash);
+
+/// <summary>
+/// Application-facing view of the repo-versioned JSONata catalogue (implemented in Infrastructure). Lets the
+/// config query compute drift (row text hash ≠ repo default hash) and the restore-default command rewrite a row
+/// from the repo — without an Application→Infrastructure reference.
+/// </summary>
+public interface IIdmExpressionCatalog
+{
+    IdmExpressionDefault? TryGet(string idmEntityType);
+
+    /// <summary>Normalised SHA-256 (line endings folded) of an expression — MUST match the seeder's hashing.</summary>
+    string Hash(string expression);
+}

@@ -58,6 +58,9 @@ public static class PermissionCatalog
         new PermissionSeed(Perm.IntegrationRead,             "View integration",          "Integration",    "View Infor endpoints, sync log and errors"),
         new PermissionSeed(Perm.IntegrationManage,           "Manage integration",        "Integration",    "Retry integration errors, manage endpoint mapping"),
         new PermissionSeed(Perm.IntegrationApiKeys,          "Manage API keys",           "Integration",    "Generate, rotate and revoke inbound X-APIKey credentials"),
+        // R8 (2026-07-04) — Infor IDM document sync monitoring + operations.
+        new PermissionSeed(Perm.IntegrationIdmSyncView,      "View IDM document sync",    "Integration",    "View the Infor IDM document sync log (RLS-scoped per role)"),
+        new PermissionSeed(Perm.IntegrationIdmSyncManage,    "Manage IDM document sync",  "Integration",    "Retry, re-push and backfill Infor IDM document sync"),
         // R4 cross-cutting — service-to-service inbound scopes (X-APIKey). NOT granted to any human role; bound to
         // API keys via their scope list. Seeded here so the catalogue is complete and the inbound endpoint-gate resolves.
         new PermissionSeed(Perm.IntegrationInboundErpAck,       "Inbound: ERP ack",          "Integration", "Inbound /erp-ack: ERP acknowledges a Portal->ERP transaction (writes back erpCode)"),
@@ -133,6 +136,9 @@ public static class PermissionCatalog
         [Perm.IntegrationRead]              = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.IntegrationManage]            = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.IntegrationApiKeys]           = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
+        // R8 — View is wide (RLS scopes each role's rows); Manage is admin-only.
+        [Perm.IntegrationIdmSyncView]       = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer, RoleNames.Finance, RoleNames.Supplier, RoleNames.ReadOnly },
+        [Perm.IntegrationIdmSyncManage]     = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         // Platform-tier perms granted ONLY to PlatformAdmin. PlatformAdmin appears in NO other row —
         // it holds zero business-data permissions (separation of duties).
         [Perm.PlatformTenants]              = new[] { RoleNames.PlatformAdmin },
