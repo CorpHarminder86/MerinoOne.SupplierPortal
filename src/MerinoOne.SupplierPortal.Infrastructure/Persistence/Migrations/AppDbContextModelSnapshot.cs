@@ -2394,6 +2394,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(1000)")
                         .HasColumnName("fileUrl");
 
+                    b.Property<string>("IdmEntityType")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("idmEntityType");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -2415,6 +2420,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("ownerEntityType");
+
+                    b.Property<string>("Pid")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("pid");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -2881,6 +2891,290 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasFilter("[isDeleted] = 0");
 
                     b.ToTable("CompanyShareGroupMember", "integration");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.IdmAttachmentTypeConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("idmAttachmentTypeConfigId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("AttachmentType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("attachmentType");
+
+                    b.Property<string>("CreateMappingExpression")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("createMappingExpression");
+
+                    b.Property<string>("CreateMappingSeedHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("createMappingSeedHash");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<string>("EligibilityGateJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("eligibilityGateJson");
+
+                    b.Property<string>("IdmEntityType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("idmEntityType");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<bool>("IsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isEnabled");
+
+                    b.Property<string>("MutateMappingExpression")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("mutateMappingExpression");
+
+                    b.Property<string>("MutateMappingSeedHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("mutateMappingSeedHash");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("idmAttachmentTypeConfigSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_IdmAttachmentTypeConfig");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_IdmAttachmentTypeConfig_idmAttachmentTypeConfigSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId", "AttachmentType")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_IdmAttachmentTypeConfig_tenant_attachmentType")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.ToTable("IdmAttachmentTypeConfig", "integration");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.IdmDocumentOutbox", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("idmDocumentOutboxId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<int>("AttemptCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("attemptCount");
+
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("correlationId");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<Guid>("DocumentUploadId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("documentUploadId");
+
+                    b.Property<string>("ExternalId")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("externalId");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("fileName");
+
+                    b.Property<string>("IdmEntityType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("idmEntityType");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("lastError");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("nextAttemptAt");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)")
+                        .HasColumnName("operation");
+
+                    b.Property<Guid>("OwnerEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("ownerEntityId");
+
+                    b.Property<string>("RequestSnapshotJson")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("requestSnapshotJson");
+
+                    b.Property<string>("ResponseJson")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("responseJson");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion")
+                        .HasColumnName("rowVersion");
+
+                    b.Property<Guid>("SeccodeId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("seccodeId");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("idmDocumentOutboxSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(14)
+                        .HasColumnType("nvarchar(14)")
+                        .HasDefaultValue("Blocked")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_IdmDocumentOutbox");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("CorrelationId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_IdmDocumentOutbox_correlationId");
+
+                    b.HasIndex("SeccodeId");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_IdmDocumentOutbox_idmDocumentOutboxSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("DocumentUploadId", "Seq")
+                        .HasDatabaseName("IX_IdmDocumentOutbox_documentUploadId_seq");
+
+                    b.HasIndex("Status", "NextAttemptAt")
+                        .HasDatabaseName("IX_IdmDocumentOutbox_status_nextAttemptAt");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Status", "NextAttemptAt"), new[] { "DocumentUploadId", "Seq" });
+
+                    b.ToTable("IdmDocumentOutbox", "integration", t =>
+                        {
+                            t.HasCheckConstraint("CK_IdmDocumentOutbox_operation", "[operation] IN ('Create','Update','Delete')");
+
+                            t.HasCheckConstraint("CK_IdmDocumentOutbox_status", "[status] IN ('Blocked','Pending','InFlight','Success','Failed','Unresolvable')");
+                        });
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.InforConnectionSetting", b =>
@@ -3371,6 +3665,127 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.HasIndex("SyncLogId");
 
                     b.ToTable("IntegrationError", "integration");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.OutboundEndpointConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("outboundEndpointConfigId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("AckParserKey")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)")
+                        .HasColumnName("ackParserKey");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DefaultAcl")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)")
+                        .HasColumnName("defaultAcl");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<string>("EndpointKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("endpointKey");
+
+                    b.Property<string>("HttpMethod")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)")
+                        .HasColumnName("httpMethod");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<bool>("IsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isEnabled");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("relativePath");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("outboundEndpointConfigSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<string>("StaticHeadersJson")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("staticHeadersJson");
+
+                    b.Property<string>("TargetSystem")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("targetSystem");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_OutboundEndpointConfig");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_OutboundEndpointConfig_outboundEndpointConfigSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId", "EndpointKey")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_OutboundEndpointConfig_tenant_endpointKey")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.ToTable("OutboundEndpointConfig", "integration", t =>
+                        {
+                            t.HasCheckConstraint("CK_OutboundEndpointConfig_httpMethod", "[httpMethod] IN ('POST','PUT','DELETE')");
+                        });
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.OutboxMessage", b =>
@@ -4599,10 +5014,25 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("erpCode");
 
+                    b.Property<string>("ErpCompany")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("erpCompany");
+
+                    b.Property<string>("ErpDocumentNo")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("erpDocumentNo");
+
                     b.Property<string>("ErpSyncId")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("erpSyncId");
+
+                    b.Property<string>("ErpTransactionType")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("erpTransactionType");
 
                     b.Property<DateTime>("ExpectedDeliveryDate")
                         .HasColumnType("datetime2")
@@ -5814,6 +6244,16 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("erpCode");
 
+                    b.Property<string>("ErpCompany")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("erpCompany");
+
+                    b.Property<string>("ErpDocumentNo")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("erpDocumentNo");
+
                     b.Property<DateTime?>("ErpPostInitiatedAt")
                         .HasColumnType("datetime2")
                         .HasColumnName("erpPostInitiatedAt");
@@ -5826,6 +6266,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("erpSyncId");
+
+                    b.Property<string>("ErpTransactionType")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("erpTransactionType");
 
                     b.Property<string>("GrnReference")
                         .HasMaxLength(50)
@@ -8891,6 +9336,27 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Navigation("CompanyShareGroup");
 
                     b.Navigation("MemberTenantEntity");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.IdmDocumentOutbox", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Doc.DocumentUpload", "DocumentUpload")
+                        .WithMany()
+                        .HasForeignKey("DocumentUploadId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_IdmDocumentOutbox_DocumentUpload_DocumentUploadId");
+
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Admin.Seccode", "Owner")
+                        .WithMany()
+                        .HasForeignKey("SeccodeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_IdmDocumentOutbox_Seccode_SeccodeId");
+
+                    b.Navigation("DocumentUpload");
+
+                    b.Navigation("Owner");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.IntegrationError", b =>

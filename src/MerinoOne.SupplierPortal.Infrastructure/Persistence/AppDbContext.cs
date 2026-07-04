@@ -129,6 +129,11 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<InforConnectionSetting> InforConnectionSettings => Set<InforConnectionSetting>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
+    // R8 (2026-07-04) — TSD R8 outbound document sync to Infor IDM.
+    public DbSet<OutboundEndpointConfig> OutboundEndpointConfigs => Set<OutboundEndpointConfig>();
+    public DbSet<IdmAttachmentTypeConfig> IdmAttachmentTypeConfigs => Set<IdmAttachmentTypeConfig>();
+    public DbSet<IdmDocumentOutbox> IdmDocumentOutboxes => Set<IdmDocumentOutbox>();
+
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();

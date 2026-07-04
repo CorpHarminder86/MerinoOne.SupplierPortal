@@ -45,6 +45,13 @@ public class Asn : BaseAggregateRoot
     public string? ErpSyncId { get; set; }
     public string? ErpCode { get; set; }
 
+    // R8 (2026-07-04) — TSD R8 §3.2 / D2. LN ERP composite key, written by the extended /inbound/erp-ack.
+    // Feeds the ASN IDM eligibility gate symmetrically with Invoice; changing any on an already-synced ASN
+    // auto-enqueues an IDM Update for its attachments.
+    public string? ErpCompany { get; set; }
+    public string? ErpTransactionType { get; set; }
+    public string? ErpDocumentNo { get; set; }
+
     // R6 (2026-07-02) — outcome of the draft-invoice generation attempt at ASN approval:
     // "Generated" (drafts created) / "Blocked" (tax gap — no invoice created, note names the cause) / null
     // (never attempted, e.g. pre-R6 ASNs). String, not enum — 2 values + null, spec-typed as NVARCHAR.

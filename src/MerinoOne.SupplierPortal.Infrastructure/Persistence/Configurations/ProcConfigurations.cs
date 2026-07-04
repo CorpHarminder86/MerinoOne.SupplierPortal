@@ -293,6 +293,11 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
 
+        // R8 (2026-07-04) — TSD R8 §3.2 / D2: LN ERP composite key (IDM eligibility gate). Written by /inbound/erp-ack.
+        b.Property(x => x.ErpCompany).HasColumnName("erpCompany").HasMaxLength(20);
+        b.Property(x => x.ErpTransactionType).HasColumnName("erpTransactionType").HasMaxLength(20);
+        b.Property(x => x.ErpDocumentNo).HasColumnName("erpDocumentNo").HasMaxLength(40);
+
         // R6 (2026-07-02) — draft-invoice generation outcome: 'Generated' / 'Blocked' / NULL (never attempted).
         // Plain string (not enum), no DB CHECK — per spec DDL nvarchar(20)/nvarchar(500).
         b.Property(x => x.InvoiceGenerationStatus).HasColumnName("invoiceGenerationStatus").HasMaxLength(20);
@@ -507,6 +512,11 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         b.Property(x => x.ErpPostedAt).HasColumnName("erpPostedAt").HasColumnType("datetime2");
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+
+        // R8 (2026-07-04) — TSD R8 §3.2: LN ERP composite key (IDM eligibility gate). Written by /inbound/erp-ack.
+        b.Property(x => x.ErpCompany).HasColumnName("erpCompany").HasMaxLength(20);
+        b.Property(x => x.ErpTransactionType).HasColumnName("erpTransactionType").HasMaxLength(20);
+        b.Property(x => x.ErpDocumentNo).HasColumnName("erpDocumentNo").HasMaxLength(40);
 
         // R6 (2026-07-02) — provenance. String-persisted enum (no DB CHECK — C# enum is the guard);
         // NOT NULL DEFAULT 'SupplierManual' (EF-auto-named default); migration 0042 backfills

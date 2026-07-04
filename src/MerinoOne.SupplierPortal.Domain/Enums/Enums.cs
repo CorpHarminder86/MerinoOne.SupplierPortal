@@ -202,6 +202,18 @@ public enum OutboxStatus { Pending, Dispatched, Acked, Failed, Sending }
 public enum SyncDirection { Inbound, Outbound, Bidirectional }
 public enum SyncStatus { Pending, Success, Failed, Retrying, Reconciled }
 
+// R8 (2026-07-04) — IDM document outbox (TSD R8). Persisted as the enum NAME (string) with a matching
+// DB CHECK constraint. Operation = the IDM item mutation; Status = the per-document-partition dispatch state.
+public enum IdmOutboxOperation { Create, Update, Delete }
+
+/// <summary>
+/// R8 — IDM document outbox row state (per-<c>documentUploadId</c> FIFO partition):
+/// <c>Blocked</c> (gate unsatisfied) → <c>Pending</c> (eligible) → <c>InFlight</c> (claimed) → <c>Success</c>;
+/// transient failure returns to <c>Pending</c> with backoff, exhausted/validation failure → <c>Failed</c>;
+/// a terminal parent condition moves a still-<c>Blocked</c> row to <c>Unresolvable</c>.
+/// </summary>
+public enum IdmOutboxStatus { Blocked, Pending, InFlight, Success, Failed, Unresolvable }
+
 /// <summary>
 /// Master-data endpoints that participate in company-wise table sharing. Persisted as a
 /// string (enum name) so the value is stable across reordering. APPEND-ONLY.

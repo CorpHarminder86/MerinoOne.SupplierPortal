@@ -104,6 +104,11 @@ public interface IAppDbContext
     DbSet<InforConnectionSetting> InforConnectionSettings { get; }
     DbSet<OutboxMessage> OutboxMessages { get; }
 
+    // R8 (2026-07-04) — TSD R8 outbound document sync to Infor IDM.
+    DbSet<OutboundEndpointConfig> OutboundEndpointConfigs { get; }
+    DbSet<IdmAttachmentTypeConfig> IdmAttachmentTypeConfigs { get; }
+    DbSet<IdmDocumentOutbox> IdmDocumentOutboxes { get; }
+
     DbSet<AuditEntry> AuditEntries { get; }
 
     DbSet<SystemSetting> SystemSettings { get; }

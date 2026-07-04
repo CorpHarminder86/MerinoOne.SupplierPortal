@@ -56,6 +56,14 @@ public class Invoice : BaseAggregateRoot
     public string? ErpSyncId { get; set; }
     public string? ErpCode { get; set; }
 
+    // R8 (2026-07-04) — TSD R8 §3.2. LN ERP composite key, written by the extended /inbound/erp-ack payload.
+    // These three feed the Invoice IDM eligibility gate (D-R8-17): an invoice attachment is dispatchable to
+    // IDM only once all three are non-null. Distinct from the single erpCode handle above (which is the LN
+    // document number only). Changing any of them on an already-synced invoice auto-enqueues an IDM Update.
+    public string? ErpCompany { get; set; }
+    public string? ErpTransactionType { get; set; }
+    public string? ErpDocumentNo { get; set; }
+
     // R6 (2026-07-02) — provenance: SupplierManual (wizard-entered) vs AsnGenerated (auto-drafted by the
     // grouped ASN generator). Persisted as the enum name (string), no DB CHECK — the C# enum is the guard.
     // Backfilled in migration 0042: existing rows with asnId set become AsnGenerated.

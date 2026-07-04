@@ -27,4 +27,12 @@ public class DocumentUpload : BaseAggregateRoot
     public decimal? AiValidationConfidence { get; set; }
     public string? AiValidationPayload { get; set; }
     public DateTime? AiValidatedAt { get; set; }
+
+    // R8 (2026-07-04) — TSD R8 §3.2 / D-R8-15. IDM outbound sync discriminator + durable handle.
+    // IdmEntityType selects the per-type config (also emitted as the MDS_EntityType payload value); it is
+    // backfillable and stamped by the outbox seeding scan from the documentType→config mapping. Pid is the
+    // IDM item id returned on the first successful Create — NULL until then, and the mutation handle for
+    // subsequent Update/Delete.
+    public string? IdmEntityType { get; set; }
+    public string? Pid { get; set; }
 }
