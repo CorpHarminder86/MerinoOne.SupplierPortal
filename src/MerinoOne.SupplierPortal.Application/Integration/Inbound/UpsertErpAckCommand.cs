@@ -1,8 +1,11 @@
 using FluentValidation;
 using MediatR;
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Integration.Idm;
 using MerinoOne.SupplierPortal.Contracts.Integration;
+using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -50,16 +53,24 @@ public class UpsertErpAckCommandValidator : AbstractValidator<UpsertErpAckComman
             // On success the ERP must return the code to write back.
             a.RuleFor(r => r.ErpCode).NotEmpty().When(r => r.Success)
                 .WithMessage("erpCode is required on a successful ack (it is the value written back to the record).");
+            // R8 — optional ERP composite key (Invoice/ASN); bounded to the proc.Invoice/proc.Asn column widths.
+            a.RuleFor(r => r.ErpCompany).MaximumLength(20);
+            a.RuleFor(r => r.ErpTransactionType).MaximumLength(20);
+            a.RuleFor(r => r.ErpDocumentNo).MaximumLength(40);
         });
     }
 }
 
-public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IRequestHandler<UpsertErpAckCommand, UpsertResultDto>
+public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec, IIdmOutboxEnqueuer idmEnqueuer)
+    : IRequestHandler<UpsertErpAckCommand, UpsertResultDto>
 {
     public Task<UpsertResultDto> Handle(UpsertErpAckCommand request, CancellationToken ct)
     {
         var recs = request.Body.Acks;
-        var canonical = recs.Select(r => $"{r.TransactionType.Trim()}|{r.PortalRef.Trim()}|{r.Success}|{(r.ErpCode ?? "").Trim()}");
+        // R8 — include the ERP composite key in the idempotency canonical so a re-ack that changes ONLY the
+        // composite (same portalRef/erpCode) is not deduped away as an identical replay.
+        var canonical = recs.Select(r => $"{r.TransactionType.Trim()}|{r.PortalRef.Trim()}|{r.Success}|" +
+            $"{(r.ErpCode ?? "").Trim()}|{(r.ErpCompany ?? "").Trim()}|{(r.ErpTransactionType ?? "").Trim()}|{(r.ErpDocumentNo ?? "").Trim()}");
         var codes = recs.Select(r => r.PortalRef.Trim());
 
         return exec.ExecuteAsync(TransactionalInboundEntity.ErpAck, request.IdempotencyKey,
@@ -96,9 +107,15 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
                     continue;
                 }
 
-                // Idempotent re-ack: an already-Acked row is a no-op.
+                // Idempotent re-ack: an already-Acked row is a no-op for the outbox/erpCode. R8 exception —
+                // LN may re-send a corrected ERP composite key on an already-posted Invoice/ASN; re-stamp those
+                // three fields and, when they actually change, enqueue IDM Update ops for already-synced
+                // attachments (D4b). The outbox row itself stays Acked → still reported as Skipped.
                 if (row.Status == OutboxStatus.Acked)
                 {
+                    if (rec.Success)
+                        await RestampCompositeOnAckedAsync(db, tenantId, request.BoundCompanyIds,
+                            row.TransactionType, row.EntityId, rec, now, token);
                     results.Add(new RowResult(portalRef, RowOutcome.Skipped, null));
                     continue;
                 }
@@ -120,7 +137,7 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
                 // Write the returned ERP code to the matching record. The mapping is by the outbox row's
                 // (TransactionType, EntityId). A record that no longer exists ⇒ failure, no Acked flip. Review S3/S4:
                 // the lookup is tenant-scoped and the target's company is required in the key's bound set.
-                var stamped = await StampErpCodeAsync(db, tenantId, request.BoundCompanyIds, row.TransactionType, row.EntityId, erpCode, now, token);
+                var stamped = await StampErpCodeAsync(db, tenantId, request.BoundCompanyIds, row.TransactionType, row.EntityId, erpCode, rec, now, token);
                 if (!stamped.ok)
                 {
                     results.Add(new RowResult(portalRef, RowOutcome.Failed, stamped.error));
@@ -148,28 +165,14 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
     /// <para>Review S3 — the resolved target's company (<c>TenantEntityId</c>) must be in the key's
     /// <paramref name="boundCompanyIds"/>; a company the key is not bound to fails the row.</para>
     /// </summary>
-    private static async Task<(bool ok, string? error)> StampErpCodeAsync(
+    private async Task<(bool ok, string? error)> StampErpCodeAsync(
         IAppDbContext db, Guid tenantId, IReadOnlySet<Guid> boundCompanyIds,
-        string transactionType, Guid? entityId, string erpCode, DateTime now, CancellationToken ct)
+        string transactionType, Guid? entityId, string erpCode, ErpAckRecord rec, DateTime now, CancellationToken ct)
     {
         if (entityId is null)
             return (false, $"Outbox row for '{transactionType}' has no entityId to stamp.");
 
         var id = entityId.Value;
-
-        // Review S3 — the ack may only touch a record whose company is in the key's bound set. A company-scoped
-        // record (TenantEntityId set) MUST be bound.
-        //
-        // Review D4 — a TRANSACTIONAL target (Invoice/Asn/PurchaseOrder/GoodsReceipt/Payment) MUST carry a company:
-        // a null TenantEntityId on such a target is treated as a FAILED row, not silently always-bound (which would
-        // bypass the company gate entirely). Tenant-level MASTERS (Supplier, SupplierChangeRequest) are legitimately
-        // tenant-wide with no company and keep passing on a null company (governed by the tenant scope, S4, alone).
-        static bool CompanyBound(IReadOnlySet<Guid> bound, Guid? companyId, bool transactional)
-        {
-            if (companyId is not Guid c)
-                return !transactional;   // null company: ok for masters, FAIL for transactional targets (D4).
-            return bound is { Count: > 0 } && bound.Contains(c);
-        }
 
         switch (transactionType)
         {
@@ -193,6 +196,8 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
                 if (!CompanyBound(boundCompanyIds, e.TenantEntityId, transactional: true))
                     return (false, $"Asn {id} company is missing or not in the API key's bound set (review S3/D4 — no write).");
                 e.ErpCode = erpCode; e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
+                // R8 — stamp the ERP composite key (IDM gate) + enqueue IDM Update ops on change (D2/D4b).
+                await StampAsnCompositeAsync(db, tenantId, e, rec, now, ct);
                 return (true, null);
             }
             case OutboxTransactionType.InvoicePost:
@@ -207,6 +212,8 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
                 // S2 — the erp-ack for an InvoicePost is also a "post genuinely landed" signal; promote
                 // initiated→posted if the dispatcher has not already done so (idempotent).
                 e.ErpPostedAt ??= now;
+                // R8 — stamp the ERP composite key (IDM gate) + enqueue IDM Update ops on change (D1/D4b).
+                await StampInvoiceCompositeAsync(db, tenantId, e, rec, now, ct);
                 return (true, null);
             }
             case OutboxTransactionType.PoAcknowledge:
@@ -259,5 +266,65 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec) : IReq
             default:
                 return (false, $"No erp-ack stamp route for transactionType '{transactionType}'.");
         }
+    }
+
+    // Review S3/D4 — the ack may only touch a record whose company is in the key's bound set. A transactional
+    // target with a null company is a corrupt row (fail); tenant-level masters legitimately carry no company.
+    private static bool CompanyBound(IReadOnlySet<Guid> bound, Guid? companyId, bool transactional)
+    {
+        if (companyId is not Guid c)
+            return !transactional;
+        return bound is { Count: > 0 } && bound.Contains(c);
+    }
+
+    // R8 — re-stamp the ERP composite key on an ALREADY-Acked Invoice/ASN (LN correction re-ack). Loads the
+    // target within-tenant + company-bound (defence-in-depth) then delegates to the per-type composite stamp.
+    private async Task RestampCompositeOnAckedAsync(IAppDbContext db, Guid tenantId, IReadOnlySet<Guid> boundCompanyIds,
+        string transactionType, Guid? entityId, ErpAckRecord rec, DateTime now, CancellationToken ct)
+    {
+        if (entityId is not Guid id) return;
+        switch (transactionType)
+        {
+            case OutboxTransactionType.InvoicePost:
+            {
+                var e = await db.Invoices.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId && !x.IsDeleted, ct);
+                if (e is null || !CompanyBound(boundCompanyIds, e.TenantEntityId, transactional: true)) return;
+                await StampInvoiceCompositeAsync(db, tenantId, e, rec, now, ct);
+                break;
+            }
+            case OutboxTransactionType.AsnPost:
+            {
+                var e = await db.Asns.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId && !x.IsDeleted, ct);
+                if (e is null || !CompanyBound(boundCompanyIds, e.TenantEntityId, transactional: true)) return;
+                await StampAsnCompositeAsync(db, tenantId, e, rec, now, ct);
+                break;
+            }
+        }
+    }
+
+    // Set the three IDM-gate fields from the ack (only when supplied — a legacy ack without them never wipes an
+    // existing value); when any actually CHANGES, enqueue IDM Update ops for the owner's already-synced attachments.
+    private async Task StampInvoiceCompositeAsync(IAppDbContext db, Guid tenantId, Invoice e, ErpAckRecord rec, DateTime now, CancellationToken ct)
+    {
+        var before = (e.ErpCompany, e.ErpTransactionType, e.ErpDocumentNo);
+        if (!string.IsNullOrWhiteSpace(rec.ErpCompany)) e.ErpCompany = rec.ErpCompany!.Trim();
+        if (!string.IsNullOrWhiteSpace(rec.ErpTransactionType)) e.ErpTransactionType = rec.ErpTransactionType!.Trim();
+        if (!string.IsNullOrWhiteSpace(rec.ErpDocumentNo)) e.ErpDocumentNo = rec.ErpDocumentNo!.Trim();
+        if (before == (e.ErpCompany, e.ErpTransactionType, e.ErpDocumentNo)) return;
+        e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
+        await idmEnqueuer.EnqueueOwnerUpdatesAsync(db, tenantId, DocumentOwnerTypes.Invoice, e.Id, "infor:inbound", ct);
+    }
+
+    private async Task StampAsnCompositeAsync(IAppDbContext db, Guid tenantId, Asn e, ErpAckRecord rec, DateTime now, CancellationToken ct)
+    {
+        var before = (e.ErpCompany, e.ErpTransactionType, e.ErpDocumentNo);
+        if (!string.IsNullOrWhiteSpace(rec.ErpCompany)) e.ErpCompany = rec.ErpCompany!.Trim();
+        if (!string.IsNullOrWhiteSpace(rec.ErpTransactionType)) e.ErpTransactionType = rec.ErpTransactionType!.Trim();
+        if (!string.IsNullOrWhiteSpace(rec.ErpDocumentNo)) e.ErpDocumentNo = rec.ErpDocumentNo!.Trim();
+        if (before == (e.ErpCompany, e.ErpTransactionType, e.ErpDocumentNo)) return;
+        e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
+        await idmEnqueuer.EnqueueOwnerUpdatesAsync(db, tenantId, DocumentOwnerTypes.Asn, e.Id, "infor:inbound", ct);
     }
 }

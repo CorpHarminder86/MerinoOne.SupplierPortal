@@ -95,7 +95,13 @@ public record ErpAckRecord(
     string PortalRef,
     bool Success,
     string? ErpCode = null,
-    string? Message = null);
+    string? Message = null,
+    // R8 (2026-07-04) — TSD R8 §3.2 / D1+D2. LN returns the ERP composite key on Invoice/ASN acks; written to
+    // proc.Invoice / proc.Asn to feed the IDM eligibility gate. Optional + trailing = non-breaking for existing
+    // callers. Changing any on an already-synced owner auto-enqueues IDM Update ops (D4b).
+    string? ErpCompany = null,
+    string? ErpTransactionType = null,
+    string? ErpDocumentNo = null);
 
 /// <summary>Inbound ERP-ack push body (batch of one or more acks).</summary>
 public record PushErpAckRequest(

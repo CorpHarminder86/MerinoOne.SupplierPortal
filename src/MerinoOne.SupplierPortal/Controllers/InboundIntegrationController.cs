@@ -207,8 +207,8 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / non-advanceable status /
     [EndpointDescription(@"The ERP acknowledges a Portal->ERP transaction and (on success) returns the entity's ERP code, written back to the matching record. Tenant-scoped (no CompanyCode).
 Auth: X-APIKey scheme; key must carry `Integration.Inbound.ErpAck`.
 Body:
-- **Acks**: 1..1000 records { transactionType, portalRef (the deterministic outbox correlation id), success, erpCode (required on success), message? }.
-Behaviour: on success resolves portalRef to exactly one outbox row of transactionType, writes erpCode (Supplier->SupCode, Asn->ASNNo, Invoice/Payment/change-line, etc.) and flips the row to Acked. Idempotent on re-ack; transactionType mismatch or missing row -> IntegrationError, no write (risk R17). 200 + UpsertResultDto; 400 validation; 403 disabled endpoint; 401 invalid key.")]
+- **Acks**: 1..1000 records { transactionType, portalRef (the deterministic outbox correlation id), success, erpCode (required on success), message?, erpCompany?, erpTransactionType?, erpDocumentNo? }.
+Behaviour: on success resolves portalRef to exactly one outbox row of transactionType, writes erpCode (Supplier->SupCode, Asn->ASNNo, Invoice/Payment/change-line, etc.) and flips the row to Acked. Idempotent on re-ack; transactionType mismatch or missing row -> IntegrationError, no write (risk R17). R8: on InvoicePost/AsnPost the optional erpCompany/erpTransactionType/erpDocumentNo are written to the Invoice/ASN (the Infor IDM eligibility gate); changing any on an already-synced owner enqueues an IDM document Update. A corrected composite may be re-sent on an already-Acked row (re-stamped, outbox stays Acked). 200 + UpsertResultDto; 400 validation; 403 disabled endpoint; 401 invalid key.")]
     public async Task<Result<UpsertResultDto>> ErpAck([FromBody] PushErpAckRequest body, CancellationToken ct)
         // Review S3 — pass the key's bound companies (anti-spoof), as the other three transactional endpoints do:
         // an ack may only stamp/erp-code a record whose company is in the key's bound set.

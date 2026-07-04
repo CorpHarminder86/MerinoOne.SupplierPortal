@@ -87,8 +87,8 @@ public static class IntegrationCatalog
             "Advance invoice status (Matched/MatchExceptions/Approved/Rejected/PartiallyPaid/Paid). Never regresses a portal-owned state (Draft/Submitted/Cancelled) nor advances a Rejected invoice (terminal - reservation already released). Advancing to Rejected releases the reservation.",
             Json(new { companyCode = "3000", invoices = new[] { new { invoiceStatus = "Paid", invoiceNumber = "INV-0001", erpCode = (string?)null } } })),
         new IntegrationEndpointDocDto("ERP ack", "Integration.Inbound.ErpAck", "POST", $"{Base}/erp-ack", false,
-            "ERP acknowledgement + erpCode write-back for a Portal->ERP transaction (tenant-scoped; resolves portalRef -> outbox row).",
-            Json(new { acks = new[] { new { transactionType = "AsnPost", portalRef = "<deterministic-outbox-key>", success = true, erpCode = "ASN-LN-0001", message = (string?)null } } })),
+            "ERP acknowledgement + erpCode write-back for a Portal->ERP transaction (tenant-scoped; resolves portalRef -> outbox row). R8: InvoicePost/AsnPost acks may carry the ERP composite key (erpCompany/erpTransactionType/erpDocumentNo) written to the Invoice/ASN for the Infor IDM eligibility gate.",
+            Json(new { acks = new[] { new { transactionType = "AsnPost", portalRef = "<deterministic-outbox-key>", success = true, erpCode = "ASN-LN-0001", message = (string?)null, erpCompany = "1100", erpTransactionType = "1DS", erpDocumentNo = "100000001" } } })),
 
         // ── Transactional document ingestion (R4 2026-06-23) — create/upsert the live PO / delivery schedule / GRN ──
         new IntegrationEndpointDocDto("Purchase orders", "Integration.Inbound.Po", "POST", $"{Base}/purchase-orders", true,

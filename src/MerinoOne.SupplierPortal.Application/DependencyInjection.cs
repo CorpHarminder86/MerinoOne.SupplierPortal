@@ -75,6 +75,10 @@ public static class DependencyInjection
         // RBAC — shared resolve/validate + collision-free diff writer for role↔permission rows, used by
         // CreateRole and AssignPermissions so the rules live in exactly one place. Scoped (per-request IAppDbContext).
         services.AddScoped<Roles.Common.RolePermissionWriter>();
+
+        // R8 (2026-07-04) — TSD R8. Shared IDM Update-enqueue helper: consumed by the erp-ack gate-field-change
+        // trigger (D4b) and the sync-log Re-push command (D4a). Stateless — register as a plain scoped service.
+        services.AddScoped<Integration.Idm.IIdmOutboxEnqueuer, Integration.Idm.IdmOutboxEnqueuer>();
         return services;
     }
 }
