@@ -17,8 +17,9 @@ public class GetIdmAttachmentTypeConfigsQueryHandler : IRequestHandler<GetIdmAtt
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly IIdmExpressionCatalog _catalog;
-    public GetIdmAttachmentTypeConfigsQueryHandler(IAppDbContext db, ICurrentUser user, IIdmExpressionCatalog catalog)
-    { _db = db; _user = user; _catalog = catalog; }
+    private readonly ISnapshotProviderRegistry _providers;
+    public GetIdmAttachmentTypeConfigsQueryHandler(IAppDbContext db, ICurrentUser user, IIdmExpressionCatalog catalog, ISnapshotProviderRegistry providers)
+    { _db = db; _user = user; _catalog = catalog; _providers = providers; }
 
     public async Task<IReadOnlyList<IdmAttachmentTypeConfigDto>> Handle(GetIdmAttachmentTypeConfigsQuery request, CancellationToken ct)
     {
@@ -33,7 +34,9 @@ public class GetIdmAttachmentTypeConfigsQueryHandler : IRequestHandler<GetIdmAtt
             var repo = _catalog.TryGet(c.IdmEntityType);
             var drifted = repo is not null && _catalog.Hash(c.CreateMappingExpression) != repo.CreateHash;
             return new IdmAttachmentTypeConfigDto(
-                c.Id, c.AttachmentType, c.IdmEntityType, ParsePaths(c.EligibilityGateJson),
+                c.Id, c.AttachmentType, c.IdmEntityType,
+                _providers.TryGet(c.IdmEntityType)?.OwnerEntityType,   // the PORTAL entity this mapping serves
+                ParsePaths(c.EligibilityGateJson),
                 c.CreateMappingExpression, c.MutateMappingExpression, c.IsEnabled, drifted, repo is not null);
         }).ToList();
     }
@@ -42,6 +45,65 @@ public class GetIdmAttachmentTypeConfigsQueryHandler : IRequestHandler<GetIdmAtt
     {
         try { return JsonSerializer.Deserialize<List<string>>(json) ?? new(); }
         catch (JsonException) { return new List<string>(); }
+    }
+}
+
+/// <summary>The (portal entity → IDM entity type) pairs a NEW mapping can target — one per registered snapshot
+/// provider (anything else would enqueue rows the dispatcher can never send: "No snapshot provider for '...'").</summary>
+public record GetIdmEntityTypeOptionsQuery : IRequest<IReadOnlyList<IdmEntityTypeOptionDto>>;
+
+public class GetIdmEntityTypeOptionsQueryHandler : IRequestHandler<GetIdmEntityTypeOptionsQuery, IReadOnlyList<IdmEntityTypeOptionDto>>
+{
+    private readonly ISnapshotProviderRegistry _providers;
+    public GetIdmEntityTypeOptionsQueryHandler(ISnapshotProviderRegistry providers) => _providers = providers;
+
+    public Task<IReadOnlyList<IdmEntityTypeOptionDto>> Handle(GetIdmEntityTypeOptionsQuery request, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<IdmEntityTypeOptionDto>>(_providers.All
+            .Select(p => new IdmEntityTypeOptionDto(p.IdmEntityType, p.OwnerEntityType))
+            .OrderBy(t => t.OwnerEntityType).ThenBy(t => t.IdmEntityType).ToList());
+}
+
+/// <summary>
+/// 2026-07-05 — deletes a mapping row (soft-delete) and UN-classifies its not-yet-pushed documents: clears
+/// <c>DocumentUpload.idmEntityType</c> where it was stamped by this mapping and no IDM pid exists. Pushed documents
+/// (pid present) KEEP the stamp — the document lives in IDM and the classification is still needed to resolve a
+/// later Delete push. Existing outbox rows are untouched; the worker's conservative sweep marks any non-terminal
+/// ones Unresolvable (config missing), from where Retry can resurrect them after re-creating the mapping.
+/// </summary>
+public record DeleteIdmAttachmentTypeConfigCommand(Guid Id) : IRequest<IdmConfigDeleteResultDto>;
+
+public class DeleteIdmAttachmentTypeConfigCommandHandler : IRequestHandler<DeleteIdmAttachmentTypeConfigCommand, IdmConfigDeleteResultDto>
+{
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _user;
+    public DeleteIdmAttachmentTypeConfigCommandHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
+
+    public async Task<IdmConfigDeleteResultDto> Handle(DeleteIdmAttachmentTypeConfigCommand request, CancellationToken ct)
+    {
+        if (_user.TenantId is not { } tid) return new IdmConfigDeleteResultDto(false, 0);
+
+        var row = await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.Id == request.Id && c.TenantId == tid && !c.IsDeleted, ct);
+        if (row is null) return new IdmConfigDeleteResultDto(false, 0);
+
+        var now = DateTime.UtcNow;
+
+        // Un-classify UNPUSHED documents stamped by this mapping (same key the stamping used: documentType +
+        // idmEntityType). Pid-bearing docs keep the stamp — see the command doc.
+        var cleared = await _db.DocumentUploads.IgnoreQueryFilters()
+            .Where(d => !d.IsDeleted && d.TenantId == tid && d.Pid == null
+                        && d.IdmEntityType == row.IdmEntityType && d.DocumentType == row.AttachmentType)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(d => d.IdmEntityType, (string?)null)
+                .SetProperty(d => d.UpdatedBy, _user.UserCode)
+                .SetProperty(d => d.UpdatedOn, now), ct);
+
+        row.IsDeleted = true;
+        row.DeletedOn = now;
+        row.DeletedBy = _user.UserCode;
+        await _db.SaveChangesAsync(ct);
+
+        return new IdmConfigDeleteResultDto(true, cleared);
     }
 }
 

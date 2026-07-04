@@ -1,29 +1,37 @@
+@page "/settings/idm-entity-types"
 @page "/settings/idm-attachment-types"
 @inject ApiClient Api
 @inject TokenAccessor Token
 @inject NotificationService Notif
 
-@* R8 (2026-07-04) — TSD R8 §7. Settings › Infor IDM per-attachment-type mapping/gate config. Pattern cloned from
-   Settings/AttachmentRequirements.razor (grid CRUD, CanWrite page-gate, merino dialog). The generic per-tenant
-   knobs (poll/batch/backoff) live on Admin › System settings › Infor IDM; THIS page is the per-type table only. *@
+@* R8 (2026-07-04, renamed 2026-07-05) — TSD R8 §7. Settings › IDM Entity Type: maps a PORTAL entity's attachment
+   type to an Infor IDM entity type; this mapping drives DocumentUpload.idmEntityType classification (worker
+   stamping + manual Backfill). Old route kept as an alias. Pattern cloned from AttachmentRequirements.razor.
+   The generic per-tenant knobs (poll/batch/backoff) live on Admin › System settings › Infor IDM. *@
 
-<PageTitle>IDM attachment types</PageTitle>
+<PageTitle>IDM Entity Type</PageTitle>
 
 <div class="tl-page">
     <header class="tl-header">
         <div>
             <div class="tl-title-row">
-                <h1 class="tl-title">IDM attachment types</h1>
+                <h1 class="tl-title">IDM Entity Type</h1>
                 <span class="tl-count-chip">@configs.Count</span>
             </div>
-            <p class="tl-sub">Per-attachment-type Infor IDM mapping + eligibility gate · Settings → Infor IDM</p>
+            <p class="tl-sub">Maps portal entities (ASN / Invoice) to Infor IDM entity types — drives document classification &amp; backfill · Settings → Infor IDM</p>
         </div>
-        @if (CanWrite && Token.HasPermission("Integration.IdmSync.Manage"))
+        @if (CanWrite)
         {
             <div class="tl-header__actions">
-                <button class="mbtn mbtn--outline" @onclick="() => showBackfill = true" disabled="@busy" title="Stamp idmEntityType on existing documents">
-                    <span class="material-symbols-outlined">database</span> Backfill
+                <button class="mbtn mbtn--primary" @onclick="OpenNew" disabled="@busy" title="Map another attachment type to Infor IDM">
+                    <span class="material-symbols-outlined">add</span> New
                 </button>
+                @if (Token.HasPermission("Integration.IdmSync.Manage"))
+                {
+                    <button class="mbtn mbtn--outline" @onclick="() => showBackfill = true" disabled="@busy" title="Stamp idmEntityType on existing documents">
+                        <span class="material-symbols-outlined">database</span> Backfill
+                    </button>
+                }
             </div>
         }
     </header>
@@ -43,13 +51,14 @@
     {
         <div class="tl-empty">
             <span class="material-symbols-outlined" style="font-size:32px;">rule</span>
-            <div>No IDM attachment-type configs.</div>
+            <div>No IDM entity-type mappings.</div>
         </div>
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 190px 160px 1fr 90px 150px 190px; --tl-min-width: 1100px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 200px 160px 200px 1fr 90px 120px 240px; --tl-min-width: 1270px;">
             <div class="tlg-header">
+                <div class="tlg-col">Portal entity</div>
                 <div class="tlg-col">Attachment type</div>
                 <div class="tlg-col">IDM entity type</div>
                 <div class="tlg-col">Eligibility gate paths</div>
@@ -61,8 +70,9 @@
             {
                 var cfg = c;
                 <div class="tlg-row">
-                    <div class="tlg-col tlg-name">@cfg.AttachmentType</div>
-                    <div class="tlg-col tlg-code">@cfg.IdmEntityType</div>
+                    <div class="tlg-col tlg-name">@PortalLabel(cfg.OwnerEntityType)</div>
+                    <div class="tlg-col">@cfg.AttachmentType</div>
+                    <div class="tlg-col tlg-code" title="@cfg.IdmEntityType">@cfg.IdmEntityType</div>
                     <div class="tlg-col">
                         @if (cfg.EligibilityGatePaths.Count == 0)
                         {
@@ -89,7 +99,7 @@
                             <span class="tlg-status tlg-status--active" title="matches repo default">Default</span>
                         }
                     </div>
-                    <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
+                    <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
                         @if (CanWrite)
                         {
                             <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(cfg)" disabled="@busy" title="Edit mapping / gate">
@@ -97,10 +107,13 @@
                             </button>
                             @if (cfg.HasRepoDefault && cfg.IsDrifted)
                             {
-                                <button class="mbtn mbtn--row mbtn--danger" @onclick="() => ConfirmRestore(cfg)" disabled="@busy" title="Restore repo default">
+                                <button class="mbtn mbtn--row mbtn--outline" @onclick="() => ConfirmRestore(cfg)" disabled="@busy" title="Restore repo default">
                                     <span class="material-symbols-outlined">settings_backup_restore</span> Restore
                                 </button>
                             }
+                            <button class="mbtn mbtn--row mbtn--danger" @onclick="() => ConfirmDelete(cfg)" disabled="@busy" title="Delete mapping (un-classifies unpushed documents)">
+                                <span class="material-symbols-outlined">delete</span> Delete
+                            </button>
                         }
                     </div>
                 </div>
@@ -118,13 +131,39 @@
             <header class="merino-dialog__header">
                 <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">rule</span></div>
                 <div class="merino-dialog__head-text">
-                    <div class="merino-dialog__eyebrow">@editing.AttachmentType · @editing.IdmEntityType</div>
-                    <h2 class="merino-dialog__title">Edit IDM mapping</h2>
+                    <div class="merino-dialog__eyebrow">@(isNew ? "New mapping" : $"{PortalLabel(editing.OwnerEntityType)} · {editing.AttachmentType} → {editing.IdmEntityType}")</div>
+                    <h2 class="merino-dialog__title">@(isNew ? "New IDM mapping" : "Edit IDM mapping")</h2>
                 </div>
                 <button class="merino-dialog__close" @onclick="() => editing = null"><span class="material-symbols-outlined">close</span></button>
             </header>
             <div class="merino-dialog__body">
                 <div style="display:flex;flex-direction:column;gap:14px;">
+                    @if (isNew)
+                    {
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachment type *</label>
+                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formAttachmentType">
+                                    <option value="">— select —</option>
+                                    @foreach (var t in attachmentTypeOptions)
+                                    {
+                                        <option value="@t.Code">@t.Name (@t.Code)</option>
+                                    }
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Portal entity → IDM entity type *</label>
+                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formIdmEntityType">
+                                    <option value="">— select —</option>
+                                    @foreach (var t in entityTypeOptions)
+                                    {
+                                        <option value="@t.IdmEntityType">@PortalLabel(t.OwnerEntityType) → @t.IdmEntityType</option>
+                                    }
+                                </select>
+                                <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">The portal entity whose documents this mapping classifies. Only entities with a registered snapshot provider can dispatch.</div>
+                            </div>
+                        </div>
+                    }
                     <div>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Eligibility gate paths (one per line)</label>
                         <textarea class="rz-textbox" style="width:100%;min-height:90px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formGatePaths" placeholder="header.status&#10;lines[0].confirmed"></textarea>
@@ -184,6 +223,34 @@
     </div>
 }
 
+@* ---------------- Delete-mapping confirm ---------------- *@
+@if (deleteRow is not null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="warning" data-size="sm" style="width:520px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">delete</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Infor IDM</div>
+                    <h2 class="merino-dialog__title">Delete this mapping?</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => deleteRow = null"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="font-size:13px;color:var(--mer-ink-700);margin:0 0 8px;">Removes the <strong>@PortalLabel(deleteRow.OwnerEntityType) · @deleteRow.AttachmentType</strong> → <span style="font-family:Inter,monospace;">@deleteRow.IdmEntityType</span> mapping.</p>
+                <p style="font-size:12.5px;color:var(--mer-ink-600);margin:0;">Documents of this type not yet pushed to IDM are un-classified (their <span style="font-family:Inter,monospace;">idmEntityType</span> is cleared); already-pushed documents keep their classification so a later IDM delete can still resolve. Queued sync rows become <em>Unresolvable</em>.</p>
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => deleteRow = null">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="danger" @onclick="Delete" disabled="@busy">@(busy ? "Deleting…" : "Delete mapping")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
 @* ---------------- Backfill confirm ---------------- *@
 @if (showBackfill)
 {
@@ -220,14 +287,31 @@
     private bool busy;
 
     private IdmAttachmentTypeConfigDto? editing;
+    private bool isNew;
+    private string formAttachmentType = string.Empty;
+    private string formIdmEntityType = string.Empty;
     private string formGatePaths = string.Empty;
     private string formCreate = string.Empty;
     private string formMutate = string.Empty;
     private bool formEnabled = true;
     private string formError = string.Empty;
 
+    private List<AttachmentTypeDto> attachmentTypeOptions = new();
+    private List<IdmEntityTypeOptionDto> entityTypeOptions = new();
+
     private IdmAttachmentTypeConfigDto? restoreRow;
+    private IdmAttachmentTypeConfigDto? deleteRow;
     private bool showBackfill;
+
+    /// <summary>Portal-entity display name (mirrors AttachmentRequirements' Entity picker labels).</summary>
+    private static string PortalLabel(string? ownerEntityType) => ownerEntityType switch
+    {
+        "Asn" => "Advance Shipping Notice",
+        "Invoice" => "Invoice",
+        "Supplier" => "Supplier",
+        null or "" => "—",
+        _ => ownerEntityType
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -246,6 +330,7 @@
     private void OpenEdit(IdmAttachmentTypeConfigDto c)
     {
         editing = c;
+        isNew = false;
         formGatePaths = string.Join("\n", c.EligibilityGatePaths);
         formCreate = c.CreateMappingExpression;
         formMutate = c.MutateMappingExpression ?? string.Empty;
@@ -253,19 +338,45 @@
         formError = string.Empty;
     }
 
+    private async Task OpenNew()
+    {
+        if (attachmentTypeOptions.Count == 0)
+        {
+            var t = await Api.GetAsync<List<AttachmentTypeDto>>("api/settings/attachment-types");
+            attachmentTypeOptions = (t?.Data ?? new()).Where(x => x.IsActive).ToList();
+        }
+        if (entityTypeOptions.Count == 0)
+        {
+            var e = await Api.GetAsync<List<IdmEntityTypeOptionDto>>("api/integration/idm/entity-types");
+            entityTypeOptions = e?.Data ?? new();
+        }
+
+        editing = new IdmAttachmentTypeConfigDto(Guid.Empty, string.Empty, string.Empty, null, new List<string>(), string.Empty, null, true, false, false);
+        isNew = true;
+        formAttachmentType = string.Empty;
+        formIdmEntityType = string.Empty;
+        formGatePaths = string.Empty;
+        formCreate = string.Empty;
+        formMutate = string.Empty;
+        formEnabled = true;
+        formError = string.Empty;
+    }
+
     private async Task Save()
     {
         if (editing is null) return;
         formError = string.Empty;
+        if (isNew && string.IsNullOrWhiteSpace(formAttachmentType)) { formError = "Attachment type is required."; return; }
+        if (isNew && string.IsNullOrWhiteSpace(formIdmEntityType)) { formError = "IDM entity type is required."; return; }
         if (string.IsNullOrWhiteSpace(formCreate)) { formError = "Create mapping expression is required."; return; }
         busy = true;
         var gatePaths = formGatePaths
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToList();
         var req = new SaveIdmAttachmentTypeConfigRequest(
-            editing.Id,
-            editing.AttachmentType,
-            editing.IdmEntityType,
+            isNew ? null : editing.Id,
+            isNew ? formAttachmentType : editing.AttachmentType,
+            isNew ? formIdmEntityType : editing.IdmEntityType,
             gatePaths,
             formCreate.Trim(),
             string.IsNullOrWhiteSpace(formMutate) ? null : formMutate.Trim(),
@@ -301,6 +412,26 @@
         else
         {
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Restore failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+
+    private void ConfirmDelete(IdmAttachmentTypeConfigDto c) => deleteRow = c;
+
+    private async Task Delete()
+    {
+        if (deleteRow is null) return;
+        busy = true;
+        var resp = await Api.DeleteAsync<IdmConfigDeleteResultDto>($"api/integration/idm/attachment-type-configs/{deleteRow.Id}");
+        if (resp?.Success == true && resp.Data?.Deleted == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Mapping deleted", Detail = $"{resp.Data.ClearedDocuments} unpushed document(s) un-classified." });
+            deleteRow = null;
+            await Load();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Delete failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
         }
         busy = false;
     }

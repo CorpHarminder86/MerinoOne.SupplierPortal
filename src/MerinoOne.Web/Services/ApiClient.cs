@@ -138,6 +138,12 @@ public class ApiClient
                  resp => ReadEnvelopeAsync<ApiResult>(resp),
                  errors => new ApiResult { Success = false, Errors = errors });
 
+    /// <summary>DELETE that binds the response payload (e.g. the IDM mapping delete's cleared-document count).</summary>
+    public Task<ApiResult<T>?> DeleteAsync<T>(string url) =>
+        RunAsync(() => _http.DeleteAsync(url),
+                 resp => ReadEnvelopeAsync<ApiResult<T>>(resp),
+                 errors => new ApiResult<T> { Success = false, Errors = errors });
+
     /// <summary>
     /// Multipart POST for file uploads. Caller builds the <see cref="MultipartFormDataContent"/>
     /// — including any non-file form fields — and we surface it through the same RunAsync

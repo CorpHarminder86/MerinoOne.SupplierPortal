@@ -139,4 +139,126 @@ public class IdmDispatchTests
         creates[0].Status.Should().Be(IdmOutboxStatus.Failed);
         creates[0].LastError.Should().NotBeNullOrEmpty();
     }
+
+    /// <summary>2026-07-05 fix — the manual Backfill must mirror the worker's PORTAL-ENTITY-aware predicate: a
+    /// shared attachment-type code on the WRONG owner entity (e.g. supplier-owned) must not be stamped.</summary>
+    [SkippableFact]
+    public async Task Backfill_stamps_only_matching_portal_entity()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        Guid rightDocId, wrongDocId;
+        string attachmentType;
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (_, rightDocId, attachmentType) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "backfill.pdf");
+            // Same attachment-type code, but SUPPLIER-owned — must be skipped by the entity-aware backfill.
+            wrongDocId = Guid.NewGuid();
+            db.DocumentUploads.Add(new DocumentUpload
+            {
+                Id = wrongDocId, OwnerEntityType = DocumentOwnerTypes.Supplier, OwnerEntityId = IntegrationTestFixture.SupplierId,
+                DocumentType = attachmentType, FileName = "wrong-owner.pdf", FileUrl = "idmtest/wrong-owner.pdf",
+                FileSizeKb = 1, MimeType = "application/pdf", UploadedBy = "seed", IdmEntityType = null, Pid = null,
+                SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var registry = scope.ServiceProvider.GetRequiredService<Application.Integration.Idm.ISnapshotProviderRegistry>();
+            var handler = new Application.Integration.Idm.Commands.BackfillIdmEntityTypeCommandHandler(
+                db, new StubCurrentUser(IntegrationTestFixture.TenantId), registry);
+            await handler.Handle(new Application.Integration.Idm.Commands.BackfillIdmEntityTypeCommand(), CancellationToken.None);
+        }
+
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.DocumentUploads.IgnoreQueryFilters().Where(d => d.Id == rightDocId).Select(d => d.IdmEntityType).SingleAsync())
+                .Should().Be("InforInvoice", because: "the invoice-owned document matches the mapping's portal entity");
+            (await db.DocumentUploads.IgnoreQueryFilters().Where(d => d.Id == wrongDocId).Select(d => d.IdmEntityType).SingleAsync())
+                .Should().BeNull(because: "a supplier-owned document must not be stamped with an invoice/ASN entity type");
+        }
+    }
+
+    /// <summary>Deleting a mapping soft-deletes the row and un-classifies its UNPUSHED documents only —
+    /// pid-bearing documents keep the stamp so a later IDM delete can still resolve.</summary>
+    [SkippableFact]
+    public async Task Delete_mapping_clears_unpushed_stamps_and_keeps_pushed()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        Guid cfgId, unpushedDocId, pushedDocId;
+        string attachmentType;
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (_, unpushedDocId, attachmentType) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "del-unpushed.pdf");
+            await db.SaveChangesAsync();
+
+            var cfg = await db.Set<IdmAttachmentTypeConfig>().IgnoreQueryFilters()
+                .SingleAsync(c => c.TenantId == IntegrationTestFixture.TenantId && c.AttachmentType == attachmentType);
+            cfgId = cfg.Id;
+
+            // Stamp both docs as the mapping would; the second one is already pushed (pid present).
+            pushedDocId = Guid.NewGuid();
+            db.DocumentUploads.Add(new DocumentUpload
+            {
+                Id = pushedDocId, OwnerEntityType = DocumentOwnerTypes.Invoice, OwnerEntityId = Guid.NewGuid(),
+                DocumentType = attachmentType, FileName = "del-pushed.pdf", FileUrl = "idmtest/del-pushed.pdf",
+                FileSizeKb = 1, MimeType = "application/pdf", UploadedBy = "seed",
+                IdmEntityType = "InforInvoice", Pid = "MDS-test-LATEST",
+                SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+            });
+            await db.DocumentUploads.IgnoreQueryFilters().Where(d => d.Id == unpushedDocId)
+                .ExecuteUpdateAsync(s => s.SetProperty(d => d.IdmEntityType, "InforInvoice"));
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var handler = new Application.Integration.Idm.Commands.DeleteIdmAttachmentTypeConfigCommandHandler(
+                db, new StubCurrentUser(IntegrationTestFixture.TenantId));
+            var result = await handler.Handle(
+                new Application.Integration.Idm.Commands.DeleteIdmAttachmentTypeConfigCommand(cfgId), CancellationToken.None);
+            result.Deleted.Should().BeTrue();
+            result.ClearedDocuments.Should().Be(1, because: "only the unpushed document is un-classified");
+
+            // Second delete is a no-op (row already gone).
+            var again = await handler.Handle(
+                new Application.Integration.Idm.Commands.DeleteIdmAttachmentTypeConfigCommand(cfgId), CancellationToken.None);
+            again.Deleted.Should().BeFalse();
+        }
+
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Set<IdmAttachmentTypeConfig>().IgnoreQueryFilters().Where(c => c.Id == cfgId).Select(c => c.IsDeleted).SingleAsync())
+                .Should().BeTrue(because: "delete is a soft-delete");
+            (await db.DocumentUploads.IgnoreQueryFilters().Where(d => d.Id == unpushedDocId).Select(d => d.IdmEntityType).SingleAsync())
+                .Should().BeNull(because: "the unpushed document loses its classification with the mapping");
+            (await db.DocumentUploads.IgnoreQueryFilters().Where(d => d.Id == pushedDocId).Select(d => d.IdmEntityType).SingleAsync())
+                .Should().Be("InforInvoice", because: "a pushed document keeps the stamp to resolve a later IDM delete");
+        }
+    }
+
+    private sealed class StubCurrentUser(Guid tenantId) : Application.Common.Interfaces.ICurrentUser
+    {
+        public string UserCode => "test:idm";
+        public string? UserName => "test:idm";
+        public IReadOnlyCollection<string> Roles => Array.Empty<string>();
+        public IReadOnlyCollection<string> Permissions => Array.Empty<string>();
+        public bool IsAuthenticated => true;
+        public bool IsManager => false;
+        public bool IsAdmin => false;
+        public bool HasPermission(string code) => false;
+        public Guid? TenantId { get; } = tenantId;
+        public bool IsPlatformAdmin => false;
+    }
 }

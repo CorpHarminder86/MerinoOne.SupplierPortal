@@ -20,22 +20,38 @@ public record IdmSyncLogDto(
     DateTime CreatedOn,
     DateTime? UpdatedOn,
     bool HasRequestSnapshot,
-    bool HasResponse);
+    bool HasResponse,
+    string? SupplierCode,
+    string? SupplierName,
+    string? MimeType,
+    long? FileSizeKb);
 
 /// <summary>On-demand detail for one sync-log row: the elided request snapshot + the raw IDM (XML) response.</summary>
 public record IdmSyncLogDetailDto(string? RequestSnapshotJson, string? ResponseBody);
 
-/// <summary>A per-attachment-type IDM mapping/gate config row (Settings › Infor IDM).</summary>
+/// <summary>
+/// One portal-entity → IDM entity-type mapping row (Settings › IDM Entity Type). <see cref="OwnerEntityType"/> is
+/// the PORTAL entity (Asn / Invoice — resolved from the registered snapshot provider) whose documents of
+/// <see cref="AttachmentType"/> are classified as <see cref="IdmEntityType"/>; null when no provider is registered
+/// (the mapping can never dispatch).
+/// </summary>
 public record IdmAttachmentTypeConfigDto(
     Guid Id,
     string AttachmentType,
     string IdmEntityType,
+    string? OwnerEntityType,
     IReadOnlyList<string> EligibilityGatePaths,
     string CreateMappingExpression,
     string? MutateMappingExpression,
     bool IsEnabled,
     bool IsDrifted,
     bool HasRepoDefault);
+
+/// <summary>A selectable IDM entity type with the PORTAL entity its snapshot provider serves.</summary>
+public record IdmEntityTypeOptionDto(string IdmEntityType, string OwnerEntityType);
+
+/// <summary>Outcome of deleting a mapping row: whether it was removed + how many UNPUSHED documents were unclassified.</summary>
+public record IdmConfigDeleteResultDto(bool Deleted, int ClearedDocuments);
 
 public record SaveIdmAttachmentTypeConfigRequest(
     Guid? Id,

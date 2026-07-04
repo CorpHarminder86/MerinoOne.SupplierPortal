@@ -19,4 +19,6 @@ public record DocumentListItemDto(
     string UploadedBy,
     DateTime CreatedOn,
     string? IdmEntityType,
-    string? Pid);
+    string? Pid,
+    string? SupplierCode,
+    string? SupplierName);

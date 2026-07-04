@@ -30,6 +30,20 @@ public class IdmIntegrationController : ControllerBase
     public async Task<Result<IReadOnlyList<IdmAttachmentTypeConfigDto>>> GetAttachmentTypeConfigs(CancellationToken ct)
         => Result<IReadOnlyList<IdmAttachmentTypeConfigDto>>.Ok(await _mediator.Send(new GetIdmAttachmentTypeConfigsQuery(), ct), HttpContext.TraceIdentifier);
 
+    [HttpGet("entity-types")]
+    [Authorize(Policy = Perm.SettingsRead)]
+    [EndpointSummary("List portal-entity → IDM entity-type pairs for a new mapping")]
+    [EndpointDescription("The (portal entity, IDM entity type) pairs with a registered snapshot provider (today: Asn → InforAdvanceShipmentNoticeSupplierASN, Invoice → InforInvoice) — the only targets a NEW mapping can dispatch. Requires Settings.Read.")]
+    public async Task<Result<IReadOnlyList<IdmEntityTypeOptionDto>>> GetEntityTypeOptions(CancellationToken ct)
+        => Result<IReadOnlyList<IdmEntityTypeOptionDto>>.Ok(await _mediator.Send(new GetIdmEntityTypeOptionsQuery(), ct), HttpContext.TraceIdentifier);
+
+    [HttpDelete("attachment-type-configs/{id:guid}")]
+    [Authorize(Policy = Perm.SettingsWrite)]
+    [EndpointSummary("Delete an IDM entity-type mapping")]
+    [EndpointDescription("Soft-deletes the mapping row and clears idmEntityType on its NOT-YET-PUSHED documents (pushed docs keep the classification for later IDM deletes). Returns whether it was deleted + the count of documents unclassified. Requires Settings.Write.")]
+    public async Task<Result<IdmConfigDeleteResultDto>> DeleteAttachmentTypeConfig(Guid id, CancellationToken ct)
+        => Result<IdmConfigDeleteResultDto>.Ok(await _mediator.Send(new DeleteIdmAttachmentTypeConfigCommand(id), ct), HttpContext.TraceIdentifier);
+
     [HttpPost("attachment-type-configs")]
     [Authorize(Policy = Perm.SettingsWrite)]
     [EndpointSummary("Create/update an IDM attachment-type config")]
@@ -98,13 +112,13 @@ public class IdmIntegrationController : ControllerBase
     [HttpGet("sync-log")]
     [Authorize(Policy = Perm.IntegrationIdmSyncView)]
     [EndpointSummary("IDM document sync log")]
-    [EndpointDescription("Paged, RLS-scoped IDM document-outbox history (status/operation/type/filename/date filters). Requires Integration.IdmSync.View — each role sees only its own rows.")]
+    [EndpointDescription("Paged, RLS-scoped IDM document-outbox history (status/operation/type/filename/date/supplierId filters). Requires Integration.IdmSync.View — each role sees only its own rows.")]
     public async Task<Result<PagedResult<IdmSyncLogDto>>> SyncLog([FromQuery] int page = 1, [FromQuery] int pageSize = 50,
         [FromQuery] string? status = null, [FromQuery] string? operation = null, [FromQuery] string? idmEntityType = null,
         [FromQuery] string? fileName = null, [FromQuery] DateTime? fromDate = null, [FromQuery] DateTime? toDate = null,
-        CancellationToken ct = default)
+        [FromQuery] Guid? supplierId = null, CancellationToken ct = default)
         => Result<PagedResult<IdmSyncLogDto>>.Ok(
-            await _mediator.Send(new GetIdmSyncLogQuery(page, pageSize, status, operation, idmEntityType, fileName, fromDate, toDate), ct),
+            await _mediator.Send(new GetIdmSyncLogQuery(page, pageSize, status, operation, idmEntityType, fileName, fromDate, toDate, supplierId), ct),
             HttpContext.TraceIdentifier);
 
     [HttpGet("sync-log/{id:guid}/detail")]

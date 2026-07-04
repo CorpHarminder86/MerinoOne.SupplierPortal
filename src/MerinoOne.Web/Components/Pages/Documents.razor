@@ -45,6 +45,18 @@ else
             </select>
             <input class="rz-textbox" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;min-width:150px;" placeholder="Document type" @bind="documentTypeFilter" @bind:after="OnFilterChanged" />
             <input class="rz-textbox" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;min-width:180px;" placeholder="Search file name" @bind="fileNameFilter" @bind:after="OnFilterChanged" />
+            @* Supplier filter — only when the signed-in user can act for more than one supplier (multi-mapped
+               supplier login, or an internal user with broad access). Single-supplier logins don't need it. *@
+            @if (suppliers.Count > 1)
+            {
+                <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:220px;" @bind="supplierFilter" @bind:after="OnFilterChanged">
+                    <option value="">All suppliers</option>
+                    @foreach (var s in suppliers)
+                    {
+                        <option value="@s.Id">@s.LegalName (@s.SupplierCode)</option>
+                    }
+                </select>
+            }
             <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:4px;">From
                 <input type="date" class="rz-textbox" style="padding:7px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;" @bind="fromDate" @bind:after="OnFilterChanged" />
             </label>
@@ -75,16 +87,21 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 1fr 150px 150px 180px 90px 130px 140px 130px; --tl-min-width: 1300px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: @GridCols; --tl-min-width: @GridMinWidth;">
                 <div class="tlg-header">
                     <div class="tlg-col">File name</div>
                     <div class="tlg-col">Document type</div>
                     <div class="tlg-col">Owner</div>
                     <div class="tlg-col">Owner ref</div>
+                    @if (suppliers.Count > 1)
+                    {
+                        <div class="tlg-col">Supplier</div>
+                    }
                     <div class="tlg-col tlg-col--num">Size (KB)</div>
                     <div class="tlg-col">Uploaded by</div>
                     <div class="tlg-col">IDM state</div>
                     <div class="tlg-col">Created</div>
+                    <div class="tlg-col tlg-col--actions">Actions</div>
                 </div>
                 @foreach (var d in paged.Items)
                 {
@@ -94,6 +111,10 @@ else
                         <div class="tlg-col">@row.DocumentType</div>
                         <div class="tlg-col">@OwnerLabel(row.OwnerEntityType)</div>
                         <div class="tlg-col tlg-code" title="@row.OwnerEntityId">@(string.IsNullOrEmpty(row.OwnerRef) ? ShortId(row.OwnerEntityId) : row.OwnerRef)</div>
+                        @if (suppliers.Count > 1)
+                        {
+                            <div class="tlg-col" title="@row.SupplierName">@(string.IsNullOrEmpty(row.SupplierCode) ? "—" : $"{row.SupplierName} ({row.SupplierCode})")</div>
+                        }
                         <div class="tlg-col tlg-col--num">@row.FileSizeKb</div>
                         <div class="tlg-col" title="@row.UploadedBy">@row.UploadedBy</div>
                         <div class="tlg-col">
@@ -111,9 +132,16 @@ else
                             }
                         </div>
                         <div class="tlg-col tlg-code">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                        <div class="tlg-col tlg-col--actions">
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => ViewDoc(row)" title="View document">
+                                <span class="material-symbols-outlined">visibility</span> View
+                            </button>
+                        </div>
                     </div>
                 }
             </div>
+
+            <DocumentPreviewer Doc="_previewDoc" OnClose="() => _previewDoc = null" />
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--mer-ink-600);">
                 <div>Page @paged.Page of @paged.TotalPages — @paged.TotalCount rows</div>
@@ -135,16 +163,32 @@ else
     private string idmStatusFilter = string.Empty;
     private string documentTypeFilter = string.Empty;
     private string fileNameFilter = string.Empty;
+    private string supplierFilter = string.Empty;
+    private List<SupplierListItemDto> suppliers = new();
     private DateTime? fromDate;
     private DateTime? toDate;
     private int page = 1;
     private const int PageSize = 50;
 
+    private DocumentPreviewer.DocumentDescriptor? _previewDoc;
+
+    private string GridCols => suppliers.Count > 1
+        ? "1fr 150px 150px 180px 160px 90px 130px 140px 130px 90px"
+        : "1fr 150px 150px 180px 90px 130px 140px 130px 90px";
+    private string GridMinWidth => suppliers.Count > 1 ? "1460px" : "1300px";
+
     protected override async Task OnInitializedAsync()
     {
         Token.Changed += OnTokenChanged;
+        // Seccode-scoped: a supplier login mapped to several suppliers gets them all here; an internal user gets
+        // the visible set. Drives the optional supplier filter/column (rendered only when >1).
+        var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+        suppliers = sup?.Data ?? new();
         await Reload();
     }
+
+    private void ViewDoc(DocumentListItemDto d) =>
+        _previewDoc = new DocumentPreviewer.DocumentDescriptor(d.Id, d.FileName, d.MimeType, d.FileSizeKb, $"files/proxy/{d.Id}");
 
     private void OnTokenChanged() => InvokeAsync(StateHasChanged);
     public void Dispose() => Token.Changed -= OnTokenChanged;
@@ -162,6 +206,7 @@ else
         if (!string.IsNullOrWhiteSpace(fileNameFilter)) url += $"&fileName={Uri.EscapeDataString(fileNameFilter.Trim())}";
         if (fromDate.HasValue) url += $"&fromDate={fromDate.Value:yyyy-MM-dd}";
         if (toDate.HasValue) url += $"&toDate={toDate.Value:yyyy-MM-dd}";
+        if (!string.IsNullOrWhiteSpace(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
         try
         {
             var resp = await Api.GetAsync<PagedResult<DocumentListItemDto>>(url);

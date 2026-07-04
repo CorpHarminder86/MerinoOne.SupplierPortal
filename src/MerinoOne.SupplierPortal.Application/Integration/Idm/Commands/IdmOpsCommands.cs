@@ -81,7 +81,9 @@ public class BackfillIdmEntityTypeCommandHandler : IRequestHandler<BackfillIdmEn
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
-    public BackfillIdmEntityTypeCommandHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
+    private readonly ISnapshotProviderRegistry _providers;
+    public BackfillIdmEntityTypeCommandHandler(IAppDbContext db, ICurrentUser user, ISnapshotProviderRegistry providers)
+    { _db = db; _user = user; _providers = providers; }
 
     public async Task<int> Handle(BackfillIdmEntityTypeCommand request, CancellationToken ct)
     {
@@ -96,8 +98,16 @@ public class BackfillIdmEntityTypeCommandHandler : IRequestHandler<BackfillIdmEn
         var total = 0;
         foreach (var cfg in configs)
         {
+            // 2026-07-05 fix — mirror the worker's seeding predicate: the mapping is PORTAL-ENTITY-aware, so only
+            // stamp documents owned by the provider's entity. Without this, a shared attachment-type code (e.g.
+            // "Msme" on both ASNs and supplier onboarding) stamped supplier-owned docs with the ASN entity type,
+            // which the dispatcher can never resolve (junk Unresolvable rows).
+            var provider = _providers.TryGet(cfg.IdmEntityType);
+            if (provider is null) continue;
+
             total += await _db.DocumentUploads.IgnoreQueryFilters()
-                .Where(d => !d.IsDeleted && d.TenantId == tid && d.IdmEntityType == null && d.DocumentType == cfg.AttachmentType)
+                .Where(d => !d.IsDeleted && d.TenantId == tid && d.IdmEntityType == null
+                            && d.OwnerEntityType == provider.OwnerEntityType && d.DocumentType == cfg.AttachmentType)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(d => d.IdmEntityType, cfg.IdmEntityType)
                     .SetProperty(d => d.UpdatedBy, _user.UserCode)

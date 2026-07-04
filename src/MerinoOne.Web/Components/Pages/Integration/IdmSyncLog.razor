@@ -48,6 +48,17 @@ else
             </select>
             <input class="rz-textbox" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;min-width:150px;" placeholder="IDM entity type" @bind="entityTypeFilter" @bind:after="OnFilterChanged" />
             <input class="rz-textbox" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;min-width:180px;" placeholder="Search file name" @bind="fileNameFilter" @bind:after="OnFilterChanged" />
+            @* Supplier filter — only when the signed-in user can act for more than one supplier. *@
+            @if (suppliers.Count > 1)
+            {
+                <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:220px;" @bind="supplierFilter" @bind:after="OnFilterChanged">
+                    <option value="">All suppliers</option>
+                    @foreach (var s in suppliers)
+                    {
+                        <option value="@s.Id">@s.LegalName (@s.SupplierCode)</option>
+                    }
+                </select>
+            }
             <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:4px;">From
                 <input type="date" class="rz-textbox" style="padding:7px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;" @bind="fromDate" @bind:after="OnFilterChanged" />
             </label>
@@ -78,9 +89,13 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 190px 1fr 90px 110px 80px 140px 130px 1fr 140px 90px; --tl-min-width: 1560px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: @GridCols; --tl-min-width: @GridMinWidth;">
                 <div class="tlg-header">
                     <div class="tlg-col">Owner entity</div>
+                    @if (suppliers.Count > 1)
+                    {
+                        <div class="tlg-col">Supplier</div>
+                    }
                     <div class="tlg-col">File name</div>
                     <div class="tlg-col">Operation</div>
                     <div class="tlg-col">Status</div>
@@ -99,6 +114,10 @@ else
                             <div style="font-weight:600;color:var(--mer-blue-darker);">@row.IdmEntityType</div>
                             <div class="tlg-code" style="font-size:11px;color:var(--mer-ink-500);">@ShortId(row.OwnerEntityId)</div>
                         </div>
+                        @if (suppliers.Count > 1)
+                        {
+                            <div class="tlg-col" title="@row.SupplierName">@(string.IsNullOrEmpty(row.SupplierCode) ? "—" : $"{row.SupplierName} ({row.SupplierCode})")</div>
+                        }
                         <div class="tlg-col tlg-desc" title="@row.FileName">@row.FileName</div>
                         <div class="tlg-col">@row.Operation</div>
                         <div class="tlg-col"><span class="tlg-status @StatusClass(row.Status)">@row.Status</span></div>
@@ -107,9 +126,12 @@ else
                         <div class="tlg-col tlg-code" title="@row.Pid">@(string.IsNullOrEmpty(row.Pid) ? "—" : (row.Pid.Length > 18 ? row.Pid[..18] + "…" : row.Pid))</div>
                         <div class="tlg-col" style="@(IsError(row.Status) ? "color:var(--mer-danger,#b42318);" : "color:var(--mer-ink-500);")" title="@row.LastError">@(string.IsNullOrEmpty(row.LastError) ? "—" : (row.LastError.Length > 90 ? row.LastError[..90] + "…" : row.LastError))</div>
                         <div class="tlg-col tlg-code">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
-                        <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
+                        <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => ViewFile(row)" disabled="@busy" title="View the uploaded document">
+                                <span class="material-symbols-outlined">visibility</span> View
+                            </button>
                             <button class="mbtn mbtn--row mbtn--accent" @onclick="() => ViewDetail(row)" disabled="@busy" title="Inspect request + response">
-                                <span class="material-symbols-outlined">data_object</span> View
+                                <span class="material-symbols-outlined">data_object</span> Detail
                             </button>
                             @if (Token.HasPermission("Integration.IdmSync.Manage"))
                             {
@@ -130,6 +152,8 @@ else
                     </div>
                 }
             </div>
+
+            <DocumentPreviewer Doc="_previewDoc" OnClose="() => _previewDoc = null" />
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--mer-ink-600);">
                 <div>Page @paged.Page of @paged.TotalPages — @paged.TotalCount rows</div>
@@ -236,17 +260,34 @@ else
     private string operationFilter = string.Empty;
     private string entityTypeFilter = string.Empty;
     private string fileNameFilter = string.Empty;
+    private string supplierFilter = string.Empty;
+    private List<SupplierListItemDto> suppliers = new();
     // Default the date range to the CURRENT MONTH (first of month → today).
     private DateTime? fromDate = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
     private DateTime? toDate = DateTime.Today;
     private int page = 1;
     private const int PageSize = 50;
 
+    private DocumentPreviewer.DocumentDescriptor? _previewDoc;
+
+    private string GridCols => suppliers.Count > 1
+        ? "190px 160px 1fr 90px 110px 80px 140px 130px 1fr 140px 220px"
+        : "190px 1fr 90px 110px 80px 140px 130px 1fr 140px 220px";
+    private string GridMinWidth => suppliers.Count > 1 ? "1720px" : "1560px";
+
     protected override async Task OnInitializedAsync()
     {
         Token.Changed += OnTokenChanged;
+        // Seccode-scoped: a supplier login mapped to several suppliers gets them all here; an internal user gets
+        // the visible set. Drives the optional supplier filter/column (rendered only when >1).
+        var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
+        suppliers = sup?.Data ?? new();
         await Reload();
     }
+
+    private void ViewFile(IdmSyncLogDto s) =>
+        _previewDoc = new DocumentPreviewer.DocumentDescriptor(
+            s.DocumentUploadId, s.FileName, s.MimeType ?? "application/octet-stream", s.FileSizeKb ?? 0, $"files/proxy/{s.DocumentUploadId}");
 
     private void OnTokenChanged() => InvokeAsync(StateHasChanged);
     public void Dispose() => Token.Changed -= OnTokenChanged;
@@ -264,6 +305,7 @@ else
         if (!string.IsNullOrWhiteSpace(fileNameFilter)) url += $"&fileName={Uri.EscapeDataString(fileNameFilter.Trim())}";
         if (fromDate.HasValue) url += $"&fromDate={fromDate.Value:yyyy-MM-dd}";
         if (toDate.HasValue) url += $"&toDate={toDate.Value:yyyy-MM-dd}";
+        if (!string.IsNullOrWhiteSpace(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
         try
         {
             var resp = await Api.GetAsync<PagedResult<IdmSyncLogDto>>(url);

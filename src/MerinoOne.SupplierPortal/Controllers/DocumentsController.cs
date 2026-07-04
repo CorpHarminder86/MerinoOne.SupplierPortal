@@ -31,15 +31,16 @@ Filters / params:
 - **fileName**: filename contains.
 - **fromDate** / **toDate**: inclusive createdOn range.
 - **idmStatus**: Synced (pid present) | NotSynced.
+- **supplierId**: restrict to documents owned (directly or via Asn/Invoice/SupplierLicense) by one supplier.
 Returns: PagedResult<DocumentListItemDto> with the owner handle + Infor IDM sync state per row. Requires permission **Document.Read**.")]
     public async Task<Result<PagedResult<DocumentListItemDto>>> List(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 50, [FromQuery] string? ownerEntityType = null,
         [FromQuery] string? documentType = null, [FromQuery] string? fileName = null,
         [FromQuery] DateTime? fromDate = null, [FromQuery] DateTime? toDate = null,
-        [FromQuery] string? idmStatus = null, CancellationToken ct = default)
+        [FromQuery] string? idmStatus = null, [FromQuery] Guid? supplierId = null, CancellationToken ct = default)
     {
         var data = await _mediator.Send(
-            new GetDocumentsQuery(page, pageSize, ownerEntityType, documentType, fileName, fromDate, toDate, idmStatus), ct);
+            new GetDocumentsQuery(page, pageSize, ownerEntityType, documentType, fileName, fromDate, toDate, idmStatus, supplierId), ct);
         return Result<PagedResult<DocumentListItemDto>>.Ok(data, HttpContext.TraceIdentifier);
     }
 }

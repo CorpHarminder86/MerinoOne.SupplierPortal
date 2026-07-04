@@ -18,7 +18,7 @@ namespace MerinoOne.SupplierPortal.Application.Documents.Queries;
 public record GetDocumentsQuery(
     int Page = 1, int PageSize = 50, string? OwnerEntityType = null, string? DocumentType = null,
     string? FileName = null, DateTime? FromDate = null, DateTime? ToDate = null,
-    string? IdmStatus = null) : IRequest<PagedResult<DocumentListItemDto>>;
+    string? IdmStatus = null, Guid? SupplierId = null) : IRequest<PagedResult<DocumentListItemDto>>;
 
 public class GetDocumentsQueryHandler : IRequestHandler<GetDocumentsQuery, PagedResult<DocumentListItemDto>>
 {
@@ -40,6 +40,12 @@ public class GetDocumentsQueryHandler : IRequestHandler<GetDocumentsQuery, Paged
         if (string.Equals(request.IdmStatus, "Synced", StringComparison.OrdinalIgnoreCase)) q = q.Where(d => d.Pid != null);
         else if (string.Equals(request.IdmStatus, "NotSynced", StringComparison.OrdinalIgnoreCase)) q = q.Where(d => d.Pid == null);
 
+        if (request.SupplierId.HasValue)
+        {
+            var docIds = await DocumentOwnerSupplierResolver.ResolveDocumentIdsForSupplierAsync(_db, request.SupplierId.Value, ct);
+            q = q.Where(d => docIds.Contains(d.Id));
+        }
+
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
         var total = await q.CountAsync(ct);
 
@@ -51,11 +57,17 @@ public class GetDocumentsQueryHandler : IRequestHandler<GetDocumentsQuery, Paged
             .ToListAsync(ct);
 
         var ownerRefs = await ResolveOwnerRefsAsync(rows, ct);
+        var supplierDisplay = await DocumentOwnerSupplierResolver.ResolveSupplierDisplayAsync(
+            _db, rows.Select(r => (r.OwnerEntityType, r.OwnerEntityId)), ct);
 
-        var items = rows.Select(r => new DocumentListItemDto(
-            r.Id, r.Seq, r.FileName, r.DocumentType, r.OwnerEntityType, r.OwnerEntityId,
-            ownerRefs.GetValueOrDefault(r.OwnerEntityId), r.FileSizeKb, r.MimeType, r.UploadedBy,
-            r.CreatedOn, r.IdmEntityType, r.Pid)).ToList();
+        var items = rows.Select(r =>
+        {
+            supplierDisplay.TryGetValue((r.OwnerEntityType, r.OwnerEntityId), out var sup);
+            return new DocumentListItemDto(
+                r.Id, r.Seq, r.FileName, r.DocumentType, r.OwnerEntityType, r.OwnerEntityId,
+                ownerRefs.GetValueOrDefault(r.OwnerEntityId), r.FileSizeKb, r.MimeType, r.UploadedBy,
+                r.CreatedOn, r.IdmEntityType, r.Pid, sup.Code, sup.Name);
+        }).ToList();
 
         return new PagedResult<DocumentListItemDto> { Items = items, Page = request.Page, PageSize = pageSize, TotalCount = total };
     }
