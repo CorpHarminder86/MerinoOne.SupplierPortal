@@ -47,15 +47,22 @@ public static class PoStatusMappingSeeder
         // Same tenant-admin seccode the other tenant-wide config masters use (CompanySeeder / AttachmentGovernance).
         var seccodeId = DeterministicId.From("Seccode.U", TenantSeeder.AdminUserCode);
 
-        var existingIds = await ctx.PoStatusMappings.IgnoreQueryFilters()
+        // R8 hardening (2026-07-04): guard by BOTH deterministic id AND live erpStatus. A dev DB can carry rows
+        // for the same (tenant, erpStatus) under NON-deterministic ids (created via UI / an older seeder), which
+        // the id-only guard missed — the insert then hit the unique index (error 2601) and aborted the whole
+        // seed run (blocking every later seeder). Id guard spans soft-deleted rows too (PK is not filtered).
+        var existing = await ctx.PoStatusMappings.IgnoreQueryFilters()
             .Where(m => m.TenantId == tenantId)
-            .Select(m => m.Id)
+            .Select(m => new { m.Id, m.ErpStatus, m.IsDeleted })
             .ToListAsync(ct);
+        var existingIds = existing.Select(x => x.Id).ToHashSet();
+        var liveStatuses = existing.Where(x => !x.IsDeleted)
+            .Select(x => x.ErpStatus.ToLowerInvariant()).ToHashSet();
 
         foreach (var (erpStatus, poStatus) in Seed)
         {
             var id = MappingId(tenantId, erpStatus);
-            if (existingIds.Contains(id)) continue;
+            if (existingIds.Contains(id) || liveStatuses.Contains(erpStatus.ToLowerInvariant())) continue;
 
             ctx.PoStatusMappings.Add(new PoStatusMapping
             {

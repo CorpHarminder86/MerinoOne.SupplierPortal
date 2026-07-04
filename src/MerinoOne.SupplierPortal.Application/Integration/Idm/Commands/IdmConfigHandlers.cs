@@ -265,12 +265,17 @@ public class ValidateOutboundEndpointCommandHandler : IRequestHandler<ValidateOu
 
         var token = await _tokens.GetAccessTokenAsync(ct);
         var tokenOk = !string.IsNullOrEmpty(token);
-        var warnLn = conn.ApiBaseUrl.Contains("/LN", StringComparison.OrdinalIgnoreCase)
-            ? " WARNING: the tenant ApiBaseUrl looks LN-suite-scoped (/LN); the IDM relativePath may need the tenant-root ION API base."
+
+        // An absolute relativePath (http/https) is used verbatim by the Live client — no base concatenation.
+        var isAbsolute = ep.RelativePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || ep.RelativePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        var target = isAbsolute ? ep.RelativePath : $"{conn.ApiBaseUrl.TrimEnd('/')}/{ep.RelativePath.TrimStart('/')}";
+        var warnLn = !isAbsolute && conn.ApiBaseUrl.Contains("/LN", StringComparison.OrdinalIgnoreCase)
+            ? " WARNING: the tenant ApiBaseUrl looks LN-suite-scoped (/LN); set an ABSOLUTE https://… relativePath for IDM (used verbatim) or use the tenant-root ION API base."
             : string.Empty;
 
         var msg = tokenOk
-            ? $"OAuth token acquired. Target: {conn.ApiBaseUrl.TrimEnd('/')}/{ep.RelativePath.TrimStart('/')}.{warnLn}"
+            ? $"OAuth token acquired. Target: {target}.{warnLn}"
             : "Could not acquire an OAuth token for the tenant.";
         return new ValidateOutboundEndpointResultDto(tokenOk, tokenOk, false, 0, msg);
     }

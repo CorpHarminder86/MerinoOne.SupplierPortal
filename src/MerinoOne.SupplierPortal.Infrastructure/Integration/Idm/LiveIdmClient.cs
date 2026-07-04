@@ -46,6 +46,9 @@ public sealed class LiveIdmClient : IIdmClient
         if (string.IsNullOrEmpty(token))
             return new IdmHttpResult(0, "Could not acquire an Infor OAuth token for the tenant.", true);
 
+        // The tenant's ApiBaseUrl may be LN-suite-scoped (…/{tenant}/LN/lnapi) while IDM lives at the tenant
+        // root (…/{tenant}/IDM/api/items). An ABSOLUTE relativePath (http/https) is used verbatim, so the IDM
+        // endpoint can be configured independently of the LN base without touching InforConnectionSetting.
         var url = CombineUrl(conn.ApiBaseUrl, endpoint.RelativePath);
         using var req = new HttpRequestMessage(new HttpMethod(endpoint.HttpMethod), url)
         {
@@ -77,5 +80,8 @@ public sealed class LiveIdmClient : IIdmClient
     }
 
     internal static string CombineUrl(string baseUrl, string relativePath)
-        => $"{baseUrl.TrimEnd('/')}/{relativePath.TrimStart('/')}";
+        => relativePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+           || relativePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            ? relativePath
+            : $"{baseUrl.TrimEnd('/')}/{relativePath.TrimStart('/')}";
 }
