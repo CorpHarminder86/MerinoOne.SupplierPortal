@@ -166,6 +166,14 @@ else
                     <span class="mer-nav-item__icon material-symbols-outlined">mail</span>
                     <span class="mer-nav-item__label">Messages</span>
                 </NavLink>
+                @* Cross-module document register (RLS-scoped: admins see the tenant, suppliers see their own). *@
+                @if (Token.HasPermission("Document.Read"))
+                {
+                    <NavLink class="mer-nav-item" href="documents" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">folder_open</span>
+                        <span class="mer-nav-item__label">Documents</span>
+                    </NavLink>
+                }
 
                 @* R8 — supplier-reachable IDM sync log (RLS-scoped). Internal users see the same screen
                    inside the admin Integrations group below, so this branch is non-admin only. *@

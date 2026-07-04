@@ -1,0 +1,187 @@
+@page "/documents"
+@implements IDisposable
+@inject ApiClient Api
+@inject TokenAccessor Token
+
+@* 2026-07-04 — cross-module document register. RLS-scoped: every role sees this screen but only its own rows
+   (admin: whole tenant). Read-only. Cloned from Integration/IdmSyncLog.razor (tl-page / tl-filter-bar / tl-grid). *@
+
+<PageTitle>Documents</PageTitle>
+
+@if (!Token.HasPermission("Document.Read"))
+{
+    <div class="tl-empty">
+        <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+        <div>Access denied — document read access required.</div>
+    </div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">Documents</h1>
+                    <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+                </div>
+                <p class="tl-sub">Every uploaded attachment across ASNs, invoices, suppliers and licenses — scoped to what you can access</p>
+            </div>
+        </header>
+
+        <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="ownerTypeFilter" @bind:after="OnFilterChanged">
+                <option value="">All owners</option>
+                <option value="Asn">ASN</option>
+                <option value="Invoice">Invoice</option>
+                <option value="Supplier">Supplier</option>
+                <option value="SupplierLicense">Supplier License</option>
+                <option value="Staging">Staging</option>
+                <option value="PendingInvite">Pending Invite</option>
+            </select>
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="idmStatusFilter" @bind:after="OnFilterChanged">
+                <option value="">Any IDM state</option>
+                <option value="Synced">Pushed to IDM</option>
+                <option value="NotSynced">Not pushed</option>
+            </select>
+            <input class="rz-textbox" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;min-width:150px;" placeholder="Document type" @bind="documentTypeFilter" @bind:after="OnFilterChanged" />
+            <input class="rz-textbox" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;min-width:180px;" placeholder="Search file name" @bind="fileNameFilter" @bind:after="OnFilterChanged" />
+            <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:4px;">From
+                <input type="date" class="rz-textbox" style="padding:7px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;" @bind="fromDate" @bind:after="OnFilterChanged" />
+            </label>
+            <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:4px;">To
+                <input type="date" class="rz-textbox" style="padding:7px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;" @bind="toDate" @bind:after="OnFilterChanged" />
+            </label>
+            <button class="mbtn mbtn--outline" @onclick="ClearDates">Clear dates</button>
+        </div>
+
+        @if (loading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (notFound)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">construction</span>
+                <div>Document register endpoint not available.</div>
+                <div style="font-size:12px;color:var(--mer-ink-500);">Backend exposes <code>/api/documents</code>.</div>
+            </div>
+        }
+        else if (paged == null || paged.Items.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">folder_open</span>
+                <div>No documents.</div>
+            </div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 1fr 150px 150px 180px 90px 130px 140px 130px; --tl-min-width: 1300px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">File name</div>
+                    <div class="tlg-col">Document type</div>
+                    <div class="tlg-col">Owner</div>
+                    <div class="tlg-col">Owner ref</div>
+                    <div class="tlg-col tlg-col--num">Size (KB)</div>
+                    <div class="tlg-col">Uploaded by</div>
+                    <div class="tlg-col">IDM state</div>
+                    <div class="tlg-col">Created</div>
+                </div>
+                @foreach (var d in paged.Items)
+                {
+                    var row = d;
+                    <div class="tlg-row">
+                        <div class="tlg-col tlg-desc" title="@row.FileName">@row.FileName</div>
+                        <div class="tlg-col">@row.DocumentType</div>
+                        <div class="tlg-col">@OwnerLabel(row.OwnerEntityType)</div>
+                        <div class="tlg-col tlg-code" title="@row.OwnerEntityId">@(string.IsNullOrEmpty(row.OwnerRef) ? ShortId(row.OwnerEntityId) : row.OwnerRef)</div>
+                        <div class="tlg-col tlg-col--num">@row.FileSizeKb</div>
+                        <div class="tlg-col" title="@row.UploadedBy">@row.UploadedBy</div>
+                        <div class="tlg-col">
+                            @if (!string.IsNullOrEmpty(row.Pid))
+                            {
+                                <span class="tlg-status tlg-status--active" title="@row.Pid">Pushed</span>
+                            }
+                            else if (!string.IsNullOrEmpty(row.IdmEntityType))
+                            {
+                                <span class="tlg-status tlg-status--pending" title="@row.IdmEntityType">Eligible</span>
+                            }
+                            else
+                            {
+                                <span class="tlg-status tlg-status--info">—</span>
+                            }
+                        </div>
+                        <div class="tlg-col tlg-code">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                    </div>
+                }
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--mer-ink-600);">
+                <div>Page @paged.Page of @paged.TotalPages — @paged.TotalCount rows</div>
+                <div style="display:flex;gap:6px;">
+                    <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Prev" disabled="@(paged.Page <= 1)">Prev</button>
+                    <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Next" disabled="@(paged.Page >= paged.TotalPages)">Next</button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private PagedResult<DocumentListItemDto>? paged;
+    private bool loading = true;
+    private bool notFound = false;
+
+    private string ownerTypeFilter = string.Empty;
+    private string idmStatusFilter = string.Empty;
+    private string documentTypeFilter = string.Empty;
+    private string fileNameFilter = string.Empty;
+    private DateTime? fromDate;
+    private DateTime? toDate;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Token.Changed += OnTokenChanged;
+        await Reload();
+    }
+
+    private void OnTokenChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Token.Changed -= OnTokenChanged;
+
+    private async Task OnFilterChanged() { page = 1; await Reload(); }
+    private async Task ClearDates() { fromDate = null; toDate = null; page = 1; await Reload(); }
+
+    private async Task Reload()
+    {
+        loading = true; notFound = false;
+        var url = $"api/documents?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(ownerTypeFilter)) url += $"&ownerEntityType={Uri.EscapeDataString(ownerTypeFilter)}";
+        if (!string.IsNullOrWhiteSpace(idmStatusFilter)) url += $"&idmStatus={Uri.EscapeDataString(idmStatusFilter)}";
+        if (!string.IsNullOrWhiteSpace(documentTypeFilter)) url += $"&documentType={Uri.EscapeDataString(documentTypeFilter.Trim())}";
+        if (!string.IsNullOrWhiteSpace(fileNameFilter)) url += $"&fileName={Uri.EscapeDataString(fileNameFilter.Trim())}";
+        if (fromDate.HasValue) url += $"&fromDate={fromDate.Value:yyyy-MM-dd}";
+        if (toDate.HasValue) url += $"&toDate={toDate.Value:yyyy-MM-dd}";
+        try
+        {
+            var resp = await Api.GetAsync<PagedResult<DocumentListItemDto>>(url);
+            if (resp == null || (!resp.Success && resp.Data == null)) { notFound = true; }
+            else paged = resp.Data;
+        }
+        catch { notFound = true; }
+        loading = false;
+    }
+
+    private async Task Prev() { if (page > 1) { page--; await Reload(); } }
+    private async Task Next() { if (paged != null && page < paged.TotalPages) { page++; await Reload(); } }
+
+    private static string ShortId(Guid id) => id.ToString()[..8];
+
+    private static string OwnerLabel(string ownerType) => ownerType switch
+    {
+        "Asn" => "ASN",
+        "SupplierLicense" => "Supplier License",
+        "PendingInvite" => "Pending Invite",
+        _ => ownerType
+    };
+}
