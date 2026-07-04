@@ -37,6 +37,14 @@ public class OutboundEndpointConfig : AuditableEntity, ITenantOwned
     /// <summary>IDM ACL default, e.g. <c>"Public"</c>.</summary>
     public string? DefaultAcl { get; set; }
 
+    /// <summary>
+    /// 2026-07-05 — IDM's <c>item.entityName</c> (its generic-document API class, e.g. <c>"MDS_GenericDocument"</c>).
+    /// Read by the snapshot providers from the tenant's <c>IDM.Item.Create</c> row (Create + Update share the same
+    /// acl/entityName — see AsnSnapshotProvider/InvoiceSnapshotProvider) and surfaced into the mapping expression
+    /// as <c>config.entityName</c>. Previously hardcoded in C#; now editable here.
+    /// </summary>
+    public string? EntityName { get; set; }
+
     /// <summary>Soft on/off switch (disabled by default until validated).</summary>
     public bool IsEnabled { get; set; }
 }

@@ -55,7 +55,7 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 160px 90px 1fr 1fr 140px 120px 80px 200px; --tl-min-width: 1400px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 160px 90px 1fr 1fr 140px 120px 160px 80px 200px; --tl-min-width: 1540px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Endpoint key</div>
                     <div class="tlg-col">Method</div>
@@ -63,6 +63,7 @@ else
                     <div class="tlg-col">Static headers</div>
                     <div class="tlg-col">Ack parser</div>
                     <div class="tlg-col">Default ACL</div>
+                    <div class="tlg-col">Entity name</div>
                     <div class="tlg-col">Enabled</div>
                     <div class="tlg-col tlg-col--actions">Actions</div>
                 </div>
@@ -75,7 +76,8 @@ else
                         <div class="tlg-col tlg-desc" title="@ep.RelativePath">@ep.RelativePath</div>
                         <div class="tlg-col tlg-desc tlg-code" title="@ep.StaticHeadersJson">@(string.IsNullOrEmpty(ep.StaticHeadersJson) ? "—" : ep.StaticHeadersJson)</div>
                         <div class="tlg-col tlg-code">@(string.IsNullOrEmpty(ep.AckParserKey) ? "—" : ep.AckParserKey)</div>
-                        <div class="tlg-col tlg-code">@(string.IsNullOrEmpty(ep.DefaultAcl) ? "—" : ep.DefaultAcl)</div>
+                        <div class="tlg-col tlg-code" title="Injected into every mapping expression as config.acl">@(string.IsNullOrEmpty(ep.DefaultAcl) ? "—" : ep.DefaultAcl)</div>
+                        <div class="tlg-col tlg-code" title="Injected into every mapping expression as config.entityName">@(string.IsNullOrEmpty(ep.EntityName) ? "—" : ep.EntityName)</div>
                         <div class="tlg-col"><span class="tlg-status @(ep.IsEnabled ? "tlg-status--active" : "tlg-status--danger")">@(ep.IsEnabled ? "On" : "Off")</span></div>
                         <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
                             @if (CanManage)
@@ -157,6 +159,11 @@ else
                                 <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Default ACL</label>
                                 <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formAcl" placeholder="e.g. Everyone" />
                             </div>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Entity name</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="formEntityName" placeholder="e.g. MDS_GenericDocument" />
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">On the <span style="font-family:Inter,monospace;">IDM.Item.Create</span> row, this + Default ACL are injected into EVERY mapping expression as <span style="font-family:Inter,monospace;">config.acl</span> / <span style="font-family:Inter,monospace;">config.entityName</span> (Create and Update dispatch share them).</div>
                         </div>
                         <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
                             <input type="checkbox" @bind="formEnabled" /> Enabled
@@ -353,14 +360,15 @@ else
     private string formHeaders = string.Empty;
     private string formAckParser = string.Empty;
     private string formAcl = string.Empty;
+    private string formEntityName = string.Empty;
     private bool formEnabled = true;
     private string formError = string.Empty;
 
     private void OpenNew()
     {
-        editing = new OutboundEndpointConfigDto(Guid.Empty, "", "POST", "", null, null, null, true);
+        editing = new OutboundEndpointConfigDto(Guid.Empty, "", "POST", "", null, null, null, null, true);
         editingId = null;
-        formKey = ""; formMethod = "POST"; formPath = ""; formHeaders = ""; formAckParser = ""; formAcl = ""; formEnabled = true;
+        formKey = ""; formMethod = "POST"; formPath = ""; formHeaders = ""; formAckParser = ""; formAcl = ""; formEntityName = ""; formEnabled = true;
         formError = string.Empty;
     }
 
@@ -374,6 +382,7 @@ else
         formHeaders = e.StaticHeadersJson ?? "";
         formAckParser = e.AckParserKey ?? "";
         formAcl = e.DefaultAcl ?? "";
+        formEntityName = e.EntityName ?? "";
         formEnabled = e.IsEnabled;
         formError = string.Empty;
     }
@@ -392,6 +401,7 @@ else
             string.IsNullOrWhiteSpace(formHeaders) ? null : formHeaders.Trim(),
             string.IsNullOrWhiteSpace(formAckParser) ? null : formAckParser.Trim(),
             string.IsNullOrWhiteSpace(formAcl) ? null : formAcl.Trim(),
+            string.IsNullOrWhiteSpace(formEntityName) ? null : formEntityName.Trim(),
             formEnabled);
         var resp = await Api.PostAsync<Guid, SaveOutboundEndpointConfigRequest>("api/integration/idm/endpoints", req);
         if (resp?.Success == true)

@@ -223,7 +223,7 @@ public class GetOutboundEndpointConfigsQueryHandler : IRequestHandler<GetOutboun
             .Where(e => e.TenantId == tid && !e.IsDeleted)
             .OrderBy(e => e.EndpointKey)
             .Select(e => new OutboundEndpointConfigDto(e.Id, e.EndpointKey, e.HttpMethod, e.RelativePath,
-                e.StaticHeadersJson, e.AckParserKey, e.DefaultAcl, e.IsEnabled))
+                e.StaticHeadersJson, e.AckParserKey, e.DefaultAcl, e.EntityName, e.IsEnabled))
             .ToListAsync(ct);
     }
 }
@@ -276,6 +276,7 @@ public class SaveOutboundEndpointConfigCommandHandler : IRequestHandler<SaveOutb
         existing.StaticHeadersJson = b.StaticHeadersJson;
         existing.AckParserKey = b.AckParserKey;
         existing.DefaultAcl = b.DefaultAcl;
+        existing.EntityName = b.EntityName;
         existing.IsEnabled = b.IsEnabled;
 
         await _db.SaveChangesAsync(ct);

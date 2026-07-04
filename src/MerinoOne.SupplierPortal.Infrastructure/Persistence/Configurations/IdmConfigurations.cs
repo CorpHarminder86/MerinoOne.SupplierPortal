@@ -23,6 +23,7 @@ public class OutboundEndpointConfigConfiguration : IEntityTypeConfiguration<Outb
         b.Property(x => x.StaticHeadersJson).HasColumnName("staticHeadersJson").HasColumnType("nvarchar(max)");
         b.Property(x => x.AckParserKey).HasColumnName("ackParserKey").HasMaxLength(60);
         b.Property(x => x.DefaultAcl).HasColumnName("defaultAcl").HasMaxLength(60);
+        b.Property(x => x.EntityName).HasColumnName("entityName").HasMaxLength(60);
         b.Property(x => x.IsEnabled).HasColumnName("isEnabled").HasColumnType("bit").HasDefaultValue(false);
 
         b.ToTable(t => t.HasCheckConstraint("CK_OutboundEndpointConfig_httpMethod",

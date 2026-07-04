@@ -64,7 +64,9 @@ public record SaveIdmAttachmentTypeConfigRequest(
 
 public record IdmBackfillResultDto(int UpdatedCount);
 
-/// <summary>An IDM transport endpoint (Integration › Endpoints). No auth/baseUrl — resolved from InforConnectionSetting (D3).</summary>
+/// <summary>An IDM transport endpoint (Integration › Endpoints). No auth/baseUrl — resolved from InforConnectionSetting (D3).
+/// <see cref="DefaultAcl"/>/<see cref="EntityName"/> on the tenant's <c>IDM.Item.Create</c> row are read by the
+/// snapshot providers into every mapping expression's <c>config.acl</c>/<c>config.entityName</c>.</summary>
 public record OutboundEndpointConfigDto(
     Guid Id,
     string EndpointKey,
@@ -73,6 +75,7 @@ public record OutboundEndpointConfigDto(
     string? StaticHeadersJson,
     string? AckParserKey,
     string? DefaultAcl,
+    string? EntityName,
     bool IsEnabled);
 
 public record SaveOutboundEndpointConfigRequest(
@@ -83,6 +86,7 @@ public record SaveOutboundEndpointConfigRequest(
     string? StaticHeadersJson,
     string? AckParserKey,
     string? DefaultAcl,
+    string? EntityName,
     bool IsEnabled);
 
 public record ValidateOutboundEndpointResultDto(bool Success, bool TokenOk, bool ReachabilityOk, int HttpStatus, string Message);

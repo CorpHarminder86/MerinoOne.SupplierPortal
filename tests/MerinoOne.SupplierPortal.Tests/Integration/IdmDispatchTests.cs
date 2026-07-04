@@ -140,6 +140,57 @@ public class IdmDispatchTests
         creates[0].LastError.Should().NotBeNullOrEmpty();
     }
 
+    /// <summary>
+    /// 2026-07-05 — config.acl / config.entityName (read by every mapping expression) must resolve from the
+    /// tenant's IDM.Item.Create OutboundEndpointConfig row, not a hardcoded literal (there was previously no UI
+    /// path to change them at all). Proves the wiring by overriding the row and checking the persisted snapshot.
+    /// </summary>
+    [SkippableFact]
+    public async Task Snapshot_config_acl_and_entityName_resolve_from_outbound_endpoint_config()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        Guid docId, endpointConfigId;
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (_, docId, _) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "acl-entity.pdf");
+
+            endpointConfigId = Guid.NewGuid();
+            db.Set<OutboundEndpointConfig>().Add(new OutboundEndpointConfig
+            {
+                Id = endpointConfigId, TenantId = IntegrationTestFixture.TenantId, TargetSystem = "IDM",
+                EndpointKey = "IDM.Item.Create", HttpMethod = "POST", RelativePath = "/IDM/api/items",
+                DefaultAcl = "CustomAcl-Test", EntityName = "CustomEntity-Test", IsEnabled = false,
+                CreatedBy = "seed",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            await DrainAsync();
+
+            using var scope = _fx.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var snapshotJson = await db.IdmDocumentOutboxes.IgnoreQueryFilters()
+                .Where(o => o.DocumentUploadId == docId && o.Operation == IdmOutboxOperation.Create)
+                .Select(o => o.RequestSnapshotJson).SingleAsync();
+
+            snapshotJson.Should().Contain("CustomAcl-Test",
+                because: "config.acl must resolve from the tenant's IDM.Item.Create endpoint row, not a hardcoded literal");
+            snapshotJson.Should().Contain("CustomEntity-Test",
+                because: "config.entityName must resolve from the same row");
+        }
+        finally
+        {
+            using var cleanup = _fx.Factory.Services.CreateScope();
+            var db = cleanup.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Set<OutboundEndpointConfig>().IgnoreQueryFilters()
+                .Where(e => e.Id == endpointConfigId).ExecuteDeleteAsync();
+        }
+    }
+
     /// <summary>2026-07-05 fix — the manual Backfill must mirror the worker's PORTAL-ENTITY-aware predicate: a
     /// shared attachment-type code on the WRONG owner entity (e.g. supplier-owned) must not be stamped.</summary>
     [SkippableFact]

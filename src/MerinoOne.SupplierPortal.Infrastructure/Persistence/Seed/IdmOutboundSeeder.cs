@@ -54,6 +54,7 @@ public static class IdmOutboundSeeder
                 RelativePath = "/IDM/api/items",
                 AckParserKey = "IdmXml",
                 DefaultAcl = "Public",
+                EntityName = "MDS_GenericDocument",
                 IsEnabled = false,
                 CreatedBy = Actor,
             });

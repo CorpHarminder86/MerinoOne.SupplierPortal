@@ -3712,6 +3712,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(80)")
                         .HasColumnName("endpointKey");
 
+                    b.Property<string>("EntityName")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)")
+                        .HasColumnName("entityName");
+
                     b.Property<string>("HttpMethod")
                         .IsRequired()
                         .HasMaxLength(10)
