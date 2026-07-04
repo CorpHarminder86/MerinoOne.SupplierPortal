@@ -453,7 +453,12 @@ else
 
     // Drives the @key on the routed content. Changing the active company or bumping _refreshTick re-creates
     // the current page so it re-fetches under the new scope — uniform across all pages, no full reload.
-    private string PageScopeKey => $"{Company.ActiveCompanyId}|{_refreshTick}";
+    // R8 (2026-07-04) — _hydrated is part of the key: on a DEEP-LINK (full reload) the body first renders
+    // under the PROVISIONAL session (stored token, EMPTY roles/permissions — HydrateTokenAsync line ~605),
+    // so permission-gated pages initialise into their "no permission" state and never re-render (pages do
+    // not subscribe to TokenAccessor.Changed). When the api/auth/me restore completes and _hydrated flips,
+    // the key changes and the routed page is disposed + recreated with the full permission set loaded.
+    private string PageScopeKey => $"{Company.ActiveCompanyId}|{_refreshTick}|{_hydrated}";
     private bool _userMenuOpen;
     private bool _companyMenuOpen;
     private bool _signingOut;
@@ -584,7 +589,9 @@ else
     private async Task HydrateTokenAsync()
     {
         if (_hydrated) return;
-        if (Token.IsAuthenticated) { _hydrated = true; return; }
+        // Already authenticated in-circuit (fresh login): flip + render NOW so the PageScopeKey change
+        // coalesces into this render instead of recreating the routed page later on an unrelated event.
+        if (Token.IsAuthenticated) { _hydrated = true; StateHasChanged(); return; }
 
         string? stored = null;
         try
