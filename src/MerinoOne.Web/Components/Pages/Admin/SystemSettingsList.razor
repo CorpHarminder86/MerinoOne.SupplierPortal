@@ -39,6 +39,9 @@
                 <button type="button" class="settings-rail__item @(category == "Fulfilment" ? "active" : null)" @onclick="@(() => SelectCategory("Fulfilment"))">
                     <span class="material-symbols-outlined">local_shipping</span> Fulfilment
                 </button>
+                <button type="button" class="settings-rail__item @(category == "InforIdm" ? "active" : null)" @onclick="@(() => SelectCategory("InforIdm"))">
+                    <span class="material-symbols-outlined">cloud_upload</span> Infor IDM
+                </button>
             </aside>
 
             <main class="rz-card settings-panel">
@@ -130,6 +133,25 @@
                             </button>
                         </div>
                     }
+                    else if (category == "InforIdm")
+                    {
+                        <h2 class="settings-section__title">Infor IDM dispatcher</h2>
+                        <p class="settings-section__sub">Outbound document-sync dispatcher tuning (TSD R8 §7). Per-attachment-type mapping lives on Settings → IDM Attachment Types.</p>
+
+                        @RenderNumericRow("DispatcherPollSeconds", "Seconds between dispatcher polls of the outbox (1–3600)", idm.DispatcherPollSeconds, v => idm.DispatcherPollSeconds = v, 1, 3600, "DispatcherPollSeconds")
+                        @RenderNumericRow("BatchSize", "Max outbox rows claimed per poll (1–500)", idm.BatchSize, v => idm.BatchSize = v, 1, 500, "BatchSize")
+                        @RenderNumericRow("ConcurrencyCap", "Max concurrent IDM pushes (1–50)", idm.ConcurrencyCap, v => idm.ConcurrencyCap = v, 1, 50, "ConcurrencyCap")
+                        @RenderNumericRow("RetryBackoffBaseSeconds", "Base delay for the first retry (1–3600)", idm.RetryBackoffBaseSeconds, v => idm.RetryBackoffBaseSeconds = v, 1, 3600, "RetryBackoffBaseSeconds")
+                        @RenderNumericRow("RetryBackoffCapSeconds", "Ceiling for exponential backoff (1–86400)", idm.RetryBackoffCapSeconds, v => idm.RetryBackoffCapSeconds = v, 1, 86400, "RetryBackoffCapSeconds")
+                        @RenderNumericRow("MaxAttempts", "Attempts before a row becomes Unresolvable (1–50)", idm.MaxAttempts, v => idm.MaxAttempts = v, 1, 50, "MaxAttempts")
+                        @RenderNumericRow("StaleInFlightMinutes", "Minutes before an InFlight row is reclaimed (1–1440)", idm.StaleInFlightMinutes, v => idm.StaleInFlightMinutes = v, 1, 1440, "StaleInFlightMinutes")
+
+                        <div class="settings-actions">
+                            <button type="button" class="rz-button rz-primary settings-btn--primary" disabled="@busy" @onclick="SaveInforIdm">
+                                <span class="material-symbols-outlined">save</span> @(busy ? "Saving…" : "Save changes")
+                            </button>
+                        </div>
+                    }
                 }
             </main>
         </div>
@@ -184,6 +206,7 @@
     private const string InviteCategory = "SupplierInvite";
     private const string InforCategory = "InforConnection";
     private const string FulfilmentCategory = "Fulfilment";
+    private const string InforIdmCategory = "InforIdm";
     private const string PasswordMask = "********";
 
     private string category = EmailCategory;
@@ -196,11 +219,13 @@
     private readonly InviteForm invite = new();
     private readonly InforForm infor = new();
     private readonly FulfilForm fulfil = new();
+    private readonly IdmForm idm = new();
 
     // Track original values per key so Save only sends changed rows.
     private Dictionary<string, string> originalEmail = new();
     private Dictionary<string, string> originalInvite = new();
     private Dictionary<string, string> originalFulfil = new();
+    private Dictionary<string, string> originalIdm = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -255,6 +280,17 @@
             fulfil.OverShipAllowanceRounding = Pick(rows, "OverShipAllowanceRounding", "None");
             originalFulfil = SnapshotFulfil();
         }
+        else if (cat == InforIdmCategory)
+        {
+            idm.DispatcherPollSeconds = ParseInt(Pick(rows, "DispatcherPollSeconds", "30"), 30);
+            idm.BatchSize = ParseInt(Pick(rows, "BatchSize", "25"), 25);
+            idm.ConcurrencyCap = ParseInt(Pick(rows, "ConcurrencyCap", "4"), 4);
+            idm.RetryBackoffBaseSeconds = ParseInt(Pick(rows, "RetryBackoffBaseSeconds", "30"), 30);
+            idm.RetryBackoffCapSeconds = ParseInt(Pick(rows, "RetryBackoffCapSeconds", "3600"), 3600);
+            idm.MaxAttempts = ParseInt(Pick(rows, "MaxAttempts", "8"), 8);
+            idm.StaleInFlightMinutes = ParseInt(Pick(rows, "StaleInFlightMinutes", "15"), 15);
+            originalIdm = SnapshotIdm();
+        }
         loading = false;
         StateHasChanged();
     }
@@ -284,6 +320,17 @@
     {
         ["EnforceOverShipGuard"] = fulfil.EnforceOverShipGuard.ToString().ToLowerInvariant(),
         ["OverShipAllowanceRounding"] = fulfil.OverShipAllowanceRounding,
+    };
+
+    private Dictionary<string, string> SnapshotIdm() => new()
+    {
+        ["DispatcherPollSeconds"] = idm.DispatcherPollSeconds.ToString(),
+        ["BatchSize"] = idm.BatchSize.ToString(),
+        ["ConcurrencyCap"] = idm.ConcurrencyCap.ToString(),
+        ["RetryBackoffBaseSeconds"] = idm.RetryBackoffBaseSeconds.ToString(),
+        ["RetryBackoffCapSeconds"] = idm.RetryBackoffCapSeconds.ToString(),
+        ["MaxAttempts"] = idm.MaxAttempts.ToString(),
+        ["StaleInFlightMinutes"] = idm.StaleInFlightMinutes.ToString(),
     };
 
     private static readonly string[] RoundingOptions = { "None", "Floor", "Round", "Ceiling" };
@@ -373,6 +420,33 @@
                 Show("Settings saved.", ok: true);
                 Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
                 await LoadCategory(FulfilmentCategory);
+            }
+            else
+            {
+                Show(string.Join(" ", failures), ok: false);
+            }
+        }
+        finally { busy = false; }
+    }
+
+    private async Task SaveInforIdm()
+    {
+        busy = true; banner = null;
+        try
+        {
+            var current = SnapshotIdm();
+            var failures = new List<string>();
+            foreach (var (key, value) in current)
+            {
+                if (originalIdm.TryGetValue(key, out var prev) && prev == value) continue;
+                if (!await SaveOne(InforIdmCategory, key, value, failures)) break;
+            }
+
+            if (failures.Count == 0)
+            {
+                Show("Settings saved.", ok: true);
+                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+                await LoadCategory(InforIdmCategory);
             }
             else
             {
@@ -662,6 +736,17 @@
     {
         public bool EnforceOverShipGuard { get; set; } = false;
         public string OverShipAllowanceRounding { get; set; } = "None";
+    }
+
+    private class IdmForm
+    {
+        public int DispatcherPollSeconds { get; set; } = 30;
+        public int BatchSize { get; set; } = 25;
+        public int ConcurrencyCap { get; set; } = 4;
+        public int RetryBackoffBaseSeconds { get; set; } = 30;
+        public int RetryBackoffCapSeconds { get; set; } = 3600;
+        public int MaxAttempts { get; set; } = 8;
+        public int StaleInFlightMinutes { get; set; } = 15;
     }
 
     private class InforForm

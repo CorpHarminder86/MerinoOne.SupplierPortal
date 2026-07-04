@@ -1,0 +1,372 @@
+@page "/integrations/idm-sync-log"
+@implements IDisposable
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+@* R8 (2026-07-04) — TSD R8 §7. Outbound Infor IDM document-sync log. RLS-scoped: every role (supplier + internal)
+   sees this screen but only its own rows. Page gate = Integration.IdmSync.View. Retry / Re-push are gated on
+   Integration.IdmSync.Manage. Cloned from Integration/SyncLog.razor (list + on-demand detail dialog). *@
+
+<PageTitle>IDM Sync Log</PageTitle>
+
+@if (!Token.HasPermission("Integration.IdmSync.View"))
+{
+    <div class="tl-empty">
+        <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+        <div>Access denied — IDM sync view access required.</div>
+    </div>
+}
+else
+{
+    <div class="tl-page">
+        <header class="tl-header">
+            <div>
+                <div class="tl-title-row">
+                    <h1 class="tl-title">IDM Sync Log</h1>
+                    <span class="tl-count-chip">@(paged?.TotalCount ?? 0)</span>
+                </div>
+                <p class="tl-sub">Outbound document push to Infor Document Management</p>
+            </div>
+        </header>
+
+        <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="OnFilterChanged">
+                <option value="">All statuses</option>
+                <option value="Blocked">Blocked</option>
+                <option value="Pending">Pending</option>
+                <option value="InFlight">In flight</option>
+                <option value="Success">Success</option>
+                <option value="Failed">Failed</option>
+                <option value="Unresolvable">Unresolvable</option>
+            </select>
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="operationFilter" @bind:after="OnFilterChanged">
+                <option value="">All operations</option>
+                <option value="Create">Create</option>
+                <option value="Update">Update</option>
+                <option value="Delete">Delete</option>
+            </select>
+            <input class="rz-textbox" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;min-width:150px;" placeholder="IDM entity type" @bind="entityTypeFilter" @bind:after="OnFilterChanged" />
+            <input class="rz-textbox" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;min-width:180px;" placeholder="Search file name" @bind="fileNameFilter" @bind:after="OnFilterChanged" />
+            <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:4px;">From
+                <input type="date" class="rz-textbox" style="padding:7px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;" @bind="fromDate" @bind:after="OnFilterChanged" />
+            </label>
+            <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:4px;">To
+                <input type="date" class="rz-textbox" style="padding:7px 8px;border:1px solid var(--mer-ink-300);border-radius:6px;" @bind="toDate" @bind:after="OnFilterChanged" />
+            </label>
+            <button class="mbtn mbtn--outline" @onclick="ClearDates">Clear dates</button>
+        </div>
+
+        @if (loading)
+        {
+            <div class="tl-empty">Loading…</div>
+        }
+        else if (notFound)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">construction</span>
+                <div>IDM sync log endpoint not available.</div>
+                <div style="font-size:12px;color:var(--mer-ink-500);">Backend exposes <code>/api/integration/idm/sync-log</code>.</div>
+            </div>
+        }
+        else if (paged == null || paged.Items.Count == 0)
+        {
+            <div class="tl-empty">
+                <span class="material-symbols-outlined" style="font-size:32px;">cloud_sync</span>
+                <div>No IDM sync events.</div>
+            </div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 190px 1fr 90px 110px 80px 140px 130px 1fr 140px 90px; --tl-min-width: 1560px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Owner entity</div>
+                    <div class="tlg-col">File name</div>
+                    <div class="tlg-col">Operation</div>
+                    <div class="tlg-col">Status</div>
+                    <div class="tlg-col tlg-col--num">Attempts</div>
+                    <div class="tlg-col">Next attempt</div>
+                    <div class="tlg-col">PID</div>
+                    <div class="tlg-col">Last error</div>
+                    <div class="tlg-col">Created</div>
+                    <div class="tlg-col tlg-col--actions">Actions</div>
+                </div>
+                @foreach (var s in paged.Items)
+                {
+                    var row = s;
+                    <div class="tlg-row">
+                        <div class="tlg-col" title="@row.OwnerEntityId">
+                            <div style="font-weight:600;color:var(--mer-blue-darker);">@row.IdmEntityType</div>
+                            <div class="tlg-code" style="font-size:11px;color:var(--mer-ink-500);">@ShortId(row.OwnerEntityId)</div>
+                        </div>
+                        <div class="tlg-col tlg-desc" title="@row.FileName">@row.FileName</div>
+                        <div class="tlg-col">@row.Operation</div>
+                        <div class="tlg-col"><span class="tlg-status @StatusClass(row.Status)">@row.Status</span></div>
+                        <div class="tlg-col tlg-col--num">@row.AttemptCount</div>
+                        <div class="tlg-col tlg-code">@(row.NextAttemptAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+                        <div class="tlg-col tlg-code" title="@row.Pid">@(string.IsNullOrEmpty(row.Pid) ? "—" : (row.Pid.Length > 18 ? row.Pid[..18] + "…" : row.Pid))</div>
+                        <div class="tlg-col" style="@(IsError(row.Status) ? "color:var(--mer-danger,#b42318);" : "color:var(--mer-ink-500);")" title="@row.LastError">@(string.IsNullOrEmpty(row.LastError) ? "—" : (row.LastError.Length > 90 ? row.LastError[..90] + "…" : row.LastError))</div>
+                        <div class="tlg-col tlg-code">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                        <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => ViewDetail(row)" disabled="@busy" title="Inspect request + response">
+                                <span class="material-symbols-outlined">data_object</span> View
+                            </button>
+                            @if (Token.HasPermission("Integration.IdmSync.Manage"))
+                            {
+                                @if (row.Status is "Failed" or "Unresolvable")
+                                {
+                                    <button class="mbtn mbtn--row mbtn--success" @onclick="() => Retry(row)" disabled="@busy" title="Re-arm to Pending">
+                                        <span class="material-symbols-outlined">refresh</span> Retry
+                                    </button>
+                                }
+                                else if (row.Status == "Success")
+                                {
+                                    <button class="mbtn mbtn--row mbtn--accent" @onclick="() => ConfirmRepush(row)" disabled="@busy" title="Queue a new Update push">
+                                        <span class="material-symbols-outlined">cloud_upload</span> Re-push
+                                    </button>
+                                }
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--mer-ink-600);">
+                <div>Page @paged.Page of @paged.TotalPages — @paged.TotalCount rows</div>
+                <div style="display:flex;gap:6px;">
+                    <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Prev" disabled="@(paged.Page <= 1)">Prev</button>
+                    <button class="rz-button" style="padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);cursor:pointer;" @onclick="Next" disabled="@(paged.Page >= paged.TotalPages)">Next</button>
+                </div>
+            </div>
+        }
+    </div>
+
+    @* Row detail — request snapshot (JSON) + raw XML response, fetched on demand. *@
+    @if (showDetail)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" data-size="xl" style="width:1100px;max-width:94vw;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">data_object</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">IDM sync · @detailEntity</div>
+                        <h2 class="merino-dialog__title">Document push detail</h2>
+                        <p class="merino-dialog__subtitle">@detailSubtitle</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="CloseDetail"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    @if (detailLoading)
+                    {
+                        <div style="color:var(--mer-ink-500);font-size:13px;">Loading detail…</div>
+                    }
+                    else
+                    {
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                            <div>
+                                <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:6px;">Request snapshot (JSON)</div>
+                                @if (string.IsNullOrWhiteSpace(detailRequest))
+                                {
+                                    <div style="color:var(--mer-ink-500);font-size:13px;">No request snapshot stored.</div>
+                                }
+                                else
+                                {
+                                    <pre style="margin:0;max-height:56vh;overflow:auto;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:8px;padding:12px 14px;font-family:Inter,monospace;font-size:12px;line-height:1.5;color:var(--mer-ink-900);white-space:pre;">@detailRequest</pre>
+                                }
+                            </div>
+                            <div>
+                                <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:6px;">IDM response (XML)</div>
+                                @if (string.IsNullOrWhiteSpace(detailResponse))
+                                {
+                                    <div style="color:var(--mer-ink-500);font-size:13px;">No response body stored.</div>
+                                }
+                                else
+                                {
+                                    <pre style="margin:0;max-height:56vh;overflow:auto;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:8px;padding:12px 14px;font-family:Inter,monospace;font-size:12px;line-height:1.5;color:var(--mer-ink-900);white-space:pre-wrap;word-break:break-word;">@detailResponse</pre>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="CloseDetail">Close</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* Re-push confirm — queues a brand-new Update push. *@
+    @if (repushRow is not null)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+            <div class="merino-dialog" data-variant="warning" data-size="sm" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">cloud_upload</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">IDM sync</div>
+                        <h2 class="merino-dialog__title">Re-push document?</h2>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => repushRow = null"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <p style="font-size:13px;color:var(--mer-ink-700);margin:0;">This queues a new <strong>Update</strong> push for <span style="font-family:Inter,monospace;">@repushRow.FileName</span> (carrying its existing PID). The original Create row stays terminal.</p>
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => repushRow = null">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="Repush" disabled="@busy">@(busy ? "Queuing…" : "Re-push")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private PagedResult<IdmSyncLogDto>? paged;
+    private bool loading = true;
+    private bool busy = false;
+    private bool notFound = false;
+
+    private string statusFilter = string.Empty;
+    private string operationFilter = string.Empty;
+    private string entityTypeFilter = string.Empty;
+    private string fileNameFilter = string.Empty;
+    // Default the date range to the CURRENT MONTH (first of month → today).
+    private DateTime? fromDate = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime? toDate = DateTime.Today;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Token.Changed += OnTokenChanged;
+        await Reload();
+    }
+
+    private void OnTokenChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Token.Changed -= OnTokenChanged;
+
+    private async Task OnFilterChanged() { page = 1; await Reload(); }
+    private async Task ClearDates() { fromDate = null; toDate = null; page = 1; await Reload(); }
+
+    private async Task Reload()
+    {
+        loading = true; notFound = false;
+        var url = $"api/integration/idm/sync-log?page={page}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
+        if (!string.IsNullOrWhiteSpace(operationFilter)) url += $"&operation={Uri.EscapeDataString(operationFilter)}";
+        if (!string.IsNullOrWhiteSpace(entityTypeFilter)) url += $"&idmEntityType={Uri.EscapeDataString(entityTypeFilter.Trim())}";
+        if (!string.IsNullOrWhiteSpace(fileNameFilter)) url += $"&fileName={Uri.EscapeDataString(fileNameFilter.Trim())}";
+        if (fromDate.HasValue) url += $"&fromDate={fromDate.Value:yyyy-MM-dd}";
+        if (toDate.HasValue) url += $"&toDate={toDate.Value:yyyy-MM-dd}";
+        try
+        {
+            var resp = await Api.GetAsync<PagedResult<IdmSyncLogDto>>(url);
+            if (resp == null || (!resp.Success && resp.Data == null)) { notFound = true; }
+            else paged = resp.Data;
+        }
+        catch { notFound = true; }
+        loading = false;
+    }
+
+    private async Task Prev() { if (page > 1) { page--; await Reload(); } }
+    private async Task Next() { if (paged != null && page < paged.TotalPages) { page++; await Reload(); } }
+
+    // ===== Detail viewer =====
+    private bool showDetail;
+    private bool detailLoading;
+    private string? detailRequest;
+    private string? detailResponse;
+    private string detailEntity = string.Empty;
+    private string detailSubtitle = string.Empty;
+
+    private async Task ViewDetail(IdmSyncLogDto s)
+    {
+        showDetail = true;
+        detailLoading = true;
+        detailRequest = null;
+        detailResponse = null;
+        detailEntity = s.IdmEntityType;
+        detailSubtitle = $"{s.FileName} · {s.Operation} · {s.CreatedOn:yyyy-MM-dd HH:mm:ss}";
+        busy = true;
+        StateHasChanged();
+
+        var resp = await Api.GetAsync<IdmSyncLogDetailDto>($"api/integration/idm/sync-log/{s.Id}/detail");
+        // Pretty-print the request snapshot (JSON). Leave the response body RAW — it is XML, never JSON.
+        detailRequest = FormatJson(resp?.Data?.RequestSnapshotJson);
+        detailResponse = resp?.Data?.ResponseBody;
+        detailLoading = false;
+        busy = false;
+    }
+
+    private void CloseDetail() { showDetail = false; detailRequest = null; detailResponse = null; }
+
+    // ===== Row actions =====
+    private async Task Retry(IdmSyncLogDto s)
+    {
+        busy = true;
+        var resp = await Api.PostAsync<bool, object>($"api/integration/idm/sync-log/{s.Id}/retry", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Retry queued" });
+            await Reload();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Retry failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+
+    private IdmSyncLogDto? repushRow;
+    private void ConfirmRepush(IdmSyncLogDto s) => repushRow = s;
+
+    private async Task Repush()
+    {
+        if (repushRow is null) return;
+        busy = true;
+        var resp = await Api.PostAsync<bool, object>($"api/integration/idm/sync-log/{repushRow.Id}/repush", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Re-push queued" });
+            repushRow = null;
+            await Reload();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Re-push failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+
+    // ===== Helpers =====
+    private static string ShortId(Guid id) => id.ToString()[..8];
+
+    private static bool IsError(string status) => status is "Failed" or "Unresolvable";
+
+    private static string? FormatJson(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
+            return System.Text.Json.JsonSerializer.Serialize(doc.RootElement,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch { return raw; }
+    }
+
+    // Status → chip class. Success→green, Pending/InFlight→pending, Failed/Unresolvable→danger, Blocked→info.
+    private static string StatusClass(string status) => status switch
+    {
+        "Success" => "tlg-status--active",
+        "Pending" or "InFlight" => "tlg-status--pending",
+        "Failed" or "Unresolvable" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

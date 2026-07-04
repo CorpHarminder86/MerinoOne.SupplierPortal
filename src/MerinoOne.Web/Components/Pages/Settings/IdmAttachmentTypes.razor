@@ -1,0 +1,325 @@
+@page "/settings/idm-attachment-types"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+@* R8 (2026-07-04) — TSD R8 §7. Settings › Infor IDM per-attachment-type mapping/gate config. Pattern cloned from
+   Settings/AttachmentRequirements.razor (grid CRUD, CanWrite page-gate, merino dialog). The generic per-tenant
+   knobs (poll/batch/backoff) live on Admin › System settings › Infor IDM; THIS page is the per-type table only. *@
+
+<PageTitle>IDM attachment types</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">IDM attachment types</h1>
+                <span class="tl-count-chip">@configs.Count</span>
+            </div>
+            <p class="tl-sub">Per-attachment-type Infor IDM mapping + eligibility gate · Settings → Infor IDM</p>
+        </div>
+        @if (CanWrite && Token.HasPermission("Integration.IdmSync.Manage"))
+        {
+            <div class="tl-header__actions">
+                <button class="mbtn mbtn--outline" @onclick="() => showBackfill = true" disabled="@busy" title="Stamp idmEntityType on existing documents">
+                    <span class="material-symbols-outlined">database</span> Backfill
+                </button>
+            </div>
+        }
+    </header>
+
+    @if (!CanRead)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
+            <div>You do not have permission to view IDM settings.</div>
+        </div>
+    }
+    else if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (configs.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">rule</span>
+            <div>No IDM attachment-type configs.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 190px 160px 1fr 90px 150px 190px; --tl-min-width: 1100px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Attachment type</div>
+                <div class="tlg-col">IDM entity type</div>
+                <div class="tlg-col">Eligibility gate paths</div>
+                <div class="tlg-col">Enabled</div>
+                <div class="tlg-col">Drift</div>
+                <div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var c in configs)
+            {
+                var cfg = c;
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-name">@cfg.AttachmentType</div>
+                    <div class="tlg-col tlg-code">@cfg.IdmEntityType</div>
+                    <div class="tlg-col">
+                        @if (cfg.EligibilityGatePaths.Count == 0)
+                        {
+                            <span style="color:var(--mer-ink-400);">— none —</span>
+                        }
+                        else
+                        {
+                            <div style="display:flex;flex-direction:column;gap:2px;">
+                                @foreach (var p in cfg.EligibilityGatePaths)
+                                {
+                                    <span class="tlg-code" style="font-size:11.5px;">@p</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <div class="tlg-col"><span class="tlg-status @(cfg.IsEnabled ? "tlg-status--active" : "tlg-status--danger")">@(cfg.IsEnabled ? "On" : "Off")</span></div>
+                    <div class="tlg-col">
+                        @if (cfg.IsDrifted)
+                        {
+                            <span class="tlg-status tlg-status--pending" title="differs from repo default">Modified</span>
+                        }
+                        else
+                        {
+                            <span class="tlg-status tlg-status--active" title="matches repo default">Default</span>
+                        }
+                    </div>
+                    <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
+                        @if (CanWrite)
+                        {
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(cfg)" disabled="@busy" title="Edit mapping / gate">
+                                <span class="material-symbols-outlined">edit</span> Edit
+                            </button>
+                            @if (cfg.HasRepoDefault && cfg.IsDrifted)
+                            {
+                                <button class="mbtn mbtn--row mbtn--danger" @onclick="() => ConfirmRestore(cfg)" disabled="@busy" title="Restore repo default">
+                                    <span class="material-symbols-outlined">settings_backup_restore</span> Restore
+                                </button>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@* ---------------- Edit dialog ---------------- *@
+@if (editing is not null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" data-size="lg" style="width:880px;max-width:92vw;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">rule</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">@editing.AttachmentType · @editing.IdmEntityType</div>
+                    <h2 class="merino-dialog__title">Edit IDM mapping</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => editing = null"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:14px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Eligibility gate paths (one per line)</label>
+                        <textarea class="rz-textbox" style="width:100%;min-height:90px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formGatePaths" placeholder="header.status&#10;lines[0].confirmed"></textarea>
+                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Each path must resolve truthy on the snapshot for the document to be pushed.</div>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Create mapping expression *</label>
+                        <textarea class="rz-textbox" style="width:100%;min-height:120px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formCreate" placeholder="{ ... JSONata create envelope mapping ... }"></textarea>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Mutate (update) mapping expression</label>
+                        <textarea class="rz-textbox" style="width:100%;min-height:120px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formMutate" placeholder="Leave blank to reuse the create mapping on update."></textarea>
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                        <input type="checkbox" @bind="formEnabled" /> Enabled
+                    </label>
+                </div>
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;white-space:pre-wrap;">@formError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => editing = null">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@* ---------------- Restore-default confirm ---------------- *@
+@if (restoreRow is not null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="warning" data-size="sm" style="width:480px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">settings_backup_restore</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Infor IDM</div>
+                    <h2 class="merino-dialog__title">Restore default?</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => restoreRow = null"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="font-size:13px;color:var(--mer-ink-700);margin:0;">This overwrites the create + mutate mapping expressions for <strong>@restoreRow.AttachmentType</strong> with the source-controlled repo default. Your customisations are lost.</p>
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => restoreRow = null">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Restore" disabled="@busy">@(busy ? "Restoring…" : "Restore default")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@* ---------------- Backfill confirm ---------------- *@
+@if (showBackfill)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="info" data-size="sm" style="width:480px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">database</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Infor IDM</div>
+                    <h2 class="merino-dialog__title">Backfill entity types?</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showBackfill = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="font-size:13px;color:var(--mer-ink-700);margin:0;">Stamps <span style="font-family:Inter,monospace;">idmEntityType</span> on existing documents whose type maps to an enabled config and are not yet classified. Safe to re-run.</p>
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showBackfill = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Backfill" disabled="@busy">@(busy ? "Stamping…" : "Backfill")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool CanRead => Token.HasPermission("Settings.Read");
+    private bool CanWrite => Token.HasPermission("Settings.Write");
+
+    private List<IdmAttachmentTypeConfigDto> configs = new();
+    private bool loading = true;
+    private bool busy;
+
+    private IdmAttachmentTypeConfigDto? editing;
+    private string formGatePaths = string.Empty;
+    private string formCreate = string.Empty;
+    private string formMutate = string.Empty;
+    private bool formEnabled = true;
+    private string formError = string.Empty;
+
+    private IdmAttachmentTypeConfigDto? restoreRow;
+    private bool showBackfill;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanRead) { loading = false; return; }
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<IdmAttachmentTypeConfigDto>>("api/integration/idm/attachment-type-configs");
+        configs = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenEdit(IdmAttachmentTypeConfigDto c)
+    {
+        editing = c;
+        formGatePaths = string.Join("\n", c.EligibilityGatePaths);
+        formCreate = c.CreateMappingExpression;
+        formMutate = c.MutateMappingExpression ?? string.Empty;
+        formEnabled = c.IsEnabled;
+        formError = string.Empty;
+    }
+
+    private async Task Save()
+    {
+        if (editing is null) return;
+        formError = string.Empty;
+        if (string.IsNullOrWhiteSpace(formCreate)) { formError = "Create mapping expression is required."; return; }
+        busy = true;
+        var gatePaths = formGatePaths
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        var req = new SaveIdmAttachmentTypeConfigRequest(
+            editing.Id,
+            editing.AttachmentType,
+            editing.IdmEntityType,
+            gatePaths,
+            formCreate.Trim(),
+            string.IsNullOrWhiteSpace(formMutate) ? null : formMutate.Trim(),
+            formEnabled);
+        var resp = await Api.PostAsync<Guid, SaveIdmAttachmentTypeConfigRequest>("api/integration/idm/attachment-type-configs", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+            editing = null;
+            await Load();
+        }
+        else
+        {
+            // 400 surfaces the JSONata compile error inline.
+            formError = resp?.Errors?.FirstOrDefault() ?? "Failed to save.";
+        }
+        busy = false;
+    }
+
+    private void ConfirmRestore(IdmAttachmentTypeConfigDto c) => restoreRow = c;
+
+    private async Task Restore()
+    {
+        if (restoreRow is null) return;
+        busy = true;
+        var resp = await Api.PostAsync<bool, object>($"api/integration/idm/attachment-type-configs/{restoreRow.Id}/restore-default", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Restored to default" });
+            restoreRow = null;
+            await Load();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Restore failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+
+    private async Task Backfill()
+    {
+        busy = true;
+        var resp = await Api.PostAsync<int, object>("api/integration/idm/attachment-type-configs/backfill", new { });
+        if (resp?.Success == true)
+        {
+            var n = resp.Data;
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Backfill complete", Detail = $"Stamped {n} documents." });
+            showBackfill = false;
+            await Load();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Backfill failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+}

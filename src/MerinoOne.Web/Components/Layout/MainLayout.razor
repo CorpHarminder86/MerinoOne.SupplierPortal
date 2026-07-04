@@ -167,6 +167,17 @@ else
                     <span class="mer-nav-item__label">Messages</span>
                 </NavLink>
 
+                @* R8 — supplier-reachable IDM sync log (RLS-scoped). Internal users see the same screen
+                   inside the admin Integrations group below, so this branch is non-admin only. *@
+                @if (!Token.IsAdmin && Token.HasPermission("Integration.IdmSync.View"))
+                {
+                    <div class="mer-nav__label">Integrations</div>
+                    <NavLink class="mer-nav-item" href="integrations/idm-sync-log" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">cloud_sync</span>
+                        <span class="mer-nav-item__label">IDM Sync Log</span>
+                    </NavLink>
+                }
+
                 @if (Token.IsAdmin)
                 {
                     <div class="mer-nav__label">Integrations</div>
@@ -189,6 +200,15 @@ else
                     <NavLink class="mer-nav-item" href="integrations/endpoints" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">cable</span>
                         <span class="mer-nav-item__label">Endpoints</span>
+                    </NavLink>
+                    @* R8 — Infor IDM outbound document sync (admin view). *@
+                    <NavLink class="mer-nav-item" href="integrations/idm-sync-log" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">cloud_sync</span>
+                        <span class="mer-nav-item__label">IDM Sync Log</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="integrations/outbound-endpoints" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">cloud_upload</span>
+                        <span class="mer-nav-item__label">Outbound Endpoints</span>
                     </NavLink>
                     <NavLink class="mer-nav-item" href="integrations/share-groups" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">hub</span>
@@ -288,6 +308,11 @@ else
                         <NavLink class="mer-nav-item" href="settings/po-status-mappings" ActiveClass="active">
                             <span class="mer-nav-item__icon material-symbols-outlined">swap_horiz</span>
                             <span class="mer-nav-item__label">PO Status Mappings</span>
+                        </NavLink>
+                        @* R8 (TSD R8 §7): per-attachment-type Infor IDM mapping / gate config (Settings.Write). *@
+                        <NavLink class="mer-nav-item" href="settings/idm-attachment-types" ActiveClass="active">
+                            <span class="mer-nav-item__icon material-symbols-outlined">rule</span>
+                            <span class="mer-nav-item__label">IDM Attachment Types</span>
                         </NavLink>
                     }
                     <NavLink class="mer-nav-item" href="admin/email-templates" ActiveClass="active">
