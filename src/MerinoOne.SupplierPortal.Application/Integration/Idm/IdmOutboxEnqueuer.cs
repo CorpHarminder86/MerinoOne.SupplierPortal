@@ -10,8 +10,9 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Idm;
 public sealed class IdmOutboxEnqueuer : IIdmOutboxEnqueuer
 {
     // A document has an in-flight/queued op when it carries a Blocked, Pending or InFlight outbox row.
-    private static readonly IdmOutboxStatus[] NonTerminal =
-        { IdmOutboxStatus.Blocked, IdmOutboxStatus.Pending, IdmOutboxStatus.InFlight };
+    // List (not array) so EF translates .Contains to a SQL IN (array binds to the untranslatable span-based Contains).
+    private static readonly List<IdmOutboxStatus> NonTerminal =
+        new() { IdmOutboxStatus.Blocked, IdmOutboxStatus.Pending, IdmOutboxStatus.InFlight };
 
     public async Task<int> EnqueueOwnerUpdatesAsync(IAppDbContext db, Guid tenantId, string ownerEntityType,
         Guid ownerEntityId, string actor, CancellationToken ct)

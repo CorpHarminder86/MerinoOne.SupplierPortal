@@ -22,8 +22,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Idm;
 /// </summary>
 internal sealed class IdmDocumentOutboxWorker : BackgroundService
 {
-    private static readonly IdmOutboxStatus[] NonTerminal =
-        { IdmOutboxStatus.Blocked, IdmOutboxStatus.Pending, IdmOutboxStatus.InFlight };
+    // List (not array) so EF translates .Contains to a SQL IN — an array binds to the .NET 10 span-based
+    // MemoryExtensions.Contains, which the EF funcletizer cannot evaluate.
+    private static readonly List<IdmOutboxStatus> NonTerminal =
+        new() { IdmOutboxStatus.Blocked, IdmOutboxStatus.Pending, IdmOutboxStatus.InFlight };
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IInforIdmSettings _settings;
@@ -149,8 +151,11 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
     private static async Task SeedCreatesAsync(IAppDbContext db, IEntitySnapshotProvider provider, IEligibilityGate gate,
         IdmAttachmentTypeConfig cfg, Guid tenantId, int batchSize, CancellationToken ct)
     {
+        // Key on documentType (unique per config), NOT idmEntityType — many attachment types may share one
+        // entityType (D7), so an idmEntityType filter would make every such config seed the same document.
         var candidates = await db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
-            .Where(d => !d.IsDeleted && d.TenantId == tenantId && d.Pid == null && d.IdmEntityType == cfg.IdmEntityType)
+            .Where(d => !d.IsDeleted && d.TenantId == tenantId && d.Pid == null
+                        && d.OwnerEntityType == provider.OwnerEntityType && d.DocumentType == cfg.AttachmentType)
             .Select(d => new { d.Id, d.OwnerEntityId, d.SeccodeId, d.TenantId, d.TenantEntityId, d.FileName })
             .Take(batchSize)
             .ToListAsync(ct);
@@ -186,9 +191,10 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
 
     private static async Task SeedDeletesAsync(IAppDbContext db, IdmAttachmentTypeConfig cfg, Guid tenantId, int batchSize, CancellationToken ct)
     {
-        // Soft-deleted documents that WERE synced (pid present) emit an IDM delete.
+        // Soft-deleted documents that WERE synced (pid present) emit an IDM delete. Key on documentType (unique
+        // per config) so a document is handled by exactly one config (D7 — types may share an idmEntityType).
         var deleted = await db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
-            .Where(d => d.IsDeleted && d.Pid != null && d.TenantId == tenantId && d.IdmEntityType == cfg.IdmEntityType)
+            .Where(d => d.IsDeleted && d.Pid != null && d.TenantId == tenantId && d.DocumentType == cfg.AttachmentType)
             .Select(d => new { d.Id, d.OwnerEntityId, d.SeccodeId, d.TenantId, d.TenantEntityId, d.FileName, d.Pid })
             .Take(batchSize)
             .ToListAsync(ct);
@@ -216,7 +222,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
 
         // Soft-deleted documents that were NEVER synced (no pid): reap any non-terminal Create rows immediately (D-R8-6).
         var neverSynced = await db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
-            .Where(d => d.IsDeleted && d.Pid == null && d.TenantId == tenantId && d.IdmEntityType == cfg.IdmEntityType)
+            .Where(d => d.IsDeleted && d.Pid == null && d.TenantId == tenantId && d.DocumentType == cfg.AttachmentType)
             .Select(d => d.Id)
             .Take(batchSize)
             .ToListAsync(ct);
@@ -386,11 +392,27 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
 
         var ack = ackParser.Parse(result.StatusCode, result.Body);
 
-        // Delete on a gone pid → no-op Success (D-R8-5).
-        if (row.Operation == IdmOutboxOperation.Delete && ack.Failure == IdmFailureClass.Validation &&
-            (result.StatusCode == 404 || (ack.Detail?.Contains("not exist", StringComparison.OrdinalIgnoreCase) ?? false)))
+        // Delete is special: the IDM delete response carries NO <pid>, so the pid-requiring parser would wrongly
+        // flag a real success as Validation. Success = any 2xx; a gone pid (404 / "does not exist") is a no-op
+        // Success (D-R8-5); 5xx = transient; other 4xx = terminal Failed.
+        if (row.Operation == IdmOutboxOperation.Delete)
         {
-            await SucceedAsync(db, rowId, row, null, result.Body, now, ct);
+            var okOrGone = (result.StatusCode is >= 200 and < 300)
+                || result.StatusCode == 404
+                || (ack.Detail?.Contains("not exist", StringComparison.OrdinalIgnoreCase) ?? false);
+            if (okOrGone)
+            {
+                await SucceedAsync(db, rowId, row, null, result.Body, now, ct);
+                logger.LogInformation("[IDM] Delete doc={Doc} → Success.", row.DocumentUploadId);
+            }
+            else if (result.StatusCode >= 500)
+            {
+                await ApplyTransientAsync(db, rowId, row.AttemptCount, settings, ack.Detail, now, ct);
+            }
+            else
+            {
+                await FailAsync(db, rowId, ack.Detail ?? "IDM delete failed.", ct, result.Body);
+            }
             return;
         }
 
@@ -462,6 +484,16 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                 .Where(d => d.Id == row.DocumentUploadId && d.Pid == null)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(d => d.Pid, pid)
+                    .SetProperty(d => d.UpdatedBy, "idm-dispatcher")
+                    .SetProperty(d => d.UpdatedOn, now), ct);
+
+        // On a successful Delete, clear the document's pid — the IDM copy is gone, so the delete-seed predicate
+        // (IsDeleted && Pid != null) no longer matches and the row is not re-seeded after it reaps.
+        if (row.Operation == IdmOutboxOperation.Delete)
+            await db.DocumentUploads.IgnoreQueryFilters()
+                .Where(d => d.Id == row.DocumentUploadId && d.Pid != null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(d => d.Pid, (string?)null)
                     .SetProperty(d => d.UpdatedBy, "idm-dispatcher")
                     .SetProperty(d => d.UpdatedOn, now), ct);
     }
