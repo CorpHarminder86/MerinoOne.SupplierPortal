@@ -8,6 +8,12 @@ namespace MerinoOne.SupplierPortal.Application.Common.Interfaces;
 public interface IInforConnectionProvider
 {
     Task<InforConnectionValues?> GetCurrentAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// R8 (2026-07-04) — tenant-explicit variant for background workers (the IDM dispatcher drains rows across
+    /// tenants and has no <c>ICurrentUser.TenantId</c>). Returns null when no config row exists for the tenant.
+    /// </summary>
+    Task<InforConnectionValues?> GetForTenantAsync(Guid tenantId, CancellationToken ct = default);
 }
 
 /// <summary>Decrypted, ready-to-use connection values for the current tenant.</summary>

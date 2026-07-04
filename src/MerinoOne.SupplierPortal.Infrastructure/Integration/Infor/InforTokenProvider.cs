@@ -35,10 +35,22 @@ public class InforTokenProvider : IInforTokenProvider
     public async Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
     {
         var conn = await _connections.GetCurrentAsync(ct);
+        return await IssueAsync(conn, _user.TenantId, ct);
+    }
+
+    // R8 (2026-07-04) — tenant-explicit variant for background workers (no ICurrentUser context).
+    public async Task<string?> GetAccessTokenAsync(Guid tenantId, CancellationToken ct = default)
+    {
+        var conn = await _connections.GetForTenantAsync(tenantId, ct);
+        return await IssueAsync(conn, tenantId, ct);
+    }
+
+    private async Task<string?> IssueAsync(Application.Common.Interfaces.InforConnectionValues? conn, Guid? tenantId, CancellationToken ct)
+    {
         if (conn is null || !conn.IsActive || !conn.IsConfigured)
             return null;
 
-        var cacheKey = $"infor-token:{_user.TenantId}";
+        var cacheKey = $"infor-token:{tenantId}";
         if (_cache.TryGetValue(cacheKey, out string? cached) && !string.IsNullOrEmpty(cached))
             return cached;
 
@@ -47,7 +59,7 @@ public class InforTokenProvider : IInforTokenProvider
 
         if (!result.Success || string.IsNullOrEmpty(result.AccessToken))
         {
-            _logger.LogWarning("Infor token acquisition failed for tenant {TenantId}: {Message}", _user.TenantId, result.Message);
+            _logger.LogWarning("Infor token acquisition failed for tenant {TenantId}: {Message}", tenantId, result.Message);
             return null;
         }
 

@@ -8,6 +8,9 @@
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Dapper" Version="2.1.66" />
+    <!-- R8 (2026-07-04) — JSONata mapping engine for the outbound IDM request builder (config-stored expressions,
+         no hand-rolled tag DSL — D-R8-9). Verified: real IDM payloads reproduce under JSONata. -->
+    <PackageReference Include="Jsonata.Net.Native" Version="3.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="9.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="9.0.0" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
@@ -24,6 +27,8 @@
          the startup project's user-secrets store; this class library doesn't get the extension transitively). -->
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <!-- R8 — IHttpClientFactory / AddHttpClient for the Live IDM transport client. -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.0" />
     <PackageReference Include="QuestPDF" Version="2026.6.1" />
     <!-- SECURITY (NU1903): pin the transitive System.Security.Cryptography.Xml (pulled in at the vulnerable 9.0.0
          via Azure.Identity / IdentityModel) to a patched 9.0.x servicing release.
@@ -48,6 +53,9 @@
          (not wwwroot-copied) so Infrastructure stays self-contained: it must not depend on MerinoOne.Web. Same
          source asset as src/MerinoOne.Web/wwwroot/img/merino-logo.png. -->
     <EmbeddedResource Include="Assets\merino-logo.png" />
+    <!-- R8 (2026-07-04) — versioned, source-controlled JSONata mapping expressions (D6). Seeded into tenant
+         config rows by IdmOutboundSeeder; drift = current row text hash ≠ embedded default hash. -->
+    <EmbeddedResource Include="Integration\Idm\Expressions\*.jsonata" />
   </ItemGroup>
 
 </Project>

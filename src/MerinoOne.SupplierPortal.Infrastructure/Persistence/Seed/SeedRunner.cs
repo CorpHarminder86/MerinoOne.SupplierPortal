@@ -57,6 +57,12 @@ public static class SeedRunner
         logger?.LogInformation("Seed: PoStatusMappingSeeder");
         await PoStatusMappingSeeder.SeedAsync(ctx, ct);
 
+        // R8 (2026-07-04) — TSD R8 §4.4 / D6. Runs AFTER TenantSeeder. Seeds the per-tenant IDM transport endpoints
+        // + default attachment-type mapping/gate rows (disabled by default) from the repo JSONata expressions;
+        // hash-gated so a repo expression change flows to untouched rows but never clobbers a hand-edit.
+        logger?.LogInformation("Seed: IdmOutboundSeeder");
+        await IdmOutboundSeeder.SeedAsync(ctx, ct);
+
         // Light scope tagging (suppliers/masters/config/UserCompanyMaps + ensure flag OFF) runs BEFORE the
         // volume backfill so suppliers carry company 2000 when the heavy pass later joins on them.
         logger?.LogInformation("Seed: ScopeBackfillSeeder (light)");

@@ -8,4 +8,10 @@ namespace MerinoOne.SupplierPortal.Application.Common.Interfaces;
 public interface IInforTokenProvider
 {
     Task<string?> GetAccessTokenAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// R8 (2026-07-04) — tenant-explicit variant for background workers (the IDM dispatcher has no
+    /// <c>ICurrentUser.TenantId</c>). Token is cached per tenant exactly as the current-user path.
+    /// </summary>
+    Task<string?> GetAccessTokenAsync(Guid tenantId, CancellationToken ct = default);
 }

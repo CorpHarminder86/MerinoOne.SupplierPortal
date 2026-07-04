@@ -1,0 +1,21 @@
+{
+  "headers": {
+    "Content-Type": "application/json",
+    "X-Infor-LnCompany": invoice.logisticCompany
+  },
+  "body": {
+    "item": {
+      "attrs": { "attr": [
+        { "name": "MDS_EntityType",       "value": entityType },
+        { "name": "MDS_AccountingEntity", "value": "infor.ln." & invoice.financialCompany },
+        { "name": "MDS_id1",              "value": invoice.financialCompany },
+        { "name": "MDS_id2",              "value": invoice.transactionType },
+        { "name": "MDS_id3",              "value": invoice.lnInvoiceNumber }
+      ]},
+      "resrs": { "res": [ { "filename": attachment.filename, "base64": attachment.base64 } ] },
+      "acl": { "name": config.acl },
+      "entityName": config.entityName,
+      "pid": pid
+    }
+  }
+}

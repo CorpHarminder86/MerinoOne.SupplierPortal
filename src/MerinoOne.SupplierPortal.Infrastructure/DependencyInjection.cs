@@ -3,8 +3,11 @@ using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Application.SystemSettings;
 using MerinoOne.SupplierPortal.Application.SystemSettings.EmailConfig;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
+using MerinoOne.SupplierPortal.Application.SystemSettings.InforIdm;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Invoicing;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Registry;
+using MerinoOne.SupplierPortal.Application.Integration.Idm;
+using MerinoOne.SupplierPortal.Infrastructure.Integration.Idm;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Scope;
 using MerinoOne.SupplierPortal.Application.SystemSettings.SupplierInvite;
 using MerinoOne.SupplierPortal.Application.PurchaseOrders.StatusMapping;
@@ -83,6 +86,29 @@ public static class DependencyInjection
         // File storage (Mock-then-Live). Stage 1 = local disk under {ContentRoot}/uploads.
         // Stage 2 will swap to Azure Blob behind the same IFileStorageService interface.
         services.AddSingleton<IFileStorageService, LocalDiskFileStorageService>();
+
+        // ── R8 (2026-07-04) — Outbound document sync to Infor IDM (TSD R8) ─────────────────────────
+        // Stateless engine parts (singletons): JSONata builder (+ the Application-side validator seam),
+        // eligibility gate, XML ack parser, and the repo expression catalogue (drift + seeding).
+        services.AddSingleton<JsonataOutboundRequestBuilder>();
+        services.AddSingleton<IOutboundRequestBuilder>(sp => sp.GetRequiredService<JsonataOutboundRequestBuilder>());
+        services.AddSingleton<IJsonataValidator>(sp => sp.GetRequiredService<JsonataOutboundRequestBuilder>());
+        services.AddSingleton<IEligibilityGate, JsonPathEligibilityGate>();
+        services.AddSingleton<IIdmAckParser, IdmAckParser>();
+        services.AddSingleton<IdmDefaultExpressions>();
+        // Per-entity snapshot assembly + registry (scoped — ctor-inject the per-scope IAppDbContext).
+        services.AddScoped<IFileContentProvider, Base64FileContentProvider>();
+        services.AddScoped<IEntitySnapshotProvider, InvoiceSnapshotProvider>();
+        services.AddScoped<IEntitySnapshotProvider, AsnSnapshotProvider>();
+        services.AddScoped<ISnapshotProviderRegistry, SnapshotProviderRegistry>();
+        // Transport seam — Mock↔Live via the SAME Integration:Mode switch as IInforIntegrationService (D8).
+        if (inforMode.Equals("Live", StringComparison.OrdinalIgnoreCase))
+            services.AddScoped<IIdmClient, LiveIdmClient>();
+        else
+            services.AddScoped<IIdmClient, MockIdmClient>();
+        services.AddHttpClient("idm");
+        // The dispatcher (per-document FIFO, gate promotion, backoff, reap). Reads InforIdm settings each drain.
+        services.AddHostedService<IdmDocumentOutboxWorker>();
 
         // R6 (plan D13) — invoice PDF rendering (QuestPDF). The Community license is asserted ONCE here (both
         // hosts call AddInfrastructure). NOTE: Community licensing is revenue-gated (<$1M USD/yr) — flagged to
@@ -169,10 +195,12 @@ public static class DependencyInjection
         services.AddSingleton<SupplierInviteSeed>();
         services.AddSingleton<FulfilmentSeed>();
         services.AddSingleton<InvoicingSeed>();
+        services.AddSingleton<InforIdmSeed>();
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<EmailConfigSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<SupplierInviteSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<FulfilmentSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<InvoicingSeed>());
+        services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<InforIdmSeed>());
         services.AddSingleton<SettingsSeedRegistry>();
 
         // Cached readers — singleton so the cache persists across requests; expose both the
@@ -194,6 +222,11 @@ public static class DependencyInjection
         services.AddSingleton<InvoicingSettingsService>();
         services.AddSingleton<IInvoicingSettings>(sp => sp.GetRequiredService<InvoicingSettingsService>());
         services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<InvoicingSettingsService>());
+
+        // R8 (2026-07-04) — IDM dispatcher runtime knobs (poll/backoff/concurrency), read live by the worker.
+        services.AddSingleton<InforIdmSettingsService>();
+        services.AddSingleton<IInforIdmSettings>(sp => sp.GetRequiredService<InforIdmSettingsService>());
+        services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<InforIdmSettingsService>());
 
         // R5 (TSD R5 Addendum §11 / Component 7) — cached ERP→portal PO-status map (per tenant). Singleton so the
         // map persists across requests with zero DB I/O on the inbound hot path; invalidated like the other cached

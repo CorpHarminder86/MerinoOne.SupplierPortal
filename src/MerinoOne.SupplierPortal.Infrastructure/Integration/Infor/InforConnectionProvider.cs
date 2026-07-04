@@ -30,13 +30,18 @@ public class InforConnectionProvider : IInforConnectionProvider
         _logger = logger;
     }
 
-    public async Task<InforConnectionValues?> GetCurrentAsync(CancellationToken ct = default)
+    public Task<InforConnectionValues?> GetCurrentAsync(CancellationToken ct = default)
     {
-        if (_user.TenantId is not { } tenantId) return null;
+        if (_user.TenantId is not { } tenantId) return Task.FromResult<InforConnectionValues?>(null);
+        return GetForTenantAsync(tenantId, ct);
+    }
 
+    public async Task<InforConnectionValues?> GetForTenantAsync(Guid tenantId, CancellationToken ct = default)
+    {
         var row = await _db.InforConnectionSettings
+            .IgnoreQueryFilters()
             .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.TenantId == tenantId, ct);
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, ct);
 
         if (row is null) return null;
 
