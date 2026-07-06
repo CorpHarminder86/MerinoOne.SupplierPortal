@@ -24,10 +24,14 @@ public class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage
         b.Property(x => x.DispatchedAt).HasColumnName("dispatchedAt").HasColumnType("datetime2");
         b.Property(x => x.AckedAt).HasColumnName("ackedAt").HasColumnType("datetime2");
         b.Property(x => x.LastError).HasColumnName("lastError").HasMaxLength(2000);
-        // R9 (migration 0046): eligibility-gate bookkeeping + the Phase-C sequence hook (FK deferred to Phase C).
+        // R9 (migration 0047): eligibility-gate bookkeeping + the Phase-C sequence hook (FK deferred to Phase C).
         b.Property(x => x.GateVersion).HasColumnName("gateVersion").HasColumnType("int");
         b.Property(x => x.SkipReason).HasColumnName("skipReason").HasMaxLength(500);
         b.Property(x => x.SequenceInstanceStepId).HasColumnName("sequenceInstanceStepId").HasColumnType("uniqueidentifier");
+        // R9 (migration 0048): code-owned failure class (D-R9-5) — Permanent (4xx) | Retriable (5xx/timeout).
+        b.Property(x => x.ErrorClass).HasColumnName("errorClass").HasMaxLength(10);
+        b.ToTable(t => t.HasCheckConstraint("CK_OutboxMessage_errorClass",
+            "[errorClass] IS NULL OR [errorClass] IN ('Permanent','Retriable')"));
         // rowVersion (IHasRowVersion) mapped centrally by the AppDbContext convention → .IsRowVersion(),
         // column "rowVersion". Backs the dispatcher's per-row Pending→Sending claim (review B1, migration 0023).
 

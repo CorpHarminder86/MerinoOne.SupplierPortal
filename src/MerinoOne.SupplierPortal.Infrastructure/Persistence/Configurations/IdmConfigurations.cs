@@ -42,8 +42,11 @@ public class IdmAttachmentTypeConfigConfiguration : IEntityTypeConfiguration<Idm
     {
         b.ApplyBaseEntityConvention("IdmAttachmentTypeConfig", "integration", "idmAttachmentTypeConfig");
         // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
+        // 2026-07-06: ownerEntityType (portal entity: Asn/Invoice/Supplier) stored so idmEntityType can be free text.
+        b.Property(x => x.OwnerEntityType).HasColumnName("ownerEntityType").HasMaxLength(40);
         // attachmentType is nvarchar(50) to MATCH doc.AttachmentType.code (DocumentUpload.documentType stores it).
-        b.Property(x => x.AttachmentType).HasColumnName("attachmentType").HasMaxLength(50).IsRequired();
+        // NULLABLE (2026-07-06): null = catch-all (every document of ownerEntityType).
+        b.Property(x => x.AttachmentType).HasColumnName("attachmentType").HasMaxLength(50);
         b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(40).IsRequired();
         b.Property(x => x.EligibilityGateJson).HasColumnName("eligibilityGateJson").HasColumnType("nvarchar(max)").IsRequired();
         b.Property(x => x.CreateMappingExpression).HasColumnName("createMappingExpression").HasColumnType("nvarchar(max)").IsRequired();
@@ -52,9 +55,12 @@ public class IdmAttachmentTypeConfigConfiguration : IEntityTypeConfiguration<Idm
         b.Property(x => x.MutateMappingSeedHash).HasColumnName("mutateMappingSeedHash").HasMaxLength(64);
         b.Property(x => x.IsEnabled).HasColumnName("isEnabled").HasColumnType("bit").HasDefaultValue(false);
 
-        // D7: keyed by attachmentType (NOT idmEntityType — many types may share one entityType).
-        b.HasIndex(x => new { x.TenantId, x.AttachmentType })
-            .HasDatabaseName("UQ_IdmAttachmentTypeConfig_tenant_attachmentType").IsUnique()
+        // D7 + 2026-07-06: keyed by (ownerEntityType, attachmentType) — NOT idmEntityType (many types may share one
+        // entityType), and now including the portal entity so the SAME attachment-type code can map differently per
+        // entity (e.g. "Msme" on an ASN vs on a Supplier). A NULL attachmentType (catch-all) is unique per entity:
+        // SQL Server treats NULLs as equal for uniqueness, so exactly one all-types row per (tenant, ownerEntityType).
+        b.HasIndex(x => new { x.TenantId, x.OwnerEntityType, x.AttachmentType })
+            .HasDatabaseName("UQ_IdmAttachmentTypeConfig_tenant_owner_attachmentType").IsUnique()
             .HasFilter("[isDeleted] = 0");
     }
 }

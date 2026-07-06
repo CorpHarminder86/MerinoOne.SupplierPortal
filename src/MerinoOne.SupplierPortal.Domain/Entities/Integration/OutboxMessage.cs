@@ -57,6 +57,13 @@ public class OutboxMessage : AuditableEntity, ITenantOwned, IHasRowVersion
     public string? SkipReason { get; set; }
 
     /// <summary>
+    /// R9 (D-R9-5, migration 0048) — the code-owned failure class on a Failed row: <c>Permanent</c> (4xx /
+    /// config bug — re-arm warns) or <c>Retriable</c> (5xx / timeout / transport). Null on legacy failures
+    /// and non-failed rows. Persisted so the outbox monitor badges permanence without parsing LastError.
+    /// </summary>
+    public string? ErrorClass { get; set; }
+
+    /// <summary>
     /// R9 — owning sequence step for sequenced onboarding rows (TSD §2.7). Column lands in Phase A;
     /// the FK constraint is deferred to Phase C when <c>integration.SequenceInstanceStep</c> exists.
     /// </summary>

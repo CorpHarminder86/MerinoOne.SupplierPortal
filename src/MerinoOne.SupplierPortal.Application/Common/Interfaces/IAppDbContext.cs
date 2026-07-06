@@ -111,6 +111,10 @@ public interface IAppDbContext
 
     // R9 (2026-07-06) — TSD R9 config-driven LN outbound posting.
     DbSet<LnEndpointConfig> LnEndpointConfigs { get; }
+    DbSet<IntegrationSwitch> IntegrationSwitches { get; }
+    DbSet<IntegrationSwitchAudit> IntegrationSwitchAudits { get; }
+    DbSet<LnBackfillRun> LnBackfillRuns { get; }
+    DbSet<HeldInboundMessage> HeldInboundMessages { get; }
 
     DbSet<AuditEntry> AuditEntries { get; }
 

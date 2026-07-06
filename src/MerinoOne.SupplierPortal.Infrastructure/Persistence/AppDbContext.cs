@@ -136,6 +136,10 @@ public class AppDbContext : DbContext, IAppDbContext
 
     // R9 (2026-07-06) — TSD R9 config-driven LN outbound posting.
     public DbSet<LnEndpointConfig> LnEndpointConfigs => Set<LnEndpointConfig>();
+    public DbSet<IntegrationSwitch> IntegrationSwitches => Set<IntegrationSwitch>();
+    public DbSet<IntegrationSwitchAudit> IntegrationSwitchAudits => Set<IntegrationSwitchAudit>();
+    public DbSet<LnBackfillRun> LnBackfillRuns => Set<LnBackfillRun>();
+    public DbSet<HeldInboundMessage> HeldInboundMessages => Set<HeldInboundMessage>();
 
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 

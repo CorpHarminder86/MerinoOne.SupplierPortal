@@ -2893,6 +2893,127 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.ToTable("CompanyShareGroupMember", "integration");
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.HeldInboundMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("heldInboundMessageId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("BoundCompanyIdsJson")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("boundCompanyIdsJson");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<string>("EndpointName")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasDefaultValue("ErpAck")
+                        .HasColumnName("endpointName");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)")
+                        .HasColumnName("idempotencyKey");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("lastError");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("payloadJson");
+
+                    b.Property<int>("ReplayAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("replayAttempts");
+
+                    b.Property<DateTime?>("ReplayedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("replayedOn");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("heldInboundMessageSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)")
+                        .HasDefaultValue("Held")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_HeldInboundMessage");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_HeldInboundMessage_heldInboundMessageSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId", "Status")
+                        .HasDatabaseName("IX_HeldInboundMessage_tenant_status")
+                        .HasFilter("[status] = 'Held' AND [isDeleted] = 0");
+
+                    b.ToTable("HeldInboundMessage", "integration", t =>
+                        {
+                            t.HasCheckConstraint("CK_HeldInboundMessage_status", "[status] IN ('Held','Replayed','Failed')");
+                        });
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.IdmAttachmentTypeConfig", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3671,6 +3792,330 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.ToTable("IntegrationError", "integration");
                 });
 
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.IntegrationSwitch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("integrationSwitchId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<bool>("IsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("isEnabled");
+
+                    b.Property<string>("LastReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("lastReason");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("scope");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("integrationSwitchSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_IntegrationSwitch");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_IntegrationSwitch_integrationSwitchSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantId", "Scope")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_IntegrationSwitch_tenant_scope")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.ToTable("IntegrationSwitch", "integration", t =>
+                        {
+                            t.HasCheckConstraint("CK_IntegrationSwitch_scope", "[scope] IN ('OutboundGlobal','InboundErpAck')");
+                        });
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.IntegrationSwitchAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("integrationSwitchAuditId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<Guid>("IntegrationSwitchId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("integrationSwitchId");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<bool>("NewEnabled")
+                        .HasColumnType("bit")
+                        .HasColumnName("newEnabled");
+
+                    b.Property<bool>("OldEnabled")
+                        .HasColumnType("bit")
+                        .HasColumnName("oldEnabled");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("scope");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("integrationSwitchAuditSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_IntegrationSwitchAudit");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("IntegrationSwitchId")
+                        .HasDatabaseName("IX_IntegrationSwitchAudit_switch");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_IntegrationSwitchAudit_integrationSwitchAuditSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.ToTable("IntegrationSwitchAudit", "integration");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.LnBackfillRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("lnBackfillRunId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("AppliedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("appliedBy");
+
+                    b.Property<DateTime?>("AppliedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("appliedOn");
+
+                    b.Property<string>("ApplyResultJson")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("applyResultJson");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<string>("DryRunResultJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("dryRunResultJson");
+
+                    b.Property<int>("EnqueueCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("enqueueCount");
+
+                    b.Property<int>("GateVersion")
+                        .HasColumnType("int")
+                        .HasColumnName("gateVersion");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<Guid>("LnEndpointConfigId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("lnEndpointConfigId");
+
+                    b.Property<int>("RearmCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("rearmCount");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("lnBackfillRunSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(12)
+                        .HasColumnType("nvarchar(12)")
+                        .HasDefaultValue("DryRun")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("TransactionType")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)")
+                        .HasColumnName("transactionType");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.Property<int>("WithdrawCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("withdrawCount");
+
+                    b.HasKey("Id")
+                        .HasName("PK_LnBackfillRun");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_LnBackfillRun_lnBackfillRunSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("LnEndpointConfigId", "Status")
+                        .HasDatabaseName("IX_LnBackfillRun_config_status")
+                        .HasFilter("[isDeleted] = 0");
+
+                    b.ToTable("LnBackfillRun", "integration", t =>
+                        {
+                            t.HasCheckConstraint("CK_LnBackfillRun_status", "[status] IN ('DryRun','Applied','Superseded','Discarded')");
+                        });
+                });
+
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.LnEndpointConfig", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4054,6 +4499,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(60)")
                         .HasColumnName("entityName");
 
+                    b.Property<string>("ErrorClass")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)")
+                        .HasColumnName("errorClass");
+
                     b.Property<int?>("GateVersion")
                         .HasColumnType("int")
                         .HasColumnName("gateVersion");
@@ -4143,7 +4593,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UQ_OutboxMessage_tenant_deterministicKey")
                         .HasFilter("[isDeleted] = 0");
 
-                    b.ToTable("OutboxMessage", "integration");
+                    b.ToTable("OutboxMessage", "integration", t =>
+                        {
+                            t.HasCheckConstraint("CK_OutboxMessage_errorClass", "[errorClass] IS NULL OR [errorClass] IN ('Permanent','Retriable')");
+                        });
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Inv.Item", b =>
@@ -9593,6 +10046,30 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_IntegrationError_SyncLog_SyncLogId");
 
                     b.Navigation("SyncLog");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.IntegrationSwitchAudit", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Integration.IntegrationSwitch", "IntegrationSwitch")
+                        .WithMany()
+                        .HasForeignKey("IntegrationSwitchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_IntegrationSwitchAudit_IntegrationSwitch_IntegrationSwitchId");
+
+                    b.Navigation("IntegrationSwitch");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Integration.LnBackfillRun", b =>
+                {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Integration.LnEndpointConfig", "LnEndpointConfig")
+                        .WithMany()
+                        .HasForeignKey("LnEndpointConfigId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_LnBackfillRun_LnEndpointConfig_LnEndpointConfigId");
+
+                    b.Navigation("LnEndpointConfig");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Inv.Item", b =>

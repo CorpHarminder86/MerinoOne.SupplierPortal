@@ -59,3 +59,96 @@ public class LnEndpointConfigConfiguration : IEntityTypeConfiguration<LnEndpoint
             .HasFilter("[isDeleted] = 0");
     }
 }
+
+/// <summary>R9 (§2.6, migration 0048) — DB-backed kill switch: one row per (tenant, scope); absent row = enabled.</summary>
+public class IntegrationSwitchConfiguration : IEntityTypeConfiguration<IntegrationSwitch>
+{
+    public void Configure(EntityTypeBuilder<IntegrationSwitch> b)
+    {
+        b.ApplyBaseEntityConvention("IntegrationSwitch", "integration", "integrationSwitch");
+        // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
+        b.Property(x => x.Scope).HasColumnName("scope").HasMaxLength(20).IsRequired();
+        b.Property(x => x.IsEnabled).HasColumnName("isEnabled").HasColumnType("bit").HasDefaultValue(true).IsRequired();
+        b.Property(x => x.LastReason).HasColumnName("lastReason").HasMaxLength(500);
+
+        b.ToTable(t => t.HasCheckConstraint("CK_IntegrationSwitch_scope",
+            "[scope] IN ('OutboundGlobal','InboundErpAck')"));
+
+        b.HasIndex(x => new { x.TenantId, x.Scope })
+            .HasDatabaseName("UQ_IntegrationSwitch_tenant_scope").IsUnique()
+            .HasFilter("[isDeleted] = 0");
+    }
+}
+
+/// <summary>R9 (§2.6) — immutable per-toggle audit: who/when (audit block), old → new, mandatory reason.</summary>
+public class IntegrationSwitchAuditConfiguration : IEntityTypeConfiguration<IntegrationSwitchAudit>
+{
+    public void Configure(EntityTypeBuilder<IntegrationSwitchAudit> b)
+    {
+        b.ApplyBaseEntityConvention("IntegrationSwitchAudit", "integration", "integrationSwitchAudit");
+        b.Property(x => x.IntegrationSwitchId).HasColumnName("integrationSwitchId");
+        b.Property(x => x.Scope).HasColumnName("scope").HasMaxLength(20).IsRequired();
+        b.Property(x => x.OldEnabled).HasColumnName("oldEnabled").HasColumnType("bit");
+        b.Property(x => x.NewEnabled).HasColumnName("newEnabled").HasColumnType("bit");
+        b.Property(x => x.Reason).HasColumnName("reason").HasMaxLength(500).IsRequired();
+
+        b.HasOne(x => x.IntegrationSwitch).WithMany().HasForeignKey(x => x.IntegrationSwitchId)
+            .HasConstraintName("FK_IntegrationSwitchAudit_IntegrationSwitch_IntegrationSwitchId")
+            .OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.IntegrationSwitchId).HasDatabaseName("IX_IntegrationSwitchAudit_switch");
+    }
+}
+
+/// <summary>R9 (§2.5, migration 0048) — backfill run audit: dry-run snapshot + apply record, gateVersion-pinned.</summary>
+public class LnBackfillRunConfiguration : IEntityTypeConfiguration<LnBackfillRun>
+{
+    public void Configure(EntityTypeBuilder<LnBackfillRun> b)
+    {
+        b.ApplyBaseEntityConvention("LnBackfillRun", "integration", "lnBackfillRun");
+        b.Property(x => x.LnEndpointConfigId).HasColumnName("lnEndpointConfigId");
+        b.Property(x => x.TransactionType).HasColumnName("transactionType").HasMaxLength(60).IsRequired();
+        b.Property(x => x.GateVersion).HasColumnName("gateVersion").HasColumnType("int");
+        b.Property(x => x.Status).HasColumnName("status").HasMaxLength(12).HasDefaultValue("DryRun").IsRequired();
+        b.Property(x => x.EnqueueCount).HasColumnName("enqueueCount").HasColumnType("int").HasDefaultValue(0);
+        b.Property(x => x.RearmCount).HasColumnName("rearmCount").HasColumnType("int").HasDefaultValue(0);
+        b.Property(x => x.WithdrawCount).HasColumnName("withdrawCount").HasColumnType("int").HasDefaultValue(0);
+        b.Property(x => x.DryRunResultJson).HasColumnName("dryRunResultJson").HasColumnType("nvarchar(max)").IsRequired();
+        b.Property(x => x.AppliedOn).HasColumnName("appliedOn").HasColumnType("datetime2");
+        b.Property(x => x.AppliedBy).HasColumnName("appliedBy").HasMaxLength(100);
+        b.Property(x => x.ApplyResultJson).HasColumnName("applyResultJson").HasColumnType("nvarchar(max)");
+
+        b.ToTable(t => t.HasCheckConstraint("CK_LnBackfillRun_status",
+            "[status] IN ('DryRun','Applied','Superseded','Discarded')"));
+
+        b.HasOne(x => x.LnEndpointConfig).WithMany().HasForeignKey(x => x.LnEndpointConfigId)
+            .HasConstraintName("FK_LnBackfillRun_LnEndpointConfig_LnEndpointConfigId")
+            .OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.LnEndpointConfigId, x.Status })
+            .HasDatabaseName("IX_LnBackfillRun_config_status").HasFilter("[isDeleted] = 0");
+    }
+}
+
+/// <summary>R9 (§2.6 inbound scope, migration 0048) — accept-and-hold store for erp-ack under kill; FIFO replay by Seq.</summary>
+public class HeldInboundMessageConfiguration : IEntityTypeConfiguration<HeldInboundMessage>
+{
+    public void Configure(EntityTypeBuilder<HeldInboundMessage> b)
+    {
+        b.ApplyBaseEntityConvention("HeldInboundMessage", "integration", "heldInboundMessage");
+        b.Property(x => x.EndpointName).HasColumnName("endpointName").HasMaxLength(40).HasDefaultValue("ErpAck").IsRequired();
+        b.Property(x => x.PayloadJson).HasColumnName("payloadJson").HasColumnType("nvarchar(max)").IsRequired();
+        b.Property(x => x.IdempotencyKey).HasColumnName("idempotencyKey").HasMaxLength(128);
+        b.Property(x => x.BoundCompanyIdsJson).HasColumnName("boundCompanyIdsJson").HasColumnType("nvarchar(max)");
+        b.Property(x => x.Status).HasColumnName("status").HasMaxLength(10).HasDefaultValue("Held").IsRequired();
+        b.Property(x => x.ReplayAttempts).HasColumnName("replayAttempts").HasColumnType("int").HasDefaultValue(0);
+        b.Property(x => x.ReplayedOn).HasColumnName("replayedOn").HasColumnType("datetime2");
+        b.Property(x => x.LastError).HasColumnName("lastError").HasMaxLength(2000);
+
+        b.ToTable(t => t.HasCheckConstraint("CK_HeldInboundMessage_status",
+            "[status] IN ('Held','Replayed','Failed')"));
+
+        // The replay worker's hot scan: live Held rows per tenant, FIFO by the clustered Seq.
+        b.HasIndex(x => new { x.TenantId, x.Status })
+            .HasDatabaseName("IX_HeldInboundMessage_tenant_status")
+            .HasFilter("[status] = 'Held' AND [isDeleted] = 0");
+    }
+}
