@@ -116,6 +116,7 @@ public static class DependencyInjection
         // LN expression catalogue, and the candidate-filter registry (save-time validation surface in Phase A).
         services.AddSingleton<Application.Integration.Ln.ILnMappingService, Integration.Ln.LnMappingService>();
         services.AddSingleton<Integration.Ln.LnDefaultExpressions>();
+        services.AddSingleton<Application.Integration.Ln.ILnExpressionCatalog>(sp => sp.GetRequiredService<Integration.Ln.LnDefaultExpressions>());
         services.AddSingleton<Application.Integration.CandidateFilters.ICandidateFilterRegistry,
             Application.Integration.CandidateFilters.CandidateFilterRegistry>();
         // Input-document builders (stateless — they take the caller's IAppDbContext per call) + registry.
