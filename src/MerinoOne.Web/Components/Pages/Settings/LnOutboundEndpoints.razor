@@ -150,9 +150,10 @@
                         </div>
                     </div>
                     <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Eligibility gate (JSONata boolean) — activates in Phase B</label>
-                        <textarea class="rz-textbox" disabled style="width:100%;min-height:60px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;background:var(--mer-ink-100);color:var(--mer-ink-500);"
-                                  placeholder="Gate evaluation goes live with TSD R9 Phase B (enqueue / dispatch re-check / sweep).">@formGateExpr</textarea>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Eligibility gate (JSONata boolean)</label>
+                        <textarea class="rz-textbox" style="width:100%;min-height:60px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;"
+                                  @bind="formGateExpr" placeholder="e.g. invoiceStatus = &quot;Submitted&quot; and allCoveringGrnsApproved"></textarea>
+                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Evaluated at enqueue, re-checked at dispatch (fail → Skipped), and swept via the candidate filter. Blank = no gate. Changing it bumps the gate version and prompts a backfill dry-run.</div>
                     </div>
                     <div>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Request mapping (JSONata → LN payload) *</label>
