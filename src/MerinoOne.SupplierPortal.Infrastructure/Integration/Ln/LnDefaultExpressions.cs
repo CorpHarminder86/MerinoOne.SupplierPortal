@@ -1,5 +1,6 @@
 using System.Text;
 using MerinoOne.SupplierPortal.Application.Common.Integration;
+using MerinoOne.SupplierPortal.Application.Integration.Ln;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Ln;
@@ -11,7 +12,7 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Ln;
 /// drift flag. Also carries the shared error-extraction default (D-R9-5) and the two validation
 /// sample documents (OData created-entity, erp-ack body).
 /// </summary>
-public sealed class LnDefaultExpressions
+public sealed class LnDefaultExpressions : ILnExpressionCatalog
 {
     public sealed record Entry(
         string TransactionType,
@@ -66,6 +67,21 @@ public sealed class LnDefaultExpressions
 
     /// <summary>Seeded onto <c>LnEndpointConfig.ackSampleJson</c> — one ErpAckRecord as pushed to /inbound/erp-ack.</summary>
     public string ErpAckBodySample { get; }
+
+    // ── ILnExpressionCatalog (Application-facing view) ─────────────────────────────────────────────
+    LnExpressionDefault? ILnExpressionCatalog.TryGet(string transactionType)
+        => _byType.TryGetValue(transactionType, out var e)
+            ? new LnExpressionDefault(e.TransactionType, e.PortalEntity, e.RequestExpr, e.ResponseExpr, e.AckExpr,
+                e.RequestHash, e.ResponseHash, e.AckHash)
+            : null;
+
+    IReadOnlyCollection<LnExpressionDefault> ILnExpressionCatalog.All
+        => _byType.Values
+            .Select(e => new LnExpressionDefault(e.TransactionType, e.PortalEntity, e.RequestExpr, e.ResponseExpr,
+                e.AckExpr, e.RequestHash, e.ResponseHash, e.AckHash))
+            .ToList();
+
+    string ILnExpressionCatalog.Hash(string expression) => ExpressionHash.Compute(expression);
 
     private static string Read(string fileName)
     {

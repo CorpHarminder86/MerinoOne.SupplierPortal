@@ -53,7 +53,8 @@ public class IdmDispatchTests
         // Enabled config mapping the unique attachmentType → InforInvoice (isolates this test's documents).
         db.Set<IdmAttachmentTypeConfig>().Add(new IdmAttachmentTypeConfig
         {
-            TenantId = IntegrationTestFixture.TenantId, AttachmentType = attachmentType, IdmEntityType = "InforInvoice",
+            TenantId = IntegrationTestFixture.TenantId, OwnerEntityType = DocumentOwnerTypes.Invoice,
+            AttachmentType = attachmentType, IdmEntityType = "InforInvoice",
             EligibilityGateJson = "[\"invoice.erpCompany\",\"invoice.erpTransactionType\",\"invoice.erpDocumentNo\"]",
             CreateMappingExpression = new IdmDefaultExpressions().TryGet("InforInvoice")!.CreateExpression,
             IsEnabled = true, CreatedBy = "seed",
@@ -138,6 +139,75 @@ public class IdmDispatchTests
         creates.Should().HaveCount(1, because: "a terminal 4xx Failed create must not be re-seeded every drain (D-R8-23)");
         creates[0].Status.Should().Be(IdmOutboxStatus.Failed);
         creates[0].LastError.Should().NotBeNullOrEmpty();
+    }
+
+    /// <summary>
+    /// 2026-07-06 — a CATCH-ALL config (null attachmentType) classifies + seeds EVERY document of its portal
+    /// entity, regardless of the document's attachment type. Proves the optional-attachment-type feature.
+    /// </summary>
+    [SkippableFact]
+    public async Task CatchAll_config_stamps_and_seeds_every_document_of_the_entity()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        Guid invoiceId, docId, cfgId;
+        var oddType = $"OddType-{tag}";   // a document type NOT matched by any specific-type config
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            invoiceId = Guid.NewGuid();
+            docId = Guid.NewGuid();
+            db.Invoices.Add(new Invoice
+            {
+                Id = invoiceId, InvoiceNumber = $"CATCH-{tag}", SupplierId = IntegrationTestFixture.SupplierId,
+                InvoiceDate = DateTime.UtcNow.Date, InvoiceAmount = 100, TaxAmount = 0, NetAmount = 100, CurrencyCode = "INR",
+                InvoiceStatus = InvoiceStatus.Submitted, ErpCompany = "2000", ErpTransactionType = "1DS", ErpDocumentNo = $"LN-{tag}",
+                SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+            });
+            db.DocumentUploads.Add(new DocumentUpload
+            {
+                Id = docId, OwnerEntityType = DocumentOwnerTypes.Invoice, OwnerEntityId = invoiceId,
+                DocumentType = oddType, FileName = "catch-all.pdf", FileUrl = $"idmtest/{tag}_catchall.pdf",
+                FileSizeKb = 1, MimeType = "application/pdf", UploadedBy = "seed", IdmEntityType = null, Pid = null,
+                SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+            });
+            var cfg = new IdmAttachmentTypeConfig
+            {
+                TenantId = IntegrationTestFixture.TenantId, OwnerEntityType = DocumentOwnerTypes.Invoice,
+                AttachmentType = null,   // CATCH-ALL
+                IdmEntityType = $"InforInvoice",   // has a provider so it can dispatch
+                EligibilityGateJson = "[\"invoice.erpCompany\",\"invoice.erpTransactionType\",\"invoice.erpDocumentNo\"]",
+                CreateMappingExpression = new IdmDefaultExpressions().TryGet("InforInvoice")!.CreateExpression,
+                IsEnabled = true, CreatedBy = "seed",
+            };
+            db.Set<IdmAttachmentTypeConfig>().Add(cfg);
+            await db.SaveChangesAsync();
+            cfgId = cfg.Id;
+        }
+
+        try
+        {
+            await DrainAsync();
+
+            using var scope = _fx.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            // A catch-all config (null attachmentType) classifies EVERY document of its portal entity regardless of
+            // the document's attachment type — the odd-typed doc gets stamped with the config's idmEntityType. (The
+            // downstream Create/dispatch mechanics are covered by the specific-type tests; here the stamp is the
+            // catch-all proof, and it isn't subject to the seed-scan's per-drain Take() batch.)
+            (await db.DocumentUploads.IgnoreQueryFilters().Where(d => d.Id == docId).Select(d => d.IdmEntityType).SingleAsync())
+                .Should().Be("InforInvoice",
+                    because: "a catch-all config classifies every document of its portal entity, whatever the attachment type");
+        }
+        finally
+        {
+            using var cleanup = _fx.Factory.Services.CreateScope();
+            var db = cleanup.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Set<IdmAttachmentTypeConfig>().IgnoreQueryFilters().Where(c => c.Id == cfgId).ExecuteDeleteAsync();
+        }
     }
 
     /// <summary>

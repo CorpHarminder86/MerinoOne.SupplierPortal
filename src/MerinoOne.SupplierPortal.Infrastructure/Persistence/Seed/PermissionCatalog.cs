@@ -59,6 +59,9 @@ public static class PermissionCatalog
         new PermissionSeed(Perm.IntegrationRead,             "View integration",          "Integration",    "View Infor endpoints, sync log and errors"),
         new PermissionSeed(Perm.IntegrationManage,           "Manage integration",        "Integration",    "Retry integration errors, manage endpoint mapping"),
         new PermissionSeed(Perm.IntegrationApiKeys,          "Manage API keys",           "Integration",    "Generate, rotate and revoke inbound X-APIKey credentials"),
+        // R9 (2026-07-06) — LN outbound config admin (high blast radius; deliberately NOT Settings.Write):
+        // endpoint CRUD, sample pinning, attestation, dispatch mode; kill switch + backfill apply in Phase B.
+        new PermissionSeed(Perm.IntegrationAdmin,            "Administer LN outbound",    "Integration",    "LN endpoint config, attestation, dispatch mode, kill switch, backfill"),
         // R8 (2026-07-04) — Infor IDM document sync monitoring + operations.
         new PermissionSeed(Perm.IntegrationIdmSyncView,      "View IDM document sync",    "Integration",    "View the Infor IDM document sync log (RLS-scoped per role)"),
         new PermissionSeed(Perm.IntegrationIdmSyncManage,    "Manage IDM document sync",  "Integration",    "Retry, re-push and backfill Infor IDM document sync"),
@@ -139,6 +142,7 @@ public static class PermissionCatalog
         [Perm.IntegrationRead]              = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.IntegrationManage]            = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         [Perm.IntegrationApiKeys]           = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
+        [Perm.IntegrationAdmin]             = new[] { RoleNames.SuperAdmin, RoleNames.Admin },
         // R8 — View is wide (RLS scopes each role's rows); Manage is admin-only.
         [Perm.IntegrationIdmSyncView]       = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer, RoleNames.Finance, RoleNames.Supplier, RoleNames.ReadOnly },
         [Perm.IntegrationIdmSyncManage]     = new[] { RoleNames.SuperAdmin, RoleNames.Admin },

@@ -36,7 +36,9 @@ public class LiveInforIntegrationService : IInforIntegrationService
     };
 
     // TODO: replace with the real ION REST / OData paths (appended to InforConnectionSetting.ApiBaseUrl).
-    private static class EndpointPaths
+    // R9 — internal (not private): LnOutboundSeeder seeds LnEndpointConfig.endpointPath from these starter
+    // values so the legacy constants and the config rows share ONE source until the tenant export lands.
+    internal static class EndpointPaths
     {
         public const string Supplier = "LN/lnapi/odata/tdapi.bpSuppliers/Suppliers";
         public const string PurchaseOrderAck = "LN/lnapi/odata/tdapi.purchaseOrders/Acknowledgements";

@@ -63,6 +63,12 @@ public static class SeedRunner
         logger?.LogInformation("Seed: IdmOutboundSeeder");
         await IdmOutboundSeeder.SeedAsync(ctx, ct);
 
+        // R9 (2026-07-06) — TSD R9 §2.1. One LnEndpointConfig row per tenant per transaction type (all 8) from
+        // the repo LN expression catalogue. Every row seeds DispatchMode=Legacy — zero dispatch change until an
+        // admin attests + flips to Dynamic. Per-slot hash-gated like the IDM seeder (hand-edits never clobbered).
+        logger?.LogInformation("Seed: LnOutboundSeeder");
+        await LnOutboundSeeder.SeedAsync(ctx, ct);
+
         // Light scope tagging (suppliers/masters/config/UserCompanyMaps + ensure flag OFF) runs BEFORE the
         // volume backfill so suppliers carry company 2000 when the heavy pass later joins on them.
         logger?.LogInformation("Seed: ScopeBackfillSeeder (light)");

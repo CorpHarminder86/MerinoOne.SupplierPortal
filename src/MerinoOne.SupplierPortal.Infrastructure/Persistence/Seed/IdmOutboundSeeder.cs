@@ -68,13 +68,15 @@ public static class IdmOutboundSeeder
             if (!IdmDefaultExpressions.Seeds.TryGetValue(entry.IdmEntityType, out var seed)) continue;
 
             var existing = await ctx.Set<IdmAttachmentTypeConfig>().IgnoreQueryFilters()
-                .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.AttachmentType == seed.AttachmentType && !c.IsDeleted, ct);
+                .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.OwnerEntityType == seed.OwnerEntityType
+                    && c.AttachmentType == seed.AttachmentType && !c.IsDeleted, ct);
 
             if (existing is null)
             {
                 ctx.Set<IdmAttachmentTypeConfig>().Add(new IdmAttachmentTypeConfig
                 {
                     TenantId = tenantId,
+                    OwnerEntityType = seed.OwnerEntityType,
                     AttachmentType = seed.AttachmentType,
                     IdmEntityType = entry.IdmEntityType,
                     EligibilityGateJson = seed.GateJson,
@@ -87,6 +89,9 @@ public static class IdmOutboundSeeder
                 });
                 continue;
             }
+
+            // Backfill the portal entity on a pre-2026-07-06 row that predates the stored column.
+            if (string.IsNullOrEmpty(existing.OwnerEntityType)) existing.OwnerEntityType = seed.OwnerEntityType;
 
             // Overwrite ONLY when still untouched since last seed (no hand-edit) AND the repo default changed.
             var touched = false;

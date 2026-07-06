@@ -2,6 +2,7 @@ using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Enums;
+using MerinoOne.SupplierPortal.Infrastructure.Integration.Ln;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -110,7 +111,8 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         _logger.LogInformation("OutboxDispatcherWorker stopped.");
     }
 
-    private async Task DrainOnceAsync(CancellationToken ct)
+    /// <summary>Internal (not private) so R9 routing tests can drive ONE deterministic drain without the hosted loop.</summary>
+    internal async Task DrainOnceAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
@@ -140,10 +142,21 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
 
         if (candidateIds.Count == 0) return;
 
+        // R9 (D-R9-2) — ONE config read per drain cycle: the tri-state routing map (tenant, transactionType) →
+        // Legacy | Dynamic | Held. Config staleness is bounded by the poll interval (≤5 s), which is the
+        // documented reaction time for a Held flip. Empty table ⇒ empty map ⇒ 100% legacy dispatch.
+        var routes = (await db.LnEndpointConfigs
+                .IgnoreQueryFilters()
+                .Where(c => !c.IsDeleted)
+                .Select(c => new LnEndpointRoute(c.TenantId, c.TransactionType, c.DispatchMode, c.PortalEntity,
+                    c.EndpointPath, c.HttpVerb, c.RequestMappingExpr, c.ResponseMappingExpr))
+                .ToListAsync(ct))
+            .ToDictionary(r => (r.TenantId, r.TransactionType));
+
         foreach (var id in candidateIds)
         {
             if (ct.IsCancellationRequested) break;
-            await DispatchOneAsync(scope.ServiceProvider, db, id, ct);
+            await DispatchOneAsync(scope.ServiceProvider, db, id, routes, ct);
         }
     }
 
@@ -284,7 +297,9 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
     /// retryable <see cref="IntegrationError"/>. A crash while the row is <c>Sending</c> is recovered by
     /// <see cref="SweepStaleSendingAsync"/>.
     /// </summary>
-    private async Task DispatchOneAsync(IServiceProvider sp, IAppDbContext db, Guid rowId, CancellationToken ct)
+    private async Task DispatchOneAsync(
+        IServiceProvider sp, IAppDbContext db, Guid rowId,
+        IReadOnlyDictionary<(Guid? TenantId, string TransactionType), LnEndpointRoute> routes, CancellationToken ct)
     {
         // --- 0. Read the row (untracked) to capture the current RowVersion the claim will arbitrate on. ----------
         var row = await db.OutboxMessages
@@ -292,6 +307,12 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
             .AsNoTracking()
             .FirstOrDefaultAsync(m => m.Id == rowId, ct);
         if (row is null || row.IsDeleted || row.Status != OutboxStatus.Pending) return;
+
+        // --- 0a. R9 (D-R9-11) — per-endpoint kill: a Held route means this transaction type's dispatch is paused.
+        // The row is NEVER claimed (stays Pending, FIFO order preserved) and drains normally once un-held.
+        // Enqueue is untouched by design — killing enqueue would silently lose business events.
+        routes.TryGetValue((row.TenantId, row.TransactionType), out var route);
+        if (route?.Mode == LnDispatchMode.Held) return;
 
         // --- 1. ATOMIC CLAIM (review B1/D5): Pending → Sending, server-side, gated by the RowVersion token. -------
         var claimRowVersion = row.RowVersion;
@@ -322,15 +343,27 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         if (row is null) return; // soft-deleted between claim and read — nothing to POST.
 
         // --- 2. POST (claim already won; the row is Sending and will not be re-POSTed by a sibling). --------------
+        // R9 (D-R9-2): Dynamic route → config-driven JSONata pipeline; Legacy route or no config row → the
+        // compiled path below, byte-identical to pre-R9 behaviour.
         var infor = sp.GetRequiredService<IInforIntegrationService>();
         var idem = sp.GetRequiredService<IOutboundIdempotencyContext>();
 
         InforSyncResult result;
+        var permanentFailure = false;
         try
         {
             // Replay the SAME deterministic key (D2 fix) as the ERP idempotency key.
             idem.Set(row.DeterministicKey);
-            result = await InvokeAsync(infor, row, ct);
+            if (route?.Mode == LnDispatchMode.Dynamic)
+            {
+                var dynamicOutcome = await sp.GetRequiredService<ILnDynamicDispatcher>().DispatchAsync(row, route, ct);
+                result = dynamicOutcome.Result;
+                permanentFailure = dynamicOutcome.PermanentFailure;
+            }
+            else
+            {
+                result = await InvokeAsync(infor, row, ct);
+            }
         }
         catch (Exception ex)
         {
@@ -402,6 +435,13 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         {
             var detail = string.IsNullOrEmpty(result.Message) ? "unknown ERP failure" : result.Message;
 
+            // R9 (D-R9-5) — permanent dynamic-path failures (4xx / config bugs) are stamped with a stable
+            // prefix (LastError) + marker (IntegrationError.StackTrace) so the errors UI can badge them and
+            // warn on re-arm. Classification is code-owned; no schema change in Phase A.
+            var lastError = permanentFailure
+                ? LnRetriabilityClassifier.PermanentLastErrorPrefix + detail
+                : detail;
+
             // Roll the claimed row Sending → Failed (POST did not land). The atomic claim already incremented
             // AttemptCount, so the failed row carries its attempt number. A future RetryIntegrationErrorCommand
             // re-arms it (Failed → Pending) — or, for an invoice, a GRN re-approval (ErpPostedAt still null) re-posts.
@@ -411,7 +451,7 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(m => m.Status, OutboxStatus.Failed)
                     .SetProperty(m => m.DispatchedAt, (DateTime?)null)
-                    .SetProperty(m => m.LastError, Truncate(detail, 2000))
+                    .SetProperty(m => m.LastError, Truncate(lastError, 2000))
                     .SetProperty(m => m.UpdatedBy, "outbox-dispatcher")
                     .SetProperty(m => m.UpdatedOn, now), ct);
 
@@ -442,6 +482,10 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
                 SyncLogId = log.Id,
                 EntityName = row.EntityName,
                 ErrorMessage = Truncate(detail, 2000),
+                // R9 (D-R9-5) — stable marker for permanent (4xx / config) dynamic-path failures; the errors
+                // UI badges these and warns on re-arm (StackTrace doubles as the reason-marker column, same
+                // precedent as DispatchedReconcileReason above).
+                StackTrace = permanentFailure ? LnRetriabilityClassifier.PermanentErrorMarker : null,
                 RetryCount = row.AttemptCount,
                 IsResolved = false,
                 CreatedBy = "outbox-dispatcher",

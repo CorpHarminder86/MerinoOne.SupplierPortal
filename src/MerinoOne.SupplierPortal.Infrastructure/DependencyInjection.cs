@@ -111,6 +111,26 @@ public static class DependencyInjection
         // The dispatcher (per-document FIFO, gate promotion, backoff, reap). Reads InforIdm settings each drain.
         services.AddHostedService<IdmDocumentOutboxWorker>();
 
+        // ── R9 (2026-07-06) — Config-driven LN outbound posting (TSD R9) ───────────────────────────
+        // Engine parts: the shared JSONata service (singleton, bounded compiled-expression cache), the repo
+        // LN expression catalogue, and the candidate-filter registry (save-time validation surface in Phase A).
+        services.AddSingleton<Application.Integration.Ln.ILnMappingService, Integration.Ln.LnMappingService>();
+        services.AddSingleton<Integration.Ln.LnDefaultExpressions>();
+        services.AddSingleton<Application.Integration.CandidateFilters.ICandidateFilterRegistry,
+            Application.Integration.CandidateFilters.CandidateFilterRegistry>();
+        // Input-document builders (stateless — they take the caller's IAppDbContext per call) + registry.
+        services.AddSingleton<Application.Integration.Ln.ILnInputDocumentBuilder, Integration.Ln.InputDocuments.InvoiceInputDocumentBuilder>();
+        services.AddSingleton<Application.Integration.Ln.ILnInputDocumentBuilder, Integration.Ln.InputDocuments.AsnInputDocumentBuilder>();
+        services.AddSingleton<Application.Integration.Ln.ILnInputDocumentBuilder, Integration.Ln.InputDocuments.PurchaseOrderInputDocumentBuilder>();
+        services.AddSingleton<Application.Integration.Ln.ILnInputDocumentBuilder, Integration.Ln.InputDocuments.SupplierInputDocumentBuilder>();
+        services.AddSingleton<Application.Integration.Ln.ILnInputDocumentBuilder, Integration.Ln.InputDocuments.SupplierChangeInputDocumentBuilder>();
+        services.AddSingleton<Application.Integration.Ln.ILnInputDocumentBuilder, Integration.Ln.InputDocuments.PoNegotiationInputDocumentBuilder>();
+        services.AddSingleton<Application.Integration.Ln.ILnInputDocumentBuilderRegistry, Integration.Ln.InputDocuments.LnInputDocumentBuilderRegistry>();
+        // Dynamic dispatch pipeline (scoped — per-drain IAppDbContext) + the tenant-explicit HTTP transport.
+        services.AddScoped<Integration.Ln.ILnDynamicDispatcher, Integration.Ln.LnDynamicDispatcher>();
+        services.AddScoped<Integration.Ln.ILnHttpTransport, Integration.Ln.LnHttpTransport>();
+        services.AddHttpClient(Integration.Ln.LnHttpTransport.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(60));
+
         // R6 (plan D13) — invoice PDF rendering (QuestPDF). The Community license is asserted ONCE here (both
         // hosts call AddInfrastructure). NOTE: Community licensing is revenue-gated (<$1M USD/yr) — flagged to
         // the owner in the build plan; WeasyPrint is the documented fallback if the terms stop fitting.

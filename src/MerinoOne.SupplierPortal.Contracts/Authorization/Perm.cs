@@ -75,6 +75,11 @@ public static class Perm
     public const string IntegrationManage = "Integration.Manage";
     public const string IntegrationApiKeys = "Integration.ApiKeys";
 
+    // R9 (2026-07-06) — TSD R9 high-blast-radius LN outbound admin: endpoint-config CRUD, sample pinning,
+    // attestation + dispatch-mode transitions (Phase A); kill switch + backfill apply (Phase B). Deliberately
+    // separate from Settings.Write — editing an e-mail template must not grant the power to kill dispatch.
+    public const string IntegrationAdmin = "Integration.Admin";
+
     // R8 (2026-07-04) — Infor IDM document sync. View is WIDE (all roles incl. Supplier — the sync-log screen is
     // RLS-scoped, so each role sees only its own rows). Manage (retry / re-push / backfill) is admin-only.
     public const string IntegrationIdmSyncView = "Integration.IdmSync.View";
@@ -121,7 +126,7 @@ public static class Perm
         CommunicationRead, CommunicationWrite,
         DocumentRead,
         UserRead, UserWrite, RoleRead, RoleWrite, SettingsRead, SettingsWrite,
-        IntegrationRead, IntegrationManage, IntegrationApiKeys,
+        IntegrationRead, IntegrationManage, IntegrationApiKeys, IntegrationAdmin,
         IntegrationIdmSyncView, IntegrationIdmSyncManage,
         IntegrationInboundErpAck, IntegrationInboundGrn, IntegrationInboundPayment,
         IntegrationInboundInvoiceStatus, IntegrationInboundPo, IntegrationInboundDeliverySchedule,
