@@ -1,0 +1,185 @@
+@page "/integrations/outbox"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+@* R9 (TSD R9 Phase B) — LN outbox monitor: Skipped rows visible with skipReason + gateVersion (a skip is
+   a decision, not a failure — this screen is its surface, D-R9-9); Failed rows badge the code-owned
+   Permanent|Retriable class; manual re-arm (Skipped/Failed → Pending) with a warning on Permanent. *@
+
+<PageTitle>LN Outbox</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">LN Outbox</h1>
+                <span class="tl-count-chip">@total</span>
+            </div>
+            <p class="tl-sub">Outbound LN transaction rows · Skipped = gate decision (reason + gate version) · Permanent = 4xx/config failure (re-arm warns)</p>
+        </div>
+        <div class="tl-header__actions" style="display:flex;gap:8px;">
+            <select class="rz-dropdown" style="padding:6px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="filterStatus">
+                <option value="">All statuses</option>
+                @foreach (var s in new[] { "Pending", "Sending", "Dispatched", "Acked", "Failed", "Skipped" })
+                {
+                    <option value="@s">@s</option>
+                }
+            </select>
+            <button class="mbtn mbtn--outline" @onclick="Load" disabled="@busy"><span class="material-symbols-outlined">refresh</span> Refresh</button>
+        </div>
+    </header>
+
+    @if (!CanRead)
+    {
+        <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">lock</span><div>You do not have permission to view the outbox.</div></div>
+    }
+    else if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (rows.Count == 0)
+    {
+        <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">outbox</span><div>No outbox rows match.</div></div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 170px 110px 110px 70px 1fr 150px 150px; --tl-min-width: 1150px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Transaction type</div>
+                <div class="tlg-col">Status</div>
+                <div class="tlg-col">Class</div>
+                <div class="tlg-col">Gate v</div>
+                <div class="tlg-col">Reason / error</div>
+                <div class="tlg-col">Created</div>
+                <div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var r in rows)
+            {
+                var row = r;
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-name" title="@row.DeterministicKey">@row.TransactionType</div>
+                    <div class="tlg-col">
+                        <span class="tlg-status @StatusChip(row.Status)" title="@(row.Status == "Skipped" ? row.SkipReason : row.LastError)">@row.Status</span>
+                    </div>
+                    <div class="tlg-col">
+                        @if (row.ErrorClass == "Permanent")
+                        {
+                            <span class="tlg-status tlg-status--danger" title="4xx/config failure — fix the config before re-arm">Permanent</span>
+                        }
+                        else if (row.ErrorClass == "Retriable")
+                        {
+                            <span class="tlg-status tlg-status--pending">Retriable</span>
+                        }
+                    </div>
+                    <div class="tlg-col">@(row.GateVersion is { } gv ? $"v{gv}" : "—")</div>
+                    <div class="tlg-col" style="font-size:12px;color:var(--mer-ink-600);" title="@(row.SkipReason ?? row.LastError)">
+                        @Truncate(row.SkipReason ?? row.LastError, 90)
+                    </div>
+                    <div class="tlg-col">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                    <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;justify-content:flex-end;">
+                        @if (CanAdmin && row.Status is "Skipped" or "Failed")
+                        {
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => rearmRow = row" disabled="@busy" title="Re-arm to Pending (same deterministic key — LN dedupes)">
+                                <span class="material-symbols-outlined">replay</span> Re-arm
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (rearmRow is not null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="warning" data-size="sm" style="width:520px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">replay</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">@rearmRow.TransactionType</div>
+                    <h2 class="merino-dialog__title">Re-arm this row?</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => rearmRow = null"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="font-size:13px;color:var(--mer-ink-700);margin:0 0 6px;">Flips <strong>@rearmRow.Status → Pending</strong> — the dispatcher re-POSTs with the SAME deterministic key (LN dedupes).</p>
+                @if (rearmRow.ErrorClass == "Permanent")
+                {
+                    <p style="font-size:12.5px;color:var(--mer-red);margin:0;"><strong>This failure is classified PERMANENT (4xx/config).</strong> Re-arming without fixing the config or mapping will fail again identically.</p>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => rearmRow = null">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Rearm" disabled="@busy">@(busy ? "Re-arming…" : "Re-arm")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool CanRead => Token.HasPermission("Integration.Read");
+    private bool CanAdmin => Token.HasPermission("Integration.Admin");
+
+    private List<OutboxMessageDto> rows = new();
+    private int total;
+    private bool loading = true;
+    private bool busy;
+    private string filterStatus = string.Empty;
+    private OutboxMessageDto? rearmRow;
+
+    private static string StatusChip(string status) => status switch
+    {
+        "Acked" or "Dispatched" => "tlg-status--active",
+        "Failed" => "tlg-status--danger",
+        "Skipped" => "tlg-status--pending",
+        _ => "tlg-status--pending",
+    };
+
+    private static string Truncate(string? s, int max)
+        => string.IsNullOrEmpty(s) ? "—" : s.Length <= max ? s : s[..max] + "…";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanRead) { loading = false; return; }
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        var url = "api/integration/ln-outbound/outbox?pageSize=100"
+                + (string.IsNullOrEmpty(filterStatus) ? string.Empty : $"&status={filterStatus}");
+        var resp = await Api.GetAsync<OutboxMessagePageDto>(url);
+        rows = resp?.Data?.Rows?.ToList() ?? new();
+        total = resp?.Data?.Total ?? 0;
+        loading = false;
+    }
+
+    private async Task Rearm()
+    {
+        if (rearmRow is null) return;
+        busy = true;
+        var resp = await Api.PostAsync<RearmOutboxResultDto, object>($"api/integration/ln-outbound/outbox/{rearmRow.Id}/rearm", new { });
+        if (resp?.Success == true && resp.Data?.Rearmed == true)
+        {
+            Notif.Notify(new NotificationMessage
+            {
+                Severity = resp.Data.WasPermanent ? NotificationSeverity.Warning : NotificationSeverity.Success,
+                Summary = "Re-armed",
+                Detail = resp.Data.Message ?? string.Empty,
+            });
+            rearmRow = null;
+            await Load();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Re-arm failed", Detail = resp?.Data?.Message ?? resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+}

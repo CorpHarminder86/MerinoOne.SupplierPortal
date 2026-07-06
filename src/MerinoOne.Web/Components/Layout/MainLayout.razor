@@ -222,6 +222,19 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">hub</span>
                         <span class="mer-nav-item__label">Table Sharing</span>
                     </NavLink>
+                    @* R9 (TSD R9 Phase B) — LN outbox monitor (Skipped visibility), kill switches, backfill. *@
+                    <NavLink class="mer-nav-item" href="integrations/outbox" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">outbox</span>
+                        <span class="mer-nav-item__label">LN Outbox</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="integrations/switches" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">toggle_on</span>
+                        <span class="mer-nav-item__label">Kill Switches</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="integrations/ln-backfill" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">rule_settings</span>
+                        <span class="mer-nav-item__label">LN Backfill</span>
+                    </NavLink>
 
                     <div class="mer-nav__label">Administration</div>
                     <NavLink class="mer-nav-item" href="admin/users" ActiveClass="active">

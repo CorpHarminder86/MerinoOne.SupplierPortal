@@ -1,6 +1,9 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Models;
+using MerinoOne.SupplierPortal.Application.Integration.Ln.Backfill;
 using MerinoOne.SupplierPortal.Application.Integration.Ln.Commands;
+using MerinoOne.SupplierPortal.Application.Integration.Ln.Monitor;
+using MerinoOne.SupplierPortal.Application.Integration.Switches;
 using MerinoOne.SupplierPortal.Contracts.Authorization;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using Microsoft.AspNetCore.Authorization;
@@ -91,4 +94,82 @@ public class LnOutboundConfigController : ControllerBase
     [EndpointDescription("Soft delete = permanent rollback to the legacy compiled builder for this transaction type (D-R9-2). Requires Integration.Admin.")]
     public async Task<Result<bool>> Delete(Guid id, CancellationToken ct)
         => Result<bool>.Ok(await _mediator.Send(new DeleteLnEndpointConfigCommand(id), ct), HttpContext.TraceIdentifier);
+
+    // ── Phase B — outbox monitor, kill switches, backfill, held inbound (reads on Integration.Read per the
+    // existing SyncLog/Errors precedent; every mutation stays Integration.Admin — O-R9-6 close-out). ─────────
+
+    [HttpGet("outbox")]
+    [Authorize(Policy = Perm.IntegrationRead)]
+    [EndpointSummary("Page the LN outbox")]
+    [EndpointDescription("Paged outbox rows with the R9 columns: Skipped rows carry skipReason + gateVersion (a skip is a decision — this is its surface, D-R9-9); Failed rows carry the Permanent|Retriable errorClass. Requires Integration.Read.")]
+    public async Task<Result<OutboxMessagePageDto>> GetOutbox([FromQuery] string? status, [FromQuery] string? transactionType, [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+        => Result<OutboxMessagePageDto>.Ok(await _mediator.Send(new GetOutboxMessagesQuery(status, transactionType, page, pageSize), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("outbox/{id:guid}/rearm")]
+    [Authorize(Policy = Perm.IntegrationAdmin)]
+    [EndpointSummary("Re-arm a Skipped/Failed outbox row")]
+    [EndpointDescription("Flips Skipped/Failed → Pending in place (same deterministic key — LN dedupes). Allowed on Permanent-classified failures as an admin override; the result flags it so the UI warns. Requires Integration.Admin.")]
+    public async Task<Result<RearmOutboxResultDto>> RearmOutbox(Guid id, CancellationToken ct)
+        => Result<RearmOutboxResultDto>.Ok(await _mediator.Send(new RearmOutboxMessageCommand(id), ct), HttpContext.TraceIdentifier);
+
+    [HttpGet("switches")]
+    [Authorize(Policy = Perm.IntegrationRead)]
+    [EndpointSummary("Kill-switch states")]
+    [EndpointDescription("The two DB-backed scopes (OutboundGlobal, InboundErpAck) with last reason/who/when and the held-ack count. Absent row = enabled. Per-endpoint kill lives on the config's dispatchMode=Held. Requires Integration.Read.")]
+    public async Task<Result<IReadOnlyList<IntegrationSwitchDto>>> GetSwitches(CancellationToken ct)
+        => Result<IReadOnlyList<IntegrationSwitchDto>>.Ok(await _mediator.Send(new GetIntegrationSwitchesQuery(), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("switches/{scope}/toggle")]
+    [Authorize(Policy = Perm.IntegrationAdmin)]
+    [EndpointSummary("Toggle a kill switch")]
+    [EndpointDescription("D-R9-11: OutboundGlobal stops dispatch (never enqueue — rows accumulate Pending and drain FIFO on re-enable); InboundErpAck makes /inbound/erp-ack accept-and-hold (never 503; held acks replay on re-enable). Reason note is MANDATORY; every toggle is audited. Requires Integration.Admin.")]
+    public async Task<Result<bool>> ToggleSwitch(string scope, [FromBody] ToggleIntegrationSwitchRequest body, CancellationToken ct)
+        => Result<bool>.Ok(await _mediator.Send(new ToggleIntegrationSwitchCommand(scope, body), ct), HttpContext.TraceIdentifier);
+
+    [HttpGet("switches/audit")]
+    [Authorize(Policy = Perm.IntegrationRead)]
+    [EndpointSummary("Kill-switch toggle audit")]
+    [EndpointDescription("Who/when/old→new/reason per toggle, newest first. Requires Integration.Read.")]
+    public async Task<Result<IReadOnlyList<IntegrationSwitchAuditDto>>> GetSwitchAudit([FromQuery] string? scope, CancellationToken ct)
+        => Result<IReadOnlyList<IntegrationSwitchAuditDto>>.Ok(await _mediator.Send(new GetIntegrationSwitchAuditQuery(scope), ct), HttpContext.TraceIdentifier);
+
+    [HttpGet("held-inbound")]
+    [Authorize(Policy = Perm.IntegrationRead)]
+    [EndpointSummary("Held inbound erp-acks")]
+    [EndpointDescription("The accept-and-hold store: acks received under an InboundErpAck kill, replayed FIFO on re-enable (5-attempt cap, then Failed + IntegrationError). Requires Integration.Read.")]
+    public async Task<Result<IReadOnlyList<HeldInboundMessageDto>>> GetHeldInbound([FromQuery] string? status, CancellationToken ct)
+        => Result<IReadOnlyList<HeldInboundMessageDto>>.Ok(await _mediator.Send(new GetHeldInboundMessagesQuery(status), ct), HttpContext.TraceIdentifier);
+
+    [HttpGet("backfill/{configId:guid}/status")]
+    [Authorize(Policy = Perm.IntegrationRead)]
+    [EndpointSummary("Backfill status for a config")]
+    [EndpointDescription("Drives the D-R9-19 auto-prompt: promptDryRun=true when the gateVersion moved past the last applied run and no fresh preview exists. Apply is ALWAYS manual. Requires Integration.Read.")]
+    public async Task<Result<LnBackfillStatusDto>> GetBackfillStatus(Guid configId, CancellationToken ct)
+        => Result<LnBackfillStatusDto>.Ok(await _mediator.Send(new GetLnBackfillStatusQuery(configId), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("backfill/{configId:guid}/dry-run")]
+    [Authorize(Policy = Perm.IntegrationAdmin)]
+    [EndpointSummary("Run a backfill dry-run")]
+    [EndpointDescription("MANDATORY preview (D-R9-10): entity scan (shared scanner) + per-row outbox re-evaluation → enqueue / re-arm / withdraw sets with row lists; Sending informational; posted rows immutable. Persisted gateVersion-pinned for the apply. Requires Integration.Admin.")]
+    public async Task<Result<LnBackfillPreviewDto>> RunBackfillDryRun(Guid configId, CancellationToken ct)
+        => Result<LnBackfillPreviewDto>.Ok(await _mediator.Send(new RunLnBackfillDryRunCommand(configId), ct), HttpContext.TraceIdentifier);
+
+    [HttpGet("backfill/runs")]
+    [Authorize(Policy = Perm.IntegrationRead)]
+    [EndpointSummary("Backfill run history")]
+    public async Task<Result<IReadOnlyList<LnBackfillRunDto>>> GetBackfillRuns([FromQuery] Guid? configId, CancellationToken ct)
+        => Result<IReadOnlyList<LnBackfillRunDto>>.Ok(await _mediator.Send(new GetLnBackfillRunsQuery(configId), ct), HttpContext.TraceIdentifier);
+
+    [HttpGet("backfill/runs/{runId:guid}")]
+    [Authorize(Policy = Perm.IntegrationRead)]
+    [EndpointSummary("A backfill run's stored preview")]
+    public async Task<Result<LnBackfillPreviewDto>> GetBackfillRun(Guid runId, CancellationToken ct)
+        => Result<LnBackfillPreviewDto>.Ok(await _mediator.Send(new GetLnBackfillRunQuery(runId), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("backfill/runs/{runId:guid}/apply")]
+    [Authorize(Policy = Perm.IntegrationAdmin)]
+    [EndpointSummary("Apply a previewed backfill")]
+    [EndpointDescription("Deliberate, never one-click: refuses a stale gateVersion (re-run the dry-run). Conditional status-guarded updates make dispatcher races VISIBLE (racedAway / escapedToSending — the dispatch re-check resolves escapes). Requires Integration.Admin.")]
+    public async Task<Result<LnBackfillApplyResultDto>> ApplyBackfill(Guid runId, CancellationToken ct)
+        => Result<LnBackfillApplyResultDto>.Ok(await _mediator.Send(new ApplyLnBackfillCommand(runId), ct), HttpContext.TraceIdentifier);
 }

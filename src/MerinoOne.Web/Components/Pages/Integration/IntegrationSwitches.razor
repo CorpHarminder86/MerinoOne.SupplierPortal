@@ -1,0 +1,200 @@
+@page "/integrations/switches"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+@* R9 (TSD R9 §2.6, D-R9-11) — the two DB-backed kill switches. OutboundGlobal: dispatch stops, enqueue
+   continues (rows accumulate Pending, FIFO drain on re-enable). InboundErpAck: /inbound/erp-ack
+   accepts-and-holds (never 503), held acks replay FIFO on re-enable. Per-endpoint kill = the config
+   screen's dispatchMode=Held. Every toggle demands a reason and is audited. *@
+
+<PageTitle>Kill Switches</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row"><h1 class="tl-title">Integration Kill Switches</h1></div>
+            <p class="tl-sub">Stops dispatch, never enqueue — no silent event loss · per-endpoint hold lives on Settings → LN Outbound Endpoints (mode = Held)</p>
+        </div>
+    </header>
+
+    @if (!CanRead)
+    {
+        <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">lock</span><div>You do not have permission to view integration switches.</div></div>
+    }
+    else if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else
+    {
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:980px;">
+            @foreach (var s in switches)
+            {
+                var sw = s;
+                <div style="border:1px solid var(--mer-ink-200);border-radius:10px;padding:16px;background:var(--mer-surface);display:flex;flex-direction:column;gap:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div style="font-weight:700;font-size:15px;">@ScopeLabel(sw.Scope)</div>
+                        <span class="tlg-status @(sw.IsEnabled ? "tlg-status--active" : "tlg-status--danger")">@(sw.IsEnabled ? "Flowing" : "KILLED")</span>
+                    </div>
+                    <div style="font-size:12.5px;color:var(--mer-ink-600);">@ScopeHelp(sw.Scope)</div>
+                    @if (sw.Scope == "InboundErpAck" && sw.HeldCount > 0)
+                    {
+                        <div style="font-size:12.5px;"><span class="tlg-status tlg-status--pending">@sw.HeldCount held ack batch(es)</span> — replay FIFO once re-enabled.</div>
+                    }
+                    @if (!string.IsNullOrEmpty(sw.LastReason))
+                    {
+                        <div style="font-size:12px;color:var(--mer-ink-500);">Last: “@sw.LastReason” — @sw.LastChangedBy · @sw.LastChangedOn?.ToString("yyyy-MM-dd HH:mm")Z</div>
+                    }
+                    @if (CanAdmin)
+                    {
+                        <button class="mbtn @(sw.IsEnabled ? "mbtn--danger" : "mbtn--primary")" style="align-self:flex-start;"
+                                @onclick="() => OpenToggle(sw)" disabled="@busy">
+                            <span class="material-symbols-outlined">@(sw.IsEnabled ? "block" : "play_arrow")</span>
+                            @(sw.IsEnabled ? "Kill" : "Re-enable")
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+
+        <h2 style="font-size:15px;font-weight:700;margin:24px 0 8px;">Toggle history</h2>
+        @if (audit.Count == 0)
+        {
+            <div style="font-size:12.5px;color:var(--mer-ink-500);">No toggles yet.</div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 160px 110px 1fr 160px 150px; --tl-min-width: 900px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Scope</div>
+                    <div class="tlg-col">Change</div>
+                    <div class="tlg-col">Reason</div>
+                    <div class="tlg-col">By</div>
+                    <div class="tlg-col">When</div>
+                </div>
+                @foreach (var a in audit)
+                {
+                    <div class="tlg-row">
+                        <div class="tlg-col">@ScopeLabel(a.Scope)</div>
+                        <div class="tlg-col"><span class="tlg-status @(a.NewEnabled ? "tlg-status--active" : "tlg-status--danger")">@(a.OldEnabled ? "On" : "Off") → @(a.NewEnabled ? "On" : "Off")</span></div>
+                        <div class="tlg-col" style="font-size:12.5px;">@a.Reason</div>
+                        <div class="tlg-col">@a.ChangedBy</div>
+                        <div class="tlg-col">@a.ChangedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@if (toggling is not null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="warning" data-size="sm" style="width:540px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">@(toggling.IsEnabled ? "block" : "play_arrow")</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">@ScopeLabel(toggling.Scope)</div>
+                    <h2 class="merino-dialog__title">@(toggling.IsEnabled ? "Kill this scope?" : "Re-enable this scope?")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => toggling = null"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="font-size:12.5px;color:var(--mer-ink-600);margin:0 0 8px;">@ScopeHelp(toggling.Scope)</p>
+                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Reason * (audited — who/when/why)</label>
+                <textarea class="rz-textbox" style="width:100%;min-height:70px;padding:8px 10px;font-size:12.5px;" @bind="toggleReason"></textarea>
+                @if (!string.IsNullOrEmpty(toggleError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@toggleError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => toggling = null">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="@(toggling.IsEnabled ? "danger" : "primary")" @onclick="Toggle" disabled="@busy">
+                        @(busy ? "Applying…" : toggling.IsEnabled ? "Kill" : "Re-enable")
+                    </button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool CanRead => Token.HasPermission("Integration.Read");
+    private bool CanAdmin => Token.HasPermission("Integration.Admin");
+
+    private List<IntegrationSwitchDto> switches = new();
+    private List<IntegrationSwitchAuditDto> audit = new();
+    private bool loading = true;
+    private bool busy;
+
+    private IntegrationSwitchDto? toggling;
+    private string toggleReason = string.Empty;
+    private string toggleError = string.Empty;
+
+    private static string ScopeLabel(string scope) => scope switch
+    {
+        "OutboundGlobal" => "Global outbound dispatch",
+        "InboundErpAck" => "Inbound erp-ack",
+        _ => scope,
+    };
+
+    private static string ScopeHelp(string scope) => scope switch
+    {
+        "OutboundGlobal" => "Killed: the dispatcher drains NOTHING for this tenant — outbox rows accumulate Pending and drain FIFO on re-enable. Enqueue never stops (no silent event loss).",
+        "InboundErpAck" => "Killed: /inbound/erp-ack ACCEPTS-AND-HOLDS (HTTP 200, never 503 — LN's retry behaviour is not ours to trust). Held acks replay FIFO on re-enable; the original idempotency key dedupes.",
+        _ => string.Empty,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanRead) { loading = false; return; }
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        var s = await Api.GetAsync<List<IntegrationSwitchDto>>("api/integration/ln-outbound/switches");
+        switches = s?.Data ?? new();
+        var a = await Api.GetAsync<List<IntegrationSwitchAuditDto>>("api/integration/ln-outbound/switches/audit");
+        audit = a?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenToggle(IntegrationSwitchDto sw)
+    {
+        toggling = sw;
+        toggleReason = string.Empty;
+        toggleError = string.Empty;
+    }
+
+    private async Task Toggle()
+    {
+        if (toggling is null) return;
+        if (string.IsNullOrWhiteSpace(toggleReason) || toggleReason.Trim().Length < 5)
+        {
+            toggleError = "A reason of at least 5 characters is mandatory.";
+            return;
+        }
+        busy = true;
+        toggleError = string.Empty;
+        var resp = await Api.PostAsync<bool, ToggleIntegrationSwitchRequest>(
+            $"api/integration/ln-outbound/switches/{toggling.Scope}/toggle",
+            new(!toggling.IsEnabled, toggleReason.Trim()));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = $"{ScopeLabel(toggling.Scope)}: {(!toggling.IsEnabled ? "re-enabled" : "KILLED")}" });
+            toggling = null;
+            await Load();
+        }
+        else
+        {
+            toggleError = resp?.Errors?.FirstOrDefault() ?? "Toggle failed.";
+        }
+        busy = false;
+    }
+}

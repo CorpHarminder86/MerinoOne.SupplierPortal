@@ -1,0 +1,263 @@
+@page "/integrations/ln-backfill"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+@* R9 (TSD R9 §2.5, D-R9-10/19) — backfill: gate-change propagation. Dry-run is MANDATORY; Apply is a
+   separate deliberate confirm restating the counts (never one-click — highest blast radius in the
+   integration surface). The auto-prompt banner fires when a config's gateVersion moved past the last
+   applied run. Sending rows untouched; posted rows immutable. *@
+
+<PageTitle>LN Backfill</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row"><h1 class="tl-title">LN Backfill</h1></div>
+            <p class="tl-sub">Gate-change propagation: preview the enqueue / re-arm / withdraw delta, then apply deliberately · posted rows are immutable (LN cannot be unposted)</p>
+        </div>
+    </header>
+
+    @if (!CanRead)
+    {
+        <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">lock</span><div>You do not have permission to view backfill.</div></div>
+    }
+    else if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else
+    {
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+            <label style="font-size:12.5px;font-weight:600;">Endpoint config:</label>
+            <select class="rz-dropdown" style="padding:6px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:260px;"
+                    value="@selectedConfigId" @onchange="OnConfigChanged">
+                <option value="">— select a gated config —</option>
+                @foreach (var c in gatedConfigs)
+                {
+                    <option value="@c.Id">@c.TransactionType (gate v@(c.GateVersion), @c.DispatchMode)</option>
+                }
+            </select>
+            @if (CanAdmin && status is not null)
+            {
+                <button class="mbtn mbtn--primary" @onclick="RunDryRun" disabled="@busy">
+                    <span class="material-symbols-outlined">rule</span> @(busy ? "Scanning…" : "Run dry-run")
+                </button>
+            }
+        </div>
+
+        @if (status?.PromptDryRun == true)
+        {
+            <div style="background:var(--mer-amber-50, #fff7e6);border:1px solid var(--mer-amber, #d97706);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;">
+                <strong>Gate changed (v@(status.ConfigGateVersion)) since the last applied backfill@(status.LastAppliedGateVersion is { } lv ? $" (v{lv})" : "")</strong>
+                — run a dry-run to see the outbox impact (D-R9-19). Apply stays manual.
+            </div>
+        }
+
+        @if (preview is not null)
+        {
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;">
+                @RenderSet("Enqueue (new)", "add_circle", preview.Enqueue, "eligible, never enqueued — inserts Pending")
+                @RenderSet("Re-arm", "replay", preview.Rearm, "Skipped/Failed keys now eligible — same row flips Pending (LN dedupes)")
+                @RenderSet("Withdraw", "block", preview.Withdraw, "Pending/Failed rows now ineligible — flip Skipped (never deleted)")
+            </div>
+            <div style="font-size:12.5px;color:var(--mer-ink-600);margin-bottom:14px;">
+                In-flight (Sending, untouched — the dispatch re-check resolves them): <strong>@preview.SendingInFlight</strong> ·
+                Posted (Dispatched/Acked, immutable): <strong>@preview.PostedImmutable</strong> ·
+                Computed @preview.ComputedAt.ToString("HH:mm:ss")Z at gate v@(preview.GateVersion)
+            </div>
+            @if (CanAdmin && (preview.Enqueue.Count + preview.Rearm.Count + preview.Withdraw.Count) > 0)
+            {
+                <button class="mbtn mbtn--danger" @onclick="() => showApply = true" disabled="@busy">
+                    <span class="material-symbols-outlined">bolt</span> Apply this backfill…
+                </button>
+            }
+        }
+
+        <h2 style="font-size:15px;font-weight:700;margin:24px 0 8px;">Run history</h2>
+        @if (runs.Count == 0)
+        {
+            <div style="font-size:12.5px;color:var(--mer-ink-500);">No backfill runs yet.</div>
+        }
+        else
+        {
+            <div class="tl-grid-wrapper" style="--tl-cols: 170px 70px 110px 90px 90px 90px 150px 160px; --tl-min-width: 1000px;">
+                <div class="tlg-header">
+                    <div class="tlg-col">Transaction type</div>
+                    <div class="tlg-col">Gate v</div>
+                    <div class="tlg-col">Status</div>
+                    <div class="tlg-col">Enqueue</div>
+                    <div class="tlg-col">Re-arm</div>
+                    <div class="tlg-col">Withdraw</div>
+                    <div class="tlg-col">Created</div>
+                    <div class="tlg-col">Applied</div>
+                </div>
+                @foreach (var r in runs)
+                {
+                    <div class="tlg-row">
+                        <div class="tlg-col tlg-name">@r.TransactionType</div>
+                        <div class="tlg-col">v@(r.GateVersion)</div>
+                        <div class="tlg-col"><span class="tlg-status @(r.Status == "Applied" ? "tlg-status--active" : r.Status == "DryRun" ? "tlg-status--pending" : "")">@r.Status</span></div>
+                        <div class="tlg-col">@r.EnqueueCount</div>
+                        <div class="tlg-col">@r.RearmCount</div>
+                        <div class="tlg-col">@r.WithdrawCount</div>
+                        <div class="tlg-col">@r.CreatedOn.ToString("MM-dd HH:mm") · @r.CreatedBy</div>
+                        <div class="tlg-col">@(r.AppliedOn is { } ao ? $"{ao:MM-dd HH:mm} · {r.AppliedBy}" : "—")</div>
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@if (showApply && preview is not null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="warning" data-size="sm" style="width:560px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">bolt</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">@preview.TransactionType · gate v@(preview.GateVersion)</div>
+                    <h2 class="merino-dialog__title">Apply this backfill?</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showApply = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="font-size:13px;color:var(--mer-ink-700);margin:0 0 8px;">
+                    <strong>@preview.Enqueue.Count</strong> new enqueue(s) · <strong>@preview.Rearm.Count</strong> re-arm(s) ·
+                    <strong>@preview.Withdraw.Count</strong> withdraw(s) to Skipped.
+                </p>
+                <p style="font-size:12.5px;color:var(--mer-ink-600);margin:0;">
+                    Conditional updates make dispatcher races visible (raced-away / escaped-to-Sending are reported,
+                    and the dispatch-time re-check resolves escapes). A stale gate version is refused — re-run the dry-run.
+                </p>
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApply = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="danger" @onclick="Apply" disabled="@busy">@(busy ? "Applying…" : "Apply backfill")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool CanRead => Token.HasPermission("Integration.Read");
+    private bool CanAdmin => Token.HasPermission("Integration.Admin");
+
+    private List<LnEndpointConfigDto> gatedConfigs = new();
+    private List<LnBackfillRunDto> runs = new();
+    private string selectedConfigId = string.Empty;
+    private LnBackfillStatusDto? status;
+    private LnBackfillPreviewDto? preview;
+    private bool showApply;
+    private bool loading = true;
+    private bool busy;
+
+    private RenderFragment RenderSet(string title, string icon, IReadOnlyList<LnBackfillRowDto> set, string help) => __builder =>
+    {
+        <div style="border:1px solid var(--mer-ink-200);border-radius:10px;padding:12px;background:var(--mer-surface);">
+            <div style="display:flex;align-items:center;gap:6px;font-weight:700;font-size:13.5px;margin-bottom:4px;">
+                <span class="material-symbols-outlined" style="font-size:18px;">@icon</span> @title
+                <span class="tl-count-chip">@set.Count</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--mer-ink-500);margin-bottom:8px;">@help</div>
+            <div style="max-height:180px;overflow:auto;display:flex;flex-direction:column;gap:3px;">
+                @foreach (var row in set.Take(50))
+                {
+                    <div style="font-size:11.5px;" title="@row.Reason">
+                        <span class="tlg-code">@row.DeterministicKey[..12]…</span>
+                        @if (row.CurrentStatus is not null)
+                        {
+                            <span class="tlg-status tlg-status--pending" style="margin-left:4px;">@row.CurrentStatus</span>
+                        }
+                    </div>
+                }
+                @if (set.Count > 50)
+                {
+                    <div style="font-size:11px;color:var(--mer-ink-500);">…and @(set.Count - 50) more.</div>
+                }
+            </div>
+        </div>
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanRead) { loading = false; return; }
+        var c = await Api.GetAsync<List<LnEndpointConfigDto>>("api/integration/ln-outbound/configs");
+        gatedConfigs = (c?.Data ?? new())
+            .Where(x => x.DispatchMode != "Legacy" && !string.IsNullOrWhiteSpace(x.EligibilityGateExpr))
+            .ToList();
+        await LoadRuns();
+        loading = false;
+    }
+
+    private async Task LoadRuns()
+    {
+        var r = await Api.GetAsync<List<LnBackfillRunDto>>("api/integration/ln-outbound/backfill/runs");
+        runs = r?.Data ?? new();
+    }
+
+    private async Task OnConfigChanged(ChangeEventArgs e)
+    {
+        selectedConfigId = e.Value?.ToString() ?? string.Empty;
+        preview = null;
+        status = null;
+        if (Guid.TryParse(selectedConfigId, out var id))
+        {
+            var resp = await Api.GetAsync<LnBackfillStatusDto>($"api/integration/ln-outbound/backfill/{id}/status");
+            status = resp?.Data;
+            if (status?.LatestDryRunId is { } runId)
+            {
+                var p = await Api.GetAsync<LnBackfillPreviewDto>($"api/integration/ln-outbound/backfill/runs/{runId}");
+                preview = p?.Data;
+            }
+        }
+    }
+
+    private async Task RunDryRun()
+    {
+        if (!Guid.TryParse(selectedConfigId, out var id)) return;
+        busy = true;
+        var resp = await Api.PostAsync<LnBackfillPreviewDto, object>($"api/integration/ln-outbound/backfill/{id}/dry-run", new { });
+        if (resp?.Success == true)
+        {
+            preview = resp.Data;
+            await LoadRuns();
+            var s = await Api.GetAsync<LnBackfillStatusDto>($"api/integration/ln-outbound/backfill/{id}/status");
+            status = s?.Data;
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Dry-run failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+
+    private async Task Apply()
+    {
+        if (preview is null) return;
+        busy = true;
+        var resp = await Api.PostAsync<LnBackfillApplyResultDto, object>($"api/integration/ln-outbound/backfill/runs/{preview.RunId}/apply", new { });
+        if (resp?.Success == true && resp.Data is { } r)
+        {
+            Notif.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Success,
+                Summary = "Backfill applied",
+                Detail = $"Enqueued {r.Enqueued}, re-armed {r.Rearmed}, withdrew {r.Withdrawn}. Races: {r.RacedAway} raced away, {r.EscapedToSending} escaped to Sending, {r.AlreadyLive} already live.",
+            });
+            showApply = false;
+            preview = null;
+            await LoadRuns();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Apply failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+            showApply = false;
+        }
+        busy = false;
+    }
+}
