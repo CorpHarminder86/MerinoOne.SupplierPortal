@@ -24,11 +24,17 @@ namespace MerinoOne.SupplierPortal.Tests.Integration;
 [Collection(IntegrationCollection.Name)]
 public class LnEndpointConfigHandlerTests
 {
-    /// <summary>Synthetic tenant — LnEndpointConfig carries no Tenant FK, so handler tests stay fully isolated.</summary>
-    private static readonly Guid TestTenantId = Guid.Parse("aaaaaaaa-9999-4999-8999-aaaaaaaa9999");
+    /// <summary>
+    /// Synthetic tenant, FRESH PER TEST (xUnit news the class per test method) — LnEndpointConfig carries
+    /// no Tenant FK, so each test's upsert-by-(tenant, transactionType) state is fully isolated from other
+    /// tests AND from prior runs against the shared test DB (a fixed guid poisoned gateVersion assertions).
+    /// </summary>
+    private readonly Guid _tenantId = Guid.NewGuid();
 
     private sealed class StubUser : ICurrentUser
     {
+        private readonly Guid _tenant;
+        public StubUser(Guid tenant) => _tenant = tenant;
         public string UserCode => "test-admin";
         public string? UserName => "Test Admin";
         public IReadOnlyCollection<string> Roles => Array.Empty<string>();
@@ -37,7 +43,7 @@ public class LnEndpointConfigHandlerTests
         public bool IsManager => false;
         public bool IsAdmin => true;
         public bool HasPermission(string code) => true;
-        public Guid? TenantId => TestTenantId;
+        public Guid? TenantId => _tenant;
         public bool IsPlatformAdmin => false;
     }
 
@@ -51,7 +57,7 @@ public class LnEndpointConfigHandlerTests
         var scope = _fx.Factory.Services.CreateScope();
         return (scope,
             scope.ServiceProvider.GetRequiredService<AppDbContext>(),
-            new StubUser(),
+            new StubUser(_tenantId),
             scope.ServiceProvider.GetRequiredService<ILnMappingService>(),
             scope.ServiceProvider.GetRequiredService<ILnInputDocumentBuilderRegistry>(),
             scope.ServiceProvider.GetRequiredService<ICandidateFilterRegistry>(),
