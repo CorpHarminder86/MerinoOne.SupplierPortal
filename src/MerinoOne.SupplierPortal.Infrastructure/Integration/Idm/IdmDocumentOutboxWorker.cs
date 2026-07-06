@@ -130,18 +130,26 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
             var provider = registry.TryGet(cfg.IdmEntityType);
             if (provider is null || cfg.TenantId is not { } tenantId) continue;
 
+            // Portal entity: the stored value wins; fall back to the provider for pre-2026-07-06 rows.
+            var ownerType = string.IsNullOrEmpty(cfg.OwnerEntityType) ? provider.OwnerEntityType : cfg.OwnerEntityType;
+            // Optional attachment-type filter: NULL config = catch-all (every document of this portal entity).
+            var attachmentType = cfg.AttachmentType;
+
             // Fix: stamp idmEntityType on matching not-yet-classified uploads so the steady-state upload/replace
-            // flow seeds without a manual backfill (verifier BLOCKER).
-            await db.DocumentUploads.IgnoreQueryFilters()
-                .Where(d => !d.IsDeleted && d.TenantId == tenantId && d.IdmEntityType == null
-                            && d.OwnerEntityType == provider.OwnerEntityType && d.DocumentType == cfg.AttachmentType)
+            // flow seeds without a manual backfill (verifier BLOCKER). Build the attachment-type filter in C#
+            // (NOT `attachmentType == null || …` in the predicate — EF translates a null parameter inconsistently
+            // between ExecuteUpdate and a projected query, which silently dropped catch-all matches).
+            var stampQuery = db.DocumentUploads.IgnoreQueryFilters()
+                .Where(d => !d.IsDeleted && d.TenantId == tenantId && d.IdmEntityType == null && d.OwnerEntityType == ownerType);
+            if (attachmentType != null) stampQuery = stampQuery.Where(d => d.DocumentType == attachmentType);
+            await stampQuery
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(d => d.IdmEntityType, cfg.IdmEntityType)
                     .SetProperty(d => d.UpdatedBy, "idm-dispatcher")
                     .SetProperty(d => d.UpdatedOn, DateTime.UtcNow), ct);
 
-            await SeedCreatesAsync(db, provider, gate, cfg, tenantId, batchSize, ct);
-            await SeedDeletesAsync(db, cfg, tenantId, batchSize, ct);
+            await SeedCreatesAsync(db, provider, gate, cfg, ownerType, attachmentType, tenantId, batchSize, ct);
+            await SeedDeletesAsync(db, cfg, ownerType, attachmentType, tenantId, batchSize, ct);
             await PromoteBlockedAsync(db, provider, gate, cfg, tenantId, batchSize, ct);
         }
 
@@ -149,13 +157,16 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
     }
 
     private static async Task SeedCreatesAsync(IAppDbContext db, IEntitySnapshotProvider provider, IEligibilityGate gate,
-        IdmAttachmentTypeConfig cfg, Guid tenantId, int batchSize, CancellationToken ct)
+        IdmAttachmentTypeConfig cfg, string ownerType, string? attachmentType, Guid tenantId, int batchSize, CancellationToken ct)
     {
-        // Key on documentType (unique per config), NOT idmEntityType — many attachment types may share one
-        // entityType (D7), so an idmEntityType filter would make every such config seed the same document.
-        var candidates = await db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
-            .Where(d => !d.IsDeleted && d.TenantId == tenantId && d.Pid == null
-                        && d.OwnerEntityType == provider.OwnerEntityType && d.DocumentType == cfg.AttachmentType)
+        // Match on (ownerEntityType, documentType) — the portal entity plus, when set, the attachment type
+        // (NULL attachmentType = catch-all: every document of this entity). NOT idmEntityType (D7: many types
+        // may share one entityType, which would make every such config seed the same document). Attachment filter
+        // built in C# (see the stamp query above for why an inline `== null` OR is unsafe).
+        var candQuery = db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
+            .Where(d => !d.IsDeleted && d.TenantId == tenantId && d.Pid == null && d.OwnerEntityType == ownerType);
+        if (attachmentType != null) candQuery = candQuery.Where(d => d.DocumentType == attachmentType);
+        var candidates = await candQuery
             .Select(d => new { d.Id, d.OwnerEntityId, d.SeccodeId, d.TenantId, d.TenantEntityId, d.FileName })
             .Take(batchSize)
             .ToListAsync(ct);
@@ -189,12 +200,15 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         }
     }
 
-    private static async Task SeedDeletesAsync(IAppDbContext db, IdmAttachmentTypeConfig cfg, Guid tenantId, int batchSize, CancellationToken ct)
+    private static async Task SeedDeletesAsync(IAppDbContext db, IdmAttachmentTypeConfig cfg, string ownerType, string? attachmentType, Guid tenantId, int batchSize, CancellationToken ct)
     {
-        // Soft-deleted documents that WERE synced (pid present) emit an IDM delete. Key on documentType (unique
-        // per config) so a document is handled by exactly one config (D7 — types may share an idmEntityType).
-        var deleted = await db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
-            .Where(d => d.IsDeleted && d.Pid != null && d.TenantId == tenantId && d.DocumentType == cfg.AttachmentType)
+        // Soft-deleted documents that WERE synced (pid present) emit an IDM delete. Match on (ownerEntityType,
+        // documentType) so a document is handled by exactly one config (owner filter added 2026-07-06 — a catch-all
+        // NULL attachmentType would otherwise match every entity's deleted docs).
+        var deletedQuery = db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
+            .Where(d => d.IsDeleted && d.Pid != null && d.TenantId == tenantId && d.OwnerEntityType == ownerType);
+        if (attachmentType != null) deletedQuery = deletedQuery.Where(d => d.DocumentType == attachmentType);
+        var deleted = await deletedQuery
             .Select(d => new { d.Id, d.OwnerEntityId, d.SeccodeId, d.TenantId, d.TenantEntityId, d.FileName, d.Pid })
             .Take(batchSize)
             .ToListAsync(ct);
@@ -221,8 +235,10 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         }
 
         // Soft-deleted documents that were NEVER synced (no pid): reap any non-terminal Create rows immediately (D-R8-6).
-        var neverSynced = await db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
-            .Where(d => d.IsDeleted && d.Pid == null && d.TenantId == tenantId && d.DocumentType == cfg.AttachmentType)
+        var neverSyncedQuery = db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
+            .Where(d => d.IsDeleted && d.Pid == null && d.TenantId == tenantId && d.OwnerEntityType == ownerType);
+        if (attachmentType != null) neverSyncedQuery = neverSyncedQuery.Where(d => d.DocumentType == attachmentType);
+        var neverSynced = await neverSyncedQuery
             .Select(d => d.Id)
             .Take(batchSize)
             .ToListAsync(ct);

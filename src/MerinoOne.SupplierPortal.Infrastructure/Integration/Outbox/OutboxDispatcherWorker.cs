@@ -142,9 +142,21 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
 
         if (candidateIds.Count == 0) return;
 
+        // R9 (D-R9-11) — ONE kill-switch read per drain cycle: tenants whose OutboundGlobal switch is off are
+        // excluded from dispatch entirely (their rows stay Pending and accumulate; enqueue is untouched —
+        // killing enqueue silently loses business events). Absent row = enabled.
+        var killedTenants = (await db.IntegrationSwitches
+                .IgnoreQueryFilters()
+                .Where(s => !s.IsDeleted && !s.IsEnabled && s.Scope == IntegrationSwitchScope.OutboundGlobal)
+                .Select(s => s.TenantId)
+                .ToListAsync(ct))
+            .Where(t => t is not null)
+            .Select(t => t!.Value)
+            .ToHashSet();
+
         // R9 (D-R9-2) — ONE config read per drain cycle: the tri-state routing map (tenant, transactionType) →
         // Legacy | Dynamic | Held. Config staleness is bounded by the poll interval (≤5 s), which is the
-        // documented reaction time for a Held flip. Empty table ⇒ empty map ⇒ 100% legacy dispatch.
+        // documented reaction time for a Held/kill flip. Empty table ⇒ empty map ⇒ 100% legacy dispatch.
         var routes = (await db.LnEndpointConfigs
                 .IgnoreQueryFilters()
                 .Where(c => !c.IsDeleted)
@@ -156,7 +168,7 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         foreach (var id in candidateIds)
         {
             if (ct.IsCancellationRequested) break;
-            await DispatchOneAsync(scope.ServiceProvider, db, id, routes, ct);
+            await DispatchOneAsync(scope.ServiceProvider, db, id, routes, killedTenants, ct);
         }
     }
 
@@ -299,7 +311,8 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
     /// </summary>
     private async Task DispatchOneAsync(
         IServiceProvider sp, IAppDbContext db, Guid rowId,
-        IReadOnlyDictionary<(Guid? TenantId, string TransactionType), LnEndpointRoute> routes, CancellationToken ct)
+        IReadOnlyDictionary<(Guid? TenantId, string TransactionType), LnEndpointRoute> routes,
+        IReadOnlySet<Guid> killedTenants, CancellationToken ct)
     {
         // --- 0. Read the row (untracked) to capture the current RowVersion the claim will arbitrate on. ----------
         var row = await db.OutboxMessages
@@ -308,9 +321,10 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
             .FirstOrDefaultAsync(m => m.Id == rowId, ct);
         if (row is null || row.IsDeleted || row.Status != OutboxStatus.Pending) return;
 
-        // --- 0a. R9 (D-R9-11) — per-endpoint kill: a Held route means this transaction type's dispatch is paused.
-        // The row is NEVER claimed (stays Pending, FIFO order preserved) and drains normally once un-held.
+        // --- 0a. R9 (D-R9-11) — kill switches. Global-outbound kill (tenant scope) and the per-endpoint Held
+        // mode both mean the row is NEVER claimed (stays Pending, FIFO preserved) and drains once re-enabled.
         // Enqueue is untouched by design — killing enqueue would silently lose business events.
+        if (row.TenantId is { } rowTenant && killedTenants.Contains(rowTenant)) return;
         routes.TryGetValue((row.TenantId, row.TransactionType), out var route);
         if (route?.Mode == LnDispatchMode.Held) return;
 
@@ -341,6 +355,35 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
             .AsNoTracking()
             .FirstOrDefaultAsync(m => m.Id == rowId, ct);
         if (row is null) return; // soft-deleted between claim and read — nothing to POST.
+
+        // --- 1a. R9 (D-R9-9) — dispatch-time gate RE-CHECK on the claimed row, the final guard before the POST.
+        // Covers revoke-between-enqueue-and-dispatch and backfill races: a gate that now says no flips the row
+        // Sending → Skipped (terminal, reason + gateVersion stamped) — NOT Failed, NO IntegrationError, NO LN
+        // call (a skip is a decision, not a failure). Gate evaluation ERRORS also land Skipped (fail closed);
+        // the outbox monitor is the surface for those.
+        if (route?.Mode is LnDispatchMode.Dynamic or LnDispatchMode.Held && row.TenantId is { } gateTenant && row.EntityId is { } gateEntity)
+        {
+            var verdict = await sp.GetRequiredService<Application.Integration.Ln.ILnEligibilityService>()
+                .EvaluateAsync(gateTenant, row.TransactionType, gateEntity, null, ct);
+            if (verdict.HasGate && !verdict.Eligible)
+            {
+                var skippedAt = DateTime.UtcNow;
+                await db.OutboxMessages
+                    .IgnoreQueryFilters()
+                    .Where(m => m.Id == rowId && m.Status == OutboxStatus.Sending)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(m => m.Status, OutboxStatus.Skipped)
+                        .SetProperty(m => m.SkipReason, Truncate(verdict.Reason ?? "gate returned false", 500))
+                        .SetProperty(m => m.GateVersion, verdict.GateVersion)
+                        .SetProperty(m => m.DispatchedAt, (DateTime?)null)
+                        .SetProperty(m => m.LastError, (string?)null)
+                        .SetProperty(m => m.UpdatedBy, "outbox-dispatcher")
+                        .SetProperty(m => m.UpdatedOn, skippedAt), ct);
+                _logger.LogInformation("[Outbox] Skipped {Tx} {Entity}:{Id} at dispatch re-check (gate v{GateVersion}): {Reason}",
+                    row.TransactionType, row.EntityName, row.EntityId, verdict.GateVersion, verdict.Reason);
+                return;
+            }
+        }
 
         // --- 2. POST (claim already won; the row is Sending and will not be re-POSTed by a sibling). --------------
         // R9 (D-R9-2): Dynamic route → config-driven JSONata pipeline; Legacy route or no config row → the
@@ -400,6 +443,7 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
                     .SetProperty(m => m.Status, hasInlineErpCode ? OutboxStatus.Acked : OutboxStatus.Dispatched)
                     .SetProperty(m => m.AckedAt, hasInlineErpCode ? now : (DateTime?)null)
                     .SetProperty(m => m.LastError, (string?)null)
+                    .SetProperty(m => m.ErrorClass, (string?)null)
                     .SetProperty(m => m.UpdatedBy, "outbox-dispatcher")
                     .SetProperty(m => m.UpdatedOn, now), ct);
 
@@ -452,6 +496,8 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
                     .SetProperty(m => m.Status, OutboxStatus.Failed)
                     .SetProperty(m => m.DispatchedAt, (DateTime?)null)
                     .SetProperty(m => m.LastError, Truncate(lastError, 2000))
+                    // R9 (D-R9-5, 0048) — persist the code-owned class for the monitor badge + re-arm warning.
+                    .SetProperty(m => m.ErrorClass, permanentFailure ? "Permanent" : "Retriable")
                     .SetProperty(m => m.UpdatedBy, "outbox-dispatcher")
                     .SetProperty(m => m.UpdatedOn, now), ct);
 

@@ -131,6 +131,10 @@ public static class DependencyInjection
         services.AddScoped<Integration.Ln.ILnDynamicDispatcher, Integration.Ln.LnDynamicDispatcher>();
         services.AddScoped<Integration.Ln.ILnHttpTransport, Integration.Ln.LnHttpTransport>();
         services.AddHttpClient(Integration.Ln.LnHttpTransport.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(60));
+        // Phase B — eligibility gate evaluation (enqueue point / dispatch re-check / sweep) + the gated
+        // enqueue chokepoint the classic IOutboxDispatcher now delegates to (gate + re-arm-over-create).
+        services.AddScoped<Application.Integration.Ln.ILnEligibilityService, Integration.Ln.LnEligibilityService>();
+        services.AddScoped<Application.Integration.Ln.ILnGatedOutboxEnqueuer, Integration.Outbox.LnGatedOutboxEnqueuer>();
 
         // R6 (plan D13) — invoice PDF rendering (QuestPDF). The Community license is asserted ONCE here (both
         // hosts call AddInfrastructure). NOTE: Community licensing is revenue-gated (<$1M USD/yr) — flagged to

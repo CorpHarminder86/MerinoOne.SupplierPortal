@@ -100,23 +100,28 @@ public class RevokeInvoiceCommandHandler : IRequestHandler<RevokeInvoiceCommand,
         invoice.UpdatedBy = _user.UserCode;
         invoice.UpdatedOn = now;
 
-        // Review R3 — soft-delete any non-Acked InvoicePost outbox row for THIS invoice. The enqueue idempotency
-        // probe (OutboxDispatcher) and the composite UQ_OutboxMessage_tenant_deterministicKey are both filtered on
-        // [isDeleted] = 0, so a live Pending/Sending/Dispatched/Failed row would block the re-enqueue on the next
-        // GRN re-approval. An already-Acked row is left intact (it represents a genuine prior post that this
-        // pre-post revoke is NOT undoing; in practice erpPostedAt would be set in that case and revoke is blocked
-        // above). Mutated as tracked rows so they soft-delete in the SAME SaveChanges as the invoice revoke.
+        // R9 (D-R9-9/10a, replaces the R3 soft-delete) — WITHDRAW live Pending/Failed InvoicePost rows to the
+        // terminal Skipped state instead of soft-deleting them: the row stays visible in the outbox monitor
+        // (a skip is a decision, not a failure — no IntegrationError), and the gated enqueue re-arms the SAME
+        // row (Skipped → Pending, same deterministic key) on the next submit + GRN re-approval, so the
+        // filtered unique index never collides (O-R9-4). A `Sending` row is deliberately UNTOUCHED — its POST
+        // may be mid-flight; the dispatcher's own success/failure path resolves it, and the Phase B
+        // dispatch-time gate re-check lands a revoked invoice's row Skipped without calling LN. Acked rows are
+        // untouched as before (a genuine prior post this pre-post revoke is not undoing).
         var outboxRows = await _db.OutboxMessages
             .IgnoreQueryFilters()
             .Where(m => !m.IsDeleted
                         && m.EntityId == invoice.Id
                         && m.TransactionType == OutboxTransactionType.InvoicePost
-                        && m.Status != OutboxStatus.Acked)
+                        && (m.Status == OutboxStatus.Pending || m.Status == OutboxStatus.Failed))
             .ToListAsync(ct);
         foreach (var row in outboxRows)
         {
-            row.IsDeleted = true;
-            row.LastError = $"Soft-deleted: invoice revoked (pre-post) at {now:O} by {_user.UserCode}.";
+            row.Status = OutboxStatus.Skipped;
+            row.SkipReason = $"invoice revoked (pre-post) at {now:O} by {_user.UserCode}";
+            row.LastError = null;
+            row.ErrorClass = null;
+            row.DispatchedAt = null;
             row.UpdatedBy = _user.UserCode;
             row.UpdatedOn = now;
         }

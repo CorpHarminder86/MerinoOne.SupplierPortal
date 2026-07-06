@@ -72,7 +72,10 @@ public class UpsertGoodsReceiptStatusCommandValidator : AbstractValidator<Upsert
     }
 }
 
-public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, IOutboxDispatcher outbox)
+public class UpsertGoodsReceiptStatusCommandHandler(
+    InboundUpsertExecutor exec,
+    Ln.ILnEligibilityService eligibility,
+    Ln.ILnGatedOutboxEnqueuer gatedOutbox)
     : IRequestHandler<UpsertGoodsReceiptStatusCommand, UpsertGrnStatusResultDto>
 {
     private const string AutoPostActor = "system:grn-autopost";
@@ -268,6 +271,16 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                     .FirstOrDefaultAsync(token);
                 if (inv is null) continue;
 
+                // R9 (D-R9-8) — config-gate check BEFORE the guard (c) atomic claim, so a gate-ineligible
+                // invoice never latches ErpPostInitiatedAt (a later state change can still auto-post). The
+                // coverage override injects the in-flight GRN facts guard (b) just proved — the DB-reading
+                // input-document builder cannot see this transaction's uncommitted GRN mutations. The atomic
+                // claim itself stays code-owned (the gate is evaluated IN ADDITION, never instead).
+                var gate = await eligibility.EvaluateAsync(
+                    inv.TenantId ?? tenantId, OutboxTransactionType.InvoicePost, inv.Id,
+                    new Ln.LnInputDocOverrides(GrnCoverageSatisfied: true), token);
+                if (gate.HasGate && !gate.Eligible) continue;
+
                 // GUARD (c) + S1 — ATOMIC post claim. Instead of read-then-write under RowVersion (which 500s the
                 // whole batch on a concurrency clash), gate the post with a single conditional server-side update:
                 // stamp erpPostInitiatedAt ONLY when it is still NULL AND the invoice is Submitted/Matched. We enqueue the
@@ -307,7 +320,11 @@ public class UpsertGoodsReceiptStatusCommandHandler(InboundUpsertExecutor exec, 
                     .Where(i => i.Id == inv.Id && i.TenantId == tenantId)
                     .ExecuteUpdateAsync(s => s.SetProperty(i => i.ErpSyncId, key), token);
 
-                await outbox.EnqueueAsync(OutboxTransactionType.InvoicePost, OutboxEntity.Invoice, inv.Id, key, null, token);
+                // R9 — gated enqueue with the coverage override (re-arms a Skipped/Failed row on the same key,
+                // D-R9-10a) and the explicit tenant (this handler runs under the inbound service principal).
+                await gatedOutbox.EnqueueAsync(OutboxTransactionType.InvoicePost, OutboxEntity.Invoice, inv.Id, key, null,
+                    tenantIdOverride: inv.TenantId ?? tenantId,
+                    overrides: new Ln.LnInputDocOverrides(GrnCoverageSatisfied: true), ct: token);
 
                 // System-actor audit referencing the triggering GRN — money-movement automation must be legible.
                 // Operation MUST be one of Insert/Update/Delete (CK_AuditEntry_operation): this row records the

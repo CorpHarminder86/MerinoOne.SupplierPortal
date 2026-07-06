@@ -107,6 +107,15 @@ public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec, IIdmOu
                     continue;
                 }
 
+                // R9 (D-R9-9) — an ack for a SKIPPED row is correlation drift: the eligibility layer deliberately
+                // withheld this row, so nothing was posted and LN has nothing to acknowledge. No write.
+                if (row.Status == OutboxStatus.Skipped)
+                {
+                    results.Add(new RowResult(portalRef, RowOutcome.Failed,
+                        "Row was skipped by the eligibility gate — ack unexpected (nothing was posted)."));
+                    continue;
+                }
+
                 // Idempotent re-ack: an already-Acked row is a no-op for the outbox/erpCode. R8 exception —
                 // LN may re-send a corrected ERP composite key on an already-posted Invoice/ASN; re-stamp those
                 // three fields and, when they actually change, enqueue IDM Update ops for already-synced
