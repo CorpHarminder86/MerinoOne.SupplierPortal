@@ -121,7 +121,8 @@ public class SaveIdmAttachmentTypeConfigValidator : AbstractValidator<SaveIdmAtt
             .Must(v => PortalEntities.Contains(v)).WithMessage("Portal entity must be Asn, Invoice or Supplier.");
         // AttachmentType is OPTIONAL (null/blank = catch-all: every document of the portal entity).
         RuleFor(x => x.Body.AttachmentType).MaximumLength(50);
-        RuleFor(x => x.Body.IdmEntityType).NotEmpty().MaximumLength(40);
+        // 100 (was 40) — real Infor entity types run long, e.g. InforERPEnterpriseCommonInternalBusinessPartner (47).
+        RuleFor(x => x.Body.IdmEntityType).NotEmpty().MaximumLength(100);
         RuleFor(x => x.Body.CreateMappingExpression).NotEmpty();
         // R9 (§2.11) — the gate is a JSONata boolean expression; blank = never satisfied (fail closed).
         RuleFor(x => x.Body.EligibilityGateExpr).NotNull();

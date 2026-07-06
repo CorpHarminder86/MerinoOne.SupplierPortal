@@ -2395,8 +2395,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnName("fileUrl");
 
                     b.Property<string>("IdmEntityType")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
                         .HasColumnName("idmEntityType");
 
                     b.Property<bool>("IsDeleted")
@@ -3065,8 +3065,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("IdmEntityType")
                         .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
                         .HasColumnName("idmEntityType");
 
                     b.Property<bool>("IsDeleted")
@@ -3190,8 +3190,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("IdmEntityType")
                         .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
                         .HasColumnName("idmEntityType");
 
                     b.Property<bool>("IsDeleted")

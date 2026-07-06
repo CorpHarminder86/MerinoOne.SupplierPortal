@@ -29,7 +29,7 @@ public class DocumentUploadConfiguration : IEntityTypeConfiguration<DocumentUplo
 
         // R8 (2026-07-04) — TSD R8 §3.2 / D-R8-15: IDM sync discriminator + durable handle. camelCase per
         // convention (spec's IDMEntityType casing is overridden by the HasColumnName style).
-        b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(40);
+        b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(100);
         b.Property(x => x.Pid).HasColumnName("pid").HasMaxLength(100);
 
         b.ToTable(t => t.HasCheckConstraint("CK_DocumentUpload_aiValidationStatus",

@@ -47,7 +47,7 @@ public class IdmAttachmentTypeConfigConfiguration : IEntityTypeConfiguration<Idm
         // attachmentType is nvarchar(50) to MATCH doc.AttachmentType.code (DocumentUpload.documentType stores it).
         // NULLABLE (2026-07-06): null = catch-all (every document of ownerEntityType).
         b.Property(x => x.AttachmentType).HasColumnName("attachmentType").HasMaxLength(50);
-        b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(40).IsRequired();
+        b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(100).IsRequired();
         // R9 (0049) — renamed from eligibilityGateJson (dot-path array) to the JSONata expression column (§2.11).
         b.Property(x => x.EligibilityGateExpr).HasColumnName("eligibilityGateExpr").HasColumnType("nvarchar(max)").IsRequired();
         b.Property(x => x.CreateMappingExpression).HasColumnName("createMappingExpression").HasColumnType("nvarchar(max)").IsRequired();
@@ -73,7 +73,7 @@ public class IdmDocumentOutboxConfiguration : IEntityTypeConfiguration<IdmDocume
         b.ApplyBaseEntityConvention("IdmDocumentOutbox", "integration", "idmDocumentOutbox");
         // seccodeId + tenantId/tenantEntityId + rowVersion mapped by the BaseAggregateRoot block.
         b.Property(x => x.DocumentUploadId).HasColumnName("documentUploadId").IsRequired();
-        b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(40).IsRequired();
+        b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(100).IsRequired();
         b.Property(x => x.OwnerEntityId).HasColumnName("ownerEntityId");
         b.Property(x => x.FileName).HasColumnName("fileName").HasMaxLength(500).IsRequired();
         b.Property(x => x.Operation).HasColumnName("operation").HasConversion<string>().HasMaxLength(10).IsRequired();
