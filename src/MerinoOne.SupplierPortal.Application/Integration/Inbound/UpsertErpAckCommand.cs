@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Integration.Idm;
 using MerinoOne.SupplierPortal.Contracts.Integration;
+using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -37,7 +38,13 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 /// <c>Id</c> alone (defence-in-depth: no write onto an unguarded cross-tenant record even if a key were ever
 /// mis-resolved).</para>
 /// </summary>
-public record UpsertErpAckCommand(PushErpAckRequest Body, IReadOnlySet<Guid> BoundCompanyIds, string? IdempotencyKey)
+public record UpsertErpAckCommand(
+    PushErpAckRequest Body,
+    IReadOnlySet<Guid> BoundCompanyIds,
+    string? IdempotencyKey,
+    // R9 (D-R9-11) — set ONLY by the HeldInboundReplayWorker: bypasses the accept-and-hold check and
+    // supplies the held row's tenant to the executor (the worker has no ambient principal).
+    Guid? ReplayTenantId = null)
     : IRequest<UpsertResultDto>;
 
 public class UpsertErpAckCommandValidator : AbstractValidator<UpsertErpAckCommand>
@@ -61,20 +68,54 @@ public class UpsertErpAckCommandValidator : AbstractValidator<UpsertErpAckComman
     }
 }
 
-public class UpsertErpAckCommandHandler(TenantInboundUpsertExecutor exec, IIdmOutboxEnqueuer idmEnqueuer)
+public class UpsertErpAckCommandHandler(
+    TenantInboundUpsertExecutor exec,
+    IIdmOutboxEnqueuer idmEnqueuer,
+    IAppDbContext holdDb,
+    ICurrentUser currentUser)
     : IRequestHandler<UpsertErpAckCommand, UpsertResultDto>
 {
-    public Task<UpsertResultDto> Handle(UpsertErpAckCommand request, CancellationToken ct)
+    public async Task<UpsertResultDto> Handle(UpsertErpAckCommand request, CancellationToken ct)
     {
         var recs = request.Body.Acks;
+
+        // R9 (TSD R9 §2.6, D-R9-11 inbound scope) — ACCEPT-AND-HOLD under an InboundErpAck kill: persist the
+        // raw batch and return HTTP 200 (never 503 — acks are idempotent and LN's retry behaviour is not
+        // ours to trust). Auth + anti-spoof already ran (ApiKey policy); the replay worker re-sends this
+        // command with ReplayTenantId once the switch re-enables. Absent switch row = enabled.
+        if (request.ReplayTenantId is null && currentUser.TenantId is { } ambientTenant)
+        {
+            var inboundKilled = await holdDb.IntegrationSwitches.IgnoreQueryFilters().AsNoTracking()
+                .AnyAsync(s => !s.IsDeleted && s.TenantId == ambientTenant
+                               && s.Scope == IntegrationSwitchScope.InboundErpAck && !s.IsEnabled, ct);
+            if (inboundKilled)
+            {
+                holdDb.HeldInboundMessages.Add(new HeldInboundMessage
+                {
+                    TenantId = ambientTenant,
+                    EndpointName = "ErpAck",
+                    PayloadJson = System.Text.Json.JsonSerializer.Serialize(request.Body),
+                    IdempotencyKey = request.IdempotencyKey,
+                    BoundCompanyIdsJson = System.Text.Json.JsonSerializer.Serialize(request.BoundCompanyIds),
+                    Status = "Held",
+                    CreatedBy = "infor:inbound",
+                    CreatedOn = DateTime.UtcNow,
+                });
+                await holdDb.SaveChangesAsync(ct);
+                return new UpsertResultDto("ErpAck", recs.Count, 0, 0, Skipped: recs.Count, 0,
+                    recs.Select(r => new RowResult(r.PortalRef, RowOutcome.Skipped,
+                        "held: inbound integration paused — will replay on re-enable")).ToList());
+            }
+        }
+
         // R8 — include the ERP composite key in the idempotency canonical so a re-ack that changes ONLY the
         // composite (same portalRef/erpCode) is not deduped away as an identical replay.
         var canonical = recs.Select(r => $"{r.TransactionType.Trim()}|{r.PortalRef.Trim()}|{r.Success}|" +
             $"{(r.ErpCode ?? "").Trim()}|{(r.ErpCompany ?? "").Trim()}|{(r.ErpTransactionType ?? "").Trim()}|{(r.ErpDocumentNo ?? "").Trim()}");
         var codes = recs.Select(r => r.PortalRef.Trim());
 
-        return exec.ExecuteAsync(TransactionalInboundEntity.ErpAck, request.IdempotencyKey,
-            recs.Count, canonical, codes, request.Body, Upsert, ct);
+        return await exec.ExecuteAsync(TransactionalInboundEntity.ErpAck, request.IdempotencyKey,
+            recs.Count, canonical, codes, request.Body, Upsert, ct, tenantOverride: request.ReplayTenantId);
 
         async Task<IReadOnlyList<RowResult>> Upsert(IAppDbContext db, Guid tenantId, CancellationToken token)
         {

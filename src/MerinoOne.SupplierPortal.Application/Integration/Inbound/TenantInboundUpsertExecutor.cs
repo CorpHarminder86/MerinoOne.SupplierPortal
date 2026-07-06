@@ -54,8 +54,11 @@ public class TenantInboundUpsertExecutor
         IEnumerable<string> codes,
         object requestPayload,
         Func<IAppDbContext, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
-        CancellationToken ct)
-        => RunAsync(InboundUpsertSupport.EntityName(endpoint), idempotencyKey, received, canonicalRows, codes, requestPayload, upsertAsync, ct);
+        CancellationToken ct,
+        // R9 (D-R9-11) — the HeldInboundReplayWorker replays held erp-acks with NO ambient principal;
+        // it passes the held row's tenant explicitly. Live traffic never sets this.
+        Guid? tenantOverride = null)
+        => RunAsync(InboundUpsertSupport.EntityName(endpoint), idempotencyKey, received, canonicalRows, codes, requestPayload, upsertAsync, ct, tenantOverride);
 
     private async Task<UpsertResultDto> RunAsync(
         string entityName,
@@ -65,11 +68,12 @@ public class TenantInboundUpsertExecutor
         IEnumerable<string> codes,
         object requestPayload,
         Func<IAppDbContext, Guid, CancellationToken, Task<IReadOnlyList<RowResult>>> upsertAsync,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? tenantOverride = null)
     {
         var entityId = InboundUpsertSupport.JoinCodes(codes);
         var payloadJson = InboundUpsertSupport.SerializePayloadCapped(requestPayload);
-        var tenantId = _user.TenantId ?? throw new ForbiddenException("API key has no tenant context.");
+        var tenantId = tenantOverride ?? _user.TenantId ?? throw new ForbiddenException("API key has no tenant context.");
 
         // Endpoint gate (kill-switch). Missing or disabled inbound map ⇒ reject.
         var map = await _db.InforEndpointMaps.IgnoreQueryFilters()

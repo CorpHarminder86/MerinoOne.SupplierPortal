@@ -93,7 +93,10 @@ public static class DependencyInjection
         services.AddSingleton<JsonataOutboundRequestBuilder>();
         services.AddSingleton<IOutboundRequestBuilder>(sp => sp.GetRequiredService<JsonataOutboundRequestBuilder>());
         services.AddSingleton<IJsonataValidator>(sp => sp.GetRequiredService<JsonataOutboundRequestBuilder>());
-        services.AddSingleton<IEligibilityGate, JsonPathEligibilityGate>();
+        // R9 (§2.11, D-R9-16) — ONE gate language: the R8 JsonPath gate is replaced by the shared JSONata
+        // engine (strict-true, fail closed; stored dot-path arrays converted by migration 0049).
+        services.AddSingleton<IEligibilityGate>(sp =>
+            new Integration.JsonataEligibilityGate(sp.GetRequiredService<Application.Integration.Ln.ILnMappingService>()));
         services.AddSingleton<IIdmAckParser, IdmAckParser>();
         services.AddSingleton<IdmDefaultExpressions>();
         services.AddSingleton<IIdmExpressionCatalog>(sp => sp.GetRequiredService<IdmDefaultExpressions>());
@@ -135,6 +138,11 @@ public static class DependencyInjection
         // enqueue chokepoint the classic IOutboxDispatcher now delegates to (gate + re-arm-over-create).
         services.AddScoped<Application.Integration.Ln.ILnEligibilityService, Integration.Ln.LnEligibilityService>();
         services.AddScoped<Application.Integration.Ln.ILnGatedOutboxEnqueuer, Integration.Outbox.LnGatedOutboxEnqueuer>();
+        // The ONE scanner sweep + backfill share (O-R9-9), the low-frequency reconciliation sweep, and the
+        // held-inbound FIFO replay (accept-and-hold under the InboundErpAck kill, D-R9-11).
+        services.AddScoped<Application.Integration.Ln.ILnGateScanner, Integration.Ln.LnGateScanner>();
+        services.AddHostedService<Integration.Ln.LnGateReconciliationWorker>();
+        services.AddHostedService<Integration.Inbound.HeldInboundReplayWorker>();
 
         // R6 (plan D13) — invoice PDF rendering (QuestPDF). The Community license is asserted ONCE here (both
         // hosts call AddInfrastructure). NOTE: Community licensing is revenue-gated (<$1M USD/yr) — flagged to

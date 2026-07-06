@@ -61,7 +61,7 @@
                 <div class="tlg-col">Portal entity</div>
                 <div class="tlg-col">Attachment type</div>
                 <div class="tlg-col">IDM entity type</div>
-                <div class="tlg-col">Eligibility gate paths</div>
+                <div class="tlg-col">Eligibility gate (JSONata)</div>
                 <div class="tlg-col">Enabled</div>
                 <div class="tlg-col">Drift</div>
                 <div class="tlg-col tlg-col--actions">Actions</div>
@@ -71,21 +71,25 @@
                 var cfg = c;
                 <div class="tlg-row">
                     <div class="tlg-col tlg-name">@PortalLabel(cfg.OwnerEntityType)</div>
-                    <div class="tlg-col">@cfg.AttachmentType</div>
-                    <div class="tlg-col tlg-code" title="@cfg.IdmEntityType">@cfg.IdmEntityType</div>
                     <div class="tlg-col">
-                        @if (cfg.EligibilityGatePaths.Count == 0)
+                        @if (string.IsNullOrEmpty(cfg.AttachmentType))
                         {
-                            <span style="color:var(--mer-ink-400);">— none —</span>
+                            <span style="color:var(--mer-ink-500);font-style:italic;">All types</span>
                         }
                         else
                         {
-                            <div style="display:flex;flex-direction:column;gap:2px;">
-                                @foreach (var p in cfg.EligibilityGatePaths)
-                                {
-                                    <span class="tlg-code" style="font-size:11.5px;">@p</span>
-                                }
-                            </div>
+                            @cfg.AttachmentType
+                        }
+                    </div>
+                    <div class="tlg-col tlg-code" title="@cfg.IdmEntityType">@cfg.IdmEntityType</div>
+                    <div class="tlg-col">
+                        @if (string.IsNullOrWhiteSpace(cfg.EligibilityGateExpr))
+                        {
+                            <span style="color:var(--mer-ink-400);" title="blank gate — never satisfied (fail closed)">— none —</span>
+                        }
+                        else
+                        {
+                            <span class="tlg-code" style="font-size:11.5px;" title="@cfg.EligibilityGateExpr">@Truncate(cfg.EligibilityGateExpr, 70)</span>
                         }
                     </div>
                     <div class="tlg-col"><span class="tlg-status @(cfg.IsEnabled ? "tlg-status--active" : "tlg-status--danger")">@(cfg.IsEnabled ? "On" : "Off")</span></div>
@@ -131,43 +135,52 @@
             <header class="merino-dialog__header">
                 <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">rule</span></div>
                 <div class="merino-dialog__head-text">
-                    <div class="merino-dialog__eyebrow">@(isNew ? "New mapping" : $"{PortalLabel(editing.OwnerEntityType)} · {editing.AttachmentType} → {editing.IdmEntityType}")</div>
+                    <div class="merino-dialog__eyebrow">@(isNew ? "New mapping" : $"{PortalLabel(editing.OwnerEntityType)} · {(string.IsNullOrEmpty(editing.AttachmentType) ? "All types" : editing.AttachmentType)} → {editing.IdmEntityType}")</div>
                     <h2 class="merino-dialog__title">@(isNew ? "New IDM mapping" : "Edit IDM mapping")</h2>
                 </div>
                 <button class="merino-dialog__close" @onclick="() => editing = null"><span class="material-symbols-outlined">close</span></button>
             </header>
             <div class="merino-dialog__body">
                 <div style="display:flex;flex-direction:column;gap:14px;">
-                    @if (isNew)
-                    {
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachment type *</label>
-                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formAttachmentType">
-                                    <option value="">— select —</option>
-                                    @foreach (var t in attachmentTypeOptions)
-                                    {
-                                        <option value="@t.Code">@t.Name (@t.Code)</option>
-                                    }
-                                </select>
-                            </div>
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Portal entity → IDM entity type *</label>
-                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formIdmEntityType">
-                                    <option value="">— select —</option>
-                                    @foreach (var t in entityTypeOptions)
-                                    {
-                                        <option value="@t.IdmEntityType">@PortalLabel(t.OwnerEntityType) → @t.IdmEntityType</option>
-                                    }
-                                </select>
-                                <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">The portal entity whose documents this mapping classifies. Only entities with a registered snapshot provider can dispatch.</div>
-                            </div>
+                    @* Identity fields — editable in BOTH new and edit. *@
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Portal entity *</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formOwnerEntityType">
+                                <option value="">— select —</option>
+                                @foreach (var (val, label) in PortalEntities)
+                                {
+                                    <option value="@val">@label</option>
+                                }
+                            </select>
                         </div>
-                    }
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachment type</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formAttachmentType">
+                                <option value="">— All types (push every document of this entity) —</option>
+                                @foreach (var t in attachmentTypeOptions)
+                                {
+                                    <option value="@t.Code">@t.Name (@t.Code)</option>
+                                }
+                            </select>
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Optional. Leave as <em>All types</em> to classify every document of the portal entity.</div>
+                        </div>
+                    </div>
                     <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Eligibility gate paths (one per line)</label>
-                        <textarea class="rz-textbox" style="width:100%;min-height:90px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formGatePaths" placeholder="header.status&#10;lines[0].confirmed"></textarea>
-                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Each path must resolve truthy on the snapshot for the document to be pushed.</div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">IDM entity type *</label>
+                        <input class="rz-textbox" list="idm-entity-type-hints" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formIdmEntityType" placeholder="e.g. InforInvoice" />
+                        <datalist id="idm-entity-type-hints">
+                            @foreach (var t in entityTypeOptions)
+                            {
+                                <option value="@t.IdmEntityType">@PortalLabel(t.OwnerEntityType)</option>
+                            }
+                        </datalist>
+                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">The MDS_EntityType value / config selector. Free text — an entity type with no registered snapshot provider stays dormant (nothing dispatches) until a provider is added.</div>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Eligibility gate (JSONata boolean)</label>
+                        <textarea class="rz-textbox" style="width:100%;min-height:90px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formGateExpr" placeholder="(invoice.erpCompany != null and $trim($string(invoice.erpCompany)) != &quot;&quot;) and …"></textarea>
+                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Must evaluate to <span style="font-family:Inter,monospace;">true</span> on the snapshot for the document to be pushed (strict — anything else fails closed). One gate language across IDM and LN (TSD R9 §2.11).</div>
                     </div>
                     <div>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Create mapping expression *</label>
@@ -238,7 +251,7 @@
                 <button class="merino-dialog__close" @onclick="() => deleteRow = null"><span class="material-symbols-outlined">close</span></button>
             </header>
             <div class="merino-dialog__body">
-                <p style="font-size:13px;color:var(--mer-ink-700);margin:0 0 8px;">Removes the <strong>@PortalLabel(deleteRow.OwnerEntityType) · @deleteRow.AttachmentType</strong> → <span style="font-family:Inter,monospace;">@deleteRow.IdmEntityType</span> mapping.</p>
+                <p style="font-size:13px;color:var(--mer-ink-700);margin:0 0 8px;">Removes the <strong>@PortalLabel(deleteRow.OwnerEntityType) · @(string.IsNullOrEmpty(deleteRow.AttachmentType) ? "All types" : deleteRow.AttachmentType)</strong> → <span style="font-family:Inter,monospace;">@deleteRow.IdmEntityType</span> mapping.</p>
                 <p style="font-size:12.5px;color:var(--mer-ink-600);margin:0;">Documents of this type not yet pushed to IDM are un-classified (their <span style="font-family:Inter,monospace;">idmEntityType</span> is cleared); already-pushed documents keep their classification so a later IDM delete can still resolve. Queued sync rows become <em>Unresolvable</em>.</p>
             </div>
             <footer class="merino-dialog__footer">
@@ -288,9 +301,10 @@
 
     private IdmAttachmentTypeConfigDto? editing;
     private bool isNew;
+    private string formOwnerEntityType = string.Empty;
     private string formAttachmentType = string.Empty;
     private string formIdmEntityType = string.Empty;
-    private string formGatePaths = string.Empty;
+    private string formGateExpr = string.Empty;
     private string formCreate = string.Empty;
     private string formMutate = string.Empty;
     private bool formEnabled = true;
@@ -299,9 +313,19 @@
     private List<AttachmentTypeDto> attachmentTypeOptions = new();
     private List<IdmEntityTypeOptionDto> entityTypeOptions = new();
 
+    /// <summary>Portal entities that can own IDM-syncable documents (doc.DocumentUpload.OwnerEntityType values).</summary>
+    private static readonly (string Value, string Label)[] PortalEntities =
+    {
+        ("Asn", "Advance Shipping Notice"),
+        ("Invoice", "Invoice"),
+        ("Supplier", "Supplier"),
+    };
+
     private IdmAttachmentTypeConfigDto? restoreRow;
     private IdmAttachmentTypeConfigDto? deleteRow;
     private bool showBackfill;
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     /// <summary>Portal-entity display name (mirrors AttachmentRequirements' Entity picker labels).</summary>
     private static string PortalLabel(string? ownerEntityType) => ownerEntityType switch
@@ -327,18 +351,8 @@
         loading = false;
     }
 
-    private void OpenEdit(IdmAttachmentTypeConfigDto c)
-    {
-        editing = c;
-        isNew = false;
-        formGatePaths = string.Join("\n", c.EligibilityGatePaths);
-        formCreate = c.CreateMappingExpression;
-        formMutate = c.MutateMappingExpression ?? string.Empty;
-        formEnabled = c.IsEnabled;
-        formError = string.Empty;
-    }
-
-    private async Task OpenNew()
+    /// <summary>Lazily load the attachment-type + IDM-entity-type option lists (shared by the New + Edit dialogs).</summary>
+    private async Task EnsureOptionsLoadedAsync()
     {
         if (attachmentTypeOptions.Count == 0)
         {
@@ -350,12 +364,32 @@
             var e = await Api.GetAsync<List<IdmEntityTypeOptionDto>>("api/integration/idm/entity-types");
             entityTypeOptions = e?.Data ?? new();
         }
+    }
 
-        editing = new IdmAttachmentTypeConfigDto(Guid.Empty, string.Empty, string.Empty, null, new List<string>(), string.Empty, null, true, false, false);
+    private async Task OpenEdit(IdmAttachmentTypeConfigDto c)
+    {
+        await EnsureOptionsLoadedAsync();
+        editing = c;
+        isNew = false;
+        formOwnerEntityType = c.OwnerEntityType ?? string.Empty;
+        formAttachmentType = c.AttachmentType ?? string.Empty;
+        formIdmEntityType = c.IdmEntityType;
+        formGateExpr = c.EligibilityGateExpr;
+        formCreate = c.CreateMappingExpression;
+        formMutate = c.MutateMappingExpression ?? string.Empty;
+        formEnabled = c.IsEnabled;
+        formError = string.Empty;
+    }
+
+    private async Task OpenNew()
+    {
+        await EnsureOptionsLoadedAsync();
+        editing = new IdmAttachmentTypeConfigDto(Guid.Empty, null, string.Empty, null, string.Empty, string.Empty, null, true, false, false);
         isNew = true;
+        formOwnerEntityType = string.Empty;
         formAttachmentType = string.Empty;
         formIdmEntityType = string.Empty;
-        formGatePaths = string.Empty;
+        formGateExpr = string.Empty;
         formCreate = string.Empty;
         formMutate = string.Empty;
         formEnabled = true;
@@ -366,18 +400,16 @@
     {
         if (editing is null) return;
         formError = string.Empty;
-        if (isNew && string.IsNullOrWhiteSpace(formAttachmentType)) { formError = "Attachment type is required."; return; }
-        if (isNew && string.IsNullOrWhiteSpace(formIdmEntityType)) { formError = "IDM entity type is required."; return; }
+        if (string.IsNullOrWhiteSpace(formOwnerEntityType)) { formError = "Portal entity is required."; return; }
+        if (string.IsNullOrWhiteSpace(formIdmEntityType)) { formError = "IDM entity type is required."; return; }
         if (string.IsNullOrWhiteSpace(formCreate)) { formError = "Create mapping expression is required."; return; }
         busy = true;
-        var gatePaths = formGatePaths
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
         var req = new SaveIdmAttachmentTypeConfigRequest(
             isNew ? null : editing.Id,
-            isNew ? formAttachmentType : editing.AttachmentType,
-            isNew ? formIdmEntityType : editing.IdmEntityType,
-            gatePaths,
+            formOwnerEntityType,
+            string.IsNullOrWhiteSpace(formAttachmentType) ? null : formAttachmentType,
+            formIdmEntityType.Trim(),
+            formGateExpr.Trim(),
             formCreate.Trim(),
             string.IsNullOrWhiteSpace(formMutate) ? null : formMutate.Trim(),
             formEnabled);

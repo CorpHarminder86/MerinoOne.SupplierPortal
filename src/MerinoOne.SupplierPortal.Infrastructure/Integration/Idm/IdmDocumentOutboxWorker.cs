@@ -183,7 +183,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         {
             if (existing.Contains(d.Id)) continue;
             var snapshot = await provider.BuildSnapshotAsync(tenantId, d.OwnerEntityId, d.Id, includeFileContent: false, ct);
-            var eligible = snapshot is not null && gate.IsSatisfied(cfg.EligibilityGateJson, snapshot);
+            var eligible = snapshot is not null && gate.IsSatisfied(cfg.EligibilityGateExpr, snapshot);
             db.IdmDocumentOutboxes.Add(new IdmDocumentOutbox
             {
                 DocumentUploadId = d.Id,
@@ -275,7 +275,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                 row.UpdatedOn = DateTime.UtcNow;
                 continue;
             }
-            if (gate.IsSatisfied(cfg.EligibilityGateJson, snapshot))
+            if (gate.IsSatisfied(cfg.EligibilityGateExpr, snapshot))
             {
                 row.Status = IdmOutboxStatus.Pending;
                 row.UpdatedBy = "idm-dispatcher";
@@ -369,7 +369,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                 return;
             }
             // Create re-check: if the gate fell unsatisfied, drop back to Blocked (do not send an incomplete key).
-            if (row.Operation == IdmOutboxOperation.Create && !gate.IsSatisfied(cfg.EligibilityGateJson, snapshot))
+            if (row.Operation == IdmOutboxOperation.Create && !gate.IsSatisfied(cfg.EligibilityGateExpr, snapshot))
             {
                 await db.IdmDocumentOutboxes.IgnoreQueryFilters()
                     .Where(o => o.Id == rowId && o.Status == IdmOutboxStatus.InFlight)

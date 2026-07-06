@@ -55,7 +55,7 @@ public class IdmDispatchTests
         {
             TenantId = IntegrationTestFixture.TenantId, OwnerEntityType = DocumentOwnerTypes.Invoice,
             AttachmentType = attachmentType, IdmEntityType = "InforInvoice",
-            EligibilityGateJson = "[\"invoice.erpCompany\",\"invoice.erpTransactionType\",\"invoice.erpDocumentNo\"]",
+            EligibilityGateExpr = MerinoOne.SupplierPortal.Application.Integration.Idm.IdmGateConversion.ToJsonata(new[] { "invoice.erpCompany", "invoice.erpTransactionType", "invoice.erpDocumentNo" }),
             CreateMappingExpression = new IdmDefaultExpressions().TryGet("InforInvoice")!.CreateExpression,
             IsEnabled = true, CreatedBy = "seed",
         });
@@ -179,7 +179,7 @@ public class IdmDispatchTests
                 TenantId = IntegrationTestFixture.TenantId, OwnerEntityType = DocumentOwnerTypes.Invoice,
                 AttachmentType = null,   // CATCH-ALL
                 IdmEntityType = $"InforInvoice",   // has a provider so it can dispatch
-                EligibilityGateJson = "[\"invoice.erpCompany\",\"invoice.erpTransactionType\",\"invoice.erpDocumentNo\"]",
+                EligibilityGateExpr = MerinoOne.SupplierPortal.Application.Integration.Idm.IdmGateConversion.ToJsonata(new[] { "invoice.erpCompany", "invoice.erpTransactionType", "invoice.erpDocumentNo" }),
                 CreateMappingExpression = new IdmDefaultExpressions().TryGet("InforInvoice")!.CreateExpression,
                 IsEnabled = true, CreatedBy = "seed",
             };

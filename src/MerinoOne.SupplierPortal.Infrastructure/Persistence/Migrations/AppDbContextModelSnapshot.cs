@@ -3058,10 +3058,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("deletedOn");
 
-                    b.Property<string>("EligibilityGateJson")
+                    b.Property<string>("EligibilityGateExpr")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)")
-                        .HasColumnName("eligibilityGateJson");
+                        .HasColumnName("eligibilityGateExpr");
 
                     b.Property<string>("IdmEntityType")
                         .IsRequired()

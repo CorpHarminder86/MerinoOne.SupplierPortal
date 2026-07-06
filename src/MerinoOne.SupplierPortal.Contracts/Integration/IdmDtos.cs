@@ -30,24 +30,26 @@ public record IdmSyncLogDto(
 public record IdmSyncLogDetailDto(string? RequestSnapshotJson, string? ResponseBody);
 
 /// <summary>
-/// One portal-entity → IDM entity-type mapping row (Settings › IDM Entity Type). <see cref="OwnerEntityType"/> is
-/// the PORTAL entity (Asn / Invoice — resolved from the registered snapshot provider) whose documents of
-/// <see cref="AttachmentType"/> are classified as <see cref="IdmEntityType"/>; null when no provider is registered
-/// (the mapping can never dispatch).
+/// One (portal-entity, attachment-type) → IDM entity-type mapping row (Settings › IDM Entity Type).
+/// <see cref="OwnerEntityType"/> is the PORTAL entity (Asn / Invoice / Supplier) whose documents this row
+/// classifies as <see cref="IdmEntityType"/>. <see cref="AttachmentType"/> is OPTIONAL: null = catch-all (every
+/// document of the portal entity). <see cref="IdmEntityType"/> is free text — a value with no registered snapshot
+/// provider leaves the mapping dormant (nothing dispatches) until one is added.
 /// </summary>
 public record IdmAttachmentTypeConfigDto(
     Guid Id,
-    string AttachmentType,
+    string? AttachmentType,
     string IdmEntityType,
     string? OwnerEntityType,
-    IReadOnlyList<string> EligibilityGatePaths,
+    // R9 (§2.11) — JSONata boolean expression (was a dot-path list); one gate language across IDM and LN.
+    string EligibilityGateExpr,
     string CreateMappingExpression,
     string? MutateMappingExpression,
     bool IsEnabled,
     bool IsDrifted,
     bool HasRepoDefault);
 
-/// <summary>A selectable IDM entity type with the PORTAL entity its snapshot provider serves.</summary>
+/// <summary>A selectable IDM entity type with the PORTAL entity its snapshot provider serves (autocomplete hint).</summary>
 public record IdmEntityTypeOptionDto(string IdmEntityType, string OwnerEntityType);
 
 /// <summary>Outcome of deleting a mapping row: whether it was removed + how many UNPUSHED documents were unclassified.</summary>
@@ -55,9 +57,11 @@ public record IdmConfigDeleteResultDto(bool Deleted, int ClearedDocuments);
 
 public record SaveIdmAttachmentTypeConfigRequest(
     Guid? Id,
-    string AttachmentType,
+    string OwnerEntityType,
+    string? AttachmentType,
     string IdmEntityType,
-    IReadOnlyList<string> EligibilityGatePaths,
+    // R9 (§2.11) — JSONata boolean expression; blank = never satisfied (fail closed, as the empty path list was).
+    string EligibilityGateExpr,
     string CreateMappingExpression,
     string? MutateMappingExpression,
     bool IsEnabled);

@@ -30,8 +30,13 @@ public class IdmAttachmentTypeConfig : AuditableEntity, ITenantOwned
     /// <summary>IDM entity type, e.g. <c>"InforInvoice"</c> — the config selector value and the <c>MDS_EntityType</c> payload value.</summary>
     public string IdmEntityType { get; set; } = string.Empty;
 
-    /// <summary>JSON array of required-non-null snapshot dot-paths (the eligibility gate), evaluated against the owning-entity snapshot.</summary>
-    public string EligibilityGateJson { get; set; } = string.Empty;
+    /// <summary>
+    /// R9 (TSD R9 §2.11, D-R9-16 — was <c>EligibilityGateJson</c>, a JSON dot-path array) — JSONata BOOLEAN
+    /// expression evaluated against the owning-entity snapshot by the shared engine (strict-true, fail
+    /// closed). Migration 0049 converted stored dot-path arrays to the equivalent null-safe conjunction
+    /// (<c>IdmGateConversion</c>) — one gate language across IDM and LN.
+    /// </summary>
+    public string EligibilityGateExpr { get; set; } = string.Empty;
 
     /// <summary>JSONata mapping expression producing the Create request envelope <c>{ headers, body }</c>.</summary>
     public string CreateMappingExpression { get; set; } = string.Empty;

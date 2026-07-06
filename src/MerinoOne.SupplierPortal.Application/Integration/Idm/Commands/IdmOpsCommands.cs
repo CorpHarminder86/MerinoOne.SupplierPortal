@@ -91,7 +91,7 @@ public class BackfillIdmEntityTypeCommandHandler : IRequestHandler<BackfillIdmEn
 
         var configs = await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().AsNoTracking()
             .Where(c => c.TenantId == tid && c.IsEnabled && !c.IsDeleted)
-            .Select(c => new { c.AttachmentType, c.IdmEntityType })
+            .Select(c => new { c.OwnerEntityType, c.AttachmentType, c.IdmEntityType })
             .ToListAsync(ct);
 
         var now = DateTime.UtcNow;
@@ -99,15 +99,20 @@ public class BackfillIdmEntityTypeCommandHandler : IRequestHandler<BackfillIdmEn
         foreach (var cfg in configs)
         {
             // 2026-07-05 fix — mirror the worker's seeding predicate: the mapping is PORTAL-ENTITY-aware, so only
-            // stamp documents owned by the provider's entity. Without this, a shared attachment-type code (e.g.
-            // "Msme" on both ASNs and supplier onboarding) stamped supplier-owned docs with the ASN entity type,
-            // which the dispatcher can never resolve (junk Unresolvable rows).
+            // stamp documents owned by that entity. Without this, a shared attachment-type code (e.g. "Msme" on
+            // both ASNs and supplier onboarding) stamped the wrong-owner docs, which the dispatcher can never
+            // resolve (junk Unresolvable rows). Portal entity: stored value wins, provider is the legacy fallback.
             var provider = _providers.TryGet(cfg.IdmEntityType);
-            if (provider is null) continue;
+            var ownerType = string.IsNullOrEmpty(cfg.OwnerEntityType) ? provider?.OwnerEntityType : cfg.OwnerEntityType;
+            if (ownerType is null) continue;   // no stored owner + no provider → cannot classify
+            var attachmentType = cfg.AttachmentType;   // NULL = catch-all (every document of this portal entity)
 
-            total += await _db.DocumentUploads.IgnoreQueryFilters()
-                .Where(d => !d.IsDeleted && d.TenantId == tid && d.IdmEntityType == null
-                            && d.OwnerEntityType == provider.OwnerEntityType && d.DocumentType == cfg.AttachmentType)
+            // Attachment filter built in C# — a null parameter in an inline `== null` OR is translated
+            // inconsistently by EF between ExecuteUpdate and projected queries (dropped catch-all matches).
+            var q = _db.DocumentUploads.IgnoreQueryFilters()
+                .Where(d => !d.IsDeleted && d.TenantId == tid && d.IdmEntityType == null && d.OwnerEntityType == ownerType);
+            if (attachmentType != null) q = q.Where(d => d.DocumentType == attachmentType);
+            total += await q
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(d => d.IdmEntityType, cfg.IdmEntityType)
                     .SetProperty(d => d.UpdatedBy, _user.UserCode)

@@ -48,7 +48,8 @@ public class IdmAttachmentTypeConfigConfiguration : IEntityTypeConfiguration<Idm
         // NULLABLE (2026-07-06): null = catch-all (every document of ownerEntityType).
         b.Property(x => x.AttachmentType).HasColumnName("attachmentType").HasMaxLength(50);
         b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(40).IsRequired();
-        b.Property(x => x.EligibilityGateJson).HasColumnName("eligibilityGateJson").HasColumnType("nvarchar(max)").IsRequired();
+        // R9 (0049) — renamed from eligibilityGateJson (dot-path array) to the JSONata expression column (§2.11).
+        b.Property(x => x.EligibilityGateExpr).HasColumnName("eligibilityGateExpr").HasColumnType("nvarchar(max)").IsRequired();
         b.Property(x => x.CreateMappingExpression).HasColumnName("createMappingExpression").HasColumnType("nvarchar(max)").IsRequired();
         b.Property(x => x.MutateMappingExpression).HasColumnName("mutateMappingExpression").HasColumnType("nvarchar(max)");
         b.Property(x => x.CreateMappingSeedHash).HasColumnName("createMappingSeedHash").HasMaxLength(64);

@@ -26,7 +26,7 @@ public class GetIdmAttachmentTypeConfigsQueryHandler : IRequestHandler<GetIdmAtt
         var tid = _user.TenantId;
         var rows = await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().AsNoTracking()
             .Where(c => c.TenantId == tid && !c.IsDeleted)
-            .OrderBy(c => c.AttachmentType)
+            .OrderBy(c => c.OwnerEntityType).ThenBy(c => c.AttachmentType)
             .ToListAsync(ct);
 
         return rows.Select(c =>
@@ -35,16 +35,12 @@ public class GetIdmAttachmentTypeConfigsQueryHandler : IRequestHandler<GetIdmAtt
             var drifted = repo is not null && _catalog.Hash(c.CreateMappingExpression) != repo.CreateHash;
             return new IdmAttachmentTypeConfigDto(
                 c.Id, c.AttachmentType, c.IdmEntityType,
-                _providers.TryGet(c.IdmEntityType)?.OwnerEntityType,   // the PORTAL entity this mapping serves
-                ParsePaths(c.EligibilityGateJson),
+                // Portal entity: the stored column wins; fall back to the provider for pre-2026-07-06 rows.
+                string.IsNullOrEmpty(c.OwnerEntityType) ? _providers.TryGet(c.IdmEntityType)?.OwnerEntityType : c.OwnerEntityType,
+                // R9 (§2.11) — defensive: a stored legacy dot-path array (unmigrated row) renders as its converted expression.
+                IdmGateConversion.ConvertStoredValue(c.EligibilityGateExpr),
                 c.CreateMappingExpression, c.MutateMappingExpression, c.IsEnabled, drifted, repo is not null);
         }).ToList();
-    }
-
-    private static IReadOnlyList<string> ParsePaths(string json)
-    {
-        try { return JsonSerializer.Deserialize<List<string>>(json) ?? new(); }
-        catch (JsonException) { return new List<string>(); }
     }
 }
 
@@ -88,11 +84,16 @@ public class DeleteIdmAttachmentTypeConfigCommandHandler : IRequestHandler<Delet
 
         var now = DateTime.UtcNow;
 
-        // Un-classify UNPUSHED documents stamped by this mapping (same key the stamping used: documentType +
-        // idmEntityType). Pid-bearing docs keep the stamp — see the command doc.
-        var cleared = await _db.DocumentUploads.IgnoreQueryFilters()
-            .Where(d => !d.IsDeleted && d.TenantId == tid && d.Pid == null
-                        && d.IdmEntityType == row.IdmEntityType && d.DocumentType == row.AttachmentType)
+        // Un-classify UNPUSHED documents stamped by this mapping (same key the stamping used: idmEntityType +,
+        // when the mapping targeted a specific attachment type, documentType — a catch-all NULL attachmentType
+        // un-classifies every not-yet-pushed doc of that idmEntityType). Pid-bearing docs keep the stamp. The
+        // attachment filter is built in C# (an inline `== null` OR on a null parameter is translated
+        // inconsistently by EF, which would silently skip the un-classify).
+        var attachmentType = row.AttachmentType;
+        var clearQuery = _db.DocumentUploads.IgnoreQueryFilters()
+            .Where(d => !d.IsDeleted && d.TenantId == tid && d.Pid == null && d.IdmEntityType == row.IdmEntityType);
+        if (attachmentType != null) clearQuery = clearQuery.Where(d => d.DocumentType == attachmentType);
+        var cleared = await clearQuery
             .ExecuteUpdateAsync(s => s
                 .SetProperty(d => d.IdmEntityType, (string?)null)
                 .SetProperty(d => d.UpdatedBy, _user.UserCode)
@@ -111,12 +112,19 @@ public record SaveIdmAttachmentTypeConfigCommand(SaveIdmAttachmentTypeConfigRequ
 
 public class SaveIdmAttachmentTypeConfigValidator : AbstractValidator<SaveIdmAttachmentTypeConfigCommand>
 {
+    // Portal entities that can own IDM-syncable documents (doc.DocumentUpload.OwnerEntityType values).
+    private static readonly string[] PortalEntities = { "Asn", "Invoice", "Supplier" };
+
     public SaveIdmAttachmentTypeConfigValidator()
     {
-        RuleFor(x => x.Body.AttachmentType).NotEmpty().MaximumLength(50);
+        RuleFor(x => x.Body.OwnerEntityType).NotEmpty()
+            .Must(v => PortalEntities.Contains(v)).WithMessage("Portal entity must be Asn, Invoice or Supplier.");
+        // AttachmentType is OPTIONAL (null/blank = catch-all: every document of the portal entity).
+        RuleFor(x => x.Body.AttachmentType).MaximumLength(50);
         RuleFor(x => x.Body.IdmEntityType).NotEmpty().MaximumLength(40);
         RuleFor(x => x.Body.CreateMappingExpression).NotEmpty();
-        RuleFor(x => x.Body.EligibilityGatePaths).NotNull();
+        // R9 (§2.11) — the gate is a JSONata boolean expression; blank = never satisfied (fail closed).
+        RuleFor(x => x.Body.EligibilityGateExpr).NotNull();
     }
 }
 
@@ -133,10 +141,16 @@ public class SaveIdmAttachmentTypeConfigCommandHandler : IRequestHandler<SaveIdm
         var b = request.Body;
         if (_user.TenantId is not { } tid) throw new ValidationException("No tenant context.");
 
-        // The attachment type must exist + be active in the tenant's catalogue.
-        var typeOk = await _db.AttachmentTypes.IgnoreQueryFilters()
-            .AnyAsync(t => t.TenantId == tid && t.Code == b.AttachmentType && t.IsActive && !t.IsDeleted, ct);
-        if (!typeOk) throw new ValidationException($"Attachment type '{b.AttachmentType}' is not an active type in this tenant.");
+        var attachmentType = string.IsNullOrWhiteSpace(b.AttachmentType) ? null : b.AttachmentType.Trim();
+
+        // When a specific attachment type is given it must exist + be active in the tenant's catalogue. A null
+        // (catch-all) mapping skips this check — it applies to every document of the portal entity.
+        if (attachmentType is not null)
+        {
+            var typeOk = await _db.AttachmentTypes.IgnoreQueryFilters()
+                .AnyAsync(t => t.TenantId == tid && t.Code == attachmentType && t.IsActive && !t.IsDeleted, ct);
+            if (!typeOk) throw new ValidationException($"Attachment type '{attachmentType}' is not an active type in this tenant.");
+        }
 
         var createErr = _jsonata.Validate(b.CreateMappingExpression);
         if (createErr is not null) throw new ValidationException($"Create mapping expression does not compile: {createErr}");
@@ -146,12 +160,21 @@ public class SaveIdmAttachmentTypeConfigCommandHandler : IRequestHandler<SaveIdm
             if (mutateErr is not null) throw new ValidationException($"Mutate mapping expression does not compile: {mutateErr}");
         }
 
-        var gateJson = JsonSerializer.Serialize(b.EligibilityGatePaths);
+        // R9 (§2.11) — the gate is a JSONata expression now; compile it at save like the mappings. A legacy
+        // dot-path array pasted in is converted transparently (the same conversion migration 0049 applied).
+        var gateExpr = IdmGateConversion.ConvertStoredValue(b.EligibilityGateExpr?.Trim() ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(gateExpr))
+        {
+            var gateErr = _jsonata.Validate(gateExpr);
+            if (gateErr is not null) throw new ValidationException($"Eligibility gate expression does not compile: {gateErr}");
+        }
         var now = DateTime.UtcNow;
 
         var existing = b.Id is { } id
             ? await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.Id == id && c.TenantId == tid, ct)
-            : await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.TenantId == tid && c.AttachmentType == b.AttachmentType && !c.IsDeleted, ct);
+            // Upsert key = (tenant, ownerEntityType, attachmentType). EF renders the null attachmentType as IS NULL.
+            : await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().FirstOrDefaultAsync(
+                c => c.TenantId == tid && c.OwnerEntityType == b.OwnerEntityType && c.AttachmentType == attachmentType && !c.IsDeleted, ct);
 
         if (existing is null)
         {
@@ -164,9 +187,10 @@ public class SaveIdmAttachmentTypeConfigCommandHandler : IRequestHandler<SaveIdm
             existing.UpdatedOn = now;
         }
 
-        existing.AttachmentType = b.AttachmentType;
+        existing.OwnerEntityType = b.OwnerEntityType;
+        existing.AttachmentType = attachmentType;
         existing.IdmEntityType = b.IdmEntityType;
-        existing.EligibilityGateJson = gateJson;
+        existing.EligibilityGateExpr = gateExpr;
         existing.CreateMappingExpression = b.CreateMappingExpression;
         existing.MutateMappingExpression = string.IsNullOrWhiteSpace(b.MutateMappingExpression) ? null : b.MutateMappingExpression;
         existing.IsEnabled = b.IsEnabled;
@@ -392,10 +416,22 @@ public class TestIdmEnvelopeCommandHandler : IRequestHandler<TestIdmEnvelopeComm
         if (doc is null)
             return new IdmTestBenchResultDto(false, new[] { "Document not found / not accessible." }, "{}", "{}", null, null);
 
-        // Resolve the config: by the stamped idmEntityType, else by the document's type.
-        var cfg = doc.IdmEntityType != null
-            ? await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(c => c.TenantId == tid && c.IdmEntityType == doc.IdmEntityType && !c.IsDeleted, ct)
-            : await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(c => c.TenantId == tid && c.AttachmentType == doc.DocumentType && !c.IsDeleted, ct);
+        // Resolve the config: by the stamped idmEntityType, else by matching the document's owner entity + type
+        // (a specific-attachment-type config wins; a catch-all — null attachmentType — matches any type of the entity).
+        IdmAttachmentTypeConfig? cfg;
+        if (doc.IdmEntityType != null)
+        {
+            cfg = await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().AsNoTracking()
+                .FirstOrDefaultAsync(c => c.TenantId == tid && c.IdmEntityType == doc.IdmEntityType && !c.IsDeleted, ct);
+        }
+        else
+        {
+            var candidates = await _db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().AsNoTracking()
+                .Where(c => c.TenantId == tid && !c.IsDeleted && c.OwnerEntityType == doc.OwnerEntityType
+                            && (c.AttachmentType == null || c.AttachmentType == doc.DocumentType))
+                .ToListAsync(ct);
+            cfg = candidates.OrderBy(c => c.AttachmentType == null ? 1 : 0).FirstOrDefault();   // specific type first
+        }
         if (cfg is null)
             return new IdmTestBenchResultDto(false, new[] { "No IDM config maps this document's type." }, "{}", "{}", null, null);
 
@@ -408,8 +444,11 @@ public class TestIdmEnvelopeCommandHandler : IRequestHandler<TestIdmEnvelopeComm
         if (displaySnapshot is null)
             return new IdmTestBenchResultDto(false, new[] { "Snapshot could not be assembled." }, "{}", "{}", null, null);
 
-        var gateSatisfied = _gate.IsSatisfied(cfg.EligibilityGateJson, displaySnapshot);
-        var failures = gateSatisfied ? Array.Empty<string>() : GateFailures(cfg.EligibilityGateJson, displaySnapshot);
+        var gateSatisfied = _gate.IsSatisfied(cfg.EligibilityGateExpr, displaySnapshot);
+        var failures = gateSatisfied
+            ? Array.Empty<string>()
+            // R9 (§2.11) — a single JSONata expression has no per-path breakdown; surface the expression itself.
+            : new[] { $"Eligibility gate returned false: {cfg.EligibilityGateExpr}" };
 
         var displayEnvelope = await _builder.BuildAsync(cfg.CreateMappingExpression, displaySnapshot, ct);
         var headersJson = JsonSerializer.Serialize(displayEnvelope.Headers);
@@ -428,15 +467,5 @@ public class TestIdmEnvelopeCommandHandler : IRequestHandler<TestIdmEnvelopeComm
         }
 
         return new IdmTestBenchResultDto(gateSatisfied, failures, headersJson, displayEnvelope.Body, dryStatus, dryResponse);
-    }
-
-    private static string[] GateFailures(string gateJson, object snapshot)
-    {
-        try
-        {
-            var paths = JsonSerializer.Deserialize<string[]>(gateJson) ?? Array.Empty<string>();
-            return paths;
-        }
-        catch (JsonException) { return new[] { "Malformed eligibility gate JSON." }; }
     }
 }

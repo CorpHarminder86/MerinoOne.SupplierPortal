@@ -14,14 +14,16 @@ public sealed class IdmDefaultExpressions : IIdmExpressionCatalog
 {
     public sealed record Entry(string IdmEntityType, string CreateExpression, string MutateExpression, string CreateHash, string MutateHash);
 
-    // idmEntityType → default (portal entity, attachmentType, gate) seed (out-of-the-box mapping for the demo tenant).
-    public static readonly IReadOnlyDictionary<string, (string OwnerEntityType, string AttachmentType, string GateJson)> Seeds =
+    // idmEntityType → default (portal entity, attachmentType, gate) seed (out-of-the-box mapping for the demo
+    // tenant). R9 (§2.11): the gate is now a JSONata boolean expression — the shared IdmGateConversion helper
+    // renders the same required-non-null semantics the old dot-path arrays carried.
+    public static readonly IReadOnlyDictionary<string, (string OwnerEntityType, string AttachmentType, string GateExpr)> Seeds =
         new Dictionary<string, (string, string, string)>(StringComparer.Ordinal)
         {
             ["InforInvoice"] = ("Invoice", "Invoice",
-                "[\"invoice.erpCompany\",\"invoice.erpTransactionType\",\"invoice.erpDocumentNo\"]"),
+                IdmGateConversion.ToJsonata(new[] { "invoice.erpCompany", "invoice.erpTransactionType", "invoice.erpDocumentNo" })),
             ["InforAdvanceShipmentNoticeSupplierASN"] = ("Asn", "AsnAttachment",
-                "[\"asn.erpCompany\",\"asn.erpTransactionType\",\"asn.erpDocumentNo\"]"),
+                IdmGateConversion.ToJsonata(new[] { "asn.erpCompany", "asn.erpTransactionType", "asn.erpDocumentNo" })),
         };
 
     private readonly Dictionary<string, Entry> _byType = new(StringComparer.Ordinal);

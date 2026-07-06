@@ -79,7 +79,7 @@ public static class IdmOutboundSeeder
                     OwnerEntityType = seed.OwnerEntityType,
                     AttachmentType = seed.AttachmentType,
                     IdmEntityType = entry.IdmEntityType,
-                    EligibilityGateJson = seed.GateJson,
+                    EligibilityGateExpr = seed.GateExpr,
                     CreateMappingExpression = entry.CreateExpression,
                     CreateMappingSeedHash = entry.CreateHash,
                     MutateMappingExpression = entry.MutateExpression,
