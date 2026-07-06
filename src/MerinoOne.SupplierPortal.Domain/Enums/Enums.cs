@@ -196,8 +196,23 @@ public enum LinePushStatus { Pending, Pushed, PushFailed }
 /// <c>/inbound/erp-ack</c>). A POST failure rolls the row <c>Sending → Failed</c> (retryable). A crash mid-POST
 /// strands the row in <c>Sending</c>; the worker's stale-<c>Sending</c> sweep resets it to <c>Pending</c> by age
 /// so it auto-recovers (the deterministic key is reused, so LN dedupes the re-POST).</para>
+///
+/// <para>R9 (TSD R9, D-R9-9/D-R9-10): <c>{Pending, Failed, Sending} → Skipped</c> — the eligibility gate
+/// deliberately withheld the row (dispatch-time re-check, backfill withdraw, or invoice revoke). Terminal but
+/// re-armable: backfill apply or a gated re-enqueue on the SAME deterministic key flips <c>Skipped → Pending</c>
+/// in place (re-arm-over-create, D-R9-10a — the filtered unique index spans all statuses, so a live Skipped row
+/// must be re-armed, never duplicated). Never an IntegrationError — a skip is a decision, not a failure.</para>
 /// </summary>
-public enum OutboxStatus { Pending, Dispatched, Acked, Failed, Sending }
+public enum OutboxStatus { Pending, Dispatched, Acked, Failed, Sending, Skipped }
+
+/// <summary>
+/// R9 (TSD R9, D-R9-2 + D-R9-11) — per-endpoint dispatch mode on <c>integration.LnEndpointConfig</c>,
+/// persisted as the enum NAME (string) with a DB CHECK. The tri-state resolves the isEnabled cutover/kill
+/// ambiguity: <c>Legacy</c> (default at creation — the compiled builder keeps serving, zero behavior change),
+/// <c>Dynamic</c> (config-driven JSONata path; requires recorded attestation + path confirmation, D-R9-17/21),
+/// <c>Held</c> (per-endpoint kill switch — dispatch held, rows stay Pending, enqueue continues).
+/// </summary>
+public enum LnDispatchMode { Legacy, Dynamic, Held }
 
 public enum SyncDirection { Inbound, Outbound, Bidirectional }
 public enum SyncStatus { Pending, Success, Failed, Retrying, Reconciled }

@@ -134,6 +134,9 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<IdmAttachmentTypeConfig> IdmAttachmentTypeConfigs => Set<IdmAttachmentTypeConfig>();
     public DbSet<IdmDocumentOutbox> IdmDocumentOutboxes => Set<IdmDocumentOutbox>();
 
+    // R9 (2026-07-06) — TSD R9 config-driven LN outbound posting.
+    public DbSet<LnEndpointConfig> LnEndpointConfigs => Set<LnEndpointConfig>();
+
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();

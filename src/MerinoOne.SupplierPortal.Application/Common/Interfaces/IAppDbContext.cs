@@ -109,6 +109,9 @@ public interface IAppDbContext
     DbSet<IdmAttachmentTypeConfig> IdmAttachmentTypeConfigs { get; }
     DbSet<IdmDocumentOutbox> IdmDocumentOutboxes { get; }
 
+    // R9 (2026-07-06) — TSD R9 config-driven LN outbound posting.
+    DbSet<LnEndpointConfig> LnEndpointConfigs { get; }
+
     DbSet<AuditEntry> AuditEntries { get; }
 
     DbSet<SystemSetting> SystemSettings { get; }

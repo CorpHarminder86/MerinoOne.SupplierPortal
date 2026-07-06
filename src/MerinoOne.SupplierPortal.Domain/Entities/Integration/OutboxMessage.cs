@@ -50,6 +50,18 @@ public class OutboxMessage : AuditableEntity, ITenantOwned, IHasRowVersion
     public DateTime? AckedAt { get; set; }
     public string? LastError { get; set; }
 
+    /// <summary>R9 — the <c>LnEndpointConfig.GateVersion</c> in force when this row was enqueued / re-armed / skipped. Null on legacy rows.</summary>
+    public int? GateVersion { get; set; }
+
+    /// <summary>R9 — why the eligibility layer moved this row to <c>Skipped</c> (dispatch re-check, backfill withdraw, revoke). Null otherwise.</summary>
+    public string? SkipReason { get; set; }
+
+    /// <summary>
+    /// R9 — owning sequence step for sequenced onboarding rows (TSD §2.7). Column lands in Phase A;
+    /// the FK constraint is deferred to Phase C when <c>integration.SequenceInstanceStep</c> exists.
+    /// </summary>
+    public Guid? SequenceInstanceStepId { get; set; }
+
     /// <summary>
     /// SQL <c>rowversion</c> optimistic-concurrency token (migration 0023, review B1). Mapped by the
     /// global <see cref="IHasRowVersion"/> convention in <c>AppDbContext</c> (<c>.IsRowVersion()</c> →

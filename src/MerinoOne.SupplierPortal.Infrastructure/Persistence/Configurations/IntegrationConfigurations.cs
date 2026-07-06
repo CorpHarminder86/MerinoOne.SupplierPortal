@@ -24,6 +24,10 @@ public class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage
         b.Property(x => x.DispatchedAt).HasColumnName("dispatchedAt").HasColumnType("datetime2");
         b.Property(x => x.AckedAt).HasColumnName("ackedAt").HasColumnType("datetime2");
         b.Property(x => x.LastError).HasColumnName("lastError").HasMaxLength(2000);
+        // R9 (migration 0046): eligibility-gate bookkeeping + the Phase-C sequence hook (FK deferred to Phase C).
+        b.Property(x => x.GateVersion).HasColumnName("gateVersion").HasColumnType("int");
+        b.Property(x => x.SkipReason).HasColumnName("skipReason").HasMaxLength(500);
+        b.Property(x => x.SequenceInstanceStepId).HasColumnName("sequenceInstanceStepId").HasColumnType("uniqueidentifier");
         // rowVersion (IHasRowVersion) mapped centrally by the AppDbContext convention → .IsRowVersion(),
         // column "rowVersion". Backs the dispatcher's per-row Pending→Sending claim (review B1, migration 0023).
 
