@@ -1,6 +1,5 @@
-using System.Reflection;
-using System.Security.Cryptography;
 using System.Text;
+using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Integration.Idm;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Idm;
@@ -15,13 +14,13 @@ public sealed class IdmDefaultExpressions : IIdmExpressionCatalog
 {
     public sealed record Entry(string IdmEntityType, string CreateExpression, string MutateExpression, string CreateHash, string MutateHash);
 
-    // idmEntityType → default attachmentType seed (the out-of-the-box mapping for the demo/seed tenant).
-    public static readonly IReadOnlyDictionary<string, (string AttachmentType, string GateJson)> Seeds =
-        new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+    // idmEntityType → default (portal entity, attachmentType, gate) seed (out-of-the-box mapping for the demo tenant).
+    public static readonly IReadOnlyDictionary<string, (string OwnerEntityType, string AttachmentType, string GateJson)> Seeds =
+        new Dictionary<string, (string, string, string)>(StringComparer.Ordinal)
         {
-            ["InforInvoice"] = ("Invoice",
+            ["InforInvoice"] = ("Invoice", "Invoice",
                 "[\"invoice.erpCompany\",\"invoice.erpTransactionType\",\"invoice.erpDocumentNo\"]"),
-            ["InforAdvanceShipmentNoticeSupplierASN"] = ("AsnAttachment",
+            ["InforAdvanceShipmentNoticeSupplierASN"] = ("Asn", "AsnAttachment",
                 "[\"asn.erpCompany\",\"asn.erpTransactionType\",\"asn.erpDocumentNo\"]"),
         };
 
@@ -49,13 +48,8 @@ public sealed class IdmDefaultExpressions : IIdmExpressionCatalog
 
     string IIdmExpressionCatalog.Hash(string expression) => Hash(expression);
 
-    /// <summary>Normalised SHA-256 (hex, lower-case) of an expression — line endings folded to LF + trimmed.</summary>
-    public static string Hash(string text)
-    {
-        var normalized = (text ?? string.Empty).Replace("\r\n", "\n").Replace("\r", "\n").Trim();
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
-    }
+    /// <summary>Normalised SHA-256 (hex, lower-case) of an expression — delegates to the shared <see cref="ExpressionHash"/> (R9 extraction).</summary>
+    public static string Hash(string text) => ExpressionHash.Compute(text);
 
     private static string Read(string fileName)
     {
