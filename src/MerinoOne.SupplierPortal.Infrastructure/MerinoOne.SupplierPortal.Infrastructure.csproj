@@ -56,6 +56,11 @@
     <!-- R8 (2026-07-04) — versioned, source-controlled JSONata mapping expressions (D6). Seeded into tenant
          config rows by IdmOutboundSeeder; drift = current row text hash ≠ embedded default hash. -->
     <EmbeddedResource Include="Integration\Idm\Expressions\*.jsonata" />
+    <!-- R9 (2026-07-06) — LN outbound repo-default expressions + validation samples (TSD R9 §2.1/§2.3).
+         Seeded into LnEndpointConfig rows by LnOutboundSeeder (per-slot hash-gate); request expressions
+         reproduce the legacy payload builders in canonical form — parity harness enforced. -->
+    <EmbeddedResource Include="Integration\Ln\Expressions\*.jsonata" />
+    <EmbeddedResource Include="Integration\Ln\Expressions\_samples\*.json" />
   </ItemGroup>
 
 </Project>

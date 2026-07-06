@@ -1,0 +1,7 @@
+/* R9 STARTER (O-R9-2 — real LN response field names pending tenant Available-APIs export; the
+   pathConfirmed attestation gate blocks Dynamic until verified). LN OData POST returns the created
+   entity (O-R9-1); extract its key into the closed contract { erpKey, erpStatus, message?, correlationBag? }. */
+{
+    "erpKey": $string(id != null ? id : (OrderNumber != null ? OrderNumber : (DocumentNumber != null ? DocumentNumber : "UNCONFIRMED-O-R9-2"))),
+    "erpStatus": "Created"
+}

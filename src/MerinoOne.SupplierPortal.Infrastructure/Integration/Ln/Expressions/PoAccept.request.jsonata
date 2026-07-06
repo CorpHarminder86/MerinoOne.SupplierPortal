@@ -1,0 +1,7 @@
+/* R9 default — reproduces the legacy PO-accept payload. proposedDeliveryDate comes from the
+   outbox row's responseContext (already re-formatted "o" by the input-document builder). */
+{
+    "PoNumber": poNumber,
+    "Action": "Accept",
+    "ProposedDeliveryDate": responseContext.proposedDeliveryDate != null ? responseContext.proposedDeliveryDate
+}

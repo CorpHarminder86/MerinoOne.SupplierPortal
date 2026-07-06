@@ -1,0 +1,8 @@
+/* R9 default — reproduces the legacy PO-acknowledge payload (PoResponseOutboundPayloadBuilder).
+   Legacy falls back to build-time UtcNow when acknowledgmentAt is null; $now() carries a shorter
+   fractional format in that rare fallback — value-equivalent, LN parses ISO 8601 either way. */
+{
+    "PoNumber": poNumber,
+    "Action": "Acknowledge",
+    "AcknowledgedAt": acknowledgmentAt != null ? acknowledgmentAt : $now()
+}

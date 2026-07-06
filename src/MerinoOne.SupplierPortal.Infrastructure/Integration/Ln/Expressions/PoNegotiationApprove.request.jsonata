@@ -1,0 +1,18 @@
+/* R9 default — reproduces PoNegotiationOutboundPayloadBuilder. NOTE the legacy shape's line keys are
+   camelCase (header PascalCase) — that asymmetry is the legacy contract, reproduce it verbatim. */
+{
+    "PoNumber": poNumber,
+    "NegotiationId": negotiationId,
+    "SubmittedAt": submittedAt,
+    "Lines": [lines.{
+        "positionNo": positionNo,
+        "sequenceNo": sequenceNo,
+        "itemCode": itemCode != null ? itemCode,
+        "originalQty": originalQty != null ? originalQty,
+        "negotiatedQty": negotiatedQty != null ? negotiatedQty,
+        "originalDeliveryDate": originalDeliveryDate != null ? originalDeliveryDate,
+        "negotiatedDeliveryDate": negotiatedDeliveryDate != null ? negotiatedDeliveryDate,
+        "originalPrice": originalPrice != null ? originalPrice,
+        "negotiatedPrice": negotiatedPrice != null ? negotiatedPrice
+    }]
+}

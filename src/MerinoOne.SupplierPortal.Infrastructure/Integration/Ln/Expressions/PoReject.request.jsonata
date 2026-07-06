@@ -1,0 +1,7 @@
+/* R9 default — reproduces the legacy PO-reject payload (Reason always present; legacy emitted "" for a
+   missing reason, so the null-coalesce keeps that byte-exact). */
+{
+    "PoNumber": poNumber,
+    "Action": "Reject",
+    "Reason": responseContext.reason != null ? responseContext.reason : ""
+}

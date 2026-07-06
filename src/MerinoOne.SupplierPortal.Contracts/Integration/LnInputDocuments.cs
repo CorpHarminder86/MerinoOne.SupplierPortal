@@ -94,8 +94,8 @@ public sealed record AsnInputDoc(
     [property: JsonPropertyName("lines")] IReadOnlyList<AsnLineInputDoc> Lines);
 
 public sealed record AsnLineInputDoc(
-    [property: JsonPropertyName("positionNo")] int PositionNo,
-    [property: JsonPropertyName("sequenceNo")] int SequenceNo,
+    [property: JsonPropertyName("positionNo")] int? PositionNo,
+    [property: JsonPropertyName("sequenceNo")] int? SequenceNo,
     [property: JsonPropertyName("itemCode")] string? ItemCode,
     [property: JsonPropertyName("shippedQty")] decimal ShippedQty,
     [property: JsonPropertyName("batchNumber")] string? BatchNumber,

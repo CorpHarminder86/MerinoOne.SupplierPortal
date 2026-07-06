@@ -1,0 +1,69 @@
+/* R9 default — reproduces SupplierChangeOutboundPayloadBuilder: the full intended end-state per
+   erpCode-keyed entity the change touched. Per-entityType projection reproduces each anonymous shape's
+   exact key set and order; Deleted is emitted for every type except the Supplier root (legacy omits it
+   there). The input document keeps nulls, so `field != null ? field` mirrors WhenWritingNull. */
+{
+    "ChangeRequestId": changeRequestId,
+    "SupplierCode": supplierCode,
+    "SupplierErpCode": supplierErpCode != null ? supplierErpCode,
+    "Summary": summary != null ? summary,
+    "Entities": [entities.(
+        entityType = "Supplier" ? {
+            "EntityType": entityType,
+            "Operation": operation,
+            "ErpCode": erpCode != null ? erpCode,
+            "LegalName": legalName != null ? legalName,
+            "TradeName": tradeName != null ? tradeName,
+            "GstNumber": gstNumber != null ? gstNumber,
+            "PanNumber": panNumber != null ? panNumber,
+            "MsmeRegNumber": msmeRegNumber != null ? msmeRegNumber,
+            "MsmeCategory": msmeCategory != null ? msmeCategory,
+            "Website": website != null ? website
+        } : entityType = "Address" ? {
+            "EntityType": entityType,
+            "Operation": operation,
+            "ErpCode": erpCode != null ? erpCode,
+            "AddressType": addressType != null ? addressType,
+            "AddressLine1": addressLine1 != null ? addressLine1,
+            "AddressLine2": addressLine2 != null ? addressLine2,
+            "Area": area != null ? area,
+            "City": city != null ? city,
+            "State": state != null ? state,
+            "Pincode": pincode != null ? pincode,
+            "Country": country != null ? country,
+            "Deleted": deleted
+        } : entityType = "Contact" ? {
+            "EntityType": entityType,
+            "Operation": operation,
+            "ErpCode": erpCode != null ? erpCode,
+            "ContactName": contactName != null ? contactName,
+            "Designation": designation != null ? designation,
+            "Email": email != null ? email,
+            "Phone": phone != null ? phone,
+            "IsPrimary": isPrimary != null ? isPrimary,
+            "Deleted": deleted
+        } : entityType = "Bank" ? {
+            "EntityType": entityType,
+            "Operation": operation,
+            "ErpCode": erpCode != null ? erpCode,
+            "BankName": bankName != null ? bankName,
+            "BankAddress": bankAddress != null ? bankAddress,
+            "AccountName": accountName != null ? accountName,
+            "AccountNumber": accountNumber != null ? accountNumber,
+            "IfscCode": ifscCode != null ? ifscCode,
+            "SwiftCode": swiftCode != null ? swiftCode,
+            "IsPrimary": isPrimary != null ? isPrimary,
+            "Deleted": deleted
+        } : {
+            "EntityType": entityType,
+            "Operation": operation,
+            "ErpCode": erpCode != null ? erpCode,
+            "LicenseNumber": licenseNumber != null ? licenseNumber,
+            "LicenseType": licenseType != null ? licenseType,
+            "Remarks": remarks != null ? remarks,
+            "IssueDate": issueDate != null ? issueDate,
+            "ExpiryDate": expiryDate != null ? expiryDate,
+            "Deleted": deleted
+        }
+    )]
+}

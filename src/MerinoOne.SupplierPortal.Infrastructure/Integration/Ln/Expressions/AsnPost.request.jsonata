@@ -1,0 +1,24 @@
+/* R9 default — reproduces AsnOutboundPayloadBuilder (header + Lines[] with Serials[]/Lots[]).
+   Array constructors are mandatory for collection outputs (D-R9-13 singleton-collapse guard);
+   `serials ? [serials]` re-wraps the path-flattened sequence AND omits the key when null. */
+{
+    "AsnNumber": asnNumber,
+    "ExpectedDeliveryDate": expectedDeliveryDate,
+    "CarrierName": carrierName != null ? carrierName,
+    "TrackingNumber": trackingNumber != null ? trackingNumber,
+    "VehicleNumber": vehicleNumber != null ? vehicleNumber,
+    "Lines": [lines.{
+        "PositionNo": positionNo != null ? positionNo,
+        "SequenceNo": sequenceNo != null ? sequenceNo,
+        "ItemCode": itemCode != null ? itemCode,
+        "ShippedQty": shippedQty,
+        "BatchNumber": batchNumber != null ? batchNumber,
+        "ExpiryDate": expiryDate != null ? expiryDate,
+        "Serials": serials ? [serials],
+        "Lots": lots ? [lots.{
+            "LotNo": lotNo,
+            "Qty": qty,
+            "ExpiryDate": expiryDate != null ? expiryDate
+        }]
+    }]
+}

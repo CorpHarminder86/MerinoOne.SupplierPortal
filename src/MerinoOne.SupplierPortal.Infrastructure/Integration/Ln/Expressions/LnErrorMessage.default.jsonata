@@ -1,0 +1,4 @@
+/* R9 shared default (D-R9-5) — enriches the error TEXT of a failed LN response by extracting the
+   OData error body ({ "error": { "message": { "value": "..." } } } or the simpler { "error": { "message": "..." } }).
+   Never consulted for retriability — classification is code-owned and takes only the HTTP status. */
+error.message.value != null ? $string(error.message.value) : (error.message != null ? $string(error.message))

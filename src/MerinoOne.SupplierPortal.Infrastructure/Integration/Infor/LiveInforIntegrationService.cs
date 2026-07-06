@@ -84,13 +84,8 @@ public class LiveInforIntegrationService : IInforIntegrationService
         var po = await _db.PurchaseOrders.FindAsync(new object?[] { purchaseOrderId }, ct);
         if (po is null) return Fail("PurchaseOrder", $"PurchaseOrder {purchaseOrderId} not found.");
 
-        // TODO: confirm the real LN PO-acknowledgement field map.
-        var payload = new
-        {
-            PoNumber = po.PoNumber,
-            Action = "Acknowledge",
-            AcknowledgedAt = (po.AcknowledgmentAt ?? DateTime.UtcNow).ToString("o"),
-        };
+        // TODO: confirm the real LN PO-acknowledgement field map (shape lives in PoResponseOutboundPayloadBuilder — R9 extraction).
+        var payload = PoResponseOutboundPayloadBuilder.BuildAcknowledgePayload(po);
         return await SendAsync("PurchaseOrder", EndpointPaths.PurchaseOrderAck, payload, ct);
     }
 
@@ -99,15 +94,10 @@ public class LiveInforIntegrationService : IInforIntegrationService
         var po = await _db.PurchaseOrders.FindAsync(new object?[] { purchaseOrderId }, ct);
         if (po is null) return Fail("PurchaseOrder", $"PurchaseOrder {purchaseOrderId} not found.");
 
-        // TODO: confirm the real LN PO-acceptance field map.
+        // TODO: confirm the real LN PO-acceptance field map (shape lives in PoResponseOutboundPayloadBuilder — R9 extraction).
         // R4 (2026-06-26) — D2: accept is accept-only (PurchaseOrder.ProposedDeliveryDate removed). The optional
         // proposedDate parameter is retained on the interface but is null on the accept path now.
-        var payload = new
-        {
-            PoNumber = po.PoNumber,
-            Action = "Accept",
-            ProposedDeliveryDate = proposedDate?.ToString("o"),
-        };
+        var payload = PoResponseOutboundPayloadBuilder.BuildAcceptPayload(po, proposedDate);
         return await SendAsync("PurchaseOrder", EndpointPaths.PurchaseOrderAccept, payload, ct);
     }
 
@@ -116,13 +106,8 @@ public class LiveInforIntegrationService : IInforIntegrationService
         var po = await _db.PurchaseOrders.FindAsync(new object?[] { purchaseOrderId }, ct);
         if (po is null) return Fail("PurchaseOrder", $"PurchaseOrder {purchaseOrderId} not found.");
 
-        // TODO: confirm the real LN PO-rejection field map.
-        var payload = new
-        {
-            PoNumber = po.PoNumber,
-            Action = "Reject",
-            Reason = reason,
-        };
+        // TODO: confirm the real LN PO-rejection field map (shape lives in PoResponseOutboundPayloadBuilder — R9 extraction).
+        var payload = PoResponseOutboundPayloadBuilder.BuildRejectPayload(po, reason);
         return await SendAsync("PurchaseOrder", EndpointPaths.PurchaseOrderReject, payload, ct);
     }
 

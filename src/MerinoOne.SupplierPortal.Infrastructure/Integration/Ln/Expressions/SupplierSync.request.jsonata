@@ -1,0 +1,53 @@
+/* R9 default — reproduces SupplierOutboundPayloadBuilder (header + Addresses[]/Contacts[]/BankDetails[]/
+   Licenses[]). Child arrays are ALWAYS emitted (legacy emits [] when empty) — hence the bare array
+   constructors, not truthy guards. Licenses deliberately carry no Remarks (legacy supplier payload omits it;
+   the change-request payload is the one that includes Remarks). */
+{
+    "SupplierCode": supplierCode,
+    "ErpCode": erpCode != null ? erpCode,
+    "Name": name != null ? name,
+    "TradeName": tradeName != null ? tradeName,
+    "GstNumber": gstNumber != null ? gstNumber,
+    "PanNumber": panNumber != null ? panNumber,
+    "IsActive": isActive,
+    "PaymentTermCode": paymentTermCode != null ? paymentTermCode,
+    "DeliveryTermCode": deliveryTermCode != null ? deliveryTermCode,
+    "PoResponseMode": poResponseMode,
+    "Addresses": [addresses.{
+        "AddressType": addressType != null ? addressType,
+        "Line1": line1 != null ? line1,
+        "Line2": line2 != null ? line2,
+        "Area": area != null ? area,
+        "City": city != null ? city,
+        "State": state != null ? state,
+        "Pincode": pincode != null ? pincode,
+        "Country": country != null ? country,
+        "ErpCode": erpCode != null ? erpCode
+    }],
+    "Contacts": [contacts.{
+        "ContactName": contactName != null ? contactName,
+        "Designation": designation != null ? designation,
+        "Email": email != null ? email,
+        "Phone": phone != null ? phone,
+        "IsPrimary": isPrimary,
+        "AddressId": addressId != null ? addressId,
+        "ErpCode": erpCode != null ? erpCode
+    }],
+    "BankDetails": [bankDetails.{
+        "BankName": bankName != null ? bankName,
+        "BankAddress": bankAddress != null ? bankAddress,
+        "AccountName": accountName != null ? accountName,
+        "AccountNumber": accountNumber != null ? accountNumber,
+        "IfscCode": ifscCode != null ? ifscCode,
+        "SwiftCode": swiftCode != null ? swiftCode,
+        "IsPrimary": isPrimary,
+        "ErpCode": erpCode != null ? erpCode
+    }],
+    "Licenses": [licenses.{
+        "LicenseNumber": licenseNumber != null ? licenseNumber,
+        "LicenseType": licenseType != null ? licenseType,
+        "IssueDate": issueDate != null ? issueDate,
+        "ExpiryDate": expiryDate != null ? expiryDate,
+        "ErpCode": erpCode != null ? erpCode
+    }]
+}

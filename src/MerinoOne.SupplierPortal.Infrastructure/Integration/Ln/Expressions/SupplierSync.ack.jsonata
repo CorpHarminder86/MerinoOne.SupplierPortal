@@ -1,0 +1,13 @@
+/* R9 STARTER (dormant in Phase A — /inbound/erp-ack field extraction stays code-owned; this mapping
+   documents the equivalent projection of ONE ErpAckRecord into the closed contract for when the ack
+   slot goes live). portalRef correlation is code-owned and deliberately absent (D-R9-5). */
+{
+    "erpKey": erpCode != null ? $string(erpCode) : "UNKNOWN",
+    "erpStatus": success ? "Acked" : "Failed",
+    "message": message != null ? message,
+    "correlationBag": {
+        "erpCompany": erpCompany != null ? erpCompany,
+        "erpTransactionType": erpTransactionType != null ? erpTransactionType,
+        "erpDocumentNo": erpDocumentNo != null ? erpDocumentNo
+    }
+}

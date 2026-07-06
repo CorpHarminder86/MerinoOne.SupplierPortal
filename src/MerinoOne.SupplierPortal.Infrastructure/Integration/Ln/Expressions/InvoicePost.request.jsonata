@@ -1,0 +1,11 @@
+/* R9 default — reproduces InvoiceOutboundPayloadBuilder byte-for-byte (canonical form).
+   Null-dropping mirrors the legacy WhenWritingNull serializer: `field != null ? field` omits the key. */
+{
+    "InvoiceNumber": invoiceNumber,
+    "InvoiceDate": invoiceDate,
+    "Currency": currency != null ? currency,
+    "InvoiceAmount": invoiceAmount,
+    "TaxAmount": taxAmount,
+    "NetAmount": netAmount,
+    "EInvoiceIrn": eInvoiceIrn != null ? eInvoiceIrn
+}

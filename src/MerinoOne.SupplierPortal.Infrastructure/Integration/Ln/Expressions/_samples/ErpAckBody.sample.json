@@ -1,0 +1,10 @@
+{
+  "transactionType": "InvoicePost",
+  "portalRef": "0000000000000000000000000000000000000000000000000000000000000000",
+  "success": true,
+  "erpCode": "INV-23063669",
+  "message": "Posted",
+  "erpCompany": "2000",
+  "erpTransactionType": "1DS",
+  "erpDocumentNo": "23063669"
+}

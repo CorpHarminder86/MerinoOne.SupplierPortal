@@ -1,0 +1,6 @@
+{
+  "@odata.context": "https://ln.example/LN/lnapi/odata/$metadata#Entity",
+  "id": "DOC-0001",
+  "OrderNumber": "DOC-0001",
+  "DocumentNumber": "DOC-0001"
+}
