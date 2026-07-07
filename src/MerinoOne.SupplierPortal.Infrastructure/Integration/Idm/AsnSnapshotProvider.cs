@@ -47,6 +47,11 @@ public sealed class AsnSnapshotProvider : IEntitySnapshotProvider
                 ["erpCompany"] = asn.ErpCompany,
                 ["erpTransactionType"] = asn.ErpTransactionType,
                 ["erpDocumentNo"] = asn.ErpDocumentNo,
+                // R10 (2026-07-07) — portal identifiers the mapping/gate expressions kept reaching for.
+                ["asnNumber"] = asn.AsnNumber,
+                ["erpCode"] = asn.ErpCode,
+                ["erpSyncId"] = asn.ErpSyncId,
+                ["status"] = asn.AsnStatus.ToString(),
             },
             ["attachment"] = new Dictionary<string, object?>
             {

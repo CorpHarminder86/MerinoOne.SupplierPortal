@@ -440,7 +440,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                 : cfg.RequestMappingExpr;
             envelope = await builder.BuildAsync(expression, snapshot, ct);
             envelope = MergeStaticHeaders(envelope, cfg.StaticHeadersJson);
-            persistSnapshotJson = BuildPersistSnapshot(envelope.Headers, snapshot);
+            persistSnapshotJson = BuildPersistSnapshot(envelope.Headers, envelope.Body, snapshot);
         }
 
         // Persist the elided request snapshot before sending (never store base64 — D-R8-18).
@@ -576,15 +576,41 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
            && s.TryGetValue("attachment", out var a) && a is IDictionary<string, object?> att
            && att.TryGetValue("base64", out var b64) && b64 is string { Length: > 0 };
 
-    private static string BuildPersistSnapshot(IReadOnlyDictionary<string, string> headers, object snapshot)
+    /// <summary>
+    /// R10 (2026-07-07) — the persisted detail now carries the RENDERED request body (what actually went on
+    /// the wire) alongside the mapping-input snapshot, both with every base64 value elided (file bytes are
+    /// never persisted — D-R8-18). Pre-R10 rows stored only {headers, snapshot}, which read as "the request"
+    /// in the viewer and confused mapping debugging.
+    /// </summary>
+    private static string BuildPersistSnapshot(IReadOnlyDictionary<string, string> headers, string renderedBody, object snapshot)
     {
-        var node = JsonNode.Parse(JsonSerializer.Serialize(snapshot));
-        if (node?["attachment"]?["base64"] is JsonNode b64)
+        var snapshotNode = JsonNode.Parse(JsonSerializer.Serialize(snapshot));
+        ElideBase64(snapshotNode);
+        JsonNode? bodyNode = null;
+        try { bodyNode = JsonNode.Parse(renderedBody); ElideBase64(bodyNode); }
+        catch (JsonException) { /* non-JSON body — persist the snapshot side only */ }
+        return JsonSerializer.Serialize(new { headers, body = bodyNode, snapshot = snapshotNode });
+    }
+
+    /// <summary>Recursively replaces every property named <c>base64</c> holding a long string with an elision marker.</summary>
+    private static void ElideBase64(JsonNode? node)
+    {
+        switch (node)
         {
-            var len = b64.ToString().Length;
-            node!["attachment"]!["base64"] = $"<elided {len} chars>";
+            case JsonObject obj:
+                foreach (var key in obj.Select(p => p.Key).ToList())
+                {
+                    if (key.Equals("base64", StringComparison.OrdinalIgnoreCase)
+                        && obj[key] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 128)
+                        obj[key] = $"<elided {s.Length} chars>";
+                    else
+                        ElideBase64(obj[key]);
+                }
+                break;
+            case JsonArray arr:
+                foreach (var item in arr) ElideBase64(item);
+                break;
         }
-        return JsonSerializer.Serialize(new { headers, snapshot = node });
     }
 
     private static async Task SucceedAsync(IAppDbContext db, Guid rowId, IdmDocumentOutbox row, IdmAck? ack, string responseBody, DateTime now, CancellationToken ct)
