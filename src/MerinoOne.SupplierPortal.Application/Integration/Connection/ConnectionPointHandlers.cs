@@ -33,17 +33,26 @@ public class GetConnectionPointsQueryHandler : IRequestHandler<GetConnectionPoin
     public async Task<IReadOnlyList<ConnectionPointDto>> Handle(GetConnectionPointsQuery request, CancellationToken ct)
     {
         var tid = _user.TenantId;
-        return await _db.ConnectionPoints.IgnoreQueryFilters().AsNoTracking()
+        var rows = await _db.ConnectionPoints.IgnoreQueryFilters().AsNoTracking()
             .Where(p => p.TenantId == tid && !p.IsDeleted)
             .OrderByDescending(p => p.IsDefault).ThenBy(p => p.Name)
-            .Select(p => new ConnectionPointDto(
+            .ToListAsync(ct);
+
+        // In-use counts as one grouped query — a correlated Count subquery with IgnoreQueryFilters inside
+        // the projection does not translate (500 at runtime).
+        var counts = await _db.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking()
+            .Where(c => c.TenantId == tid && c.ConnectionPointId != null && !c.IsDeleted)
+            .GroupBy(c => c.ConnectionPointId!.Value)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+
+        return rows.Select(p => new ConnectionPointDto(
                 p.Id, p.Seq, p.Name, p.SystemType, p.BaseUrl, p.IsDefault, p.Notes,
                 p.AuthConfigJson != null,
-                _db.OutboundIntegrationConfigs.IgnoreQueryFilters()
-                    .Count(c => c.ConnectionPointId == p.Id && !c.IsDeleted),
+                counts.GetValueOrDefault(p.Id),
                 OutboundTransportCatalog.Available.Contains(p.SystemType),
                 p.CreatedOn, p.UpdatedOn))
-            .ToListAsync(ct);
+            .ToList();
     }
 }
 
