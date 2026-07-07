@@ -413,6 +413,16 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                 await FailAsync(db, rowId, "Owning entity or document no longer resolves.", ct);
                 return;
             }
+            // Missing file bytes = Validation-class TERMINAL failure (the D-R8-18 contract) — posting a
+            // content-less item just makes the remote reject it (observed: Live IDM 500 → a pointless
+            // transient-retry loop until attempts exhaust). Fail fast with an actionable message instead.
+            if (!SnapshotHasFileContent(snapshot))
+            {
+                await FailAsync(db, rowId,
+                    $"File content missing from storage — re-upload the document (file: {row.FileName}).", ct);
+                logger.LogWarning("[IDM] {Op} doc={Doc} → Failed: file bytes missing from storage.", row.Operation, row.DocumentUploadId);
+                return;
+            }
             // Create re-check: if the gate fell unsatisfied, drop back to Blocked (do not send an incomplete key).
             if (row.Operation == IdmOutboxOperation.Create && !GatePasses(gate, cfg.EligibilityGateExpr, snapshot))
             {
@@ -558,6 +568,13 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                 $"Response mapping output is not a pid contract: {ex.Message}");
         }
     }
+
+    /// <summary>True when the dispatch snapshot carries the file's base64 (<c>attachment.base64</c> non-null).
+    /// Providers return null there when <c>IFileContentProvider</c> cannot read the stored bytes.</summary>
+    internal static bool SnapshotHasFileContent(object snapshot)
+        => snapshot is IDictionary<string, object?> s
+           && s.TryGetValue("attachment", out var a) && a is IDictionary<string, object?> att
+           && att.TryGetValue("base64", out var b64) && b64 is string { Length: > 0 };
 
     private static string BuildPersistSnapshot(IReadOnlyDictionary<string, string> headers, object snapshot)
     {

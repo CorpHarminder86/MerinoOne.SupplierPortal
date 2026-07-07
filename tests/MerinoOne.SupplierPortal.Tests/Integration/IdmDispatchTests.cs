@@ -45,12 +45,23 @@ public class IdmDispatchTests
         CreatedBy = "seed",
     };
 
-    private (Guid invoiceId, Guid docId, string attachmentType) SeedInvoiceDoc(AppDbContext db, string tag, string fileName)
+    /// <summary>Stores REAL bytes for the document (the R10 worker fails a dispatch terminally when the
+    /// stored file is missing — a fake FileUrl would turn every Create into that failure).</summary>
+    private async Task<string> StoreRealFileAsync(string fileName)
+    {
+        var storage = _fx.Factory.Services.GetRequiredService<Application.Common.Interfaces.IFileStorageService>();
+        await using var ms = new MemoryStream(new byte[] { 0x25, 0x50, 0x44, 0x46 });   // "%PDF"
+        var stored = await storage.StoreAsync(ms, fileName, "application/pdf", Guid.NewGuid());
+        return stored.StorageKey;
+    }
+
+    private async Task<(Guid invoiceId, Guid docId, string attachmentType)> SeedInvoiceDocAsync(AppDbContext db, string tag, string fileName)
     {
         var now = DateTime.UtcNow;
         var invoiceId = Guid.NewGuid();
         var docId = Guid.NewGuid();
         var attachmentType = $"IdmInv-{tag}";
+        var storageKey = await StoreRealFileAsync(fileName);
 
         db.Invoices.Add(new Invoice
         {
@@ -64,7 +75,7 @@ public class IdmDispatchTests
         db.DocumentUploads.Add(new DocumentUpload
         {
             Id = docId, OwnerEntityType = DocumentOwnerTypes.Invoice, OwnerEntityId = invoiceId,
-            DocumentType = attachmentType, FileName = fileName, FileUrl = $"idmtest/{tag}_{fileName}",
+            DocumentType = attachmentType, FileName = fileName, FileUrl = storageKey,
             FileSizeKb = 1, MimeType = "application/pdf", UploadedBy = "seed", IdmEntityType = null, Pid = null,
             SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
             TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now,
@@ -90,7 +101,7 @@ public class IdmDispatchTests
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            (_, docId, _) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "invoice.pdf");
+            (_, docId, _) = await SeedInvoiceDocAsync(db, Guid.NewGuid().ToString("N")[..8], "invoice.pdf");
             await db.SaveChangesAsync();
         }
 
@@ -136,7 +147,7 @@ public class IdmDispatchTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             // The Mock client returns a 400 when the payload contains this marker (via the filename).
-            (_, docId, _) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "idm-fail-validation.pdf");
+            (_, docId, _) = await SeedInvoiceDocAsync(db, Guid.NewGuid().ToString("N")[..8], "idm-fail-validation.pdf");
             await db.SaveChangesAsync();
         }
 
@@ -181,7 +192,7 @@ public class IdmDispatchTests
             db.DocumentUploads.Add(new DocumentUpload
             {
                 Id = docId, OwnerEntityType = DocumentOwnerTypes.Invoice, OwnerEntityId = invoiceId,
-                DocumentType = oddType, FileName = "catch-all.pdf", FileUrl = $"idmtest/{tag}_catchall.pdf",
+                DocumentType = oddType, FileName = "catch-all.pdf", FileUrl = await StoreRealFileAsync("catch-all.pdf"),
                 FileSizeKb = 1, MimeType = "application/pdf", UploadedBy = "seed", IdmEntityType = null, Pid = null,
                 SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
                 TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
@@ -229,7 +240,7 @@ public class IdmDispatchTests
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            (_, docId, attachmentType) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "acl-entity.pdf");
+            (_, docId, attachmentType) = await SeedInvoiceDocAsync(db, Guid.NewGuid().ToString("N")[..8], "acl-entity.pdf");
             await db.SaveChangesAsync();
 
             await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
@@ -266,7 +277,7 @@ public class IdmDispatchTests
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            (_, rightDocId, attachmentType) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "backfill.pdf");
+            (_, rightDocId, attachmentType) = await SeedInvoiceDocAsync(db, Guid.NewGuid().ToString("N")[..8], "backfill.pdf");
             // Same attachment-type code, but SUPPLIER-owned — must be skipped by the entity-aware backfill.
             wrongDocId = Guid.NewGuid();
             db.DocumentUploads.Add(new DocumentUpload
@@ -311,7 +322,7 @@ public class IdmDispatchTests
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            (_, unpushedDocId, attachmentType) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "del-unpushed.pdf");
+            (_, unpushedDocId, attachmentType) = await SeedInvoiceDocAsync(db, Guid.NewGuid().ToString("N")[..8], "del-unpushed.pdf");
             await db.SaveChangesAsync();
 
             var cfg = await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
