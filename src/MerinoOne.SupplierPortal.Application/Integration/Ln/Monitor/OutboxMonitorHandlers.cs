@@ -45,6 +45,48 @@ public class GetOutboxMessagesQueryHandler : IRequestHandler<GetOutboxMessagesQu
 }
 
 /// <summary>
+/// R10 — on-demand payload detail for one outbox row: the row's enqueue args + the LATEST dispatch
+/// attempt's request payload and outcome from <c>InforSyncLog</c> (linked by idempotencyKey ==
+/// deterministicKey — one log row per attempt). The raw LN response body is not persisted on success
+/// (only the extracted erpKey ack); failures carry the ERP error message.
+/// </summary>
+public record GetOutboxMessageDetailQuery(Guid OutboxMessageId) : IRequest<OutboxMessageDetailDto?>;
+
+public class GetOutboxMessageDetailQueryHandler : IRequestHandler<GetOutboxMessageDetailQuery, OutboxMessageDetailDto?>
+{
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _user;
+    public GetOutboxMessageDetailQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
+
+    public async Task<OutboxMessageDetailDto?> Handle(GetOutboxMessageDetailQuery request, CancellationToken ct)
+    {
+        var tid = _user.TenantId;
+        var row = await _db.OutboxMessages.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == request.OutboxMessageId && m.TenantId == tid && !m.IsDeleted, ct);
+        if (row is null) return null;
+
+        var attempt = await _db.InforSyncLogs.IgnoreQueryFilters().AsNoTracking()
+            .Where(l => l.TenantId == tid && l.IdempotencyKey == row.DeterministicKey && !l.IsDeleted)
+            .OrderByDescending(l => l.SyncedAt)
+            .Select(l => new { l.PayloadJson, l.ErrorMessage, l.Status, l.SyncedAt })
+            .FirstOrDefaultAsync(ct);
+
+        return new OutboxMessageDetailDto(
+            row.Id, row.TransactionType, row.DeterministicKey,
+            ArgsJson: row.PayloadJson,
+            RequestPayloadJson: attempt?.PayloadJson,
+            AttemptStatus: attempt?.Status.ToString(),
+            AttemptAt: attempt?.SyncedAt,
+            ResponseInfo: attempt is null
+                ? null
+                : attempt.ErrorMessage
+                  ?? (row.Status == OutboxStatus.Acked && row.AckedAt is not null
+                        ? $"Acked (erp ack received {row.AckedAt:yyyy-MM-dd HH:mm}Z)"
+                        : "2xx — ack extracted (LN response body is not persisted on success)"));
+    }
+}
+
+/// <summary>
 /// Manual re-arm (Skipped/Failed → Pending). Allowed on Permanent-classified failures too — admin
 /// override with a UI warning (D-R9-5: the classification informs, it does not imprison).
 /// </summary>

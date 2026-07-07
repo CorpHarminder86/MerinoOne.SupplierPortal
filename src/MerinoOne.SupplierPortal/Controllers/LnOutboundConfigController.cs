@@ -137,6 +137,13 @@ public class LnOutboundConfigController : ControllerBase
     public async Task<Result<OutboxMessagePageDto>> GetOutbox([FromQuery] string? status, [FromQuery] string? transactionType, [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
         => Result<OutboxMessagePageDto>.Ok(await _mediator.Send(new GetOutboxMessagesQuery(status, transactionType, page, pageSize), ct), HttpContext.TraceIdentifier);
 
+    [HttpGet("outbox/{id:guid}/detail")]
+    [Authorize(Policy = Perm.IntegrationRead)]
+    [EndpointSummary("Outbox row payload detail")]
+    [EndpointDescription("The row's enqueue args plus the LATEST dispatch attempt's request payload and outcome (from InforSyncLog, linked by the deterministic key). Fetched on demand — payloads are not shipped with the grid. Requires Integration.Read.")]
+    public async Task<Result<OutboxMessageDetailDto?>> GetOutboxDetail(Guid id, CancellationToken ct)
+        => Result<OutboxMessageDetailDto?>.Ok(await _mediator.Send(new GetOutboxMessageDetailQuery(id), ct), HttpContext.TraceIdentifier);
+
     [HttpPost("outbox/{id:guid}/rearm")]
     [Authorize(Policy = Perm.IntegrationAdmin)]
     [EndpointSummary("Re-arm a Skipped/Failed outbox row")]

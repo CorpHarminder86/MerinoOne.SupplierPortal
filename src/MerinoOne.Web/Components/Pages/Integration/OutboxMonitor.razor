@@ -78,6 +78,9 @@
                     </div>
                     <div class="tlg-col">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
                     <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;justify-content:flex-end;">
+                        <button class="mbtn mbtn--row mbtn--outline" @onclick="() => ViewDetail(row)" disabled="@busy" title="Inspect the request payload + attempt outcome">
+                            <span class="material-symbols-outlined">data_object</span> Detail
+                        </button>
                         @if (CanAdmin && row.Status is "Skipped" or "Failed")
                         {
                             <button class="mbtn mbtn--row mbtn--accent" @onclick="() => rearmRow = row" disabled="@busy" title="Re-arm to Pending (same deterministic key — LN dedupes)">
@@ -90,6 +93,61 @@
         </div>
     }
 </div>
+
+@* R10 — on-demand payload detail: enqueue args + latest attempt request/outcome (InforSyncLog by key). *@
+@if (showDetail)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="info" data-size="xl" style="width:1100px;max-width:94vw;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">data_object</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Outbox · @detailFor?.TransactionType</div>
+                    <h2 class="merino-dialog__title">Dispatch payload detail</h2>
+                    <p class="merino-dialog__subtitle">key @detailFor?.DeterministicKey</p>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showDetail = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                @if (detailLoading)
+                {
+                    <div style="color:var(--mer-ink-500);font-size:13px;">Loading detail…</div>
+                }
+                else if (detail is null)
+                {
+                    <div style="color:var(--mer-ink-500);font-size:13px;">Row not found.</div>
+                }
+                else
+                {
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                        <div>
+                            <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:6px;">
+                                Request payload @(detail.AttemptAt is { } at ? $"(attempt {at:yyyy-MM-dd HH:mm}Z · {detail.AttemptStatus})" : "(no dispatch attempt yet)")
+                            </div>
+                            <pre style="margin:0;max-height:56vh;overflow:auto;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:8px;padding:12px 14px;font-family:Inter,monospace;font-size:12px;line-height:1.5;color:var(--mer-ink-900);white-space:pre-wrap;word-break:break-all;">@(string.IsNullOrWhiteSpace(detail.RequestPayloadJson) ? "— not dispatched yet (the wire body is built at dispatch time) —" : Pretty(detail.RequestPayloadJson))</pre>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:12px;">
+                            <div>
+                                <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:6px;">Response / outcome</div>
+                                <pre style="margin:0;max-height:26vh;overflow:auto;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:8px;padding:12px 14px;font-family:Inter,monospace;font-size:12px;line-height:1.5;color:var(--mer-ink-900);white-space:pre-wrap;word-break:break-all;">@(string.IsNullOrWhiteSpace(detail.ResponseInfo) ? "—" : detail.ResponseInfo)</pre>
+                            </div>
+                            <div>
+                                <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:6px;">Enqueue args (outbox payloadJson)</div>
+                                <pre style="margin:0;max-height:22vh;overflow:auto;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:8px;padding:12px 14px;font-family:Inter,monospace;font-size:12px;line-height:1.5;color:var(--mer-ink-900);white-space:pre-wrap;word-break:break-all;">@(string.IsNullOrWhiteSpace(detail.ArgsJson) ? "— none (payload is rebuilt from the entity at dispatch) —" : Pretty(detail.ArgsJson))</pre>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showDetail = false">Close</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
 
 @if (rearmRow is not null)
 {
@@ -142,6 +200,34 @@
 
     private static string Truncate(string? s, int max)
         => string.IsNullOrEmpty(s) ? "—" : s.Length <= max ? s : s[..max] + "…";
+
+    // Detail dialog state.
+    private bool showDetail;
+    private bool detailLoading;
+    private OutboxMessageDto? detailFor;
+    private OutboxMessageDetailDto? detail;
+
+    private async Task ViewDetail(OutboxMessageDto row)
+    {
+        detailFor = row;
+        detail = null;
+        showDetail = true;
+        detailLoading = true;
+        var resp = await Api.GetAsync<OutboxMessageDetailDto>($"api/integration/outbound/outbox/{row.Id}/detail");
+        detail = resp?.Data;
+        detailLoading = false;
+    }
+
+    private static string Pretty(string json)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return System.Text.Json.JsonSerializer.Serialize(doc.RootElement,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch { return json; }
+    }
 
     protected override async Task OnInitializedAsync()
     {
