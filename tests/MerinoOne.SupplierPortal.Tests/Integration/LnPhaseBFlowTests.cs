@@ -75,12 +75,12 @@ public class LnPhaseBFlowTests
         var db = Db(scope);
         var defaults = new MerinoOne.SupplierPortal.Infrastructure.Integration.Ln.LnDefaultExpressions();
         var entry = defaults.TryGet(OutboxTransactionType.InvoicePost)!;
-        var cfg = await db.LnEndpointConfigs.IgnoreQueryFilters()
+        var cfg = await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == IntegrationTestFixture.TenantId
                 && c.TransactionType == OutboxTransactionType.InvoicePost && !c.IsDeleted);
         if (cfg is null)
         {
-            cfg = new LnEndpointConfig
+            cfg = new OutboundIntegrationConfig
             {
                 TenantId = IntegrationTestFixture.TenantId,
                 TransactionType = OutboxTransactionType.InvoicePost,
@@ -90,9 +90,9 @@ public class LnPhaseBFlowTests
                 ResponseMappingExpr = entry.ResponseExpr,
                 CreatedBy = "seed",
             };
-            db.LnEndpointConfigs.Add(cfg);
+            db.OutboundIntegrationConfigs.Add(cfg);
         }
-        cfg.DispatchMode = LnDispatchMode.Held;
+        cfg.DispatchMode = OutboundDispatchMode.Held;
         cfg.EligibilityGateExpr = $"$contains(invoiceNumber, \"{marker}\")";
         cfg.CandidateFilterName = "InvoiceSubmittedUnposted";
         cfg.CandidateFilterParams = null;
@@ -109,7 +109,7 @@ public class LnPhaseBFlowTests
         await db.LnBackfillRuns.IgnoreQueryFilters()
             .Where(r => r.TenantId == IntegrationTestFixture.TenantId)
             .ExecuteDeleteAsync();
-        await db.LnEndpointConfigs.IgnoreQueryFilters()
+        await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
             .Where(c => c.TenantId == IntegrationTestFixture.TenantId && c.TransactionType == OutboxTransactionType.InvoicePost)
             .ExecuteDeleteAsync();
         await db.IntegrationSwitches.IgnoreQueryFilters()
@@ -273,7 +273,7 @@ public class LnPhaseBFlowTests
             }
 
             // A stale-gateVersion apply is refused: bump the gate, try to re-apply the old run.
-            var cfg = await db.LnEndpointConfigs.IgnoreQueryFilters().FirstAsync(c => c.Id == configId);
+            var cfg = await db.OutboundIntegrationConfigs.IgnoreQueryFilters().FirstAsync(c => c.Id == configId);
             cfg.GateVersion = 5;
             await db.SaveChangesAsync();
             var replay = new ApplyLnBackfillCommandHandler(db, new StubUser());

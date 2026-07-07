@@ -58,19 +58,19 @@ public class LnDispatchRoutingTests
     }
 
     /// <summary>Upserts the tenant's InvoicePost config in the given mode (repo default expressions).</summary>
-    private async Task SetInvoiceConfigAsync(LnDispatchMode mode, string? requestExprOverride = null)
+    private async Task SetInvoiceConfigAsync(OutboundDispatchMode mode, string? requestExprOverride = null)
     {
         using var scope = _fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var defaults = new LnDefaultExpressions();
         var entry = defaults.TryGet(OutboxTransactionType.InvoicePost)!;
 
-        var cfg = await db.LnEndpointConfigs.IgnoreQueryFilters()
+        var cfg = await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == IntegrationTestFixture.TenantId
                 && c.TransactionType == OutboxTransactionType.InvoicePost && !c.IsDeleted);
         if (cfg is null)
         {
-            cfg = new LnEndpointConfig
+            cfg = new OutboundIntegrationConfig
             {
                 TenantId = IntegrationTestFixture.TenantId,
                 TransactionType = OutboxTransactionType.InvoicePost,
@@ -78,7 +78,7 @@ public class LnDispatchRoutingTests
                 EndpointPath = "LN/lnapi/odata/cisli.selfBillingInvoices/Invoices",
                 CreatedBy = "seed",
             };
-            db.LnEndpointConfigs.Add(cfg);
+            db.OutboundIntegrationConfigs.Add(cfg);
         }
         cfg.DispatchMode = mode;
         cfg.RequestMappingExpr = requestExprOverride ?? entry.RequestExpr;
@@ -90,7 +90,7 @@ public class LnDispatchRoutingTests
     {
         using var scope = _fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.LnEndpointConfigs.IgnoreQueryFilters()
+        await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
             .Where(c => c.TenantId == IntegrationTestFixture.TenantId && c.TransactionType == OutboxTransactionType.InvoicePost)
             .ExecuteDeleteAsync();
     }
@@ -120,7 +120,7 @@ public class LnDispatchRoutingTests
     public async Task Legacy_mode_config_row_changes_nothing()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-        await SetInvoiceConfigAsync(LnDispatchMode.Legacy);
+        await SetInvoiceConfigAsync(OutboundDispatchMode.Legacy);
         var rowId = await EnqueueInvoicePostAsync(Guid.NewGuid().ToString("N")[..8]);
 
         await DrainAsync();
@@ -133,7 +133,7 @@ public class LnDispatchRoutingTests
     public async Task Held_mode_leaves_the_row_pending_and_unclaimed()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-        await SetInvoiceConfigAsync(LnDispatchMode.Held);
+        await SetInvoiceConfigAsync(OutboundDispatchMode.Held);
         var rowId = await EnqueueInvoicePostAsync(Guid.NewGuid().ToString("N")[..8]);
 
         await DrainAsync();
@@ -143,7 +143,7 @@ public class LnDispatchRoutingTests
         row.AttemptCount.Should().Be(0);
 
         // Un-hold → the very next drain dispatches it (kill stops dispatch, never enqueue — D-R9-11).
-        await SetInvoiceConfigAsync(LnDispatchMode.Dynamic);
+        await SetInvoiceConfigAsync(OutboundDispatchMode.Dynamic);
         await DrainAsync();
         (await RowAsync(rowId)).Status.Should().Be(OutboxStatus.Dispatched);
         await RemoveInvoiceConfigAsync();
@@ -153,7 +153,7 @@ public class LnDispatchRoutingTests
     public async Task Dynamic_mock_dispatch_logs_the_canonical_jsonata_payload()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-        await SetInvoiceConfigAsync(LnDispatchMode.Dynamic);
+        await SetInvoiceConfigAsync(OutboundDispatchMode.Dynamic);
         var rowId = await EnqueueInvoicePostAsync(Guid.NewGuid().ToString("N")[..8]);
 
         await DrainAsync();
@@ -176,7 +176,7 @@ public class LnDispatchRoutingTests
         }
 
         // Reversibility (D-R9-2): flip back to Legacy → the next row routes through the compiled path.
-        await SetInvoiceConfigAsync(LnDispatchMode.Legacy);
+        await SetInvoiceConfigAsync(OutboundDispatchMode.Legacy);
         var backId = await EnqueueInvoicePostAsync(Guid.NewGuid().ToString("N")[..8]);
         await DrainAsync();
         (await RowAsync(backId)).Status.Should().Be(OutboxStatus.Dispatched);
@@ -189,7 +189,7 @@ public class LnDispatchRoutingTests
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
         // A request expression that evaluates to nothing (navigates off the document) = a CONFIG bug:
         // permanent Failed, no LN call, [permanent] prefix + IntegrationError marker (D-R9-5).
-        await SetInvoiceConfigAsync(LnDispatchMode.Dynamic, requestExprOverride: "no.such.path");
+        await SetInvoiceConfigAsync(OutboundDispatchMode.Dynamic, requestExprOverride: "no.such.path");
         var rowId = await EnqueueInvoicePostAsync(Guid.NewGuid().ToString("N")[..8]);
 
         await DrainAsync();

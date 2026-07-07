@@ -157,10 +157,10 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         // R9 (D-R9-2) — ONE config read per drain cycle: the tri-state routing map (tenant, transactionType) →
         // Legacy | Dynamic | Held. Config staleness is bounded by the poll interval (≤5 s), which is the
         // documented reaction time for a Held/kill flip. Empty table ⇒ empty map ⇒ 100% legacy dispatch.
-        var routes = (await db.LnEndpointConfigs
+        var routes = (await db.OutboundIntegrationConfigs
                 .IgnoreQueryFilters()
-                .Where(c => !c.IsDeleted)
-                .Select(c => new LnEndpointRoute(c.TenantId, c.TransactionType, c.DispatchMode, c.PortalEntity,
+                .Where(c => !c.IsDeleted && c.Kind == OutboundIntegrationKind.Transaction && c.TransactionType != null)
+                .Select(c => new LnEndpointRoute(c.TenantId, c.TransactionType!, c.DispatchMode, c.PortalEntity,
                     c.EndpointPath, c.HttpVerb, c.RequestMappingExpr, c.ResponseMappingExpr))
                 .ToListAsync(ct))
             .ToDictionary(r => (r.TenantId, r.TransactionType));
@@ -326,7 +326,7 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         // Enqueue is untouched by design — killing enqueue would silently lose business events.
         if (row.TenantId is { } rowTenant && killedTenants.Contains(rowTenant)) return;
         routes.TryGetValue((row.TenantId, row.TransactionType), out var route);
-        if (route?.Mode == LnDispatchMode.Held) return;
+        if (route?.Mode == OutboundDispatchMode.Held) return;
 
         // --- 1. ATOMIC CLAIM (review B1/D5): Pending → Sending, server-side, gated by the RowVersion token. -------
         var claimRowVersion = row.RowVersion;
@@ -361,7 +361,7 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         // Sending → Skipped (terminal, reason + gateVersion stamped) — NOT Failed, NO IntegrationError, NO LN
         // call (a skip is a decision, not a failure). Gate evaluation ERRORS also land Skipped (fail closed);
         // the outbox monitor is the surface for those.
-        if (route?.Mode is LnDispatchMode.Dynamic or LnDispatchMode.Held && row.TenantId is { } gateTenant && row.EntityId is { } gateEntity)
+        if (route?.Mode is OutboundDispatchMode.Dynamic or OutboundDispatchMode.Held && row.TenantId is { } gateTenant && row.EntityId is { } gateEntity)
         {
             var verdict = await sp.GetRequiredService<Application.Integration.Ln.ILnEligibilityService>()
                 .EvaluateAsync(gateTenant, row.TransactionType, gateEntity, null, ct);
@@ -397,7 +397,7 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         {
             // Replay the SAME deterministic key (D2 fix) as the ERP idempotency key.
             idem.Set(row.DeterministicKey);
-            if (route?.Mode == LnDispatchMode.Dynamic)
+            if (route?.Mode == OutboundDispatchMode.Dynamic)
             {
                 var dynamicOutcome = await sp.GetRequiredService<ILnDynamicDispatcher>().DispatchAsync(row, route, ct);
                 result = dynamicOutcome.Result;

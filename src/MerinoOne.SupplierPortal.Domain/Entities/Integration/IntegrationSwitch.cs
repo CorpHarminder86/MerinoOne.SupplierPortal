@@ -8,7 +8,7 @@ namespace MerinoOne.SupplierPortal.Domain.Entities.Integration;
 /// tenant; enqueue continues — killing enqueue silently loses business events) and <c>InboundErpAck</c>
 /// (/inbound/erp-ack accepts-and-holds: raw acks persist to <see cref="HeldInboundMessage"/> and replay
 /// on re-enable — never a 503; LN's retry behaviour is not ours to trust). The per-endpoint scope is
-/// NOT here — that is <c>LnEndpointConfig.DispatchMode = Held</c>.
+/// NOT here — that is <c>OutboundIntegrationConfig.DispatchMode = Held</c>.
 /// ABSENT ROW = ENABLED (rows are lazy-created on first toggle; no per-tenant seeding).
 /// Every toggle writes an <see cref="IntegrationSwitchAudit"/> row with a MANDATORY reason.
 /// </summary>

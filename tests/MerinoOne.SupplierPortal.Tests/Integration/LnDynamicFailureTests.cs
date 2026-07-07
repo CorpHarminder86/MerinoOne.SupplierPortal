@@ -89,7 +89,7 @@ public class LnDynamicFailureTests
         };
         var entry = Defaults.TryGet(OutboxTransactionType.PoAccept)!;
         var route = new LnEndpointRoute(
-            IntegrationTestFixture.TenantId, OutboxTransactionType.PoAccept, LnDispatchMode.Dynamic,
+            IntegrationTestFixture.TenantId, OutboxTransactionType.PoAccept, OutboundDispatchMode.Dynamic,
             LnPortalEntity.PurchaseOrder, "LN/lnapi/odata/tdapi.purchaseOrders/Acceptances", "POST",
             entry.RequestExpr, entry.ResponseExpr);
         return (row, route, po.Id);

@@ -117,21 +117,25 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         if (reset > 0) logger.LogWarning("[IDM] Stale-InFlight sweep re-armed {Count} row(s) to Pending.", reset);
     }
 
-    // ── Seeding + gate promotion + unresolvable, per enabled config. ────────────────────────────────────────────
+    // ── Seeding + gate promotion + unresolvable, per active config. ─────────────────────────────────────────────
+    // R10 — configs live on the unified integration.OutboundIntegrationConfig (Kind=Document). Dynamic = active;
+    // Held = fully off for seeding AND dispatch (exact parity with the old IsEnabled=false — a held Document
+    // integration must not silently accumulate outbox rows the way LN's per-endpoint Held does).
     internal static async Task SeedAndPromoteAsync(IAppDbContext db, ISnapshotProviderRegistry registry,
         IEligibilityGate gate, int batchSize, ILogger logger, CancellationToken ct)
     {
-        var configs = await db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().AsNoTracking()
-            .Where(c => c.IsEnabled && !c.IsDeleted)
+        var configs = await db.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking()
+            .Where(c => c.Kind == OutboundIntegrationKind.Document
+                        && c.DispatchMode == OutboundDispatchMode.Dynamic
+                        && c.TargetEntityName != null && !c.IsDeleted)
             .ToListAsync(ct);
 
         foreach (var cfg in configs)
         {
-            var provider = registry.TryGet(cfg.IdmEntityType);
+            var provider = registry.TryGet(cfg.TargetEntityName!);
             if (provider is null || cfg.TenantId is not { } tenantId) continue;
 
-            // Portal entity: the stored value wins; fall back to the provider for pre-2026-07-06 rows.
-            var ownerType = string.IsNullOrEmpty(cfg.OwnerEntityType) ? provider.OwnerEntityType : cfg.OwnerEntityType;
+            var ownerType = cfg.PortalEntity;
             // Optional attachment-type filter: NULL config = catch-all (every document of this portal entity).
             var attachmentType = cfg.AttachmentType;
 
@@ -144,7 +148,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
             if (attachmentType != null) stampQuery = stampQuery.Where(d => d.DocumentType == attachmentType);
             await stampQuery
                 .ExecuteUpdateAsync(s => s
-                    .SetProperty(d => d.IdmEntityType, cfg.IdmEntityType)
+                    .SetProperty(d => d.IdmEntityType, cfg.TargetEntityName)
                     .SetProperty(d => d.UpdatedBy, "idm-dispatcher")
                     .SetProperty(d => d.UpdatedOn, DateTime.UtcNow), ct);
 
@@ -156,8 +160,13 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>R10 gate rule, aligned with the LN plane: a blank/NULL gate = no gate = eligible (was: the R8
+    /// dot-path column was required). Non-blank gates keep the strict-true fail-closed engine semantics.</summary>
+    private static bool GatePasses(IEligibilityGate gate, string? gateExpr, object snapshot)
+        => string.IsNullOrWhiteSpace(gateExpr) || gate.IsSatisfied(gateExpr, snapshot);
+
     private static async Task SeedCreatesAsync(IAppDbContext db, IEntitySnapshotProvider provider, IEligibilityGate gate,
-        IdmAttachmentTypeConfig cfg, string ownerType, string? attachmentType, Guid tenantId, int batchSize, CancellationToken ct)
+        OutboundIntegrationConfig cfg, string ownerType, string? attachmentType, Guid tenantId, int batchSize, CancellationToken ct)
     {
         // Match on (ownerEntityType, documentType) — the portal entity plus, when set, the attachment type
         // (NULL attachmentType = catch-all: every document of this entity). NOT idmEntityType (D7: many types
@@ -183,11 +192,11 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         {
             if (existing.Contains(d.Id)) continue;
             var snapshot = await provider.BuildSnapshotAsync(tenantId, d.OwnerEntityId, d.Id, includeFileContent: false, ct);
-            var eligible = snapshot is not null && gate.IsSatisfied(cfg.EligibilityGateExpr, snapshot);
+            var eligible = snapshot is not null && GatePasses(gate, cfg.EligibilityGateExpr, snapshot);
             db.IdmDocumentOutboxes.Add(new IdmDocumentOutbox
             {
                 DocumentUploadId = d.Id,
-                IdmEntityType = cfg.IdmEntityType,
+                IdmEntityType = cfg.TargetEntityName!,
                 OwnerEntityId = d.OwnerEntityId,
                 FileName = d.FileName,
                 Operation = IdmOutboxOperation.Create,
@@ -200,7 +209,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         }
     }
 
-    private static async Task SeedDeletesAsync(IAppDbContext db, IdmAttachmentTypeConfig cfg, string ownerType, string? attachmentType, Guid tenantId, int batchSize, CancellationToken ct)
+    private static async Task SeedDeletesAsync(IAppDbContext db, OutboundIntegrationConfig cfg, string ownerType, string? attachmentType, Guid tenantId, int batchSize, CancellationToken ct)
     {
         // Soft-deleted documents that WERE synced (pid present) emit an IDM delete. Match on (ownerEntityType,
         // documentType) so a document is handled by exactly one config (owner filter added 2026-07-06 — a catch-all
@@ -221,7 +230,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
             db.IdmDocumentOutboxes.Add(new IdmDocumentOutbox
             {
                 DocumentUploadId = d.Id,
-                IdmEntityType = cfg.IdmEntityType,
+                IdmEntityType = cfg.TargetEntityName!,
                 OwnerEntityId = d.OwnerEntityId,
                 FileName = d.FileName,
                 Operation = IdmOutboxOperation.Delete,
@@ -255,11 +264,11 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
     }
 
     private static async Task PromoteBlockedAsync(IAppDbContext db, IEntitySnapshotProvider provider, IEligibilityGate gate,
-        IdmAttachmentTypeConfig cfg, Guid tenantId, int batchSize, CancellationToken ct)
+        OutboundIntegrationConfig cfg, Guid tenantId, int batchSize, CancellationToken ct)
     {
         var blocked = await db.IdmDocumentOutboxes.IgnoreQueryFilters()
             .Where(o => !o.IsDeleted && o.Status == IdmOutboxStatus.Blocked
-                        && o.TenantId == tenantId && o.IdmEntityType == cfg.IdmEntityType)
+                        && o.TenantId == tenantId && o.IdmEntityType == cfg.TargetEntityName)
             .Take(batchSize)
             .ToListAsync(ct);
 
@@ -275,7 +284,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                 row.UpdatedOn = DateTime.UtcNow;
                 continue;
             }
-            if (gate.IsSatisfied(cfg.EligibilityGateExpr, snapshot))
+            if (GatePasses(gate, cfg.EligibilityGateExpr, snapshot))
             {
                 row.Status = IdmOutboxStatus.Pending;
                 row.UpdatedBy = "idm-dispatcher";
@@ -319,10 +328,33 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         var builder = scope.ServiceProvider.GetRequiredService<IOutboundRequestBuilder>();
         var client = scope.ServiceProvider.GetRequiredService<IIdmClient>();
         var ackParser = scope.ServiceProvider.GetRequiredService<IIdmAckParser>();
+        var mapping = scope.ServiceProvider.GetRequiredService<Application.Integration.Ln.ILnMappingService>();
 
         // Read + atomic claim (Pending → InFlight) gated by RowVersion — exactly-once under parallelism/restart.
         var snap = await db.IdmDocumentOutboxes.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(o => o.Id == rowId, ct);
         if (snap is null || snap.IsDeleted || snap.Status != IdmOutboxStatus.Pending) return;
+
+        // R10 — resolve THE config the same way the seeding scan matched the document: by the document's
+        // (ownerEntityType, documentType), a specific-attachment-type row beating the catch-all (D7). NOT by
+        // targetEntityName — many rows may share one entity type, which made the lookup ambiguous.
+        var docKey = await db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
+            .Where(d => d.Id == snap.DocumentUploadId)
+            .Select(d => new { d.OwnerEntityType, d.DocumentType })
+            .FirstOrDefaultAsync(ct);
+        OutboundIntegrationConfig? cfg = null;
+        if (docKey is not null)
+        {
+            var candidates = await db.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking()
+                .Where(c => c.TenantId == snap.TenantId && c.Kind == OutboundIntegrationKind.Document
+                            && c.PortalEntity == docKey.OwnerEntityType && !c.IsDeleted
+                            && (c.AttachmentType == null || c.AttachmentType == docKey.DocumentType))
+                .ToListAsync(ct);
+            cfg = candidates.OrderBy(c => c.AttachmentType == null ? 1 : 0).ThenBy(c => c.Seq).FirstOrDefault();
+        }
+
+        // R10 — Held pre-claim gate: a held integration stops dispatch of already-Pending rows too (kill
+        // stops dispatch; the seeding scan is separately fenced to Dynamic).
+        if (cfg?.DispatchMode == OutboundDispatchMode.Held) return;
 
         var claimVersion = snap.RowVersion;
         var claimedAt = DateTime.UtcNow;
@@ -338,11 +370,24 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         var row = await db.IdmDocumentOutboxes.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(o => o.Id == rowId, ct);
         if (row is null) return;
 
-        var cfg = await db.IdmAttachmentTypeConfigs.IgnoreQueryFilters().AsNoTracking()
-            .FirstOrDefaultAsync(c => c.TenantId == row.TenantId && c.IdmEntityType == row.IdmEntityType && !c.IsDeleted, ct);
         var provider = registry.TryGet(row.IdmEntityType);
         var tenantId = row.TenantId ?? Guid.Empty;
-        var endpointKey = $"IDM.Item.{row.Operation}";
+
+        if (cfg is null)
+        {
+            // R10 — routing (verb/path) lives on the config row for EVERY operation now, so a deleted config
+            // stops Deletes too (pre-R10 they could still resolve the separate transport row).
+            await FailAsync(db, rowId, "Missing outbound integration config (Document kind) for this entity type.", ct);
+            return;
+        }
+
+        // Per-operation routing from the unified row (NULL mutate/delete path = reuse the create path).
+        var (verb, path) = row.Operation switch
+        {
+            IdmOutboxOperation.Update => (cfg.MutateVerb ?? cfg.HttpVerb, cfg.MutatePath ?? cfg.EndpointPath),
+            IdmOutboxOperation.Delete => (cfg.DeleteVerb ?? "DELETE", cfg.DeletePath ?? cfg.EndpointPath),
+            _ => (cfg.HttpVerb, cfg.EndpointPath),
+        };
 
         OutboundEnvelope envelope;
         string persistSnapshotJson;
@@ -357,9 +402,9 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         }
         else
         {
-            if (cfg is null || provider is null)
+            if (provider is null)
             {
-                await FailAsync(db, rowId, "Missing IDM type config / snapshot provider.", ct);
+                await FailAsync(db, rowId, "No snapshot provider for this entity type.", ct);
                 return;
             }
             var snapshot = await provider.BuildSnapshotAsync(tenantId, row.OwnerEntityId, row.DocumentUploadId, includeFileContent: true, ct);
@@ -369,7 +414,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                 return;
             }
             // Create re-check: if the gate fell unsatisfied, drop back to Blocked (do not send an incomplete key).
-            if (row.Operation == IdmOutboxOperation.Create && !gate.IsSatisfied(cfg.EligibilityGateExpr, snapshot))
+            if (row.Operation == IdmOutboxOperation.Create && !GatePasses(gate, cfg.EligibilityGateExpr, snapshot))
             {
                 await db.IdmDocumentOutboxes.IgnoreQueryFilters()
                     .Where(o => o.Id == rowId && o.Status == IdmOutboxStatus.InFlight)
@@ -381,10 +426,10 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
             }
 
             var expression = row.Operation == IdmOutboxOperation.Update
-                ? (cfg.MutateMappingExpression ?? cfg.CreateMappingExpression)
-                : cfg.CreateMappingExpression;
+                ? (cfg.MutateMappingExpr ?? cfg.RequestMappingExpr)
+                : cfg.RequestMappingExpr;
             envelope = await builder.BuildAsync(expression, snapshot, ct);
-            envelope = await MergeStaticHeaders(db, envelope, tenantId, endpointKey, ct);
+            envelope = MergeStaticHeaders(envelope, cfg.StaticHeadersJson);
             persistSnapshotJson = BuildPersistSnapshot(envelope.Headers, snapshot);
         }
 
@@ -394,7 +439,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
             .ExecuteUpdateAsync(s => s.SetProperty(o => o.RequestSnapshotJson, Truncate(persistSnapshotJson, 1_000_000)), ct);
 
         IdmHttpResult result;
-        try { result = await client.SendAsync(tenantId, endpointKey, envelope, ct); }
+        try { result = await client.SendAsync(tenantId, row.Operation, verb, path, envelope, ct); }
         catch (Exception ex) { result = new IdmHttpResult(0, ex.Message, true); }
 
         var now = DateTime.UtcNow;
@@ -406,7 +451,14 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
             return;
         }
 
-        var ack = ackParser.Parse(result.StatusCode, result.Body);
+        // R10 — response extraction: a configured response mapping (over the format-normalized body) replaces
+        // the hardcoded parser for 2xx Create/Update; everything else (non-2xx classification, Delete, blank
+        // expression) stays on the code-owned parser. Retriability NEVER flows from an expression (D-R9-5).
+        var ack = row.Operation != IdmOutboxOperation.Delete
+                  && result.StatusCode is >= 200 and < 300
+                  && !string.IsNullOrWhiteSpace(cfg.ResponseMappingExpr)
+            ? ExtractAckViaExpression(mapping, cfg.ResponseMappingExpr!, cfg.ResponseFormat, result.Body)
+            : ackParser.Parse(result.StatusCode, result.Body);
 
         // Delete is special: the IDM delete response carries NO <pid>, so the pid-requiring parser would wrongly
         // flag a real success as Validation. Success = any 2xx; a gone pid (404 / "does not exist") is a no-op
@@ -448,12 +500,8 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         }
     }
 
-    private static async Task<OutboundEnvelope> MergeStaticHeaders(IAppDbContext db, OutboundEnvelope envelope, Guid tenantId, string endpointKey, CancellationToken ct)
+    private static OutboundEnvelope MergeStaticHeaders(OutboundEnvelope envelope, string? staticJson)
     {
-        var staticJson = await db.OutboundEndpointConfigs.IgnoreQueryFilters().AsNoTracking()
-            .Where(e => e.TenantId == tenantId && e.EndpointKey == endpointKey && !e.IsDeleted)
-            .Select(e => e.StaticHeadersJson)
-            .FirstOrDefaultAsync(ct);
         if (string.IsNullOrWhiteSpace(staticJson)) return envelope;
 
         var merged = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -468,6 +516,47 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
 
         foreach (var (k, v) in envelope.Headers) merged[k] = v; // expression headers win
         return envelope with { Headers = merged };
+    }
+
+    /// <summary>
+    /// R10 — expression-based success extraction. The 2xx body is normalized to JSON per the config's
+    /// declared responseFormat (Xml → <see cref="XmlJsonNormalizer"/>), then the response mapping runs and
+    /// must yield <c>{pid: "…"}</c> (or a bare pid string). A 2xx whose content cannot produce a pid is a
+    /// Validation failure — same never-silent-success posture as the code parser (D-R8-22).
+    /// </summary>
+    internal static IdmAck ExtractAckViaExpression(Application.Integration.Ln.ILnMappingService mapping,
+        string responseExpr, string responseFormat, string body)
+    {
+        var json = string.Equals(responseFormat, "Xml", StringComparison.OrdinalIgnoreCase)
+            ? XmlJsonNormalizer.TryToJson(body)
+            : body;
+        if (string.IsNullOrWhiteSpace(json))
+            return new IdmAck(null, null, null, null, IdmFailureClass.Validation,
+                $"2xx response body is not well-formed {responseFormat} — cannot extract pid.");
+
+        var eval = mapping.Evaluate(responseExpr, json!);
+        if (!eval.Ok || string.IsNullOrWhiteSpace(eval.OutputJson))
+            return new IdmAck(null, null, null, null, IdmFailureClass.Validation,
+                $"Response mapping failed: {eval.Error ?? "no output"}.");
+
+        try
+        {
+            var node = JsonNode.Parse(eval.OutputJson!);
+            var pid = node switch
+            {
+                JsonObject obj when obj.TryGetPropertyValue("pid", out var p) => p?.GetValue<string>(),
+                JsonValue val => val.GetValue<string>(),
+                _ => null,
+            };
+            return string.IsNullOrWhiteSpace(pid)
+                ? new IdmAck(null, null, null, null, IdmFailureClass.Validation, "Response mapping produced no pid.")
+                : new IdmAck(pid, null, null, null, IdmFailureClass.None, null);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
+        {
+            return new IdmAck(null, null, null, null, IdmFailureClass.Validation,
+                $"Response mapping output is not a pid contract: {ex.Message}");
+        }
     }
 
     private static string BuildPersistSnapshot(IReadOnlyDictionary<string, string> headers, object snapshot)

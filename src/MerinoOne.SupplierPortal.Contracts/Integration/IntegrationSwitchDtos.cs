@@ -1,7 +1,7 @@
 namespace MerinoOne.SupplierPortal.Contracts.Integration;
 
 // R9 (TSD R9 §2.6, D-R9-11) — kill-switch DTOs. Per-endpoint scope is NOT here (that is
-// LnEndpointConfig.dispatchMode = Held on the config screen).
+// OutboundIntegrationConfig.dispatchMode = Held on the config screen).
 
 /// <summary>One switch scope's state. Absent DB row = enabled (rows lazy-create on first toggle).</summary>
 public sealed record IntegrationSwitchDto(

@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Seed;
 
 /// <summary>
-/// R9 (TSD R9 §2.1) — seeds one <c>LnEndpointConfig</c> row per tenant per transaction type (all 8) from
+/// R9 (TSD R9 §2.1) — seeds one <c>OutboundIntegrationConfig</c> row per tenant per transaction type (all 8) from
 /// the repo-embedded expression catalogue. Every row seeds <c>DispatchMode=Legacy</c> — creating config
 /// rows changes NOTHING at dispatch until an admin attests + flips to Dynamic (D-R9-2/17/21).
 /// Idempotent with the IdmOutboundSeeder per-slot hash-gate: on re-seed an expression is overwritten ONLY
@@ -54,22 +54,42 @@ public static class LnOutboundSeeder
 
         foreach (var tenantId in tenantIds)
         {
+            // R10 — every tenant gets exactly one default connection point ("Default — Infor ION"): base URL +
+            // OAuth resolve from the tenant's Infor connection settings, so the row is pure identity. Configs
+            // with a NULL connectionPointId dispatch through it — the pre-R10 behavior, now named.
+            var hasDefault = await ctx.ConnectionPoints.IgnoreQueryFilters()
+                .AnyAsync(p => p.TenantId == tenantId && p.IsDefault && !p.IsDeleted, ct);
+            if (!hasDefault)
+            {
+                ctx.ConnectionPoints.Add(new ConnectionPoint
+                {
+                    TenantId = tenantId,
+                    Name = "Default — Infor ION",
+                    SystemType = ConnectionSystemTypes.InforIon,
+                    IsDefault = true,
+                    Notes = "Seeded default. Base URL and OAuth resolve from Settings → Infor CloudSuite.",
+                    CreatedBy = Actor,
+                });
+            }
+
             foreach (var entry in defaults.All)
             {
-                var existing = await ctx.LnEndpointConfigs.IgnoreQueryFilters()
-                    .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.TransactionType == entry.TransactionType && !c.IsDeleted, ct);
+                var existing = await ctx.OutboundIntegrationConfigs.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Kind == OutboundIntegrationKind.Transaction
+                                              && c.TransactionType == entry.TransactionType && !c.IsDeleted, ct);
 
                 if (existing is null)
                 {
                     var filter = CandidateFilterByType[entry.TransactionType];
-                    ctx.LnEndpointConfigs.Add(new LnEndpointConfig
+                    ctx.OutboundIntegrationConfigs.Add(new OutboundIntegrationConfig
                     {
                         TenantId = tenantId,
+                        Kind = OutboundIntegrationKind.Transaction,
                         TransactionType = entry.TransactionType,
                         PortalEntity = entry.PortalEntity,
                         EndpointPath = EndpointPathByType[entry.TransactionType],
                         HttpVerb = "POST",
-                        DispatchMode = LnDispatchMode.Legacy,
+                        DispatchMode = OutboundDispatchMode.Legacy,
                         RequestMappingExpr = entry.RequestExpr,
                         RequestMappingSeedHash = entry.RequestHash,
                         ResponseMappingExpr = entry.ResponseExpr,
@@ -95,7 +115,8 @@ public static class LnOutboundSeeder
                     existing.RequestMappingSeedHash = entry.RequestHash;
                     touched = true;
                 }
-                if (Application.Common.Integration.ExpressionHash.Compute(existing.ResponseMappingExpr) == existing.ResponseMappingSeedHash
+                if (existing.ResponseMappingExpr is not null
+                    && Application.Common.Integration.ExpressionHash.Compute(existing.ResponseMappingExpr) == existing.ResponseMappingSeedHash
                     && existing.ResponseMappingSeedHash != entry.ResponseHash)
                 {
                     existing.ResponseMappingExpr = entry.ResponseExpr;

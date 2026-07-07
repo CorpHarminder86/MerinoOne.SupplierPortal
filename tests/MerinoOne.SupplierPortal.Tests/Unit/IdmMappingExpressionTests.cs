@@ -12,7 +12,7 @@ namespace MerinoOne.SupplierPortal.Tests.Unit;
 /// </summary>
 public class IdmMappingExpressionTests
 {
-    private readonly JsonataOutboundRequestBuilder _builder = new();
+    private readonly JsonataOutboundRequestBuilder _builder = new(new MerinoOne.SupplierPortal.Infrastructure.Integration.Ln.LnMappingService());
     private readonly IdmDefaultExpressions _defaults = new();
 
     [Fact]

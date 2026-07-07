@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace MerinoOne.SupplierPortal.Contracts.Integration;
 
 // TSD R9 — LN outbound endpoint-config DTOs (Phase A). The closed response/ack contract and the
-// admin-screen CRUD/validate/attest/pin surface for integration.LnEndpointConfig.
+// admin-screen CRUD/validate/attest/pin surface for integration.OutboundIntegrationConfig.
 
 /// <summary>
 /// The fixed CLOSED portal contract every response/ack mapping must produce (D-R9-4):
@@ -18,18 +18,37 @@ public sealed record LnOutboundAck(
     string? Message = null,
     JsonElement? CorrelationBag = null);
 
-/// <summary>List/edit projection of one <c>integration.LnEndpointConfig</c> row.</summary>
-public sealed record LnEndpointConfigDto(
+/// <summary>
+/// List/edit projection of one <c>integration.OutboundIntegrationConfig</c> row (R10 unified plane).
+/// <c>Kind</c> = Transaction | Document selects which field group is meaningful — Transaction rows carry
+/// TransactionType/candidate-filter/sample/attestation; Document rows carry AttachmentType/TargetEntityName/
+/// Mutate-Delete routing/ContextJson.
+/// </summary>
+public sealed record OutboundIntegrationConfigDto(
     Guid Id,
     int Seq,
-    string TransactionType,
+    string Kind,
+    Guid? ConnectionPointId,
+    string? ConnectionPointName,
+    string? TransactionType,
     string PortalEntity,
+    string? AttachmentType,
+    string? TargetEntityName,
+    string? ContextJson,
     string EndpointPath,
     string HttpVerb,
+    string? MutatePath,
+    string? MutateVerb,
+    string? DeletePath,
+    string? DeleteVerb,
+    string? StaticHeadersJson,
+    string RequestFormat,
+    string ResponseFormat,
     string DispatchMode,
     string? EligibilityGateExpr,
     string RequestMappingExpr,
-    string ResponseMappingExpr,
+    string? MutateMappingExpr,
+    string? ResponseMappingExpr,
     string? AckMappingExpr,
     string? CandidateFilterName,
     string? CandidateFilterParams,
@@ -50,16 +69,30 @@ public sealed record LnEndpointConfigDto(
     DateTime CreatedOn,
     DateTime? UpdatedOn);
 
-/// <summary>Create/update request. Never carries dispatchMode — mode transitions are a separate audited action.</summary>
-public sealed record SaveLnEndpointConfigRequest(
+/// <summary>Create/update request. Never carries dispatchMode — mode transitions are a separate audited action.
+/// <c>Kind</c> is fixed at creation (Transaction | Document) and immutable on update.</summary>
+public sealed record SaveOutboundIntegrationConfigRequest(
     Guid? Id,
-    string TransactionType,
+    string Kind,
+    Guid? ConnectionPointId,
+    string? TransactionType,
     string PortalEntity,
+    string? AttachmentType,
+    string? TargetEntityName,
+    string? ContextJson,
     string EndpointPath,
     string HttpVerb,
+    string? MutatePath,
+    string? MutateVerb,
+    string? DeletePath,
+    string? DeleteVerb,
+    string? StaticHeadersJson,
+    string? RequestFormat,
+    string? ResponseFormat,
     string? EligibilityGateExpr,
     string RequestMappingExpr,
-    string ResponseMappingExpr,
+    string? MutateMappingExpr,
+    string? ResponseMappingExpr,
     string? AckMappingExpr,
     string? CandidateFilterName,
     string? CandidateFilterParams,
@@ -67,7 +100,7 @@ public sealed record SaveLnEndpointConfigRequest(
     string? AckSampleJson);
 
 /// <summary>Dry validation of a config shape (same pipeline as save, no write). Reused by the Phase D editor live-eval.</summary>
-public sealed record ValidateLnEndpointConfigRequest(
+public sealed record ValidateOutboundIntegrationConfigRequest(
     string PortalEntity,
     string? EligibilityGateExpr,
     string? RequestMappingExpr,
@@ -97,7 +130,7 @@ public sealed record LnConfigValidationResultDto(
 public sealed record AttestLnEndpointRequest(string Note, bool PathConfirmed);
 
 /// <summary>Mode transition: <c>Legacy</c> | <c>Dynamic</c> | <c>Held</c>. → Dynamic requires attestation + pathConfirmed + fresh pinned sample + green validation.</summary>
-public sealed record SetLnDispatchModeRequest(string Mode);
+public sealed record SetOutboundDispatchModeRequest(string Mode);
 
 /// <summary>Pin request (D-R9-18): run this entity through the input-document builder and freeze the output on the config.</summary>
 public sealed record PinLnSampleRequest(Guid EntityId);

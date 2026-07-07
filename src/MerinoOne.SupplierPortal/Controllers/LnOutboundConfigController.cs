@@ -12,13 +12,16 @@ using Microsoft.AspNetCore.Mvc;
 namespace MerinoOne.SupplierPortal.Controllers;
 
 /// <summary>
-/// R9 (TSD R9 §2.1) — config-driven LN outbound posting admin: per-transaction-type endpoint config CRUD,
-/// save-time JSONata/contract validation, sample pin (D-R9-18), manual dry-post attestation + path
-/// confirmation (D-R9-17/21), and the tri-state dispatch-mode switch (D-R9-2/11). Reads are Settings.Read;
-/// every mutation is the high-blast-radius Integration.Admin.
+/// R9 §2.1 / R10 — unified outbound-integration admin: config CRUD for BOTH kinds (Transaction = LN posting,
+/// Document = IDM sync), save-time JSONata/contract validation, sample pin (D-R9-18), attestation + path
+/// confirmation (D-R9-17/21), the tri-state dispatch-mode switch (D-R9-2/11), and connection points.
+/// Reads are Settings.Read; every mutation is the high-blast-radius Integration.Admin.
+/// The route keeps its R9 name (api/integration/ln-outbound) as a stable alias; api/integration/outbound is
+/// the R10 canonical.
 /// </summary>
 [ApiController]
 [Authorize]
+[Route("api/integration/outbound")]
 [Route("api/integration/ln-outbound")]
 public class LnOutboundConfigController : ControllerBase
 {
@@ -27,10 +30,39 @@ public class LnOutboundConfigController : ControllerBase
 
     [HttpGet("configs")]
     [Authorize(Policy = Perm.SettingsRead)]
-    [EndpointSummary("List LN outbound endpoint configs")]
-    [EndpointDescription("The tenant's per-transaction-type LN endpoint configs with drift flags, sample state (stale badge on builder-version drift) and attestation evidence. Requires Settings.Read.")]
-    public async Task<Result<IReadOnlyList<LnEndpointConfigDto>>> GetConfigs(CancellationToken ct)
-        => Result<IReadOnlyList<LnEndpointConfigDto>>.Ok(await _mediator.Send(new GetLnEndpointConfigsQuery(), ct), HttpContext.TraceIdentifier);
+    [EndpointSummary("List outbound integration configs")]
+    [EndpointDescription("The tenant's unified outbound integration configs (Transaction + Document kinds) with connection tags, drift flags, sample state (stale badge on builder-version drift) and attestation evidence. Requires Settings.Read.")]
+    public async Task<Result<IReadOnlyList<OutboundIntegrationConfigDto>>> GetConfigs(CancellationToken ct)
+        => Result<IReadOnlyList<OutboundIntegrationConfigDto>>.Ok(await _mediator.Send(new GetOutboundIntegrationConfigsQuery(), ct), HttpContext.TraceIdentifier);
+
+    // ── R10 — connection points ───────────────────────────────────────────────────────────────────────
+    [HttpGet("connection-points")]
+    [Authorize(Policy = Perm.SettingsRead)]
+    [EndpointSummary("List connection points")]
+    [EndpointDescription("The tenant's named outbound connection targets (default chip, in-use counts, transport availability). Auth blobs are never returned. Requires Settings.Read.")]
+    public async Task<Result<IReadOnlyList<ConnectionPointDto>>> GetConnectionPoints(CancellationToken ct)
+        => Result<IReadOnlyList<ConnectionPointDto>>.Ok(await _mediator.Send(new Application.Integration.Connection.GetConnectionPointsQuery(), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("connection-points")]
+    [Authorize(Policy = Perm.IntegrationAdmin)]
+    [EndpointSummary("Create/update a connection point")]
+    [EndpointDescription("Upserts a connection point. InforION rows carry no URL/auth (resolved from the Infor connection settings); other types require a base URL and store their auth blob encrypted. Requires Integration.Admin.")]
+    public async Task<Result<Guid>> SaveConnectionPoint([FromBody] SaveConnectionPointRequest body, CancellationToken ct)
+        => Result<Guid>.Ok(await _mediator.Send(new Application.Integration.Connection.SaveConnectionPointCommand(body), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("connection-points/{id:guid}/set-default")]
+    [Authorize(Policy = Perm.IntegrationAdmin)]
+    [EndpointSummary("Set the tenant default connection")]
+    [EndpointDescription("Moves the tenant default (what NULL-tagged config rows dispatch through). Blocked for connection types with no registered transport. Requires Integration.Admin.")]
+    public async Task<Result<bool>> SetDefaultConnectionPoint(Guid id, CancellationToken ct)
+        => Result<bool>.Ok(await _mediator.Send(new Application.Integration.Connection.SetDefaultConnectionPointCommand(id), ct), HttpContext.TraceIdentifier);
+
+    [HttpDelete("connection-points/{id:guid}")]
+    [Authorize(Policy = Perm.IntegrationAdmin)]
+    [EndpointSummary("Delete a connection point")]
+    [EndpointDescription("Soft-deletes a connection point. Blocked while it is the default or any integration config is tagged to it. Requires Integration.Admin.")]
+    public async Task<Result<bool>> DeleteConnectionPoint(Guid id, CancellationToken ct)
+        => Result<bool>.Ok(await _mediator.Send(new Application.Integration.Connection.DeleteConnectionPointCommand(id), ct), HttpContext.TraceIdentifier);
 
     [HttpGet("candidate-filters")]
     [Authorize(Policy = Perm.SettingsRead)]
@@ -50,15 +82,15 @@ public class LnOutboundConfigController : ControllerBase
     [Authorize(Policy = Perm.IntegrationAdmin)]
     [EndpointSummary("Create/update an LN endpoint config")]
     [EndpointDescription("Upserts (by id, else tenant+transactionType) after the full save-time pipeline: expressions compile, gate is boolean vs the pinned sample, response/ack satisfy the CLOSED contract (unknown keys block), candidateFilterName resolves in the registry. Any gate/mapping/filter change bumps gateVersion. Never changes dispatchMode. Requires Integration.Admin.")]
-    public async Task<Result<Guid>> SaveConfig([FromBody] SaveLnEndpointConfigRequest body, CancellationToken ct)
-        => Result<Guid>.Ok(await _mediator.Send(new SaveLnEndpointConfigCommand(body), ct), HttpContext.TraceIdentifier);
+    public async Task<Result<Guid>> SaveConfig([FromBody] SaveOutboundIntegrationConfigRequest body, CancellationToken ct)
+        => Result<Guid>.Ok(await _mediator.Send(new SaveOutboundIntegrationConfigCommand(body), ct), HttpContext.TraceIdentifier);
 
     [HttpPost("configs/validate")]
     [Authorize(Policy = Perm.IntegrationAdmin)]
     [EndpointSummary("Dry-validate a config shape")]
     [EndpointDescription("Runs the save-time pipeline without writing: per-slot errors + the rendered request preview against the supplied sample. (The Phase D mapping editor's live-eval endpoint.) Requires Integration.Admin.")]
-    public async Task<Result<LnConfigValidationResultDto>> Validate([FromBody] ValidateLnEndpointConfigRequest body, CancellationToken ct)
-        => Result<LnConfigValidationResultDto>.Ok(await _mediator.Send(new ValidateLnEndpointConfigCommand(body), ct), HttpContext.TraceIdentifier);
+    public async Task<Result<LnConfigValidationResultDto>> Validate([FromBody] ValidateOutboundIntegrationConfigRequest body, CancellationToken ct)
+        => Result<LnConfigValidationResultDto>.Ok(await _mediator.Send(new ValidateOutboundIntegrationConfigCommand(body), ct), HttpContext.TraceIdentifier);
 
     [HttpPost("configs/{id:guid}/pin-sample")]
     [Authorize(Policy = Perm.IntegrationAdmin)]
@@ -78,8 +110,8 @@ public class LnOutboundConfigController : ControllerBase
     [Authorize(Policy = Perm.IntegrationAdmin)]
     [EndpointSummary("Switch dispatch mode (Legacy | Dynamic | Held)")]
     [EndpointDescription("Tri-state cutover/kill: → Dynamic requires attestation + pathConfirmed + a fresh pinned sample + green validation; → Held (per-endpoint kill — rows accumulate Pending, enqueue continues) and → Legacy (rollback) are never blocked. Requires Integration.Admin.")]
-    public async Task<Result<bool>> SetDispatchMode(Guid id, [FromBody] SetLnDispatchModeRequest body, CancellationToken ct)
-        => Result<bool>.Ok(await _mediator.Send(new SetLnDispatchModeCommand(id, body.Mode), ct), HttpContext.TraceIdentifier);
+    public async Task<Result<bool>> SetDispatchMode(Guid id, [FromBody] SetOutboundDispatchModeRequest body, CancellationToken ct)
+        => Result<bool>.Ok(await _mediator.Send(new SetOutboundDispatchModeCommand(id, body.Mode), ct), HttpContext.TraceIdentifier);
 
     [HttpPost("configs/{id:guid}/restore-default")]
     [Authorize(Policy = Perm.IntegrationAdmin)]
@@ -93,7 +125,7 @@ public class LnOutboundConfigController : ControllerBase
     [EndpointSummary("Delete an LN endpoint config")]
     [EndpointDescription("Soft delete = permanent rollback to the legacy compiled builder for this transaction type (D-R9-2). Requires Integration.Admin.")]
     public async Task<Result<bool>> Delete(Guid id, CancellationToken ct)
-        => Result<bool>.Ok(await _mediator.Send(new DeleteLnEndpointConfigCommand(id), ct), HttpContext.TraceIdentifier);
+        => Result<bool>.Ok(await _mediator.Send(new DeleteOutboundIntegrationConfigCommand(id), ct), HttpContext.TraceIdentifier);
 
     // ── Phase B — outbox monitor, kill switches, backfill, held inbound (reads on Integration.Read per the
     // existing SyncLog/Errors precedent; every mutation stays Integration.Admin — O-R9-6 close-out). ─────────

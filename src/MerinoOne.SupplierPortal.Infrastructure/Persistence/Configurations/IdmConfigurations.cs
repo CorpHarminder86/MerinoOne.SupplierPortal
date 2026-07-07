@@ -6,65 +6,12 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Configurations;
 
-// R8 (2026-07-04) — TSD R8. EF config for the outbound-document-sync (Infor IDM) tables. Two-key convention
+// R8 (2026-07-04) — TSD R8. EF config for the outbound-document-sync (Infor IDM) outbox. Two-key convention
 // (GUID PK nonclustered + INT Seq clustered UX) via ApplyBaseEntityConvention; camelCase columns; named
 // constraints; EF auto-named DEFAULTs (project convention overrides explicit DF_ names).
-
-public class OutboundEndpointConfigConfiguration : IEntityTypeConfiguration<OutboundEndpointConfig>
-{
-    public void Configure(EntityTypeBuilder<OutboundEndpointConfig> b)
-    {
-        b.ApplyBaseEntityConvention("OutboundEndpointConfig", "integration", "outboundEndpointConfig");
-        // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
-        b.Property(x => x.TargetSystem).HasColumnName("targetSystem").HasMaxLength(30).IsRequired();
-        b.Property(x => x.EndpointKey).HasColumnName("endpointKey").HasMaxLength(80).IsRequired();
-        b.Property(x => x.HttpMethod).HasColumnName("httpMethod").HasMaxLength(10).IsRequired();
-        b.Property(x => x.RelativePath).HasColumnName("relativePath").HasMaxLength(400).IsRequired();
-        b.Property(x => x.StaticHeadersJson).HasColumnName("staticHeadersJson").HasColumnType("nvarchar(max)");
-        b.Property(x => x.AckParserKey).HasColumnName("ackParserKey").HasMaxLength(60);
-        b.Property(x => x.DefaultAcl).HasColumnName("defaultAcl").HasMaxLength(60);
-        b.Property(x => x.EntityName).HasColumnName("entityName").HasMaxLength(60);
-        b.Property(x => x.IsEnabled).HasColumnName("isEnabled").HasColumnType("bit").HasDefaultValue(false);
-
-        b.ToTable(t => t.HasCheckConstraint("CK_OutboundEndpointConfig_httpMethod",
-            "[httpMethod] IN ('POST','PUT','DELETE')"));
-
-        // One live endpoint row per (tenant, endpointKey). Filtered so a soft-deleted row never blocks re-create.
-        b.HasIndex(x => new { x.TenantId, x.EndpointKey })
-            .HasDatabaseName("UQ_OutboundEndpointConfig_tenant_endpointKey").IsUnique()
-            .HasFilter("[isDeleted] = 0");
-    }
-}
-
-public class IdmAttachmentTypeConfigConfiguration : IEntityTypeConfiguration<IdmAttachmentTypeConfig>
-{
-    public void Configure(EntityTypeBuilder<IdmAttachmentTypeConfig> b)
-    {
-        b.ApplyBaseEntityConvention("IdmAttachmentTypeConfig", "integration", "idmAttachmentTypeConfig");
-        // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
-        // 2026-07-06: ownerEntityType (portal entity: Asn/Invoice/Supplier) stored so idmEntityType can be free text.
-        b.Property(x => x.OwnerEntityType).HasColumnName("ownerEntityType").HasMaxLength(40);
-        // attachmentType is nvarchar(50) to MATCH doc.AttachmentType.code (DocumentUpload.documentType stores it).
-        // NULLABLE (2026-07-06): null = catch-all (every document of ownerEntityType).
-        b.Property(x => x.AttachmentType).HasColumnName("attachmentType").HasMaxLength(50);
-        b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(100).IsRequired();
-        // R9 (0049) — renamed from eligibilityGateJson (dot-path array) to the JSONata expression column (§2.11).
-        b.Property(x => x.EligibilityGateExpr).HasColumnName("eligibilityGateExpr").HasColumnType("nvarchar(max)").IsRequired();
-        b.Property(x => x.CreateMappingExpression).HasColumnName("createMappingExpression").HasColumnType("nvarchar(max)").IsRequired();
-        b.Property(x => x.MutateMappingExpression).HasColumnName("mutateMappingExpression").HasColumnType("nvarchar(max)");
-        b.Property(x => x.CreateMappingSeedHash).HasColumnName("createMappingSeedHash").HasMaxLength(64);
-        b.Property(x => x.MutateMappingSeedHash).HasColumnName("mutateMappingSeedHash").HasMaxLength(64);
-        b.Property(x => x.IsEnabled).HasColumnName("isEnabled").HasColumnType("bit").HasDefaultValue(false);
-
-        // D7 + 2026-07-06: keyed by (ownerEntityType, attachmentType) — NOT idmEntityType (many types may share one
-        // entityType), and now including the portal entity so the SAME attachment-type code can map differently per
-        // entity (e.g. "Msme" on an ASN vs on a Supplier). A NULL attachmentType (catch-all) is unique per entity:
-        // SQL Server treats NULLs as equal for uniqueness, so exactly one all-types row per (tenant, ownerEntityType).
-        b.HasIndex(x => new { x.TenantId, x.OwnerEntityType, x.AttachmentType })
-            .HasDatabaseName("UQ_IdmAttachmentTypeConfig_tenant_owner_attachmentType").IsUnique()
-            .HasFilter("[isDeleted] = 0");
-    }
-}
+// R10 (migration 0051): the R8 config pair (OutboundEndpointConfig + IdmAttachmentTypeConfig) folded into
+// integration.OutboundIntegrationConfig (Document kind) — see OutboundIntegrationConfigConfiguration.
+// Only the outbox table stays here.
 
 public class IdmDocumentOutboxConfiguration : IEntityTypeConfiguration<IdmDocumentOutbox>
 {

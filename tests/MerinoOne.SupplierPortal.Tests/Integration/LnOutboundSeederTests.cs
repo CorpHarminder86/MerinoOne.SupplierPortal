@@ -37,12 +37,13 @@ public class LnOutboundSeederTests
 
         using var scope = _fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var rows = await db.LnEndpointConfigs.IgnoreQueryFilters().AsNoTracking()
-            .Where(c => c.TenantId == IntegrationTestFixture.TenantId && !c.IsDeleted)
+        // Kind filter (R10): the shared test tenant also accrues Document-kind rows from the IDM dispatch tests.
+        var rows = await db.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking()
+            .Where(c => c.TenantId == IntegrationTestFixture.TenantId && c.Kind == OutboundIntegrationKind.Transaction && !c.IsDeleted)
             .ToListAsync();
 
         rows.Should().HaveCount(8);
-        rows.Should().OnlyContain(r => r.DispatchMode == LnDispatchMode.Legacy, "seeded rows must never change dispatch behaviour");
+        rows.Should().OnlyContain(r => r.DispatchMode == OutboundDispatchMode.Legacy, "seeded rows must never change dispatch behaviour");
         rows.Should().OnlyContain(r => !string.IsNullOrWhiteSpace(r.RequestMappingExpr)
             && !string.IsNullOrWhiteSpace(r.ResponseMappingExpr)
             && !string.IsNullOrWhiteSpace(r.CandidateFilterName)
@@ -65,11 +66,11 @@ public class LnOutboundSeederTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             // Hand-edit InvoicePost's request expression (hash no longer matches its seed hash).
-            var invoice = await db.LnEndpointConfigs.IgnoreQueryFilters()
+            var invoice = await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
                 .FirstAsync(c => c.TenantId == IntegrationTestFixture.TenantId && c.TransactionType == OutboxTransactionType.InvoicePost && !c.IsDeleted);
             invoice.RequestMappingExpr = "{ \"HandEdited\": invoiceNumber }";
             // Simulate a pre-repo-change AsnPost row: stored text + seed hash agree with an OLD default.
-            var asn = await db.LnEndpointConfigs.IgnoreQueryFilters()
+            var asn = await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
                 .FirstAsync(c => c.TenantId == IntegrationTestFixture.TenantId && c.TransactionType == OutboxTransactionType.AsnPost && !c.IsDeleted);
             asn.RequestMappingExpr = "{ \"Old\": asnNumber }";
             asn.RequestMappingSeedHash = ExpressionHash.Compute("{ \"Old\": asnNumber }");
@@ -81,11 +82,11 @@ public class LnOutboundSeederTests
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var invoice = await db.LnEndpointConfigs.IgnoreQueryFilters().AsNoTracking()
+            var invoice = await db.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking()
                 .FirstAsync(c => c.TenantId == IntegrationTestFixture.TenantId && c.TransactionType == OutboxTransactionType.InvoicePost && !c.IsDeleted);
             invoice.RequestMappingExpr.Should().Be("{ \"HandEdited\": invoiceNumber }", "hand edits are never clobbered — that difference IS the drift flag");
 
-            var asn = await db.LnEndpointConfigs.IgnoreQueryFilters().AsNoTracking()
+            var asn = await db.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking()
                 .FirstAsync(c => c.TenantId == IntegrationTestFixture.TenantId && c.TransactionType == OutboxTransactionType.AsnPost && !c.IsDeleted);
             asn.RequestMappingExpr.Should().Be(defaults.TryGet(OutboxTransactionType.AsnPost)!.RequestExpr,
                 "an untouched-since-seed row whose repo default changed must flow forward");
@@ -95,7 +96,7 @@ public class LnOutboundSeederTests
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var invoice = await db.LnEndpointConfigs.IgnoreQueryFilters()
+            var invoice = await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
                 .FirstAsync(c => c.TenantId == IntegrationTestFixture.TenantId && c.TransactionType == OutboxTransactionType.InvoicePost && !c.IsDeleted);
             invoice.RequestMappingExpr = repoInvoiceRequest;
             invoice.RequestMappingSeedHash = defaults.TryGet(OutboxTransactionType.InvoicePost)!.RequestHash;

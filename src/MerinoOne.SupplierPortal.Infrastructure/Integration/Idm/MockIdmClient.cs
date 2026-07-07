@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using MerinoOne.SupplierPortal.Application.Integration.Idm;
+using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.Extensions.Logging;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Idm;
@@ -19,7 +20,8 @@ public sealed class MockIdmClient : IIdmClient
 
     public MockIdmClient(ILogger<MockIdmClient> logger) => _logger = logger;
 
-    public Task<IdmHttpResult> SendAsync(Guid tenantId, string endpointKey, OutboundEnvelope envelope, CancellationToken ct)
+    public Task<IdmHttpResult> SendAsync(Guid tenantId, IdmOutboxOperation operation, string httpVerb, string path,
+        OutboundEnvelope envelope, CancellationToken ct)
     {
         var body = envelope.Body ?? string.Empty;
 
@@ -31,14 +33,14 @@ public sealed class MockIdmClient : IIdmClient
             return Task.FromResult(new IdmHttpResult(500,
                 $"<error xmlns=\"{DafNs}\"><detail>Simulated transient IDM failure.</detail></error>", false));
 
-        if (endpointKey.EndsWith(".Delete", StringComparison.OrdinalIgnoreCase))
+        if (operation == IdmOutboxOperation.Delete)
             return Task.FromResult(new IdmHttpResult(200, $"<item xmlns=\"{DafNs}\"><status>deleted</status></item>", false));
 
         var handle = StableHandle(body);
         var pid = $"MDS-{handle}-LATEST";
         var xml =
             $"<item xmlns=\"{DafNs}\"><pid>{pid}</pid><pid2>{Guid.Empty}</pid2><id>MDS-{handle}</id><version>1</version></item>";
-        _logger.LogDebug("[IDM Mock] {Endpoint} → pid {Pid}", endpointKey, pid);
+        _logger.LogDebug("[IDM Mock] {Op} {Verb} {Path} → pid {Pid}", operation, httpVerb, path, pid);
         return Task.FromResult(new IdmHttpResult(200, xml, false));
     }
 

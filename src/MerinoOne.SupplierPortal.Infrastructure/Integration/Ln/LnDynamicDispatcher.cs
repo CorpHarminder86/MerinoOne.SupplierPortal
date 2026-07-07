@@ -33,11 +33,11 @@ public interface ILnDynamicDispatcher
 /// <summary>Dispatch outcome + the code-owned permanence class (D-R9-5) for the worker's failure stamping.</summary>
 public sealed record LnDispatchOutcome(InforSyncResult Result, bool PermanentFailure);
 
-/// <summary>Per-drain-cycle projection of one live <c>LnEndpointConfig</c> row (the worker's routing map).</summary>
+/// <summary>Per-drain-cycle projection of one live <c>OutboundIntegrationConfig</c> row (the worker's routing map).</summary>
 public sealed record LnEndpointRoute(
     Guid? TenantId,
     string TransactionType,
-    LnDispatchMode Mode,
+    OutboundDispatchMode Mode,
     string PortalEntity,
     string EndpointPath,
     string HttpVerb,

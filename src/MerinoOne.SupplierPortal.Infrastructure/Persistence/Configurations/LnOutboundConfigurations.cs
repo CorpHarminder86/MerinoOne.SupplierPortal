@@ -6,30 +6,47 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Configurations;
 
 /// <summary>
-/// R9 (TSD R9 §2.1, migration 0046) — <c>integration.LnEndpointConfig</c>: the per-transaction-type
-/// config layer over the LN outbound pipeline. Two-key pattern + audit block via
-/// <see cref="BaseEntityConfigExtensions.ApplyBaseEntityConvention"/>.
+/// R10 (migration 0051; born as the R9 LN endpoint config, migration 0047) —
+/// <c>integration.OutboundIntegrationConfig</c>: the unified outbound-integration config plane. One row =
+/// one integration (connection + gate + request/response/ack mappings + portal entity); <c>kind</c> selects
+/// the executor (Transaction → OutboxMessage pipeline, Document → IdmDocumentOutbox pipeline). Two-key
+/// pattern + audit block via <see cref="BaseEntityConfigExtensions.ApplyBaseEntityConvention"/>.
 /// </summary>
-public class LnEndpointConfigConfiguration : IEntityTypeConfiguration<LnEndpointConfig>
+public class OutboundIntegrationConfigConfiguration : IEntityTypeConfiguration<OutboundIntegrationConfig>
 {
-    public void Configure(EntityTypeBuilder<LnEndpointConfig> b)
+    public void Configure(EntityTypeBuilder<OutboundIntegrationConfig> b)
     {
-        b.ApplyBaseEntityConvention("LnEndpointConfig", "integration", "lnEndpointConfig");
+        b.ApplyBaseEntityConvention("OutboundIntegrationConfig", "integration", "outboundIntegrationConfig");
         // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
-        b.Property(x => x.TransactionType).HasColumnName("transactionType").HasMaxLength(60).IsRequired();
+        b.Property(x => x.Kind).HasColumnName("kind").HasConversion<string>().HasMaxLength(20)
+            .HasDefaultValue(OutboundIntegrationKind.Transaction).IsRequired();
+        b.Property(x => x.ConnectionPointId).HasColumnName("connectionPointId");
+        b.Property(x => x.TransactionType).HasColumnName("transactionType").HasMaxLength(60);
         b.Property(x => x.PortalEntity).HasColumnName("portalEntity").HasMaxLength(60).IsRequired();
+        // attachmentType matches doc.AttachmentType.code width; targetEntityName matches the old idmEntityType width.
+        b.Property(x => x.AttachmentType).HasColumnName("attachmentType").HasMaxLength(50);
+        b.Property(x => x.TargetEntityName).HasColumnName("targetEntityName").HasMaxLength(100);
+        b.Property(x => x.ContextJson).HasColumnName("contextJson").HasColumnType("nvarchar(max)");
         b.Property(x => x.EndpointPath).HasColumnName("endpointPath").HasMaxLength(400).IsRequired();
         b.Property(x => x.HttpVerb).HasColumnName("httpVerb").HasMaxLength(10).HasDefaultValue("POST").IsRequired();
+        b.Property(x => x.MutatePath).HasColumnName("mutatePath").HasMaxLength(400);
+        b.Property(x => x.MutateVerb).HasColumnName("mutateVerb").HasMaxLength(10);
+        b.Property(x => x.DeletePath).HasColumnName("deletePath").HasMaxLength(400);
+        b.Property(x => x.DeleteVerb).HasColumnName("deleteVerb").HasMaxLength(10);
+        b.Property(x => x.StaticHeadersJson).HasColumnName("staticHeadersJson").HasColumnType("nvarchar(max)");
+        b.Property(x => x.RequestFormat).HasColumnName("requestFormat").HasMaxLength(10).HasDefaultValue("Json").IsRequired();
+        b.Property(x => x.ResponseFormat).HasColumnName("responseFormat").HasMaxLength(10).HasDefaultValue("Json").IsRequired();
         // Tri-state cutover/kill (D-R9-2 + D-R9-11): CHECK-constrained enum name — Legacy must be the safe
-        // default at row creation, so unlike most status enums this one gets a DB CHECK (matches R8's
-        // OutboundEndpointConfig.httpMethod precedent for config-table value guards).
+        // default at row creation (Transaction kind; Document rows are save-guarded to Dynamic|Held).
         b.Property(x => x.DispatchMode).HasColumnName("dispatchMode").HasConversion<string>().HasMaxLength(20)
-            .HasDefaultValue(LnDispatchMode.Legacy).IsRequired();
+            .HasDefaultValue(OutboundDispatchMode.Legacy).IsRequired();
         b.Property(x => x.EligibilityGateExpr).HasColumnName("eligibilityGateExpr").HasColumnType("nvarchar(max)");
         b.Property(x => x.RequestMappingExpr).HasColumnName("requestMappingExpr").HasColumnType("nvarchar(max)").IsRequired();
-        b.Property(x => x.ResponseMappingExpr).HasColumnName("responseMappingExpr").HasColumnType("nvarchar(max)").IsRequired();
+        b.Property(x => x.MutateMappingExpr).HasColumnName("mutateMappingExpr").HasColumnType("nvarchar(max)");
+        b.Property(x => x.ResponseMappingExpr).HasColumnName("responseMappingExpr").HasColumnType("nvarchar(max)");
         b.Property(x => x.AckMappingExpr).HasColumnName("ackMappingExpr").HasColumnType("nvarchar(max)");
         b.Property(x => x.RequestMappingSeedHash).HasColumnName("requestMappingSeedHash").HasMaxLength(64);
+        b.Property(x => x.MutateMappingSeedHash).HasColumnName("mutateMappingSeedHash").HasMaxLength(64);
         b.Property(x => x.ResponseMappingSeedHash).HasColumnName("responseMappingSeedHash").HasMaxLength(64);
         b.Property(x => x.AckMappingSeedHash).HasColumnName("ackMappingSeedHash").HasMaxLength(64);
         b.Property(x => x.CandidateFilterName).HasColumnName("candidateFilterName").HasMaxLength(120);
@@ -44,19 +61,63 @@ public class LnEndpointConfigConfiguration : IEntityTypeConfiguration<LnEndpoint
         b.Property(x => x.VerifiedNote).HasColumnName("verifiedNote").HasMaxLength(500);
         b.Property(x => x.PathConfirmed).HasColumnName("pathConfirmed").HasColumnType("bit").HasDefaultValue(false).IsRequired();
 
-        // Verb + mode value guards (config table — hostile values here mean wrong HTTP calls, so DB CHECKs
-        // back the C# enums; mirrors R8's CK on OutboundEndpointConfig.httpMethod).
+        // Value guards (config table — hostile values here mean wrong HTTP calls, so DB CHECKs back the C# enums).
         b.ToTable(t =>
         {
-            t.HasCheckConstraint("CK_LnEndpointConfig_httpVerb", "[httpVerb] IN ('POST','PUT','PATCH')");
-            t.HasCheckConstraint("CK_LnEndpointConfig_dispatchMode", "[dispatchMode] IN ('Legacy','Dynamic','Held')");
+            t.HasCheckConstraint("CK_OutboundIntegrationConfig_kind", "[kind] IN ('Transaction','Document')");
+            t.HasCheckConstraint("CK_OutboundIntegrationConfig_httpVerb", "[httpVerb] IN ('POST','PUT','PATCH')");
+            t.HasCheckConstraint("CK_OutboundIntegrationConfig_mutateVerb", "[mutateVerb] IS NULL OR [mutateVerb] IN ('POST','PUT','PATCH')");
+            t.HasCheckConstraint("CK_OutboundIntegrationConfig_deleteVerb", "[deleteVerb] IS NULL OR [deleteVerb] IN ('POST','PUT','PATCH','DELETE')");
+            t.HasCheckConstraint("CK_OutboundIntegrationConfig_dispatchMode", "[dispatchMode] IN ('Legacy','Dynamic','Held')");
+            t.HasCheckConstraint("CK_OutboundIntegrationConfig_requestFormat", "[requestFormat] IN ('Json','Xml')");
+            t.HasCheckConstraint("CK_OutboundIntegrationConfig_responseFormat", "[responseFormat] IN ('Json','Xml')");
         });
 
-        // One live config per (tenant, transactionType) — filtered so a soft-deleted row (rollback-to-legacy)
-        // never blocks re-creating the config. Matches the outbox filtered-index tenancy approach.
+        b.HasOne(x => x.ConnectionPoint).WithMany().HasForeignKey(x => x.ConnectionPointId)
+            .HasConstraintName("FK_OutboundIntegrationConfig_ConnectionPoint_ConnectionPointId")
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Per-kind identity, both filtered so a soft-deleted row never blocks re-creation:
+        // Transaction — one live config per (tenant, transactionType);
+        // Document — one live config per (tenant, portalEntity, attachmentType); NULLs compare equal in a
+        // unique index, so exactly one catch-all (NULL attachmentType) row per (tenant, portalEntity).
         b.HasIndex(x => new { x.TenantId, x.TransactionType })
-            .HasDatabaseName("UQ_LnEndpointConfig_tenant_transactionType").IsUnique()
+            .HasDatabaseName("UQ_OutboundIntegrationConfig_tenant_transactionType").IsUnique()
+            .HasFilter("[isDeleted] = 0 AND [kind] = 'Transaction'");
+        b.HasIndex(x => new { x.TenantId, x.PortalEntity, x.AttachmentType })
+            .HasDatabaseName("UQ_OutboundIntegrationConfig_tenant_entity_attachmentType").IsUnique()
+            .HasFilter("[isDeleted] = 0 AND [kind] = 'Document'");
+    }
+}
+
+/// <summary>
+/// R10 (migration 0051) — <c>integration.ConnectionPoint</c>: named outbound connection target. Exactly one
+/// live default per tenant (filtered unique). InforION rows carry no URL/auth (resolved from the tenant's
+/// Infor connection settings); other system types own theirs here.
+/// </summary>
+public class ConnectionPointConfiguration : IEntityTypeConfiguration<ConnectionPoint>
+{
+    public void Configure(EntityTypeBuilder<ConnectionPoint> b)
+    {
+        b.ApplyBaseEntityConvention("ConnectionPoint", "integration", "connectionPoint");
+        // tenantId mapped by the ITenantOwned block in ApplyBaseEntityConvention.
+        b.Property(x => x.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
+        b.Property(x => x.SystemType).HasColumnName("systemType").HasMaxLength(20).IsRequired();
+        b.Property(x => x.BaseUrl).HasColumnName("baseUrl").HasMaxLength(400);
+        b.Property(x => x.AuthConfigJson).HasColumnName("authConfigJson").HasColumnType("nvarchar(max)");
+        b.Property(x => x.IsDefault).HasColumnName("isDefault").HasColumnType("bit").HasDefaultValue(false).IsRequired();
+        b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(500);
+
+        b.ToTable(t => t.HasCheckConstraint("CK_ConnectionPoint_systemType",
+            "[systemType] IN ('InforION','Tally','ClearTax','GenericRest')"));
+
+        b.HasIndex(x => new { x.TenantId, x.Name })
+            .HasDatabaseName("UQ_ConnectionPoint_tenant_name").IsUnique()
             .HasFilter("[isDeleted] = 0");
+        // Exactly one live default per tenant.
+        b.HasIndex(x => x.TenantId)
+            .HasDatabaseName("UQ_ConnectionPoint_tenant_default").IsUnique()
+            .HasFilter("[isDefault] = 1 AND [isDeleted] = 0");
     }
 }
 
@@ -105,7 +166,7 @@ public class LnBackfillRunConfiguration : IEntityTypeConfiguration<LnBackfillRun
     public void Configure(EntityTypeBuilder<LnBackfillRun> b)
     {
         b.ApplyBaseEntityConvention("LnBackfillRun", "integration", "lnBackfillRun");
-        b.Property(x => x.LnEndpointConfigId).HasColumnName("lnEndpointConfigId");
+        b.Property(x => x.OutboundIntegrationConfigId).HasColumnName("lnEndpointConfigId");
         b.Property(x => x.TransactionType).HasColumnName("transactionType").HasMaxLength(60).IsRequired();
         b.Property(x => x.GateVersion).HasColumnName("gateVersion").HasColumnType("int");
         b.Property(x => x.Status).HasColumnName("status").HasMaxLength(12).HasDefaultValue("DryRun").IsRequired();
@@ -120,10 +181,10 @@ public class LnBackfillRunConfiguration : IEntityTypeConfiguration<LnBackfillRun
         b.ToTable(t => t.HasCheckConstraint("CK_LnBackfillRun_status",
             "[status] IN ('DryRun','Applied','Superseded','Discarded')"));
 
-        b.HasOne(x => x.LnEndpointConfig).WithMany().HasForeignKey(x => x.LnEndpointConfigId)
-            .HasConstraintName("FK_LnBackfillRun_LnEndpointConfig_LnEndpointConfigId")
+        b.HasOne(x => x.OutboundIntegrationConfig).WithMany().HasForeignKey(x => x.OutboundIntegrationConfigId)
+            .HasConstraintName("FK_LnBackfillRun_OutboundIntegrationConfig_OutboundIntegrationConfigId")
             .OnDelete(DeleteBehavior.Restrict);
-        b.HasIndex(x => new { x.LnEndpointConfigId, x.Status })
+        b.HasIndex(x => new { x.OutboundIntegrationConfigId, x.Status })
             .HasDatabaseName("IX_LnBackfillRun_config_status").HasFilter("[isDeleted] = 0");
     }
 }

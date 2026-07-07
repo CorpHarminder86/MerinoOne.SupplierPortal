@@ -65,11 +65,12 @@ internal sealed class LnGateReconciliationWorker : BackgroundService
 
         // Sweep only configs that are gated (mode != Legacy + gate expr) AND have a candidate filter —
         // the SQL pre-filter is not optional (§2.4). Legacy configs keep their legacy code-eligibility.
-        var configs = await db.LnEndpointConfigs
+        var configs = await db.OutboundIntegrationConfigs
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(c => !c.IsDeleted
-                        && c.DispatchMode != LnDispatchMode.Legacy
+                        && c.Kind == OutboundIntegrationKind.Transaction
+                        && c.DispatchMode != OutboundDispatchMode.Legacy
                         && c.EligibilityGateExpr != null && c.EligibilityGateExpr != ""
                         && c.CandidateFilterName != null && c.CandidateFilterName != "")
             .ToListAsync(ct);

@@ -206,13 +206,22 @@ public enum LinePushStatus { Pending, Pushed, PushFailed }
 public enum OutboxStatus { Pending, Dispatched, Acked, Failed, Sending, Skipped }
 
 /// <summary>
-/// R9 (TSD R9, D-R9-2 + D-R9-11) — per-endpoint dispatch mode on <c>integration.LnEndpointConfig</c>,
-/// persisted as the enum NAME (string) with a DB CHECK. The tri-state resolves the isEnabled cutover/kill
-/// ambiguity: <c>Legacy</c> (default at creation — the compiled builder keeps serving, zero behavior change),
-/// <c>Dynamic</c> (config-driven JSONata path; requires recorded attestation + path confirmation, D-R9-17/21),
-/// <c>Held</c> (per-endpoint kill switch — dispatch held, rows stay Pending, enqueue continues).
+/// R9 (TSD R9, D-R9-2 + D-R9-11; renamed from the Ln-prefixed enum in R10) — per-integration dispatch mode
+/// on <c>integration.OutboundIntegrationConfig</c>, persisted as the enum NAME (string) with a DB CHECK.
+/// The tri-state resolves the isEnabled cutover/kill ambiguity: <c>Legacy</c> (compiled builder keeps
+/// serving — Transaction kind only; Document kind has no legacy builder, so Legacy is save-blocked there),
+/// <c>Dynamic</c> (config-driven JSONata path; Transaction kind requires attestation + path confirmation,
+/// D-R9-17/21), <c>Held</c> (per-integration kill — dispatch held, rows accumulate, enqueue continues).
 /// </summary>
-public enum LnDispatchMode { Legacy, Dynamic, Held }
+public enum OutboundDispatchMode { Legacy, Dynamic, Held }
+
+/// <summary>
+/// R10 — executor discriminator on <c>integration.OutboundIntegrationConfig</c>, persisted as the enum NAME
+/// (string) with a DB CHECK. One config plane, two queue disciplines: <c>Transaction</c> rows drive the
+/// <c>OutboxMessage</c> pipeline (deterministic keys, manual re-arm, sweep/backfill); <c>Document</c> rows
+/// drive the <c>IdmDocumentOutbox</c> pipeline (per-document FIFO, auto-backoff, pid statefulness).
+/// </summary>
+public enum OutboundIntegrationKind { Transaction, Document }
 
 public enum SyncDirection { Inbound, Outbound, Bidirectional }
 public enum SyncStatus { Pending, Success, Failed, Retrying, Reconciled }

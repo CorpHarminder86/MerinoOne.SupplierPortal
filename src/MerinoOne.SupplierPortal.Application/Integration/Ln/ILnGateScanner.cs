@@ -11,7 +11,7 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Ln;
 /// </summary>
 public interface ILnGateScanner
 {
-    Task<IReadOnlyList<LnScanVerdict>> ScanAsync(LnEndpointConfig config, int maxCandidates, CancellationToken ct = default);
+    Task<IReadOnlyList<LnScanVerdict>> ScanAsync(OutboundIntegrationConfig config, int maxCandidates, CancellationToken ct = default);
 }
 
 /// <summary>

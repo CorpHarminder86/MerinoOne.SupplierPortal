@@ -12,8 +12,8 @@ namespace MerinoOne.SupplierPortal.Domain.Entities.Integration;
 public class LnBackfillRun : AuditableEntity, ITenantOwned
 {
     public Guid? TenantId { get; set; }
-    public Guid LnEndpointConfigId { get; set; }
-    public LnEndpointConfig? LnEndpointConfig { get; set; }
+    public Guid OutboundIntegrationConfigId { get; set; }
+    public OutboundIntegrationConfig? OutboundIntegrationConfig { get; set; }
 
     /// <summary>Denormalised for the monitoring list (the config row may be soft-deleted later).</summary>
     public string TransactionType { get; set; } = string.Empty;

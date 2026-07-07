@@ -15,7 +15,7 @@ namespace MerinoOne.SupplierPortal.Contracts.Integration;
 // field; request expressions navigate missing/null fields to reproduce the legacy null-dropping.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-/// <summary>Portal-entity discriminators for <c>integration.LnEndpointConfig.portalEntity</c>. APPEND-ONLY.</summary>
+/// <summary>Portal-entity discriminators for <c>integration.OutboundIntegrationConfig.portalEntity</c>. APPEND-ONLY.</summary>
 public static class LnPortalEntity
 {
     public const string Invoice = "Invoice";

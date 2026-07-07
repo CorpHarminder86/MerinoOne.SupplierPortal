@@ -50,7 +50,7 @@ public class OutboxMessage : AuditableEntity, ITenantOwned, IHasRowVersion
     public DateTime? AckedAt { get; set; }
     public string? LastError { get; set; }
 
-    /// <summary>R9 — the <c>LnEndpointConfig.GateVersion</c> in force when this row was enqueued / re-armed / skipped. Null on legacy rows.</summary>
+    /// <summary>R9 — the <c>OutboundIntegrationConfig.GateVersion</c> in force when this row was enqueued / re-armed / skipped. Null on legacy rows.</summary>
     public int? GateVersion { get; set; }
 
     /// <summary>R9 — why the eligibility layer moved this row to <c>Skipped</c> (dispatch re-check, backfill withdraw, revoke). Null otherwise.</summary>

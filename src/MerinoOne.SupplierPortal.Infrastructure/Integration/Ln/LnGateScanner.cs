@@ -32,7 +32,7 @@ public sealed class LnGateScanner : ILnGateScanner
 
     private sealed record Candidate(Guid EntityId, Guid TenantId, string EntityName, string DeterministicKey);
 
-    public async Task<IReadOnlyList<LnScanVerdict>> ScanAsync(LnEndpointConfig config, int maxCandidates, CancellationToken ct = default)
+    public async Task<IReadOnlyList<LnScanVerdict>> ScanAsync(OutboundIntegrationConfig config, int maxCandidates, CancellationToken ct = default)
     {
         if (config.TenantId is not { } tenantId)
             throw new InvalidOperationException("Scanner requires a tenant-scoped config row.");
@@ -74,7 +74,7 @@ public sealed class LnGateScanner : ILnGateScanner
     /// LnOutboxKeyDerivationTests; drift here means the sweep double-enqueues or never reconciles).
     /// </summary>
     private async Task<List<Candidate>> CandidatesAsync(
-        LnEndpointConfig config, Guid tenantId, LambdaExpression filter, int take, CancellationToken ct)
+        OutboundIntegrationConfig config, Guid tenantId, LambdaExpression filter, int take, CancellationToken ct)
     {
         switch (config.PortalEntity)
         {

@@ -41,12 +41,12 @@ public class LnDispatchRecheckTests
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var defaults = new LnDefaultExpressions();
         var entry = defaults.TryGet(OutboxTransactionType.InvoicePost)!;
-        var cfg = await db.LnEndpointConfigs.IgnoreQueryFilters()
+        var cfg = await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == IntegrationTestFixture.TenantId
                 && c.TransactionType == OutboxTransactionType.InvoicePost && !c.IsDeleted);
         if (cfg is null)
         {
-            cfg = new LnEndpointConfig
+            cfg = new OutboundIntegrationConfig
             {
                 TenantId = IntegrationTestFixture.TenantId,
                 TransactionType = OutboxTransactionType.InvoicePost,
@@ -56,9 +56,9 @@ public class LnDispatchRecheckTests
                 ResponseMappingExpr = entry.ResponseExpr,
                 CreatedBy = "seed",
             };
-            db.LnEndpointConfigs.Add(cfg);
+            db.OutboundIntegrationConfigs.Add(cfg);
         }
-        cfg.DispatchMode = LnDispatchMode.Dynamic;
+        cfg.DispatchMode = OutboundDispatchMode.Dynamic;
         cfg.EligibilityGateExpr = gateExpr;
         cfg.GateVersion = 11;
         await db.SaveChangesAsync();
@@ -68,7 +68,7 @@ public class LnDispatchRecheckTests
     {
         using var scope = _fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.LnEndpointConfigs.IgnoreQueryFilters()
+        await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
             .Where(c => c.TenantId == IntegrationTestFixture.TenantId && c.TransactionType == OutboxTransactionType.InvoicePost)
             .ExecuteDeleteAsync();
         await db.IntegrationSwitches.IgnoreQueryFilters()

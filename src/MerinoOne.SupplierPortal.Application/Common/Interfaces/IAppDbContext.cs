@@ -105,12 +105,11 @@ public interface IAppDbContext
     DbSet<OutboxMessage> OutboxMessages { get; }
 
     // R8 (2026-07-04) — TSD R8 outbound document sync to Infor IDM.
-    DbSet<OutboundEndpointConfig> OutboundEndpointConfigs { get; }
-    DbSet<IdmAttachmentTypeConfig> IdmAttachmentTypeConfigs { get; }
     DbSet<IdmDocumentOutbox> IdmDocumentOutboxes { get; }
 
     // R9 (2026-07-06) — TSD R9 config-driven LN outbound posting.
-    DbSet<LnEndpointConfig> LnEndpointConfigs { get; }
+    DbSet<OutboundIntegrationConfig> OutboundIntegrationConfigs { get; }
+    DbSet<ConnectionPoint> ConnectionPoints { get; }
     DbSet<IntegrationSwitch> IntegrationSwitches { get; }
     DbSet<IntegrationSwitchAudit> IntegrationSwitchAudits { get; }
     DbSet<LnBackfillRun> LnBackfillRuns { get; }

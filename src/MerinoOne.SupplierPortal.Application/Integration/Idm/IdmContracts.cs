@@ -1,3 +1,5 @@
+using MerinoOne.SupplierPortal.Domain.Enums;
+
 namespace MerinoOne.SupplierPortal.Application.Integration.Idm;
 
 // R8 (2026-07-04) — TSD R8 §6. Application-layer contracts for the outbound IDM document-sync engine. The ONLY
@@ -78,10 +80,15 @@ public interface IIdmAckParser
 /// <summary>Raw transport result. <see cref="TransportFailure"/> = timeout/connection reset (→ Transient without parsing).</summary>
 public sealed record IdmHttpResult(int StatusCode, string Body, bool TransportFailure);
 
-/// <summary>The IDM HTTP transport seam (Mock/Live, swapped by Integration:Mode — D8).</summary>
+/// <summary>
+/// The IDM HTTP transport seam (Mock/Live, swapped by Integration:Mode — D8). R10: verb + path arrive
+/// resolved from the unified <c>OutboundIntegrationConfig</c> row (the worker owns config resolution —
+/// the transport just sends); <paramref name="operation"/> replaces the old endpointKey-suffix branching.
+/// </summary>
 public interface IIdmClient
 {
-    Task<IdmHttpResult> SendAsync(Guid tenantId, string endpointKey, OutboundEnvelope envelope, CancellationToken ct);
+    Task<IdmHttpResult> SendAsync(Guid tenantId, IdmOutboxOperation operation, string httpVerb, string path,
+        OutboundEnvelope envelope, CancellationToken ct);
 }
 
 /// <summary>Compile-check a JSONata expression from the Application layer (Save-config validation) without a direct package ref.</summary>

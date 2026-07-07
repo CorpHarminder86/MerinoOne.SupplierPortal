@@ -31,10 +31,10 @@ public class RunLnBackfillDryRunCommandHandler : IRequestHandler<RunLnBackfillDr
     public async Task<LnBackfillPreviewDto> Handle(RunLnBackfillDryRunCommand request, CancellationToken ct)
     {
         if (_user.TenantId is not { } tid) throw new ValidationException("No tenant context.");
-        var config = await _db.LnEndpointConfigs.IgnoreQueryFilters().AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == request.ConfigId && c.TenantId == tid && !c.IsDeleted, ct)
+        var config = await _db.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == request.ConfigId && c.TenantId == tid && c.Kind == OutboundIntegrationKind.Transaction && !c.IsDeleted, ct)
             ?? throw new ValidationException("Endpoint config not found.");
-        if (config.DispatchMode == LnDispatchMode.Legacy || string.IsNullOrWhiteSpace(config.EligibilityGateExpr))
+        if (config.DispatchMode == OutboundDispatchMode.Legacy || string.IsNullOrWhiteSpace(config.EligibilityGateExpr))
             throw new ValidationException("Backfill applies to gated configs only (dispatch mode Dynamic/Held with a gate expression).");
         if (string.IsNullOrWhiteSpace(config.CandidateFilterName))
             throw new ValidationException("Backfill requires a candidate filter (the entity-side scan's SQL pre-filter).");
@@ -79,7 +79,7 @@ public class RunLnBackfillDryRunCommandHandler : IRequestHandler<RunLnBackfillDr
         // Supersede older previews; persist this one (the audit trail for the apply that may follow).
         var now = DateTime.UtcNow;
         await _db.LnBackfillRuns.IgnoreQueryFilters()
-            .Where(r => r.LnEndpointConfigId == config.Id && r.Status == "DryRun" && !r.IsDeleted)
+            .Where(r => r.OutboundIntegrationConfigId == config.Id && r.Status == "DryRun" && !r.IsDeleted)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(r => r.Status, "Superseded")
                 .SetProperty(r => r.UpdatedBy, _user.UserCode)
@@ -88,7 +88,7 @@ public class RunLnBackfillDryRunCommandHandler : IRequestHandler<RunLnBackfillDr
         var run = new LnBackfillRun
         {
             TenantId = tid,
-            LnEndpointConfigId = config.Id,
+            OutboundIntegrationConfigId = config.Id,
             TransactionType = config.TransactionType,
             GateVersion = config.GateVersion,
             Status = "DryRun",
@@ -128,8 +128,8 @@ public class ApplyLnBackfillCommandHandler : IRequestHandler<ApplyLnBackfillComm
         if (run.Status != "DryRun")
             throw new ValidationException($"Run is '{run.Status}' — only a fresh DryRun can be applied.");
 
-        var config = await _db.LnEndpointConfigs.IgnoreQueryFilters().AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == run.LnEndpointConfigId && !c.IsDeleted, ct)
+        var config = await _db.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == run.OutboundIntegrationConfigId && !c.IsDeleted, ct)
             ?? throw new ValidationException("Endpoint config no longer exists.");
         if (config.GateVersion != run.GateVersion)
             throw new ValidationException(
@@ -232,7 +232,7 @@ public class ApplyLnBackfillCommandHandler : IRequestHandler<ApplyLnBackfillComm
     }
 
     /// <summary>Outbox entityName per config — PoNegotiation enqueues under EntityName=PurchaseOrder (legacy contract).</summary>
-    private static string EntityNameFor(LnEndpointConfig config) => config.PortalEntity switch
+    private static string EntityNameFor(OutboundIntegrationConfig config) => config.PortalEntity switch
     {
         LnPortalEntity.PoNegotiation => OutboxEntity.PurchaseOrder,
         LnPortalEntity.Invoice => OutboxEntity.Invoice,
@@ -256,19 +256,19 @@ public class GetLnBackfillStatusQueryHandler : IRequestHandler<GetLnBackfillStat
     public async Task<LnBackfillStatusDto> Handle(GetLnBackfillStatusQuery request, CancellationToken ct)
     {
         var tid = _user.TenantId ?? throw new ValidationException("No tenant context.");
-        var config = await _db.LnEndpointConfigs.IgnoreQueryFilters().AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == request.ConfigId && c.TenantId == tid && !c.IsDeleted, ct)
+        var config = await _db.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == request.ConfigId && c.TenantId == tid && c.Kind == OutboundIntegrationKind.Transaction && !c.IsDeleted, ct)
             ?? throw new ValidationException("Endpoint config not found.");
 
         var runs = await _db.LnBackfillRuns.IgnoreQueryFilters().AsNoTracking()
-            .Where(r => r.LnEndpointConfigId == config.Id && !r.IsDeleted)
+            .Where(r => r.OutboundIntegrationConfigId == config.Id && !r.IsDeleted)
             .OrderByDescending(r => r.CreatedOn)
             .Take(20)
             .ToListAsync(ct);
 
         var lastApplied = runs.Where(r => r.Status == "Applied").MaxBy(r => r.AppliedOn)?.GateVersion;
         var latestDryRun = runs.FirstOrDefault(r => r.Status == "DryRun" && r.GateVersion == config.GateVersion);
-        var gated = config.DispatchMode != LnDispatchMode.Legacy && !string.IsNullOrWhiteSpace(config.EligibilityGateExpr);
+        var gated = config.DispatchMode != OutboundDispatchMode.Legacy && !string.IsNullOrWhiteSpace(config.EligibilityGateExpr);
 
         return new LnBackfillStatusDto(
             config.Id, config.TransactionType, config.GateVersion,
@@ -293,7 +293,7 @@ public class GetLnBackfillRunsQueryHandler : IRequestHandler<GetLnBackfillRunsQu
         var tid = _user.TenantId;
         return await _db.LnBackfillRuns.IgnoreQueryFilters().AsNoTracking()
             .Where(r => r.TenantId == tid && !r.IsDeleted
-                        && (request.ConfigId == null || r.LnEndpointConfigId == request.ConfigId))
+                        && (request.ConfigId == null || r.OutboundIntegrationConfigId == request.ConfigId))
             .OrderByDescending(r => r.CreatedOn)
             .Take(50)
             .Select(r => new LnBackfillRunDto(r.Id, r.TransactionType, r.GateVersion, r.Status,

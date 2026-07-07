@@ -64,18 +64,18 @@ public class LnGatedEnqueueTests
     }
 
     /// <summary>Upsert the fixture tenant's InvoicePost config with the given mode + gate.</summary>
-    private async Task SetConfigAsync(LnDispatchMode mode, string? gateExpr)
+    private async Task SetConfigAsync(OutboundDispatchMode mode, string? gateExpr)
     {
         using var scope = _fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var cfg = await db.LnEndpointConfigs.IgnoreQueryFilters()
+        var cfg = await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == IntegrationTestFixture.TenantId
                 && c.TransactionType == OutboxTransactionType.InvoicePost && !c.IsDeleted);
         if (cfg is null)
         {
             var defaults = new LnInfra.LnDefaultExpressions();
             var entry = defaults.TryGet(OutboxTransactionType.InvoicePost)!;
-            cfg = new LnEndpointConfig
+            cfg = new OutboundIntegrationConfig
             {
                 TenantId = IntegrationTestFixture.TenantId,
                 TransactionType = OutboxTransactionType.InvoicePost,
@@ -85,7 +85,7 @@ public class LnGatedEnqueueTests
                 ResponseMappingExpr = entry.ResponseExpr,
                 CreatedBy = "seed",
             };
-            db.LnEndpointConfigs.Add(cfg);
+            db.OutboundIntegrationConfigs.Add(cfg);
         }
         cfg.DispatchMode = mode;
         cfg.EligibilityGateExpr = gateExpr;
@@ -97,7 +97,7 @@ public class LnGatedEnqueueTests
     {
         using var scope = _fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.LnEndpointConfigs.IgnoreQueryFilters()
+        await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
             .Where(c => c.TenantId == IntegrationTestFixture.TenantId && c.TransactionType == OutboxTransactionType.InvoicePost)
             .ExecuteDeleteAsync();
     }
@@ -126,7 +126,7 @@ public class LnGatedEnqueueTests
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
         // Fixture invoice is Submitted → gate passes. Held mode: kill stops dispatch, never enqueue (D-R9-11).
-        await SetConfigAsync(LnDispatchMode.Held, "invoiceStatus = \"Submitted\"");
+        await SetConfigAsync(OutboundDispatchMode.Held, "invoiceStatus = \"Submitted\"");
         var key = NewKey(Guid.NewGuid().ToString("N")[..8]);
         var result = await EnqueueAsync(key);
         result.Outcome.Should().Be(GatedEnqueueOutcome.Enqueued);
@@ -140,7 +140,7 @@ public class LnGatedEnqueueTests
     public async Task Gate_false_creates_nothing()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-        await SetConfigAsync(LnDispatchMode.Dynamic, "invoiceStatus = \"NoSuchStatus\"");
+        await SetConfigAsync(OutboundDispatchMode.Dynamic, "invoiceStatus = \"NoSuchStatus\"");
         var key = NewKey(Guid.NewGuid().ToString("N")[..8]);
         var result = await EnqueueAsync(key);
         result.Outcome.Should().Be(GatedEnqueueOutcome.GateIneligible);

@@ -33,15 +33,16 @@ public sealed class LnEligibilityService : ILnEligibilityService
     public async Task<LnGateVerdict> EvaluateAsync(Guid tenantId, string transactionType, Guid entityId,
         LnInputDocOverrides? overrides = null, CancellationToken ct = default)
     {
-        var cfg = await _db.LnEndpointConfigs
+        var cfg = await _db.OutboundIntegrationConfigs
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(c => c.TenantId == tenantId && c.TransactionType == transactionType && !c.IsDeleted)
+            .Where(c => c.TenantId == tenantId && c.Kind == OutboundIntegrationKind.Transaction
+                        && c.TransactionType == transactionType && !c.IsDeleted)
             .Select(c => new { c.DispatchMode, c.PortalEntity, c.EligibilityGateExpr, c.GateVersion })
             .FirstOrDefaultAsync(ct);
 
         // THE rule: no config, or Legacy mode, ⇒ no gate (legacy code-eligibility untouched).
-        if (cfg is null || cfg.DispatchMode == LnDispatchMode.Legacy)
+        if (cfg is null || cfg.DispatchMode == OutboundDispatchMode.Legacy)
             return LnGateVerdict.NoConfig;
 
         // Dynamic/Held with a blank gate ⇒ no gate, but the gateVersion still stamps onto enqueued rows.
@@ -92,7 +93,7 @@ public sealed class LnEligibilityService : ILnEligibilityService
         return obj.ToJsonString(new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never });
     }
 
-    private static LnGateVerdict Ineligible(int gateVersion, LnDispatchMode mode, string reason)
+    private static LnGateVerdict Ineligible(int gateVersion, OutboundDispatchMode mode, string reason)
         => new(true, false, gateVersion, reason, mode.ToString());
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";

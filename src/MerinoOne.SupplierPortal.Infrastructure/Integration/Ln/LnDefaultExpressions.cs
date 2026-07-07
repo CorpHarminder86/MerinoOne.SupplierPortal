@@ -62,10 +62,10 @@ public sealed class LnDefaultExpressions : ILnExpressionCatalog
     /// <summary>Shared default error-text extraction over a failed LN response body (D-R9-5 — text only, never class).</summary>
     public string ErrorMessageExpression { get; }
 
-    /// <summary>Seeded onto <c>LnEndpointConfig.responseSampleJson</c> — generic OData created-entity body.</summary>
+    /// <summary>Seeded onto <c>OutboundIntegrationConfig.responseSampleJson</c> — generic OData created-entity body.</summary>
     public string ODataCreatedEntitySample { get; }
 
-    /// <summary>Seeded onto <c>LnEndpointConfig.ackSampleJson</c> — one ErpAckRecord as pushed to /inbound/erp-ack.</summary>
+    /// <summary>Seeded onto <c>OutboundIntegrationConfig.ackSampleJson</c> — one ErpAckRecord as pushed to /inbound/erp-ack.</summary>
     public string ErpAckBodySample { get; }
 
     // ── ILnExpressionCatalog (Application-facing view) ─────────────────────────────────────────────

@@ -16,7 +16,8 @@ using Xunit;
 namespace MerinoOne.SupplierPortal.Tests.Integration;
 
 /// <summary>
-/// R8 — TSD R8 §5. End-to-end IDM dispatch against the real DB with the Mock IDM client (Integration:Mode=Mock).
+/// R8 — TSD R8 §5 (R10: configs live on the unified integration.OutboundIntegrationConfig, Kind=Document).
+/// End-to-end IDM dispatch against the real DB with the Mock IDM client (Integration:Mode=Mock).
 /// Exercises the full drain: idmEntityType stamping → Create seed → gate promotion → dispatch → pid write-back →
 /// soft-delete → Delete op → reap. Plus the verifier fix: a terminal 4xx Failed Create must NOT be re-seeded.
 /// </summary>
@@ -25,6 +26,24 @@ public class IdmDispatchTests
 {
     private readonly IntegrationTestFixture _fx;
     public IdmDispatchTests(IntegrationTestFixture fx) => _fx = fx;
+
+    private static OutboundIntegrationConfig NewDocumentConfig(string? attachmentType) => new()
+    {
+        TenantId = IntegrationTestFixture.TenantId,
+        Kind = OutboundIntegrationKind.Document,
+        PortalEntity = DocumentOwnerTypes.Invoice,
+        AttachmentType = attachmentType,
+        TargetEntityName = "InforInvoice",
+        EndpointPath = "/IDM/api/items",
+        HttpVerb = "POST",
+        DeleteVerb = "DELETE",
+        ResponseFormat = "Xml",
+        DispatchMode = OutboundDispatchMode.Dynamic,
+        EligibilityGateExpr = MerinoOne.SupplierPortal.Application.Integration.Idm.IdmGateConversion.ToJsonata(
+            new[] { "invoice.erpCompany", "invoice.erpTransactionType", "invoice.erpDocumentNo" }),
+        RequestMappingExpr = new IdmDefaultExpressions().TryGet("InforInvoice")!.CreateExpression,
+        CreatedBy = "seed",
+    };
 
     private (Guid invoiceId, Guid docId, string attachmentType) SeedInvoiceDoc(AppDbContext db, string tag, string fileName)
     {
@@ -50,15 +69,8 @@ public class IdmDispatchTests
             SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
             TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now,
         });
-        // Enabled config mapping the unique attachmentType → InforInvoice (isolates this test's documents).
-        db.Set<IdmAttachmentTypeConfig>().Add(new IdmAttachmentTypeConfig
-        {
-            TenantId = IntegrationTestFixture.TenantId, OwnerEntityType = DocumentOwnerTypes.Invoice,
-            AttachmentType = attachmentType, IdmEntityType = "InforInvoice",
-            EligibilityGateExpr = MerinoOne.SupplierPortal.Application.Integration.Idm.IdmGateConversion.ToJsonata(new[] { "invoice.erpCompany", "invoice.erpTransactionType", "invoice.erpDocumentNo" }),
-            CreateMappingExpression = new IdmDefaultExpressions().TryGet("InforInvoice")!.CreateExpression,
-            IsEnabled = true, CreatedBy = "seed",
-        });
+        // Active (Dynamic) Document-kind config mapping the unique attachmentType → InforInvoice (isolates this test's documents).
+        db.OutboundIntegrationConfigs.Add(NewDocumentConfig(attachmentType));
         return (invoiceId, docId, attachmentType);
     }
 
@@ -174,16 +186,8 @@ public class IdmDispatchTests
                 SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
                 TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
             });
-            var cfg = new IdmAttachmentTypeConfig
-            {
-                TenantId = IntegrationTestFixture.TenantId, OwnerEntityType = DocumentOwnerTypes.Invoice,
-                AttachmentType = null,   // CATCH-ALL
-                IdmEntityType = $"InforInvoice",   // has a provider so it can dispatch
-                EligibilityGateExpr = MerinoOne.SupplierPortal.Application.Integration.Idm.IdmGateConversion.ToJsonata(new[] { "invoice.erpCompany", "invoice.erpTransactionType", "invoice.erpDocumentNo" }),
-                CreateMappingExpression = new IdmDefaultExpressions().TryGet("InforInvoice")!.CreateExpression,
-                IsEnabled = true, CreatedBy = "seed",
-            };
-            db.Set<IdmAttachmentTypeConfig>().Add(cfg);
+            var cfg = NewDocumentConfig(attachmentType: null);   // CATCH-ALL
+            db.OutboundIntegrationConfigs.Add(cfg);
             await db.SaveChangesAsync();
             cfgId = cfg.Id;
         }
@@ -195,7 +199,7 @@ public class IdmDispatchTests
             using var scope = _fx.Factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             // A catch-all config (null attachmentType) classifies EVERY document of its portal entity regardless of
-            // the document's attachment type — the odd-typed doc gets stamped with the config's idmEntityType. (The
+            // the document's attachment type — the odd-typed doc gets stamped with the config's target entity. (The
             // downstream Create/dispatch mechanics are covered by the specific-type tests; here the stamp is the
             // catch-all proof, and it isn't subject to the seed-scan's per-drain Take() batch.)
             (await db.DocumentUploads.IgnoreQueryFilters().Where(d => d.Id == docId).Select(d => d.IdmEntityType).SingleAsync())
@@ -206,58 +210,47 @@ public class IdmDispatchTests
         {
             using var cleanup = _fx.Factory.Services.CreateScope();
             var db = cleanup.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.Set<IdmAttachmentTypeConfig>().IgnoreQueryFilters().Where(c => c.Id == cfgId).ExecuteDeleteAsync();
+            await db.OutboundIntegrationConfigs.IgnoreQueryFilters().Where(c => c.Id == cfgId).ExecuteDeleteAsync();
         }
     }
 
     /// <summary>
-    /// 2026-07-05 — config.acl / config.entityName (read by every mapping expression) must resolve from the
-    /// tenant's IDM.Item.Create OutboundEndpointConfig row, not a hardcoded literal (there was previously no UI
-    /// path to change them at all). Proves the wiring by overriding the row and checking the persisted snapshot.
+    /// R10 — config.acl / config.entityName (read by every mapping expression) must resolve from the unified
+    /// config row's contextJson, not a hardcoded literal. Proves the wiring by setting the row's context and
+    /// checking the persisted snapshot.
     /// </summary>
     [SkippableFact]
-    public async Task Snapshot_config_acl_and_entityName_resolve_from_outbound_endpoint_config()
+    public async Task Snapshot_config_acl_and_entityName_resolve_from_context_json()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
-        Guid docId, endpointConfigId;
+        Guid docId;
+        string attachmentType;
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            (_, docId, _) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "acl-entity.pdf");
-
-            endpointConfigId = Guid.NewGuid();
-            db.Set<OutboundEndpointConfig>().Add(new OutboundEndpointConfig
-            {
-                Id = endpointConfigId, TenantId = IntegrationTestFixture.TenantId, TargetSystem = "IDM",
-                EndpointKey = "IDM.Item.Create", HttpMethod = "POST", RelativePath = "/IDM/api/items",
-                DefaultAcl = "CustomAcl-Test", EntityName = "CustomEntity-Test", IsEnabled = false,
-                CreatedBy = "seed",
-            });
+            (_, docId, attachmentType) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "acl-entity.pdf");
             await db.SaveChangesAsync();
+
+            await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
+                .Where(c => c.TenantId == IntegrationTestFixture.TenantId && c.AttachmentType == attachmentType)
+                .ExecuteUpdateAsync(s => s.SetProperty(
+                    c => c.ContextJson, "{\"acl\":\"CustomAcl-Test\",\"entityName\":\"CustomEntity-Test\"}"));
         }
 
-        try
-        {
-            await DrainAsync();
+        await DrainAsync();
 
-            using var scope = _fx.Factory.Services.CreateScope();
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var snapshotJson = await db.IdmDocumentOutboxes.IgnoreQueryFilters()
                 .Where(o => o.DocumentUploadId == docId && o.Operation == IdmOutboxOperation.Create)
                 .Select(o => o.RequestSnapshotJson).SingleAsync();
 
             snapshotJson.Should().Contain("CustomAcl-Test",
-                because: "config.acl must resolve from the tenant's IDM.Item.Create endpoint row, not a hardcoded literal");
+                because: "config.acl must resolve from the unified config row's contextJson, not a hardcoded literal");
             snapshotJson.Should().Contain("CustomEntity-Test",
-                because: "config.entityName must resolve from the same row");
-        }
-        finally
-        {
-            using var cleanup = _fx.Factory.Services.CreateScope();
-            var db = cleanup.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.Set<OutboundEndpointConfig>().IgnoreQueryFilters()
-                .Where(e => e.Id == endpointConfigId).ExecuteDeleteAsync();
+                because: "config.entityName must resolve from the same contextJson");
         }
     }
 
@@ -306,8 +299,8 @@ public class IdmDispatchTests
         }
     }
 
-    /// <summary>Deleting a mapping soft-deletes the row and un-classifies its UNPUSHED documents only —
-    /// pid-bearing documents keep the stamp so a later IDM delete can still resolve.</summary>
+    /// <summary>Deleting a Document integration soft-deletes the row and un-classifies its UNPUSHED documents only —
+    /// pid-bearing documents keep the stamp so a later IDM delete can still resolve (R10: unified delete handler).</summary>
     [SkippableFact]
     public async Task Delete_mapping_clears_unpushed_stamps_and_keeps_pushed()
     {
@@ -321,7 +314,7 @@ public class IdmDispatchTests
             (_, unpushedDocId, attachmentType) = SeedInvoiceDoc(db, Guid.NewGuid().ToString("N")[..8], "del-unpushed.pdf");
             await db.SaveChangesAsync();
 
-            var cfg = await db.Set<IdmAttachmentTypeConfig>().IgnoreQueryFilters()
+            var cfg = await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
                 .SingleAsync(c => c.TenantId == IntegrationTestFixture.TenantId && c.AttachmentType == attachmentType);
             cfgId = cfg.Id;
 
@@ -344,23 +337,22 @@ public class IdmDispatchTests
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var handler = new Application.Integration.Idm.Commands.DeleteIdmAttachmentTypeConfigCommandHandler(
+            var handler = new Application.Integration.Ln.Commands.DeleteOutboundIntegrationConfigCommandHandler(
                 db, new StubCurrentUser(IntegrationTestFixture.TenantId));
             var result = await handler.Handle(
-                new Application.Integration.Idm.Commands.DeleteIdmAttachmentTypeConfigCommand(cfgId), CancellationToken.None);
-            result.Deleted.Should().BeTrue();
-            result.ClearedDocuments.Should().Be(1, because: "only the unpushed document is un-classified");
+                new Application.Integration.Ln.Commands.DeleteOutboundIntegrationConfigCommand(cfgId), CancellationToken.None);
+            result.Should().BeTrue();
 
             // Second delete is a no-op (row already gone).
             var again = await handler.Handle(
-                new Application.Integration.Idm.Commands.DeleteIdmAttachmentTypeConfigCommand(cfgId), CancellationToken.None);
-            again.Deleted.Should().BeFalse();
+                new Application.Integration.Ln.Commands.DeleteOutboundIntegrationConfigCommand(cfgId), CancellationToken.None);
+            again.Should().BeFalse();
         }
 
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            (await db.Set<IdmAttachmentTypeConfig>().IgnoreQueryFilters().Where(c => c.Id == cfgId).Select(c => c.IsDeleted).SingleAsync())
+            (await db.OutboundIntegrationConfigs.IgnoreQueryFilters().Where(c => c.Id == cfgId).Select(c => c.IsDeleted).SingleAsync())
                 .Should().BeTrue(because: "delete is a soft-delete");
             (await db.DocumentUploads.IgnoreQueryFilters().Where(d => d.Id == unpushedDocId).Select(d => d.IdmEntityType).SingleAsync())
                 .Should().BeNull(because: "the unpushed document loses its classification with the mapping");

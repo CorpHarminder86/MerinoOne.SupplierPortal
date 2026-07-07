@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Jsonata.Net.Native;
-using Jsonata.Net.Native.Json;
 using MerinoOne.SupplierPortal.Application.Integration.Idm;
+using MerinoOne.SupplierPortal.Application.Integration.Ln;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Idm;
 
@@ -10,15 +10,21 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Idm;
 /// expression, and parses the resulting <c>{ headers, body }</c> envelope. JSONata does static values +
 /// projection only (D-R8-18) — the file fetch happened at snapshot assembly, so <c>attachment.base64</c> is
 /// already present. Also serves <see cref="IJsonataValidator"/> for the Save-config compile check.
+/// R10 — evaluation routed through the shared engine (bounded compiled-expression cache) instead of
+/// compiling a fresh JsonataQuery per call (R10 audit finding).
 /// </summary>
 public sealed class JsonataOutboundRequestBuilder : IOutboundRequestBuilder, IJsonataValidator
 {
+    private readonly ILnMappingService _mapping;
+    public JsonataOutboundRequestBuilder(ILnMappingService mapping) => _mapping = mapping;
+
     public Task<OutboundEnvelope> BuildAsync(string mappingExpression, object snapshot, CancellationToken ct)
     {
         var inputJson = JsonSerializer.Serialize(snapshot);
-        var query = new JsonataQuery(mappingExpression);
-        var result = query.Eval(JToken.Parse(inputJson));
-        var outJson = result.ToFlatString();
+        var eval = _mapping.Evaluate(mappingExpression, inputJson);
+        if (!eval.Ok || eval.OutputJson is null)
+            throw new InvalidOperationException($"Mapping expression failed: {eval.Error ?? "no output"}");
+        var outJson = eval.OutputJson;
 
         using var doc = JsonDocument.Parse(outJson);
         var root = doc.RootElement;
