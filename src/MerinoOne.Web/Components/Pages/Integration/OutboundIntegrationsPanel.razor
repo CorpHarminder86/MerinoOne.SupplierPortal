@@ -1,0 +1,797 @@
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+@* R10 — the unified Outbound Integrations panel (Endpoints hub → Outbound tab). ONE grid over
+   integration.OutboundIntegrationConfig: Transaction rows (LN posting — R9 semantics intact: tri-state mode,
+   sample pin, attestation, candidate filters) and Document rows (IDM sync — attachment mapping + per-operation
+   routing + optional pid response mapping) side by side, each tagged with its connection point.
+   No @@page — the hub provides chrome; grew out of the R9 LnOutboundEndpoints screen. *@
+
+@if (!CanRead)
+{
+    <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">lock</span><div>You do not have permission to view outbound integrations.</div></div>
+}
+else if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else
+{
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <span class="tl-count-chip">@configs.Count</span>
+        <span style="font-size:12.5px;color:var(--mer-ink-500);">Transaction = ERP posting (Legacy rows keep the compiled builders) · Document = IDM attachment sync · connection blank = tenant default</span>
+        @if (CanAdmin)
+        {
+            <button class="mbtn mbtn--accent" style="margin-left:auto;" @onclick="OpenCreateDocument" disabled="@busy" title="New Document integration (attachment mapping)">
+                <span class="material-symbols-outlined">add</span> New Document integration
+            </button>
+        }
+    </div>
+
+    @if (configs.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">cable</span>
+            <div>No outbound integrations. Run the seed CLI to create the 8 Transaction rows (all Legacy).</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 105px 190px 170px 130px 1fr 100px 110px 110px 230px; --tl-min-width: 1480px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Kind</div>
+                <div class="tlg-col">Integration</div>
+                <div class="tlg-col">Target</div>
+                <div class="tlg-col">Connection</div>
+                <div class="tlg-col">Path</div>
+                <div class="tlg-col">Mode</div>
+                <div class="tlg-col">Sample</div>
+                <div class="tlg-col">Attested</div>
+                <div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var c in configs)
+            {
+                var cfg = c;
+                var isTx = cfg.Kind == "Transaction";
+                <div class="tlg-row">
+                    <div class="tlg-col"><span class="tlg-status @(isTx ? "tlg-status--active" : "tlg-status--pending")">@cfg.Kind</span></div>
+                    <div class="tlg-col tlg-name" title="gate v@(cfg.GateVersion)">
+                        @(isTx ? cfg.TransactionType : $"{cfg.PortalEntity} · {cfg.AttachmentType ?? "all types"}")
+                    </div>
+                    <div class="tlg-col tlg-code" title="@(isTx ? cfg.PortalEntity : cfg.TargetEntityName)">
+                        @(isTx ? cfg.PortalEntity : cfg.TargetEntityName)
+                    </div>
+                    <div class="tlg-col" style="font-size:12px;">@(cfg.ConnectionPointName ?? "default")</div>
+                    <div class="tlg-col tlg-code" title="@cfg.EndpointPath">@cfg.EndpointPath</div>
+                    <div class="tlg-col"><span class="tlg-status @ModeChipClass(cfg.DispatchMode)" title="@ModeTitle(cfg.DispatchMode)">@cfg.DispatchMode</span></div>
+                    <div class="tlg-col">
+                        @if (!isTx) { <span style="color:var(--mer-ink-400);">n/a</span> }
+                        else if (!cfg.HasSample) { <span style="color:var(--mer-ink-400);">— none —</span> }
+                        else if (cfg.SampleStale) { <span class="tlg-status tlg-status--pending" title="builder version @cfg.SampleBuilderVersion — re-snapshot">Stale</span> }
+                        else { <span class="tlg-status tlg-status--active" title="@cfg.SampleBuilderVersion">Pinned</span> }
+                    </div>
+                    <div class="tlg-col">
+                        @if (!isTx) { <span style="color:var(--mer-ink-400);">n/a</span> }
+                        else if (cfg.VerifiedAt is null) { <span style="color:var(--mer-ink-400);">— no —</span> }
+                        else
+                        {
+                            <span class="tlg-status @(cfg.PathConfirmed ? "tlg-status--active" : "tlg-status--pending")"
+                                  title="@($"{cfg.VerifiedBy} · {cfg.VerifiedAt:yyyy-MM-dd HH:mm}Z · {cfg.VerifiedNote}")">
+                                @(cfg.PathConfirmed ? "Yes" : "No path ✓")
+                            </span>
+                        }
+                    </div>
+                    <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+                        @if (CanAdmin)
+                        {
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(cfg)" disabled="@busy" title="Edit routing / expressions">
+                                <span class="material-symbols-outlined">edit</span> Edit
+                            </button>
+                            @if (isTx)
+                            {
+                                <button class="mbtn mbtn--row mbtn--outline" @onclick="() => OpenSample(cfg)" disabled="@busy" title="Pin a sample document (D-R9-18)">
+                                    <span class="material-symbols-outlined">push_pin</span> Sample
+                                </button>
+                            }
+                            <button class="mbtn mbtn--row mbtn--outline" @onclick="() => OpenEnable(cfg)" disabled="@busy" title="Dispatch mode">
+                                <span class="material-symbols-outlined">rocket_launch</span> Mode
+                            </button>
+                            @if (!isTx)
+                            {
+                                <button class="mbtn mbtn--row mbtn--danger" @onclick="() => DeleteConfig(cfg)" disabled="@busy" title="Delete mapping (un-classifies unpushed documents)">
+                                    <span class="material-symbols-outlined">delete</span>
+                                </button>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@* ---------------- Edit / create dialog (kind-adaptive) ---------------- *@
+@if (editorOpen)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" data-size="lg" style="width:940px;max-width:94vw;max-height:92vh;overflow-y:auto;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">cable</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">@(editing is null ? "New Document integration" : (formIsTx ? $"{editing.TransactionType} · {editing.PortalEntity}" : $"{editing.PortalEntity} · {editing.AttachmentType ?? "all types"}"))</div>
+                    <h2 class="merino-dialog__title">@(editing is null ? "Create Document integration" : "Edit outbound integration")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="CloseEditor"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:14px;">
+                    @if (!formIsTx)
+                    {
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Portal entity *</label>
+                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);"
+                                        @bind="formPortalEntity" disabled="@(editing is not null)">
+                                    <option value="Asn">Asn</option><option value="Invoice">Invoice</option><option value="Supplier">Supplier</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachment type (blank = all)</label>
+                                <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formAttachmentType" disabled="@(editing is not null)" />
+                            </div>
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Target entity name * (IDM entity type)</label>
+                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formTargetEntityName"
+                                       list="idm-entity-options" />
+                                <datalist id="idm-entity-options">
+                                    @foreach (var o in entityTypeOptions) { <option value="@o.IdmEntityType">@o.OwnerEntityType</option> }
+                                </datalist>
+                            </div>
+                        </div>
+                    }
+                    <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Endpoint path * (relative to the connection base URL; absolute https:// used verbatim)</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formEndpointPath" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">HTTP verb</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formHttpVerb">
+                                <option>POST</option><option>PUT</option><option>PATCH</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Connection point</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formConnectionId">
+                                <option value="">— tenant default —</option>
+                                @foreach (var cp in connectionPoints)
+                                {
+                                    <option value="@cp.Id" disabled="@(!cp.TransportAvailable)">@cp.Name (@cp.SystemType)@(cp.TransportAvailable ? "" : " — no transport yet")</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    @if (!formIsTx)
+                    {
+                        <div style="display:grid;grid-template-columns:2fr 1fr 2fr 1fr;gap:14px;">
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Update path (blank = create path)</label>
+                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formMutatePath" />
+                            </div>
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Update verb</label>
+                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formMutateVerb">
+                                    <option value="">(create verb)</option><option>POST</option><option>PUT</option><option>PATCH</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Delete path (blank = create path)</label>
+                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formDeletePath" />
+                            </div>
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Delete verb</label>
+                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formDeleteVerb">
+                                    <option value="">DELETE</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Response format</label>
+                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formResponseFormat">
+                                    <option>Xml</option><option>Json</option>
+                                </select>
+                                <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Xml → normalized to JSON before the response mapping runs (IDM). Declared, never hardcoded.</div>
+                            </div>
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Context JSON (config.* in expressions)</label>
+                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formContextJson"
+                                       placeholder='{"acl":"Public","entityName":"MDS_GenericDocument"}' />
+                            </div>
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Static headers (JSON object)</label>
+                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formStaticHeaders" />
+                            </div>
+                        </div>
+                    }
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Eligibility gate (JSONata boolean — blank = no gate)</label>
+                        <textarea class="rz-textbox" style="width:100%;min-height:60px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;"
+                                  @bind="formGateExpr" placeholder="e.g. invoice.erpCompany != null"></textarea>
+                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Strict-true, fail closed. Transaction: enqueue + dispatch re-check + sweep. Document: seed/promote gate. Changing it bumps the gate version.</div>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Request mapping (JSONata) *@(formIsTx ? " → target payload" : " → Create envelope { headers, body }")</label>
+                        <textarea class="rz-textbox" style="width:100%;min-height:150px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formRequestExpr"></textarea>
+                    </div>
+                    @if (!formIsTx)
+                    {
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Mutate mapping (pid-keyed Update — blank = create shape)</label>
+                            <textarea class="rz-textbox" style="width:100%;min-height:90px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formMutateExpr"></textarea>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Response mapping (normalized response → { pid } — blank = built-in parser)</label>
+                            <textarea class="rz-textbox" style="width:100%;min-height:70px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formResponseExpr"
+                                      placeholder="item.pid"></textarea>
+                        </div>
+                    }
+                    else
+                    {
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Response mapping (response → closed contract) *</label>
+                            <textarea class="rz-textbox" style="width:100%;min-height:100px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formResponseExpr"></textarea>
+                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Must produce <span style="font-family:Inter,monospace;">{ erpKey, erpStatus, message?, correlationBag? }</span> — unknown keys block save (D-R9-4).</div>
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Ack mapping (erp-ack body → closed contract) — dormant, ack extraction stays code-owned</label>
+                            <textarea class="rz-textbox" style="width:100%;min-height:80px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formAckExpr"></textarea>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Candidate filter (code-registered, D-R9-15)</label>
+                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formFilterName">
+                                    <option value="">— none —</option>
+                                    @foreach (var f in filterOptions)
+                                    {
+                                        <option value="@f.Name">@f.Name@(f.IsParameterized ? " (params)" : "")</option>
+                                    }
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Filter params (JSON)</label>
+                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formFilterParams" placeholder="{&quot;statuses&quot;:[&quot;Accepted&quot;]}" />
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <button class="mbtn mbtn--outline" @onclick="ValidateForm" disabled="@busy" title="Run the save-time pipeline without saving">
+                                <span class="material-symbols-outlined">rule</span> Validate
+                            </button>
+                            @if (editing is not null && (editing.RequestDrifted || editing.ResponseDrifted || editing.AckDrifted))
+                            {
+                                <button class="mbtn mbtn--outline" @onclick='() => RestoreSlot("request")' disabled="@(busy || !editing.RequestDrifted)" title="Restore the request expression to the repo default">
+                                    <span class="material-symbols-outlined">settings_backup_restore</span> Request default
+                                </button>
+                                <button class="mbtn mbtn--outline" @onclick='() => RestoreSlot("response")' disabled="@(busy || !editing.ResponseDrifted)" title="Restore the response expression to the repo default">
+                                    <span class="material-symbols-outlined">settings_backup_restore</span> Response default
+                                </button>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(renderedPreview))
+                        {
+                            <div>
+                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Rendered request (against the pinned sample)</label>
+                                <pre style="max-height:200px;overflow:auto;background:var(--mer-ink-100);padding:10px;border-radius:6px;font-size:11.5px;">@renderedPreview</pre>
+                            </div>
+                        }
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;white-space:pre-wrap;">@formError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="CloseEditor">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@* ---------------- Sample-pin dialog (Transaction, D-R9-18) ---------------- *@
+@if (sampleFor is not null)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="info" data-size="md" style="width:640px;max-width:92vw;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">push_pin</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">@sampleFor.TransactionType · @sampleFor.PortalEntity</div>
+                    <h2 class="merino-dialog__title">Pin a sample document</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => sampleFor = null"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <p style="font-size:12.5px;color:var(--mer-ink-600);margin:0 0 10px;">
+                    The chosen REAL entity runs through the input-document builder and its output is frozen for save-time
+                    validation (hand-authored samples drift and rot — D-R9-18). Pick a <strong>representative</strong> entity:
+                    multi-line, populated lots/serials, or the collapse lint has nothing to trip on.
+                </p>
+                <div style="display:flex;gap:8px;margin-bottom:10px;">
+                    <input class="rz-textbox" style="flex:1;padding:8px 10px;" @bind="sampleSearch" placeholder="Search by number / code…" />
+                    <button class="mbtn mbtn--outline" @onclick="SearchSamples" disabled="@busy"><span class="material-symbols-outlined">search</span> Search</button>
+                </div>
+                @if (sampleCandidates.Count == 0)
+                {
+                    <div style="font-size:12.5px;color:var(--mer-ink-500);">No candidates — search above.</div>
+                }
+                else
+                {
+                    <div style="max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:4px;">
+                        @foreach (var s in sampleCandidates)
+                        {
+                            var cand = s;
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:6px 8px;border:1px solid var(--mer-ink-200);border-radius:6px;">
+                                <input type="radio" name="sampleCandidate" checked="@(selectedSampleId == cand.EntityId)"
+                                       @onchange="() => selectedSampleId = cand.EntityId" />
+                                <span class="tlg-code">@cand.DisplayKey</span>
+                                <span class="tlg-status tlg-status--pending">@cand.StatusLabel</span>
+                                <span style="color:var(--mer-ink-500);font-size:11.5px;margin-left:auto;">@cand.CreatedOn.ToString("yyyy-MM-dd")</span>
+                            </label>
+                        }
+                    </div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => sampleFor = null">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="PinSample" disabled="@(busy || selectedSampleId is null)">@(busy ? "Pinning…" : "Pin sample")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@* ---------------- Attest + dispatch-mode dialog (kind-adaptive) ---------------- *@
+@if (enableFor is not null)
+{
+    var enableIsTx = enableFor.Kind == "Transaction";
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="warning" data-size="md" style="width:620px;max-width:92vw;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">rocket_launch</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">@(enableIsTx ? enableFor.TransactionType : $"{enableFor.PortalEntity} · {enableFor.AttachmentType ?? "all types"}")</div>
+                    <h2 class="merino-dialog__title">@(enableIsTx ? "Attestation & dispatch mode" : "Dispatch mode")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => enableFor = null"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    @if (enableIsTx)
+                    {
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attestation note * (what was dry-posted, when, against which tenant)</label>
+                            <textarea class="rz-textbox" style="width:100%;min-height:70px;padding:8px 10px;font-size:12.5px;" @bind="attestNote"></textarea>
+                        </div>
+                        <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" @bind="attestPathConfirmed" style="margin-top:2px;" />
+                            <span><strong>Endpoint path confirmed against tenant Available-APIs export</strong> (D-R9-21).
+                            Hard gate: Dynamic dispatch is blocked until this is ticked — the endpoint path is the one thing
+                            most likely to be wrong (O-R9-2). The system records this attestation; it does not verify it.</span>
+                        </label>
+                        <button class="mbtn mbtn--outline" style="align-self:flex-start;" @onclick="Attest" disabled="@busy">
+                            <span class="material-symbols-outlined">verified</span> Record attestation
+                        </button>
+                        <hr style="border:none;border-top:1px solid var(--mer-ink-200);margin:2px 0;" />
+                    }
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Dispatch mode</label>
+                        <div style="display:flex;gap:14px;margin-top:6px;">
+                            @foreach (var m in (enableIsTx ? new[] { "Legacy", "Dynamic", "Held" } : new[] { "Dynamic", "Held" }))
+                            {
+                                var mode = m;
+                                var blocked = enableIsTx && mode == "Dynamic" && !DynamicReady;
+                                <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:@(blocked ? "not-allowed" : "pointer");opacity:@(blocked ? "0.5" : "1");">
+                                    <input type="radio" name="dispatchMode" checked="@(selectedMode == mode)" disabled="@blocked"
+                                           @onchange="() => selectedMode = mode" />
+                                    @mode
+                                </label>
+                            }
+                        </div>
+                        @if (enableIsTx && !DynamicReady)
+                        {
+                            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+                                @if (enableFor.VerifiedAt is null) { <span class="tlg-status tlg-status--danger">not attested</span> }
+                                @if (!enableFor.PathConfirmed && !attestPathConfirmed) { <span class="tlg-status tlg-status--danger">path not confirmed</span> }
+                                @if (!enableFor.HasSample) { <span class="tlg-status tlg-status--danger">no sample pinned</span> }
+                                @if (enableFor.SampleStale) { <span class="tlg-status tlg-status--danger">sample stale</span> }
+                            </div>
+                        }
+                        <div style="font-size:11.5px;color:var(--mer-ink-500);margin-top:6px;">
+                            @(enableIsTx
+                                ? "Legacy = compiled builder (rollback) · Dynamic = config-driven JSONata path · Held = per-endpoint kill (dispatch pauses, rows accumulate Pending, enqueue continues — D-R9-11)."
+                                : "Dynamic = active (documents classify, seed and dispatch) · Held = off (no seeding, no dispatch — parity with the pre-R10 disabled state).")
+                        </div>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(enableError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;white-space:pre-wrap;">@enableError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => enableFor = null">Close</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="ApplyMode" disabled="@(busy || selectedMode == enableFor.DispatchMode)">@(busy ? "Applying…" : $"Set {selectedMode}")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool CanRead => Token.HasPermission("Settings.Read");
+    private bool CanAdmin => Token.HasPermission("Integration.Admin");
+
+    private List<OutboundIntegrationConfigDto> configs = new();
+    private List<ConnectionPointDto> connectionPoints = new();
+    private List<IdmEntityTypeOptionDto> entityTypeOptions = new();
+    private bool loading = true;
+    private bool busy;
+
+    // Editor state (edit an existing row, or create a NEW Document row when editing == null).
+    private bool editorOpen;
+    private OutboundIntegrationConfigDto? editing;
+    private bool formIsTx;
+    private string formPortalEntity = "Invoice";
+    private string formAttachmentType = string.Empty;
+    private string formTargetEntityName = string.Empty;
+    private string formEndpointPath = string.Empty;
+    private string formHttpVerb = "POST";
+    private string formConnectionId = string.Empty;
+    private string formMutatePath = string.Empty;
+    private string formMutateVerb = string.Empty;
+    private string formDeletePath = string.Empty;
+    private string formDeleteVerb = string.Empty;
+    private string formResponseFormat = "Xml";
+    private string formContextJson = string.Empty;
+    private string formStaticHeaders = string.Empty;
+    private string formGateExpr = string.Empty;
+    private string formRequestExpr = string.Empty;
+    private string formMutateExpr = string.Empty;
+    private string formResponseExpr = string.Empty;
+    private string formAckExpr = string.Empty;
+    private string formFilterName = string.Empty;
+    private string formFilterParams = string.Empty;
+    private string formError = string.Empty;
+    private string renderedPreview = string.Empty;
+    private List<LnCandidateFilterDto> filterOptions = new();
+
+    // Sample dialog state.
+    private OutboundIntegrationConfigDto? sampleFor;
+    private string sampleSearch = string.Empty;
+    private List<LnSampleCandidateDto> sampleCandidates = new();
+    private Guid? selectedSampleId;
+
+    // Attest / mode dialog state.
+    private OutboundIntegrationConfigDto? enableFor;
+    private string attestNote = string.Empty;
+    private bool attestPathConfirmed;
+    private string selectedMode = "Legacy";
+    private string enableError = string.Empty;
+    private bool DynamicReady => enableFor is not null
+        && (enableFor.VerifiedAt is not null || !string.IsNullOrWhiteSpace(attestNote))
+        && (enableFor.PathConfirmed || attestPathConfirmed)
+        && enableFor.HasSample && !enableFor.SampleStale;
+
+    private static string ModeChipClass(string mode) => mode switch
+    {
+        "Dynamic" => "tlg-status--active",
+        "Held" => "tlg-status--danger",
+        _ => "tlg-status--pending",
+    };
+
+    private static string ModeTitle(string mode) => mode switch
+    {
+        "Dynamic" => "Config-driven dispatch (active)",
+        "Held" => "Kill — dispatch paused",
+        _ => "Legacy compiled builder",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanRead) { loading = false; return; }
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<OutboundIntegrationConfigDto>>("api/integration/outbound/configs");
+        configs = resp?.Data ?? new();
+        var cps = await Api.GetAsync<List<ConnectionPointDto>>("api/integration/outbound/connection-points");
+        connectionPoints = cps?.Data ?? new();
+        loading = false;
+    }
+
+    private void CloseEditor() { editorOpen = false; editing = null; }
+
+    private async Task OpenCreateDocument()
+    {
+        editing = null;
+        formIsTx = false;
+        formPortalEntity = "Invoice";
+        formAttachmentType = string.Empty;
+        formTargetEntityName = string.Empty;
+        formEndpointPath = "/IDM/api/items";
+        formHttpVerb = "POST";
+        formConnectionId = string.Empty;
+        formMutatePath = string.Empty; formMutateVerb = string.Empty;
+        formDeletePath = string.Empty; formDeleteVerb = string.Empty;
+        formResponseFormat = "Xml";
+        formContextJson = "{\"acl\":\"Public\",\"entityName\":\"MDS_GenericDocument\"}";
+        formStaticHeaders = string.Empty;
+        formGateExpr = string.Empty;
+        formRequestExpr = string.Empty;
+        formMutateExpr = string.Empty;
+        formResponseExpr = string.Empty;
+        formAckExpr = string.Empty; formFilterName = string.Empty; formFilterParams = string.Empty;
+        formError = string.Empty; renderedPreview = string.Empty;
+        var opts = await Api.GetAsync<List<IdmEntityTypeOptionDto>>("api/integration/idm/entity-types");
+        entityTypeOptions = opts?.Data ?? new();
+        editorOpen = true;
+    }
+
+    private async Task OpenEdit(OutboundIntegrationConfigDto c)
+    {
+        editing = c;
+        formIsTx = c.Kind == "Transaction";
+        formPortalEntity = c.PortalEntity;
+        formAttachmentType = c.AttachmentType ?? string.Empty;
+        formTargetEntityName = c.TargetEntityName ?? string.Empty;
+        formEndpointPath = c.EndpointPath;
+        formHttpVerb = c.HttpVerb;
+        formConnectionId = c.ConnectionPointId?.ToString() ?? string.Empty;
+        formMutatePath = c.MutatePath ?? string.Empty;
+        formMutateVerb = c.MutateVerb ?? string.Empty;
+        formDeletePath = c.DeletePath ?? string.Empty;
+        formDeleteVerb = c.DeleteVerb ?? string.Empty;
+        formResponseFormat = c.ResponseFormat;
+        formContextJson = c.ContextJson ?? string.Empty;
+        formStaticHeaders = c.StaticHeadersJson ?? string.Empty;
+        formGateExpr = c.EligibilityGateExpr ?? string.Empty;
+        formRequestExpr = c.RequestMappingExpr;
+        formMutateExpr = c.MutateMappingExpr ?? string.Empty;
+        formResponseExpr = c.ResponseMappingExpr ?? string.Empty;
+        formAckExpr = c.AckMappingExpr ?? string.Empty;
+        formFilterName = c.CandidateFilterName ?? string.Empty;
+        formFilterParams = c.CandidateFilterParams ?? string.Empty;
+        formError = string.Empty;
+        renderedPreview = string.Empty;
+        if (formIsTx)
+        {
+            var f = await Api.GetAsync<List<LnCandidateFilterDto>>($"api/integration/outbound/candidate-filters?portalEntity={Uri.EscapeDataString(c.PortalEntity)}");
+            filterOptions = f?.Data ?? new();
+        }
+        else
+        {
+            var opts = await Api.GetAsync<List<IdmEntityTypeOptionDto>>("api/integration/idm/entity-types");
+            entityTypeOptions = opts?.Data ?? new();
+        }
+        editorOpen = true;
+    }
+
+    private SaveOutboundIntegrationConfigRequest BuildSaveRequest() => new(
+        Id: editing?.Id,
+        Kind: formIsTx ? "Transaction" : "Document",
+        ConnectionPointId: Guid.TryParse(formConnectionId, out var cid) ? cid : null,
+        TransactionType: editing?.TransactionType,
+        PortalEntity: formPortalEntity,
+        AttachmentType: string.IsNullOrWhiteSpace(formAttachmentType) ? null : formAttachmentType.Trim(),
+        TargetEntityName: string.IsNullOrWhiteSpace(formTargetEntityName) ? null : formTargetEntityName.Trim(),
+        ContextJson: string.IsNullOrWhiteSpace(formContextJson) ? null : formContextJson,
+        EndpointPath: formEndpointPath.Trim(),
+        HttpVerb: formHttpVerb,
+        MutatePath: string.IsNullOrWhiteSpace(formMutatePath) ? null : formMutatePath.Trim(),
+        MutateVerb: string.IsNullOrWhiteSpace(formMutateVerb) ? null : formMutateVerb,
+        DeletePath: string.IsNullOrWhiteSpace(formDeletePath) ? null : formDeletePath.Trim(),
+        DeleteVerb: string.IsNullOrWhiteSpace(formDeleteVerb) ? null : formDeleteVerb,
+        StaticHeadersJson: string.IsNullOrWhiteSpace(formStaticHeaders) ? null : formStaticHeaders,
+        RequestFormat: editing?.RequestFormat ?? "Json",
+        ResponseFormat: formIsTx ? (editing?.ResponseFormat ?? "Json") : formResponseFormat,
+        EligibilityGateExpr: string.IsNullOrWhiteSpace(formGateExpr) ? null : formGateExpr,
+        RequestMappingExpr: formRequestExpr,
+        MutateMappingExpr: string.IsNullOrWhiteSpace(formMutateExpr) ? null : formMutateExpr,
+        ResponseMappingExpr: string.IsNullOrWhiteSpace(formResponseExpr) ? null : formResponseExpr,
+        AckMappingExpr: string.IsNullOrWhiteSpace(formAckExpr) ? null : formAckExpr,
+        CandidateFilterName: string.IsNullOrWhiteSpace(formFilterName) ? null : formFilterName,
+        CandidateFilterParams: string.IsNullOrWhiteSpace(formFilterParams) ? null : formFilterParams,
+        ResponseSampleJson: null,
+        AckSampleJson: null);
+
+    private async Task ValidateForm()
+    {
+        if (editing is null || !formIsTx) return;
+        busy = true;
+        formError = string.Empty;
+        renderedPreview = string.Empty;
+        var req = new ValidateOutboundIntegrationConfigRequest(
+            editing.PortalEntity,
+            string.IsNullOrWhiteSpace(formGateExpr) ? null : formGateExpr,
+            formRequestExpr, formResponseExpr,
+            string.IsNullOrWhiteSpace(formAckExpr) ? null : formAckExpr,
+            string.IsNullOrWhiteSpace(formFilterName) ? null : formFilterName,
+            string.IsNullOrWhiteSpace(formFilterParams) ? null : formFilterParams,
+            editing.SampleDocumentJson, editing.ResponseSampleJson, editing.AckSampleJson);
+        var resp = await Api.PostAsync<LnConfigValidationResultDto, ValidateOutboundIntegrationConfigRequest>("api/integration/outbound/configs/validate", req);
+        if (resp?.Success == true && resp.Data is { } r)
+        {
+            if (r.IsValid)
+            {
+                renderedPreview = r.RenderedRequestJson ?? "(no pinned sample — expressions compile)";
+                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Validation green" });
+            }
+            else
+            {
+                formError = string.Join("\n", r.GeneralErrors
+                    .Concat(r.GateErrors.Select(e => $"Gate: {e}"))
+                    .Concat(r.RequestErrors.Select(e => $"Request: {e}"))
+                    .Concat(r.ResponseErrors.Select(e => $"Response: {e}"))
+                    .Concat(r.AckErrors.Select(e => $"Ack: {e}")));
+            }
+        }
+        else
+        {
+            formError = resp?.Errors?.FirstOrDefault() ?? "Validation call failed.";
+        }
+        busy = false;
+    }
+
+    private async Task Save()
+    {
+        busy = true;
+        formError = string.Empty;
+        var resp = await Api.PostAsync<Guid, SaveOutboundIntegrationConfigRequest>("api/integration/outbound/configs", BuildSaveRequest());
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved", Detail = "Any gate/mapping change bumped the gate version." });
+            CloseEditor();
+            await Load();
+        }
+        else
+        {
+            formError = resp?.Errors?.FirstOrDefault() ?? "Failed to save.";
+        }
+        busy = false;
+    }
+
+    private async Task RestoreSlot(string slot)
+    {
+        if (editing is null) return;
+        busy = true;
+        var resp = await Api.PostAsync<bool, RestoreLnDefaultExpressionRequest>($"api/integration/outbound/configs/{editing.Id}/restore-default", new(slot));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = $"Restored {slot} default" });
+            var current = editing;
+            await Load();
+            var refreshed = configs.FirstOrDefault(c => c.Id == current.Id);
+            if (refreshed is not null) await OpenEdit(refreshed);
+        }
+        else
+        {
+            formError = resp?.Errors?.FirstOrDefault() ?? "Restore failed.";
+        }
+        busy = false;
+    }
+
+    private async Task DeleteConfig(OutboundIntegrationConfigDto c)
+    {
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/integration/outbound/configs/{c.Id}");
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Mapping deleted", Detail = "Unpushed documents were un-classified." });
+            await Load();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Delete failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+
+    private async Task OpenSample(OutboundIntegrationConfigDto c)
+    {
+        sampleFor = c;
+        sampleSearch = string.Empty;
+        selectedSampleId = null;
+        sampleCandidates = new();
+        await SearchSamples();
+    }
+
+    private async Task SearchSamples()
+    {
+        if (sampleFor is null) return;
+        busy = true;
+        var url = $"api/integration/outbound/sample-candidates?portalEntity={Uri.EscapeDataString(sampleFor.PortalEntity)}"
+                + (string.IsNullOrWhiteSpace(sampleSearch) ? string.Empty : $"&search={Uri.EscapeDataString(sampleSearch)}");
+        var resp = await Api.GetAsync<List<LnSampleCandidateDto>>(url);
+        sampleCandidates = resp?.Data ?? new();
+        busy = false;
+    }
+
+    private async Task PinSample()
+    {
+        if (sampleFor is null || selectedSampleId is not { } entityId) return;
+        busy = true;
+        var resp = await Api.PostAsync<bool, PinLnSampleRequest>($"api/integration/outbound/configs/{sampleFor.Id}/pin-sample", new(entityId));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Sample pinned", Detail = "Save-time validation now runs against this snapshot." });
+            sampleFor = null;
+            await Load();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Pin failed", Detail = resp?.Errors?.FirstOrDefault() ?? string.Empty });
+        }
+        busy = false;
+    }
+
+    private void OpenEnable(OutboundIntegrationConfigDto c)
+    {
+        enableFor = c;
+        attestNote = c.VerifiedNote ?? string.Empty;
+        attestPathConfirmed = c.PathConfirmed;
+        selectedMode = c.DispatchMode;
+        enableError = string.Empty;
+    }
+
+    private async Task Attest()
+    {
+        if (enableFor is null) return;
+        busy = true;
+        enableError = string.Empty;
+        var resp = await Api.PostAsync<bool, AttestLnEndpointRequest>($"api/integration/outbound/configs/{enableFor.Id}/attest", new(attestNote, attestPathConfirmed));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Attestation recorded" });
+            var id = enableFor.Id;
+            await Load();
+            enableFor = configs.FirstOrDefault(c => c.Id == id) ?? enableFor;
+        }
+        else
+        {
+            enableError = resp?.Errors?.FirstOrDefault() ?? "Attestation failed.";
+        }
+        busy = false;
+    }
+
+    private async Task ApplyMode()
+    {
+        if (enableFor is null) return;
+        busy = true;
+        enableError = string.Empty;
+        var resp = await Api.PostAsync<bool, SetOutboundDispatchModeRequest>($"api/integration/outbound/configs/{enableFor.Id}/dispatch-mode", new(selectedMode));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = $"Dispatch mode: {selectedMode}" });
+            enableFor = null;
+            await Load();
+        }
+        else
+        {
+            enableError = resp?.Errors?.FirstOrDefault() ?? "Mode change failed.";
+        }
+        busy = false;
+    }
+}

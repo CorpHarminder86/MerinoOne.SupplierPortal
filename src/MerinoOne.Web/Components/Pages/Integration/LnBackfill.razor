@@ -147,7 +147,7 @@
     private bool CanRead => Token.HasPermission("Integration.Read");
     private bool CanAdmin => Token.HasPermission("Integration.Admin");
 
-    private List<LnEndpointConfigDto> gatedConfigs = new();
+    private List<OutboundIntegrationConfigDto> gatedConfigs = new();
     private List<LnBackfillRunDto> runs = new();
     private string selectedConfigId = string.Empty;
     private LnBackfillStatusDto? status;
@@ -186,7 +186,7 @@
     protected override async Task OnInitializedAsync()
     {
         if (!CanRead) { loading = false; return; }
-        var c = await Api.GetAsync<List<LnEndpointConfigDto>>("api/integration/ln-outbound/configs");
+        var c = await Api.GetAsync<List<OutboundIntegrationConfigDto>>("api/integration/ln-outbound/configs");
         gatedConfigs = (c?.Data ?? new())
             .Where(x => x.DispatchMode != "Legacy" && !string.IsNullOrWhiteSpace(x.EligibilityGateExpr))
             .ToList();

@@ -236,6 +236,9 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">menu_book</span>
                         <span class="mer-nav-item__label">Developer Docs</span>
                     </NavLink>
+                    @* R10 — the Endpoints HUB: Inbound channels + the unified Outbound Integrations
+                       (Transaction + Document configs; absorbed IDM Entity Type, Outbound Endpoints and
+                       LN Outbound Endpoints — their routes redirect here). *@
                     <NavLink class="mer-nav-item" href="integrations/endpoints" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">cable</span>
                         <span class="mer-nav-item__label">Endpoints</span>
@@ -244,10 +247,6 @@ else
                     <NavLink class="mer-nav-item" href="integrations/idm-sync-log" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">cloud_sync</span>
                         <span class="mer-nav-item__label">IDM Sync Log</span>
-                    </NavLink>
-                    <NavLink class="mer-nav-item" href="integrations/outbound-endpoints" ActiveClass="active">
-                        <span class="mer-nav-item__icon material-symbols-outlined">cloud_upload</span>
-                        <span class="mer-nav-item__label">Outbound Endpoints</span>
                     </NavLink>
                     <NavLink class="mer-nav-item" href="integrations/share-groups" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">hub</span>
@@ -289,7 +288,22 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">mail_outline</span>
                         <span class="mer-nav-item__label">Supplier Invites</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="admin/delivery-terms" ActiveClass="active">
+                   
+                    </div>
+
+                    <button type="button" class="mer-nav-grp @(IsGroupOpen("Master Data") ? "is-open" : null)" @onclick='() => ToggleGroup("Master Data")'>
+                        <span>Master Data</span><span class="material-symbols-outlined mer-nav-grp__caret">expand_more</span>
+                    </button>
+                    <div class="mer-nav-grp__items @(IsGroupOpen("Master Data") ? null : "collapsed")">
+                    <NavLink class="mer-nav-item" href="admin/item-groups" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">category</span>
+                        <span class="mer-nav-item__label">Item Groups</span>
+                    </NavLink>
+                    <NavLink class="mer-nav-item" href="admin/items" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
+                        <span class="mer-nav-item__label">Items</span>
+                    </NavLink>
+                     <NavLink class="mer-nav-item" href="admin/delivery-terms" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">local_shipping</span>
                         <span class="mer-nav-item__label">Delivery Terms</span>
                     </NavLink>
@@ -301,20 +315,7 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">percent</span>
                         <span class="mer-nav-item__label">Taxes</span>
                     </NavLink>
-                    <NavLink class="mer-nav-item" href="admin/items" ActiveClass="active">
-                        <span class="mer-nav-item__icon material-symbols-outlined">inventory_2</span>
-                        <span class="mer-nav-item__label">Items</span>
-                    </NavLink>
-                    </div>
-
-                    <button type="button" class="mer-nav-grp @(IsGroupOpen("Master Data") ? "is-open" : null)" @onclick='() => ToggleGroup("Master Data")'>
-                        <span>Master Data</span><span class="material-symbols-outlined mer-nav-grp__caret">expand_more</span>
-                    </button>
-                    <div class="mer-nav-grp__items @(IsGroupOpen("Master Data") ? null : "collapsed")">
-                    <NavLink class="mer-nav-item" href="admin/item-groups" ActiveClass="active">
-                        <span class="mer-nav-item__icon material-symbols-outlined">category</span>
-                        <span class="mer-nav-item__label">Item Groups</span>
-                    </NavLink>
+                    
                     <NavLink class="mer-nav-item" href="admin/units" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">straighten</span>
                         <span class="mer-nav-item__label">Units</span>
@@ -370,16 +371,8 @@ else
                             <span class="mer-nav-item__icon material-symbols-outlined">swap_horiz</span>
                             <span class="mer-nav-item__label">PO Status Mappings</span>
                         </NavLink>
-                        @* R8 (TSD R8 §7, renamed 2026-07-05): portal-entity → Infor IDM entity-type mapping / gate config (Settings.Write). *@
-                        <NavLink class="mer-nav-item" href="settings/idm-entity-types" ActiveClass="active">
-                            <span class="mer-nav-item__icon material-symbols-outlined">rule</span>
-                            <span class="mer-nav-item__label">IDM Entity Type</span>
-                        </NavLink>
-                        @* R9 (TSD R9 §2.1): config-driven LN outbound posting — endpoint config / attestation / dispatch mode. *@
-                        <NavLink class="mer-nav-item" href="settings/ln-outbound-endpoints" ActiveClass="active">
-                            <span class="mer-nav-item__icon material-symbols-outlined">cable</span>
-                            <span class="mer-nav-item__label">LN Outbound Endpoints</span>
-                        </NavLink>
+                        @* R10 — IDM Entity Type + LN Outbound Endpoints merged into the Endpoints hub
+                           (Integrations → Endpoints → Outbound); old routes redirect. *@
                     }
                     <NavLink class="mer-nav-item" href="admin/email-templates" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">mail</span>

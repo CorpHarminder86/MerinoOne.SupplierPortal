@@ -42,6 +42,9 @@
                 <button type="button" class="settings-rail__item @(category == "InforIdm" ? "active" : null)" @onclick="@(() => SelectCategory("InforIdm"))">
                     <span class="material-symbols-outlined">cloud_upload</span> Infor IDM
                 </button>
+                <button type="button" class="settings-rail__item @(category == "Connections" ? "active" : null)" @onclick="@(() => SelectCategory("Connections"))">
+                    <span class="material-symbols-outlined">lan</span> Connections
+                </button>
                 <button type="button" class="settings-rail__item @(category == "KillSwitches" ? "active" : null)" @onclick="@(() => SelectCategory("KillSwitches"))">
                     <span class="material-symbols-outlined">toggle_on</span> Kill Switches
                 </button>
@@ -155,10 +158,16 @@
                             </button>
                         </div>
                     }
+                    else if (category == ConnectionsCategory)
+                    {
+                        <h2 class="settings-section__title">Outbound connections</h2>
+                        <p class="settings-section__sub">Named connection targets for outbound integrations (R10). Integration configs tag a connection on the Endpoints hub; untagged rows use the tenant default.</p>
+                        <ConnectionPointsPanel />
+                    }
                     else if (category == KillSwitchCategory)
                     {
                         <h2 class="settings-section__title">Integration kill switches</h2>
-                        <p class="settings-section__sub">Stops dispatch, never enqueue — no silent event loss (TSD R9 §2.6). Per-endpoint hold lives on Settings → LN Outbound Endpoints (mode = Held).</p>
+                        <p class="settings-section__sub">Stops dispatch, never enqueue — no silent event loss (TSD R9 §2.6). Per-integration hold lives on the Endpoints hub (mode = Held).</p>
                         <IntegrationSwitchesPanel />
                     }
                 }
@@ -217,12 +226,13 @@
     private const string FulfilmentCategory = "Fulfilment";
     private const string InforIdmCategory = "InforIdm";
     private const string KillSwitchCategory = "KillSwitches";
+    private const string ConnectionsCategory = "Connections";
     private const string PasswordMask = "********";
 
     /// <summary>Categories a deep-link (?category=) may target — guards against arbitrary values.</summary>
     private static readonly HashSet<string> KnownCategories = new(StringComparer.Ordinal)
     {
-        EmailCategory, InviteCategory, InforCategory, FulfilmentCategory, InforIdmCategory, KillSwitchCategory,
+        EmailCategory, InviteCategory, InforCategory, FulfilmentCategory, InforIdmCategory, KillSwitchCategory, ConnectionsCategory,
     };
 
     private string category = EmailCategory;
@@ -275,8 +285,8 @@
             return;
         }
 
-        // Kill switches self-load inside the embedded IntegrationSwitchesPanel — no system-settings key/value here.
-        if (cat == KillSwitchCategory)
+        // Kill switches + connections self-load inside their embedded panels — no system-settings key/value here.
+        if (cat is KillSwitchCategory or ConnectionsCategory)
         {
             loading = false;
             StateHasChanged();

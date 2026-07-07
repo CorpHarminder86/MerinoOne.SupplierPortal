@@ -1,0 +1,243 @@
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+
+@* R10 — connection points panel, EMBEDDED under Admin → System settings → Connections. Named outbound
+   connection targets: the seeded "Default — Infor ION" (base URL + OAuth resolve from the Infor CloudSuite
+   tab) plus future systems (Tally, second LN instance, ClearTax). Integration configs tag a connection on
+   the Endpoints hub; untagged rows use the default. No @@page — the settings shell provides chrome. *@
+
+@if (loading)
+{
+    <div class="tl-empty">Loading…</div>
+}
+else
+{
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <span class="tl-count-chip">@points.Count</span>
+        <span style="font-size:12.5px;color:var(--mer-ink-500);">A connection type without a registered transport can be declared ahead of time, but configs cannot dispatch through it yet.</span>
+        @if (CanAdmin)
+        {
+            <button class="mbtn mbtn--accent" style="margin-left:auto;" @onclick="OpenCreate" disabled="@busy">
+                <span class="material-symbols-outlined">add</span> New connection
+            </button>
+        }
+    </div>
+
+    <div class="tl-grid-wrapper" style="--tl-cols: 220px 110px 1fr 90px 90px 90px 220px; --tl-min-width: 980px;">
+        <div class="tlg-header">
+            <div class="tlg-col">Name</div>
+            <div class="tlg-col">System</div>
+            <div class="tlg-col">Base URL</div>
+            <div class="tlg-col">Default</div>
+            <div class="tlg-col">Transport</div>
+            <div class="tlg-col tlg-col--num">In use</div>
+            <div class="tlg-col tlg-col--actions">Actions</div>
+        </div>
+        @foreach (var p in points)
+        {
+            var cp = p;
+            <div class="tlg-row">
+                <div class="tlg-col tlg-name">@cp.Name</div>
+                <div class="tlg-col">@cp.SystemType</div>
+                <div class="tlg-col tlg-code" title="@cp.BaseUrl">@(cp.BaseUrl ?? "— from Infor CloudSuite settings —")</div>
+                <div class="tlg-col">
+                    @if (cp.IsDefault) { <span class="tlg-status tlg-status--active">Default</span> }
+                </div>
+                <div class="tlg-col">
+                    <span class="tlg-status @(cp.TransportAvailable ? "tlg-status--active" : "tlg-status--pending")"
+                          title="@(cp.TransportAvailable ? "An outbound transport is registered" : "Declared — transport arrives with a later release")">
+                        @(cp.TransportAvailable ? "Ready" : "Pending")
+                    </span>
+                </div>
+                <div class="tlg-col tlg-col--num">@cp.InUseCount</div>
+                <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+                    @if (CanAdmin)
+                    {
+                        <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(cp)" disabled="@busy">
+                            <span class="material-symbols-outlined">edit</span> Edit
+                        </button>
+                        @if (!cp.IsDefault)
+                        {
+                            <button class="mbtn mbtn--row mbtn--outline" @onclick="() => SetDefault(cp)" disabled="@(busy || !cp.TransportAvailable)" title="Make this the tenant default connection">
+                                <span class="material-symbols-outlined">star</span> Default
+                            </button>
+                            <button class="mbtn mbtn--row mbtn--danger" @onclick="() => Delete(cp)" disabled="@(busy || cp.InUseCount > 0)" title="@(cp.InUseCount > 0 ? "Retag its configs first" : "Delete")">
+                                <span class="material-symbols-outlined">delete</span>
+                            </button>
+                        }
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (editorOpen)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1001;">
+        <div class="merino-dialog" data-variant="info" data-size="md" style="width:620px;max-width:92vw;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">lan</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Connection point</div>
+                    <h2 class="merino-dialog__title">@(editingId is null ? "New connection" : "Edit connection")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => editorOpen = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;">
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Name *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formName" placeholder="Tally — Mumbai office" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">System type *</label>
+                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formSystemType">
+                                <option value="InforION">InforION</option>
+                                <option value="Tally">Tally</option>
+                                <option value="ClearTax">ClearTax</option>
+                                <option value="GenericRest">GenericRest</option>
+                            </select>
+                        </div>
+                    </div>
+                    @if (formSystemType == "InforION")
+                    {
+                        <div style="font-size:12.5px;color:var(--mer-ink-500);background:var(--mer-ink-50);padding:10px 12px;border-radius:6px;">
+                            InforION connections resolve base URL + OAuth from <strong>Settings → Infor CloudSuite</strong> — one source
+                            of truth for ION credentials. Nothing else to configure here.
+                        </div>
+                    }
+                    else
+                    {
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Base URL *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formBaseUrl" placeholder="https://tally.company.local:9000" />
+                        </div>
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Auth config (JSON — stored encrypted; blank keeps the saved value)</label>
+                            <textarea class="rz-textbox" style="width:100%;min-height:70px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formAuthJson"
+                                      placeholder='{"apiKey":"…"} — shape is owned by the transport'></textarea>
+                        </div>
+                    }
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Notes</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formNotes" />
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@formError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => editorOpen = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool CanAdmin => Token.HasPermission("Integration.Admin");
+
+    private List<ConnectionPointDto> points = new();
+    private bool loading = true;
+    private bool busy;
+
+    private bool editorOpen;
+    private Guid? editingId;
+    private string formName = string.Empty;
+    private string formSystemType = "GenericRest";
+    private string formBaseUrl = string.Empty;
+    private string formAuthJson = string.Empty;
+    private string formNotes = string.Empty;
+    private string formError = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<ConnectionPointDto>>("api/integration/outbound/connection-points");
+        points = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenCreate()
+    {
+        editingId = null;
+        formName = string.Empty;
+        formSystemType = "GenericRest";
+        formBaseUrl = string.Empty;
+        formAuthJson = string.Empty;
+        formNotes = string.Empty;
+        formError = string.Empty;
+        editorOpen = true;
+    }
+
+    private void OpenEdit(ConnectionPointDto cp)
+    {
+        editingId = cp.Id;
+        formName = cp.Name;
+        formSystemType = cp.SystemType;
+        formBaseUrl = cp.BaseUrl ?? string.Empty;
+        formAuthJson = string.Empty;   // blank = keep stored (encrypted) value
+        formNotes = cp.Notes ?? string.Empty;
+        formError = string.Empty;
+        editorOpen = true;
+    }
+
+    private async Task Save()
+    {
+        busy = true;
+        formError = string.Empty;
+        var req = new SaveConnectionPointRequest(
+            editingId, formName.Trim(), formSystemType,
+            formSystemType == "InforION" || string.IsNullOrWhiteSpace(formBaseUrl) ? null : formBaseUrl.Trim(),
+            formSystemType == "InforION" ? null : (string.IsNullOrWhiteSpace(formAuthJson) ? null : formAuthJson),
+            string.IsNullOrWhiteSpace(formNotes) ? null : formNotes.Trim());
+        var resp = await Api.PostAsync<Guid, SaveConnectionPointRequest>("api/integration/outbound/connection-points", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Connection saved" });
+            editorOpen = false;
+            await Load();
+        }
+        else
+        {
+            formError = resp?.Errors?.FirstOrDefault() ?? "Failed to save.";
+        }
+        busy = false;
+    }
+
+    private async Task SetDefault(ConnectionPointDto cp)
+    {
+        busy = true;
+        var resp = await Api.PostAsync<bool, object>($"api/integration/outbound/connection-points/{cp.Id}/set-default", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = $"Default connection: {cp.Name}" });
+            await Load();
+        }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Set default failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+
+    private async Task Delete(ConnectionPointDto cp)
+    {
+        busy = true;
+        var resp = await Api.DeleteAsync($"api/integration/outbound/connection-points/{cp.Id}");
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Connection deleted" });
+            await Load();
+        }
+        else Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Delete failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" });
+        busy = false;
+    }
+}
