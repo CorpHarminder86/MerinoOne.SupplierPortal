@@ -391,6 +391,18 @@
                             </div>
                         }
 
+                        @* ------ Warehouse gate (R11 D4): an ASN never spans two warehouses either ------ *@
+                        @* Not a selector: the warehouse is DERIVED from the first PO added, then pins the picker so
+                           POs from other warehouses stop being offered. Hidden until something is actually pinned. *@
+                        @if (!string.IsNullOrEmpty(PinnedWarehouse))
+                        {
+                            <div style="font-size:12.5px;color:var(--mer-ink-700);margin-bottom:12px;">
+                                Warehouse:
+                                <span class="tlg-status tlg-status--info" style="font-family:Inter,monospace;">@PinnedWarehouse</span>
+                                <span style="color:var(--mer-ink-500);"> · only POs from this warehouse can be added</span>
+                            </div>
+                        }
+
                         @* The PO search + add list stays HIDDEN until a ship-to is chosen. *@
                         @if (shipToChosen)
                         {
@@ -1109,6 +1121,17 @@
     private string SelectedShipToName =>
         shipToOptions.FirstOrDefault(o => o.Id == selectedShipToId).Name ?? "(no ship-to)";
 
+    // R11 (D4) — the warehouse pinned by the CURRENT selection: the single distinct non-null warehouse across the
+    // already-selected POs, or null when nothing is selected yet / every selected PO is a pre-R11 null. Once
+    // pinned, the picker offers only POs that match it, so the supplier never builds a selection the server would
+    // reject. Nulls are not a distinct group here either — same rule as AsnWarehouseRules.ResolveSingle.
+    private string? PinnedWarehouse =>
+        openPos.Where(p => selectedPoIds.Contains(p.Id))
+               .Select(p => p.Warehouse)
+               .Where(w => !string.IsNullOrWhiteSpace(w))
+               .Distinct(StringComparer.OrdinalIgnoreCase)
+               .FirstOrDefault();
+
     // The POs offered to add: cached open POs for the chosen ship-to, minus already-selected ones, filtered by the
     // (client-side) PO-number contains text. A PO from another ship-to can never appear here → never be added.
     private List<PurchaseOrderListItemDto> AddablePos =>
@@ -1116,6 +1139,10 @@
         : openPos
             .Where(p => p.ShipToAddressId == selectedShipToId)
             .Where(p => !selectedPoIds.Contains(p.Id))
+            // R11 (D4) — never offer a PO from a second warehouse; the server rejects such a selection outright.
+            .Where(p => PinnedWarehouse is null
+                        || string.IsNullOrWhiteSpace(p.Warehouse)
+                        || string.Equals(p.Warehouse, PinnedWarehouse, StringComparison.OrdinalIgnoreCase))
             // R4 §6.2 — offer ONLY POs whose confirmation gate is open (not shippable → hidden from the picker).
             .Where(p => p.IsShippable)
             .Where(p => string.IsNullOrWhiteSpace(poSearch) || p.PoNumber.Contains(poSearch.Trim(), StringComparison.OrdinalIgnoreCase))
