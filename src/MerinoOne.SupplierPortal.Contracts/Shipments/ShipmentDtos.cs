@@ -148,7 +148,17 @@ public record AsnDetailDto(
     // the scalar DraftInvoiceId above stays = first for back-compat.
     string? InvoiceGenerationStatus = null,
     string? InvoiceGenerationNote = null,
-    IReadOnlyList<Guid>? DraftInvoiceIds = null);
+    IReadOnlyList<Guid>? DraftInvoiceIds = null,
+    // R11 — Warehouse is the D4 grouping key, DERIVED from the covered PO(s) and read-only on every screen.
+    // InvoiceNo/BillOfLading/PackingList are the D6 supplier-entered shipment references.
+    // CreatedOn is the audit-block creation instant, surfaced because it is the LN payload's CreateDate (D10)
+    // and the form shows it read-only (D12). The payload's ShipmentDate is SubmittedAt above (D11) — null until
+    // the buyer approves, which is exactly when the shipment goes to the ERP.
+    string? Warehouse = null,
+    string? InvoiceNo = null,
+    string? BillOfLading = null,
+    string? PackingList = null,
+    DateTime? CreatedOn = null);
 
 /// <summary>One covered PO on a (possibly multi-PO) ASN.</summary>
 public record AsnPurchaseOrderDto(
@@ -237,7 +247,13 @@ public record CreateAsnRequest(
     // R4 (2026-06-26) — §6.5 / UC-PO-09: admin gate-override reason. When the PO confirmation gate would BLOCK ASN
     // creation, a caller holding PurchaseOrder.OverrideGate may supply a non-empty reason to proceed anyway (audited).
     // Empty reason or missing permission → the normal block. Trailing optional.
-    string? OverrideReason = null);
+    string? OverrideReason = null,
+    // R11 (D6/D7) — supplier-entered shipment references, forwarded verbatim to LN. Max 50 each. Optional HERE
+    // (a Draft may be parked with them blank) but MANDATORY at Send-For-Approval, so nothing reaches the ERP
+    // without them. Trailing optional → source-compatible.
+    string? InvoiceNo = null,
+    string? BillOfLading = null,
+    string? PackingList = null);
 
 // R4 (2026-06-23) — Serial/Lot capture: Serials (serialized item) + Lots (lot-controlled item) — at most one
 // populated per line. The other is ignored by the handler based on the line's Item flag. Used by BOTH Create
@@ -259,7 +275,12 @@ public record UpdateAsnRequest(
     string? DriverName,
     string? DriverPhone,
     string? Notes,
-    List<CreateAsnLineRequest> Lines);
+    List<CreateAsnLineRequest> Lines,
+    // R11 (D6/D7) — see CreateAsnRequest. FULL-OVERWRITE semantics: the handler assigns all three unconditionally,
+    // so a caller that omits one wipes it. The Blazor form always sends its current values.
+    string? InvoiceNo = null,
+    string? BillOfLading = null,
+    string? PackingList = null);
 
 // R4 (2026-06-26) — §6.5 / UC-PO-09: optional submit-time admin gate-override reason. When the PO confirmation
 // gate would BLOCK draft submission, a caller holding PurchaseOrder.OverrideGate may supply a non-empty reason to

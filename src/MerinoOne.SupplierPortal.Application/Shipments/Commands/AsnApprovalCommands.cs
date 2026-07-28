@@ -59,6 +59,24 @@ public class SendForApprovalCommandHandler : IRequestHandler<SendForApprovalComm
         // ASN to the supplier's principal; canWrite is enforced by the Asn.Write policy + the supplier SecRight.
         AsnLifecycle.AssertCanSendForApproval(asn.AsnStatus);
 
+        // R11 (D6/D7) — the three supplier-entered shipment references are MANDATORY here, not at draft creation.
+        // This is the last point before the ASN leaves the supplier's hands: approval flips it straight to
+        // Submitted and enqueues the LN post in one transaction, and there is no post-approval edit path, so an
+        // ASN that passes here with a blank ref would reach the ERP incomplete and be unfixable.
+        // D8 — no grandfathering: pre-R11 drafts hit this too and must be filled in before they can be sent.
+        var missingRefs = new List<string>();
+        if (string.IsNullOrWhiteSpace(asn.InvoiceNo)) missingRefs.Add("invoice no.");
+        if (string.IsNullOrWhiteSpace(asn.BillOfLading)) missingRefs.Add("bill of lading");
+        if (string.IsNullOrWhiteSpace(asn.PackingList)) missingRefs.Add("packing list");
+        if (missingRefs.Count > 0)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["shipmentReferences"] = new[]
+                {
+                    $"Fill in {string.Join(", ", missingRefs)} on the ASN before sending it for approval."
+                }
+            });
+
         var now = DateTime.UtcNow;
 
         // R4 §6.2 — "submission of a Draft ASN" is inside the gate block scope. Hard-block Send-For-Approval if a

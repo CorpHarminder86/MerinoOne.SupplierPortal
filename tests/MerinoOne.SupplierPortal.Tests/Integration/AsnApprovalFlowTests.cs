@@ -119,6 +119,8 @@ public class AsnApprovalFlowTests : IAsyncLifetime
 
         var (asnId, setup, supplierClient) = await NewDraftWithBuyerAsync();
 
+        // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
         var send = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
         send.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(send));
         var detail = (await Read<AsnDetailDto>(send)).Data!;
@@ -147,6 +149,8 @@ public class AsnApprovalFlowTests : IAsyncLifetime
         var (asnId, _, supplierClient) = await NewDraftWithBuyerAsync();
 
         // Send without the certificate → blocked with the mandatory message; ASN stays Draft (never reaches buyer).
+        // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
         var send = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
         send.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await Body(send));
         (await Read<AsnDetailDto>(send)).Errors.Should()
@@ -376,8 +380,10 @@ public class AsnApprovalFlowTests : IAsyncLifetime
         return (asnId, setup, client);
     }
 
-    private static async Task SendOkAsync(HttpClient supplierClient, Guid asnId)
+    private async Task SendOkAsync(HttpClient supplierClient, Guid asnId)
     {
+        // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
         var send = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
         send.StatusCode.Should().Be(HttpStatusCode.OK, because: await send.Content.ReadAsStringAsync());
     }

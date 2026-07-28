@@ -198,6 +198,13 @@ public static class ProcureToPayFlow
         IntegrationTestFixture fx, HttpClient supplierClient, Guid asnId,
         bool acknowledgeMissingAttachments = false, string? overrideReason = null)
     {
+        // R11 (D6/D7) — Send-For-Approval hard-blocks unless invoiceNo / billOfLading / packingList are set.
+        // Tests that are not ABOUT that gate should not each have to supply them, so stamp defaults here for any
+        // ASN that has not set them itself. Direct DB write, not a PUT, so the flow under test is unperturbed
+        // (a PUT would also re-run the draft gate and replace the line set).
+        // Tests that DO exercise the gate must clear these afterwards, or drive the endpoint directly.
+        await EnsureShipmentRefsAsync(fx, asnId);
+
         var send = await supplierClient.PostAsJsonAsync(
             $"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest(acknowledgeMissingAttachments));
         // If the attachment governance blocks/confirms, return that response (the caller asserts on it).
@@ -208,6 +215,26 @@ public static class ProcureToPayFlow
         // The buyer was mapped to this supplier at AssignBuyerAsync (approval is scoped by admin.SupplierUserMap).
         var buyer = await SecurityTestHarness.ClientAsAsync(fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
         return await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest(overrideReason));
+    }
+
+    /// <summary>
+    /// R11 (D6/D7) — fills the three mandatory shipment references on an ASN if the test has not set them, so
+    /// the Send-For-Approval gate does not fail tests that are about something else. Only fills BLANKS, so a test
+    /// that set its own values (or deliberately left one blank to exercise the gate via the endpoint directly)
+    /// is not overwritten.
+    /// </summary>
+    public static async Task EnsureShipmentRefsAsync(IntegrationTestFixture fx, Guid asnId)
+    {
+        using var scope = fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = await db.Asns.IgnoreQueryFilters().FirstOrDefaultAsync(a => a.Id == asnId);
+        if (asn is null) return;
+
+        var changed = false;
+        if (string.IsNullOrWhiteSpace(asn.InvoiceNo)) { asn.InvoiceNo = "INV-TEST-1"; changed = true; }
+        if (string.IsNullOrWhiteSpace(asn.BillOfLading)) { asn.BillOfLading = "BOL-TEST-1"; changed = true; }
+        if (string.IsNullOrWhiteSpace(asn.PackingList)) { asn.PackingList = "PL-TEST-1"; changed = true; }
+        if (changed) await db.SaveChangesAsync();
     }
 
     /// <summary>Create (PO-picker) → Send-for-Approval → Approve in one call; returns the final approve response.</summary>

@@ -27,6 +27,18 @@ public class UpdateAsnCommandValidator : AbstractValidator<UpdateAsnCommand>
     {
         RuleFor(x => x.Id).NotEmpty();
         RuleFor(x => x.Body.ExpectedDeliveryDate).NotEmpty();
+        // R11 (D16) — header length caps, identical to CreateAsnCommandValidator (see AsnHeaderRules).
+        RuleFor(x => x.Body.TimeWindow).MaximumLength(AsnHeaderRules.TimeWindow);
+        RuleFor(x => x.Body.CarrierName).MaximumLength(AsnHeaderRules.CarrierName);
+        RuleFor(x => x.Body.TrackingNumber).MaximumLength(AsnHeaderRules.TrackingNumber);
+        RuleFor(x => x.Body.VehicleNumber).MaximumLength(AsnHeaderRules.VehicleNumber);
+        RuleFor(x => x.Body.DriverName).MaximumLength(AsnHeaderRules.DriverName);
+        RuleFor(x => x.Body.DriverPhone).MaximumLength(AsnHeaderRules.DriverPhone);
+        RuleFor(x => x.Body.Notes).MaximumLength(AsnHeaderRules.Notes);
+        RuleFor(x => x.Body.InvoiceNo).MaximumLength(AsnHeaderRules.InvoiceNo).WithName("invoiceNo");
+        RuleFor(x => x.Body.BillOfLading).MaximumLength(AsnHeaderRules.BillOfLading).WithName("billOfLading");
+        RuleFor(x => x.Body.PackingList).MaximumLength(AsnHeaderRules.PackingList).WithName("packingList");
+
         RuleFor(x => x.Body.Lines).NotNull().NotEmpty().WithMessage("At least one ASN line is required.");
         RuleForEach(x => x.Body.Lines).ChildRules(line =>
         {
@@ -117,6 +129,11 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         asn.DriverPhone = body.DriverPhone;
         asn.Notes = body.Notes;
         asn.Warehouse = newWarehouse;   // R11 D4 — derived, never supplier-supplied.
+        // R11 (D6) — full-overwrite like the rest of the header: assigned unconditionally, so a caller that omits
+        // one clears it. Trimmed to empty-as-null so a whitespace-only value cannot satisfy the SendForApproval gate.
+        asn.InvoiceNo = AsnHeaderRules.NullIfBlank(body.InvoiceNo);
+        asn.BillOfLading = AsnHeaderRules.NullIfBlank(body.BillOfLading);
+        asn.PackingList = AsnHeaderRules.NullIfBlank(body.PackingList);
         asn.UpdatedBy = _user.UserCode;
         asn.UpdatedOn = now;
 

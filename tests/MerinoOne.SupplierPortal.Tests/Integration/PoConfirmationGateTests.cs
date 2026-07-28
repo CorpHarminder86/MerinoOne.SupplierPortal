@@ -238,6 +238,8 @@ public class PoConfirmationGateTests
         var asnId = (await Read<AsnDetailDto>(createResp)).Data!.Id;
 
         // Send for approval (the gate is NOT checked here — only at the buyer Approve/Submit step).
+        // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
         var send = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
         send.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(send));
 
@@ -301,6 +303,8 @@ public class PoConfirmationGateTests
         createOk.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createOk));
         var asnId = (await Read<AsnDetailDto>(createOk)).Data!.Id;
 
+        // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
         var sendOk = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
         sendOk.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(sendOk));
         await SetPoStatusAsync(confirmed.PoId, PoStatus.Released);

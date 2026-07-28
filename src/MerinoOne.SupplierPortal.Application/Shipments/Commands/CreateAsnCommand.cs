@@ -31,6 +31,19 @@ public class CreateAsnCommandValidator : AbstractValidator<CreateAsnCommand>
                        || (b.PurchaseOrderIds is { Count: > 0 }))
             .WithMessage("At least one PurchaseOrderId is required (PurchaseOrderId or PurchaseOrderIds).")
             .WithName("purchaseOrderId");
+        // R11 (D16) — header length caps. The three new refs are OPTIONAL here by design (D7): a Draft may be
+        // parked with them blank; SendForApproval is where they become mandatory.
+        RuleFor(x => x.Body.TimeWindow).MaximumLength(AsnHeaderRules.TimeWindow);
+        RuleFor(x => x.Body.CarrierName).MaximumLength(AsnHeaderRules.CarrierName);
+        RuleFor(x => x.Body.TrackingNumber).MaximumLength(AsnHeaderRules.TrackingNumber);
+        RuleFor(x => x.Body.VehicleNumber).MaximumLength(AsnHeaderRules.VehicleNumber);
+        RuleFor(x => x.Body.DriverName).MaximumLength(AsnHeaderRules.DriverName);
+        RuleFor(x => x.Body.DriverPhone).MaximumLength(AsnHeaderRules.DriverPhone);
+        RuleFor(x => x.Body.Notes).MaximumLength(AsnHeaderRules.Notes);
+        RuleFor(x => x.Body.InvoiceNo).MaximumLength(AsnHeaderRules.InvoiceNo).WithName("invoiceNo");
+        RuleFor(x => x.Body.BillOfLading).MaximumLength(AsnHeaderRules.BillOfLading).WithName("billOfLading");
+        RuleFor(x => x.Body.PackingList).MaximumLength(AsnHeaderRules.PackingList).WithName("packingList");
+
         RuleFor(x => x.Body.Lines).NotNull().NotEmpty()
             .WithMessage("At least one ASN line is required.");
         RuleForEach(x => x.Body.Lines).ChildRules(line =>
@@ -43,6 +56,35 @@ public class CreateAsnCommandValidator : AbstractValidator<CreateAsnCommand>
             line.RuleFor(l => l.Lots).Must(AsnLineRules.LotNosDistinct).WithMessage("Lot numbers must be unique within a line.");
         });
     }
+}
+
+/// <summary>
+/// R11 (D16) — ASN header field length caps, mirroring the column widths in <c>AsnConfiguration</c>.
+/// <para>Before R11 the ASN validators carried NO length rules at all, so an over-long carrierName reached SQL
+/// and surfaced as a 500 rather than a 400. The three new R11 refs are capped here alongside the pre-existing
+/// fields so the whole header behaves consistently, rather than cementing "BOL over 50 gives a clean 400 but
+/// carrierName over 200 gives a 500".</para>
+/// </summary>
+internal static class AsnHeaderRules
+{
+    public const int TimeWindow = 50;
+    public const int CarrierName = 200;
+    public const int TrackingNumber = 100;
+    public const int VehicleNumber = 50;
+    public const int DriverName = 100;
+    public const int DriverPhone = 20;
+    public const int Notes = 2000;
+
+    // R11 (D6) — "open text textbox with max length 50".
+    public const int InvoiceNo = 50;
+    public const int BillOfLading = 50;
+    public const int PackingList = 50;
+
+    /// <summary>
+    /// Trims and collapses blank/whitespace to null. Used on the three R11 shipment refs so a whitespace-only
+    /// value cannot satisfy the Send-For-Approval mandatory gate, and so "cleared" and "never set" persist alike.
+    /// </summary>
+    public static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 }
 
 /// <summary>Shared input-level rules for ASN line serial/lot capture (used by Create + Update validators).</summary>
@@ -152,6 +194,10 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
             AsnNumber = asnNumber,
             PurchaseOrderId = shippedPoIds.Count == 1 ? shippedPoIds[0] : null,
             Warehouse = warehouse,
+            // R11 (D6/D7) — optional at create; SendForApproval is the gate that requires them.
+            InvoiceNo = AsnHeaderRules.NullIfBlank(body.InvoiceNo),
+            BillOfLading = AsnHeaderRules.NullIfBlank(body.BillOfLading),
+            PackingList = AsnHeaderRules.NullIfBlank(body.PackingList),
             SupplierId = supplierId,
             ExpectedDeliveryDate = body.ExpectedDeliveryDate,
             TimeWindow = body.TimeWindow,

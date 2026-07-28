@@ -225,7 +225,10 @@ public static class AsnDtoBuilder
             lines, attachments,
             a.ShipToAddressId, shipToName, approval,
             shipBlockReason is not null, shipBlockReason,
-            a.InvoiceGenerationStatus, a.InvoiceGenerationNote, draftInvoiceIds);
+            a.InvoiceGenerationStatus, a.InvoiceGenerationNote, draftInvoiceIds,
+            // R11 — warehouse (derived, read-only) + the three supplier-entered shipment refs, and createdOn,
+            // which the form renders read-only and the LN payload sends as CreateDate.
+            a.Warehouse, a.InvoiceNo, a.BillOfLading, a.PackingList, a.CreatedOn);
     }
 
     public static async Task<IReadOnlyList<DocumentAttachmentDto>> BuildAttachmentsAsync(

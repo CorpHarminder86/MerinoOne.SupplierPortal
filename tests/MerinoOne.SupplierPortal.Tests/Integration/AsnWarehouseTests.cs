@@ -129,6 +129,80 @@ public class AsnWarehouseTests
         (await resp.Content.ReadAsStringAsync()).Should().Contain("cannot mix warehouses");
     }
 
+    // ── R11 (D6/D7/D8) — mandatory shipment references at Send-For-Approval ─────────────────────────────
+
+    [SkippableTheory] // Each ref is independently required, and the error names the missing one(s).
+    [InlineData(null, "BOL-1", "PL-1", "invoice no.")]
+    [InlineData("INV-1", null, "PL-1", "bill of lading")]
+    [InlineData("INV-1", "BOL-1", null, "packing list")]
+    [InlineData("   ", "BOL-1", "PL-1", "invoice no.")]   // whitespace counts as absent
+    public async Task Send_for_approval_is_blocked_until_all_three_shipment_refs_are_set(
+        string? invoiceNo, string? bol, string? packingList, string expectedInMessage)
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var (asnId, client) = await DraftWithRefsAsync(invoiceNo, bol, packingList);
+
+        var send = await client.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
+        send.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "all three shipment references are mandatory before an ASN leaves Draft");
+        (await send.Content.ReadAsStringAsync()).Should().Contain(expectedInMessage);
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.Asns.IgnoreQueryFilters().FirstAsync(a => a.Id == asnId)).AsnStatus
+            .Should().Be(AsnStatus.Draft, because: "a blocked send must not move the ASN off Draft");
+    }
+
+    [SkippableFact] // The refs are optional at CREATE (D7) — a partial draft can still be parked.
+    public async Task Draft_can_be_created_and_saved_with_blank_shipment_refs()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var (asnId, _) = await DraftWithRefsAsync(null, null, null);
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = await db.Asns.IgnoreQueryFilters().FirstAsync(a => a.Id == asnId);
+        asn.AsnStatus.Should().Be(AsnStatus.Draft);
+        asn.InvoiceNo.Should().BeNull(because: "creation does not require the refs — only Send-For-Approval does");
+    }
+
+    [SkippableFact] // With all three set, the send proceeds.
+    public async Task Send_for_approval_succeeds_once_all_three_refs_are_set()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var (asnId, client) = await DraftWithRefsAsync("INV-9", "BOL-9", "PL-9");
+
+        var send = await client.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
+        send.StatusCode.Should().Be(HttpStatusCode.OK, because: await send.Content.ReadAsStringAsync());
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.Asns.IgnoreQueryFilters().FirstAsync(a => a.Id == asnId)).AsnStatus
+            .Should().Be(AsnStatus.PendingApproval);
+    }
+
+    /// <summary>Creates a single-PO draft ASN carrying the given shipment refs, and returns it with a supplier client.</summary>
+    private async Task<(Guid AsnId, HttpClient Client)> DraftWithRefsAsync(string? invoiceNo, string? bol, string? packingList)
+    {
+        var ctx = await SetupAsync(IntegrationTestFixture.WarehouseCode, IntegrationTestFixture.WarehouseCode);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, ctx.PoIdA);
+        var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+
+        var req = AsnOver(ctx.LineA, poA: ctx.PoIdA) with
+        {
+            InvoiceNo = invoiceNo,
+            BillOfLading = bol,
+            PackingList = packingList,
+        };
+
+        var create = await client.PostAsJsonAsync("/api/asns", req);
+        create.StatusCode.Should().Be(HttpStatusCode.OK, because: await create.Content.ReadAsStringAsync());
+        return ((await Read<AsnDetailDto>(create)).Data!.Id, client);
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────────────────────────────
 
     private record Ctx(Guid SupplierId, Guid PoIdA, Guid PoIdB, Guid LineA, Guid LineB);

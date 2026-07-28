@@ -64,6 +64,8 @@ public class AsnDraftGateTests
 
         await SetPoStatusAsync(setup.PoId, PoStatus.Released);
 
+        // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
         var send = await supplier.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
         send.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await Body(send));
         (await Read<AsnDetailDto>(send)).Errors.Should().Contain(e => e.Contains("Accept"),
@@ -82,6 +84,8 @@ public class AsnDraftGateTests
         // ASN-A → PendingApproval (partial qty so a second ASN is possible).
         var createA = await supplier.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup, shippedQty: 4m));
         var asnA = (await Read<AsnDetailDto>(createA)).Data!.Id;
+        // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnA);
         var sendA = await supplier.PostAsJsonAsync($"/api/asns/{asnA}/send-for-approval", new SendForApprovalRequest());
         sendA.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(sendA));
         await AssertAsnStatus(asnA, AsnStatus.PendingApproval);
@@ -91,6 +95,8 @@ public class AsnDraftGateTests
         createB.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createB));
         var asnB = (await Read<AsnDetailDto>(createB)).Data!.Id;
 
+        // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnB);
         var sendB = await supplier.PostAsJsonAsync($"/api/asns/{asnB}/send-for-approval", new SendForApprovalRequest());
         sendB.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await Body(sendB));
         (await Read<AsnDetailDto>(sendB)).Errors.Should().Contain(e => e.Contains("pending buyer approval"),
@@ -108,6 +114,8 @@ public class AsnDraftGateTests
 
         var create = await supplier.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
         var asnId = (await Read<AsnDetailDto>(create)).Data!.Id;
+        // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
         var send = await supplier.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
         send.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(send));
 

@@ -74,7 +74,12 @@ public class AttachmentGovernanceTests : IAsyncLifetime
     // leaves the ASN PendingApproval (not Submitted). Mandatory-block / Warning-confirm / Optional-silent behaviour
     // is UNCHANGED — only the firing site moves.
     private async Task<HttpResponseMessage> SubmitAsync(HttpClient client, Guid asnId, bool ack = false)
-        => await client.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest(ack));
+    {
+        // R11 (D6/D7) — Send-For-Approval also requires the three shipment refs. These tests are about attachment
+        // governance, so stamp them first and let the attachment rules be the only thing under test.
+        await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
+        return await client.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest(ack));
+    }
 
     // ── UC-ATT-01 — all mandatory present → proceeds ──────────────────────────────────────────────────
     [SkippableFact]
