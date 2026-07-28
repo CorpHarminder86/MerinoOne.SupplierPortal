@@ -57,35 +57,41 @@ internal static class AsnOutboundPayloadBuilder
         // IgnoreQueryFilters (+ re-apply !IsDeleted): this runs in the tenant-less OutboxDispatcher scope, and with
         // the scope gate now fail-CLOSED a filtered query could otherwise drop these rows → null ItemCode in the
         // outbound payload. Matches how the ASN root is loaded above.
-        var poLineIds = asn.Lines.Select(l => l.PurchaseOrderLineId).Distinct().ToList();
-        var itemCodeByPoLine = await db.PurchaseOrderLines
-            .IgnoreQueryFilters()
-            .Where(p => poLineIds.Contains(p.Id) && !p.IsDeleted)
-            .Select(p => new { p.Id, p.ItemCode })
-            .ToDictionaryAsync(p => p.Id, p => p.ItemCode, ct);
+        var facts = await AsnOutboundFacts.LoadAsync(db, asn, ct);
 
         var lines = asn.Lines
             .Where(l => !l.IsDeleted)
             .OrderBy(l => l.PositionNo)
             .Select(l =>
             {
-                var serials = l.Serials.Where(s => !s.IsDeleted).Select(s => s.SerialNumber).ToList();
+                var po = facts.PoLine(l.PurchaseOrderLineId);
+                var serials = l.Serials.Where(s => !s.IsDeleted).ToList();
                 var lots = l.Lots.Where(x => !x.IsDeleted).ToList();
                 return new
                 {
+                    PoNumber = po?.PoNumber,
+                    PoOrigin = po?.PoOrigin,
                     PositionNo = l.PositionNo,
                     SequenceNo = l.SequenceNo,
-                    ItemCode = itemCodeByPoLine.TryGetValue(l.PurchaseOrderLineId, out var ic) ? ic : null,
+                    ItemCode = po?.ItemCode,
                     ShippedQty = l.ShippedQty,
-                    BatchNumber = l.BatchNumber,
-                    ExpiryDate = l.ExpiryDate?.ToString("o"),
+                    // R11 (D5) — a pure mirror of ShippedQty, NOT a unit conversion. See AsnLineInputDoc.
+                    ShippedQty_InvUnit = l.ShippedQty,
+                    Uom = po?.OrderUnit,
+                    Batch = l.BatchNumber,
+                    Expiry = l.ExpiryDate?.ToString("o"),
                     // OMIT (null → dropped by WhenWritingNull) when the line has no serials / no lots.
-                    Serials = serials.Count == 0 ? null : serials,
+                    // R11 — serials are objects now, each carrying its own expiry.
+                    Serials = serials.Count == 0 ? null : serials.Select(s => new
+                    {
+                        Serial = s.SerialNumber,
+                        Expiry = AsnOutboundFacts.FormatDate(s.ExpiryDate),
+                    }).ToList(),
                     Lots = lots.Count == 0 ? null : lots.Select(lot => new
                     {
                         LotNo = lot.LotNo,
                         Qty = lot.Qty,
-                        ExpiryDate = lot.ExpiryDate?.ToString("yyyy-MM-dd"),
+                        Expiry = AsnOutboundFacts.FormatDate(lot.ExpiryDate),
                     }).ToList(),
                 };
             })
@@ -93,11 +99,25 @@ internal static class AsnOutboundPayloadBuilder
 
         return new
         {
+            CompanyCode = facts.CompanyCode,
+            SupplierBp = facts.SupplierBp,
             AsnNumber = asn.AsnNumber,
             ExpectedDeliveryDate = asn.ExpectedDeliveryDate.ToString("o"),
+            TimeWindow = asn.TimeWindow,
             CarrierName = asn.CarrierName,
-            TrackingNumber = asn.TrackingNumber,
-            VehicleNumber = asn.VehicleNumber,
+            TrackingNo = asn.TrackingNumber,
+            VehicleNo = asn.VehicleNumber,
+            DriverName = asn.DriverName,
+            DriverPhone = asn.DriverPhone,
+            Warehouse = asn.Warehouse,
+            CreateDate = asn.CreatedOn.ToString("o"),
+            // Null until the buyer approves — approval is what stamps SubmittedAt and enqueues this very post,
+            // so in practice anything reaching LN carries it.
+            ShipmentDate = asn.SubmittedAt?.ToString("o"),
+            InvoiceNo = asn.InvoiceNo,
+            BillOfLading = asn.BillOfLading,
+            PackingList = asn.PackingList,
+            Notes = asn.Notes,
             Lines = lines,
         };
     }

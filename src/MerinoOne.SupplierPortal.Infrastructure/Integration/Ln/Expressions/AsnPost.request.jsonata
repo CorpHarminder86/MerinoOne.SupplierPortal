@@ -1,24 +1,48 @@
-/* R9 default — reproduces AsnOutboundPayloadBuilder (header + Lines[] with Serials[]/Lots[]).
-   Array constructors are mandatory for collection outputs (D-R9-13 singleton-collapse guard);
-   `serials ? [serials]` re-wraps the path-flattened sequence AND omits the key when null. */
+/* R11 default — reproduces AsnOutboundPayloadBuilder byte-for-byte (LnRequestExpressionParityTests asserts it).
+   Wire contract per D15: PascalCase throughout, with the source payload's misspellings corrected
+   (vechicalNo→VehicleNo, ShippmentDate→ShipmentDate, BillOfLanding→BillOfLading, Packinglist→PackingList).
+   ShippedQty_InvUnit keeps its underscore and is a MIRROR of ShippedQty, not a unit conversion (D5).
+
+   `x != null ? x` omits the key when the value is null, reproducing the legacy WhenWritingNull behaviour.
+   Array constructors are mandatory for collection outputs (D-R9-13 singleton-collapse guard); `serials ? [...]`
+   re-wraps the path-flattened sequence AND omits the key when null. */
 {
+    "CompanyCode": companyCode != null ? companyCode,
+    "SupplierBp": supplierBp != null ? supplierBp,
     "AsnNumber": asnNumber,
     "ExpectedDeliveryDate": expectedDeliveryDate,
+    "TimeWindow": timeWindow != null ? timeWindow,
     "CarrierName": carrierName != null ? carrierName,
-    "TrackingNumber": trackingNumber != null ? trackingNumber,
-    "VehicleNumber": vehicleNumber != null ? vehicleNumber,
+    "TrackingNo": trackingNumber != null ? trackingNumber,
+    "VehicleNo": vehicleNumber != null ? vehicleNumber,
+    "DriverName": driverName != null ? driverName,
+    "DriverPhone": driverPhone != null ? driverPhone,
+    "Warehouse": warehouse != null ? warehouse,
+    "CreateDate": createDate != null ? createDate,
+    "ShipmentDate": shipmentDate != null ? shipmentDate,
+    "InvoiceNo": invoiceNo != null ? invoiceNo,
+    "BillOfLading": billOfLading != null ? billOfLading,
+    "PackingList": packingList != null ? packingList,
+    "Notes": notes != null ? notes,
     "Lines": [lines.{
+        "PoNumber": poNumber != null ? poNumber,
+        "PoOrigin": poOrigin != null ? poOrigin,
         "PositionNo": positionNo != null ? positionNo,
         "SequenceNo": sequenceNo != null ? sequenceNo,
         "ItemCode": itemCode != null ? itemCode,
         "ShippedQty": shippedQty,
-        "BatchNumber": batchNumber != null ? batchNumber,
-        "ExpiryDate": expiryDate != null ? expiryDate,
-        "Serials": serials ? [serials],
+        "ShippedQty_InvUnit": shippedQtyInvUnit,
+        "Uom": uom != null ? uom,
+        "Batch": batchNumber != null ? batchNumber,
+        "Expiry": expiryDate != null ? expiryDate,
+        "Serials": serials ? [serials.{
+            "Serial": serial,
+            "Expiry": expiry != null ? expiry
+        }],
         "Lots": lots ? [lots.{
             "LotNo": lotNo,
             "Qty": qty,
-            "ExpiryDate": expiryDate != null ? expiryDate
+            "Expiry": expiryDate != null ? expiryDate
         }]
     }]
 }

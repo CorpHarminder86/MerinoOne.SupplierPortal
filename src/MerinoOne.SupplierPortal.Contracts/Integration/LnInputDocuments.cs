@@ -33,7 +33,11 @@ public static class LnPortalEntity
 public static class LnInputDocumentVersions
 {
     public const string Invoice = "invoice-v1";
-    public const string Asn = "asn-v1";
+    // R11 (2026-07-28) — bumped from asn-v1: the ASN input document gained company/supplier/warehouse/date/
+    // shipment-ref header fields and per-line PO reference + UoM, and serials became objects. Every pinned
+    // SampleDocumentJson stamped asn-v1 now renders "sample stale — re-snapshot", which is an ATTESTATION
+    // BLOCKER for any AsnPost config already attested for Dynamic. Re-pin in the Endpoints UI after deploy.
+    public const string Asn = "asn-v2";
     public const string PurchaseOrder = "purchaseOrder-v1";
     public const string Supplier = "supplier-v1";
     public const string SupplierChange = "supplierChange-v1";
@@ -78,14 +82,34 @@ public sealed record InvoiceInputDoc(
     [property: JsonPropertyName("hasCoveringGrns")] bool HasCoveringGrns,
     [property: JsonPropertyName("allCoveringGrnsApproved")] bool AllCoveringGrnsApproved);
 
-/// <summary>ASN input document (portalEntity <c>Asn</c>, transaction <c>AsnPost</c>).</summary>
+/// <summary>ASN input document (portalEntity <c>Asn</c>, transaction <c>AsnPost</c>). Contract <c>asn-v2</c>.</summary>
 public sealed record AsnInputDoc(
     [property: JsonPropertyName("id")] Guid Id,
     [property: JsonPropertyName("asnNumber")] string AsnNumber,
+    // R11 — companyCode is the ERP company code (TenantEntity.Code, the same value LN sends inbound as
+    // companyCode); supplierBp is Supplier.ErpCode, the LN business-partner id used to match inbound POs.
+    [property: JsonPropertyName("companyCode")] string? CompanyCode,
+    [property: JsonPropertyName("supplierBp")] string? SupplierBp,
     [property: JsonPropertyName("expectedDeliveryDate")] string ExpectedDeliveryDate,
+    [property: JsonPropertyName("timeWindow")] string? TimeWindow,
     [property: JsonPropertyName("carrierName")] string? CarrierName,
     [property: JsonPropertyName("trackingNumber")] string? TrackingNumber,
     [property: JsonPropertyName("vehicleNumber")] string? VehicleNumber,
+    [property: JsonPropertyName("driverName")] string? DriverName,
+    [property: JsonPropertyName("driverPhone")] string? DriverPhone,
+    // R11 — the D4 grouping key, snapshotted from the covered PO header.
+    [property: JsonPropertyName("warehouse")] string? Warehouse,
+    // R11 — createDate is the ASN's audit creation instant; shipmentDate is submittedAt, stamped at BUYER
+    // APPROVAL (AsnSubmitExecutor, sharing AsnApproval.DecisionOn's timestamp) and therefore null on any ASN
+    // that has not been approved. Both pre-formatted "o" so request expressions stay pure projection.
+    [property: JsonPropertyName("createDate")] string? CreateDate,
+    [property: JsonPropertyName("shipmentDate")] string? ShipmentDate,
+    // R11 — supplier-entered shipment references (mandatory at Send-For-Approval, so non-null in practice
+    // for anything that reaches the outbox).
+    [property: JsonPropertyName("invoiceNo")] string? InvoiceNo,
+    [property: JsonPropertyName("billOfLading")] string? BillOfLading,
+    [property: JsonPropertyName("packingList")] string? PackingList,
+    [property: JsonPropertyName("notes")] string? Notes,
     [property: JsonPropertyName("asnStatus")] string AsnStatus,
     [property: JsonPropertyName("erpCode")] string? ErpCode,
     [property: JsonPropertyName("erpCompany")] string? ErpCompany,
@@ -94,16 +118,33 @@ public sealed record AsnInputDoc(
     [property: JsonPropertyName("lines")] IReadOnlyList<AsnLineInputDoc> Lines);
 
 public sealed record AsnLineInputDoc(
+    // R11 — the line's source PO reference. Closes the gap recorded in the Infor Live cutover checklist:
+    // a multi-PO ASN was previously unrepresentable to LN because no line carried its PO.
+    [property: JsonPropertyName("poNumber")] string? PoNumber,
+    [property: JsonPropertyName("poOrigin")] string? PoOrigin,
     [property: JsonPropertyName("positionNo")] int? PositionNo,
     [property: JsonPropertyName("sequenceNo")] int? SequenceNo,
     [property: JsonPropertyName("itemCode")] string? ItemCode,
     [property: JsonPropertyName("shippedQty")] decimal ShippedQty,
+    // R11 (D5) — the inventory-unit quantity. A PURE MIRROR of shippedQty: the portal has no UoM conversion
+    // (Unit.ConversionFactor exists but is used nowhere, and PurchaseOrderLine.OrderUnit is an unFK'd free
+    // string), so there is nothing to convert from. Do NOT "fix" this into a conversion — the name asserts
+    // one, but the agreed contract is equality.
+    [property: JsonPropertyName("shippedQtyInvUnit")] decimal ShippedQtyInvUnit,
+    // R11 — the PO line's order unit, carried through verbatim.
+    [property: JsonPropertyName("uom")] string? Uom,
     [property: JsonPropertyName("batchNumber")] string? BatchNumber,
     [property: JsonPropertyName("expiryDate")] string? ExpiryDate,
     // Null (not empty) when the line carries no per-unit capture — request expressions reproduce the
     // legacy WhenWritingNull omission by navigating the missing value.
-    [property: JsonPropertyName("serials")] IReadOnlyList<string>? Serials,
+    // R11 — serials are OBJECTS now (serial + its own expiry), not bare strings.
+    [property: JsonPropertyName("serials")] IReadOnlyList<AsnSerialInputDoc>? Serials,
     [property: JsonPropertyName("lots")] IReadOnlyList<AsnLotInputDoc>? Lots);
+
+/// <summary>R11 — one captured serial. Previously a bare string in the input doc and on the wire.</summary>
+public sealed record AsnSerialInputDoc(
+    [property: JsonPropertyName("serial")] string Serial,
+    [property: JsonPropertyName("expiry")] string? Expiry);
 
 public sealed record AsnLotInputDoc(
     [property: JsonPropertyName("lotNo")] string LotNo,
