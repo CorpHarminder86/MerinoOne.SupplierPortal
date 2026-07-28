@@ -73,6 +73,7 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
                               ScheduleId = s.Id,
                               s.ShipToAddressId,
                               PoShipToAddressId = po.ShipToAddressId,
+                              PoWarehouse = po.Warehouse,
                               s.PurchaseOrderId,
                               s.PurchaseOrderLineId,
                               po.SupplierId,
@@ -121,6 +122,12 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
                 }
             });
 
+        // ── R11 (D4) — single warehouse. Same shape as the ship-to rule above: LN's whinh.advanceShipmentNotices
+        // carries ONE receiving warehouse, so an ASN that mixed them would be misrouted at the ERP. Pre-R11 POs
+        // have a null warehouse; nulls are treated as one value so legacy selections are not blocked, and the
+        // resulting ASN simply carries a null warehouse through to the payload.
+        var warehouse = AsnWarehouseRules.ResolveSingle(rows.Select(r => r.PoWarehouse));
+
         var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == supplierId, ct)
                        ?? throw new NotFoundException("Supplier", supplierId);
 
@@ -145,6 +152,7 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
             AsnNumber = asnNumber,
             PurchaseOrderId = null,                 // R5 §9.2 — header PO deprecated; PO linkage is per line.
             ShipToAddressId = shipToAddressId,       // R5 §9.2 — the grouping key.
+            Warehouse = warehouse,                   // R11 D4 — the second grouping key, snapshotted off the PO.
             SupplierId = supplierId,
             ExpectedDeliveryDate = body.ExpectedDeliveryDate,
             TimeWindow = body.TimeWindow,

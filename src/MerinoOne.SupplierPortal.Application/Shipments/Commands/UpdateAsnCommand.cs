@@ -81,6 +81,13 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         var targetPoIds = poLines.Values.Select(l => l.PurchaseOrderId).Distinct().ToList();
         await AsnDraftGate.EnsureEditableAsync(_db, asn, targetPoIds, ct);
 
+        // R11 (D4) — RE-derive the warehouse from the NEW line set: an update replaces the lines wholesale, so a
+        // supplier can swap in a line from a PO in another warehouse. Re-resolving here rejects that, and keeps
+        // the stored warehouse in step when the line set narrows to a different (single) warehouse.
+        var newWarehouse = AsnWarehouseRules.ResolveSingle(
+            await _db.PurchaseOrders.Where(p => targetPoIds.Contains(p.Id))
+                .Select(p => p.Warehouse).ToListAsync(ct));
+
         // R4 (2026-06-23) — Serial/Lot capture: the Item control flags (serialized XOR lot-controlled) decide which
         // child rows to persist per replaced line. Resolve by **ItemCode within the ASN's company** (NOT ItemId —
         // the PO line is ERP-fed and routinely has a null ItemId; Item natural key = (TenantEntityId, Code)).
@@ -109,6 +116,7 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         asn.DriverName = body.DriverName;
         asn.DriverPhone = body.DriverPhone;
         asn.Notes = body.Notes;
+        asn.Warehouse = newWarehouse;   // R11 D4 — derived, never supplier-supplied.
         asn.UpdatedBy = _user.UserCode;
         asn.UpdatedOn = now;
 

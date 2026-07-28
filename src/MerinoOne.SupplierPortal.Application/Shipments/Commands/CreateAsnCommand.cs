@@ -139,11 +139,19 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
         // for back-compat; multi-PO → leave scalar null, the junction is the source of truth.
         var shippedPoIds = poLines.Values.Select(l => l.PurchaseOrderId).Distinct().ToList();
 
+        // R11 (D4) — single warehouse, resolved from the POs actually shipped on (NOT the requested PO set, which
+        // may be wider than the chosen lines). Mirrors the R5 single-ship-to rule; nulls from pre-R11 POs are not
+        // treated as a distinct value, so legacy selections are never blocked. This legacy path never set
+        // ShipToAddressId either, but warehouse IS set here — the LN payload needs it on every ASN.
+        var warehouse = AsnWarehouseRules.ResolveSingle(
+            pos.Where(p => shippedPoIds.Contains(p.Id)).Select(p => p.Warehouse));
+
         var asn = new Asn
         {
             Id = asnId,
             AsnNumber = asnNumber,
             PurchaseOrderId = shippedPoIds.Count == 1 ? shippedPoIds[0] : null,
+            Warehouse = warehouse,
             SupplierId = supplierId,
             ExpectedDeliveryDate = body.ExpectedDeliveryDate,
             TimeWindow = body.TimeWindow,
