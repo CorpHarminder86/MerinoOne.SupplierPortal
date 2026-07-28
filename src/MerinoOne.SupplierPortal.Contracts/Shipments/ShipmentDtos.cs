@@ -77,7 +77,9 @@ public record AsnListItemDto(
     string? TrackingNumber,
     string AsnStatus,
     DateTime? SubmittedAt,
-    DateTime CreatedOn);
+    DateTime CreatedOn,
+    // R11 (D4) — the receiving warehouse, so the list reads as "which dock is this going to" at a glance.
+    string? Warehouse = null);
 
 // R5 (review gap C2) — one row in the buyer-facing ASN approval queue (GET /api/asns/pending-approvals). Lists
 // PendingApproval ASNs routed to the calling buyer (via any covered PO's BuyerUserId), or ALL PendingApproval
@@ -90,7 +92,9 @@ public record AsnApprovalListItemDto(
     string? ShipToAddressName,
     int PoCount,
     string? SubmittedBy,
-    DateTime? SubmittedOn);
+    DateTime? SubmittedOn,
+    // R11 (D4) — shown beside ship-to; the buyer approving a queue of ASNs cares which warehouse each is bound for.
+    string? Warehouse = null);
 
 // R5 (TSD R5 Addendum §10.2 / §4.6) — the latest approval session for an ASN, surfaced on the detail DTO.
 // Null when the ASN has never been sent for approval. Status is Pending | Approved | Rejected.

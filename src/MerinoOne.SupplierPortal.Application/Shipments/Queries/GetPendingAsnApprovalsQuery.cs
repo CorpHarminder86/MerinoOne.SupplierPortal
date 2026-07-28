@@ -74,6 +74,7 @@ public class GetPendingAsnApprovalsQueryHandler
                 a.AsnNumber,
                 SupplierName = s.LegalName,
                 a.ShipToAddressId,
+                a.Warehouse,
                 // Distinct covered POs = lines' POs ∪ junction POs ∪ legacy scalar header PO.
                 PoIdsViaLines = _db.AsnLines.IgnoreQueryFilters()
                     .Where(al => al.AsnId == a.Id && !al.IsDeleted)
@@ -109,7 +110,7 @@ public class GetPendingAsnApprovalsQueryHandler
             string? shipToName = r.ShipToAddressId.HasValue && shipToNames.TryGetValue(r.ShipToAddressId.Value, out var n)
                 ? n : null;
             return new AsnApprovalListItemDto(
-                r.Id, r.Seq, r.AsnNumber, r.SupplierName, shipToName, poCount, r.SubmittedBy, r.SubmittedOn);
+                r.Id, r.Seq, r.AsnNumber, r.SupplierName, shipToName, poCount, r.SubmittedBy, r.SubmittedOn, r.Warehouse);
         }).ToList();
     }
 }

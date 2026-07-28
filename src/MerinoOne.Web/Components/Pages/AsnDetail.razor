@@ -213,6 +213,15 @@
                     @if (!string.IsNullOrEmpty(detail.TrackingNumber)) { <dt style="color:var(--mer-ink-500);">Tracking</dt><dd style="font-family:Inter,monospace;">@detail.TrackingNumber</dd> }
                     @if (!string.IsNullOrEmpty(detail.VehicleNumber)) { <dt style="color:var(--mer-ink-500);">Vehicle</dt><dd style="font-family:Inter,monospace;">@detail.VehicleNumber</dd> }
                     @if (!string.IsNullOrEmpty(detail.DriverName)) { <dt style="color:var(--mer-ink-500);">Driver</dt><dd>@detail.DriverName @(string.IsNullOrEmpty(detail.DriverPhone) ? "" : $"· {detail.DriverPhone}")</dd> }
+                    @* R11 (D12) — warehouse + the three shipment refs, read-only. Warehouse is the D4 grouping key
+                       (derived from the covered PO); the refs are what the supplier entered before sending. *@
+                    @if (!string.IsNullOrEmpty(detail.Warehouse)) { <dt style="color:var(--mer-ink-500);">Warehouse</dt><dd style="font-family:Inter,monospace;">@detail.Warehouse</dd> }
+                    @if (!string.IsNullOrEmpty(detail.InvoiceNo)) { <dt style="color:var(--mer-ink-500);">Invoice no.</dt><dd style="font-family:Inter,monospace;">@detail.InvoiceNo</dd> }
+                    @if (!string.IsNullOrEmpty(detail.BillOfLading)) { <dt style="color:var(--mer-ink-500);">Bill of lading</dt><dd style="font-family:Inter,monospace;">@detail.BillOfLading</dd> }
+                    @if (!string.IsNullOrEmpty(detail.PackingList)) { <dt style="color:var(--mer-ink-500);">Packing list</dt><dd style="font-family:Inter,monospace;">@detail.PackingList</dd> }
+                    @if (detail.CreatedOn.HasValue) { <dt style="color:var(--mer-ink-500);">Created</dt><dd style="font-family:Inter,monospace;">@detail.CreatedOn.Value.ToString("yyyy-MM-dd HH:mm")</dd> }
+                    @* Shipment date IS submittedAt — the buyer-approval instant, which is when the ASN goes to the ERP. *@
+                    <dt style="color:var(--mer-ink-500);">Shipment date</dt><dd style="font-family:Inter,monospace;">@(detail.SubmittedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
                     @if (detail.SubmittedAt.HasValue) { <dt style="color:var(--mer-ink-500);">Submitted</dt><dd style="font-family:Inter,monospace;">@detail.SubmittedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.SubmittedBy) ? "" : $"by {detail.SubmittedBy}")</dd> }
                     @if (!string.IsNullOrEmpty(detail.ErpSyncId)) { <dt style="color:var(--mer-ink-500);">ERP sync id</dt><dd style="font-family:Inter,monospace;font-size:11px;">@detail.ErpSyncId</dd> }
                     @if (!string.IsNullOrEmpty(detail.ErpCode)) { <dt style="color:var(--mer-ink-500);">ERP code</dt><dd style="font-family:Inter,monospace;">@detail.ErpCode</dd> }
@@ -664,6 +673,47 @@
                         <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="driverPhone" />
                     </div>
                 </div>
+                @* R11 (D6/D7) — shipment references. Required to SEND, not to save a draft, so the labels carry
+                   the * but the wizard's Next/Save are not gated on them; Send For Approval is (server-enforced). *@
+                <h3 style="font-size:14px;font-weight:700;margin:18px 0 12px;color:var(--mer-blue-darker);">Shipment references</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Invoice no. *</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" maxlength="50" @bind="invoiceNo" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Bill of lading *</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" maxlength="50" @bind="billOfLading" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Packing list *</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" maxlength="50" @bind="packingList" />
+                    </div>
+                </div>
+                @if (ShipmentRefsMissing)
+                {
+                    <p style="font-size:12px;color:var(--mer-ink-500);margin:8px 0 0;">
+                        You can save this draft now, but all three are required before it can be sent for approval.
+                    </p>
+                }
+
+                @* R11 (D12) — derived, read-only. Warehouse comes from the covered PO(s); the shipment date is
+                   stamped when the buyer approves, so it reads "—" until then. *@
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px;padding-top:12px;border-top:1px solid var(--mer-line);">
+                    <div>
+                        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mer-ink-500);margin-bottom:4px;">Warehouse</div>
+                        <div style="font-size:13px;font-family:Inter,monospace;">@(string.IsNullOrEmpty(asnWarehouse) ? "—" : asnWarehouse)</div>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mer-ink-500);margin-bottom:4px;">Created</div>
+                        <div style="font-size:13px;font-family:Inter,monospace;">@(asnCreatedOn?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mer-ink-500);margin-bottom:4px;">Shipment date</div>
+                        <div style="font-size:13px;font-family:Inter,monospace;">@(asnShipmentDate?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+                    </div>
+                </div>
+
                 <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:12px;display:block;">Notes</label>
                 <textarea class="rz-textbox" rows="3" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="notes"></textarea>
 
@@ -1000,6 +1050,19 @@
     private string? driverPhone;
     private string? notes;
 
+    // R11 (D6) — supplier-entered shipment references. Optional to SAVE a draft, MANDATORY to send it for
+    // approval (the server is the authority; ShipmentRefsMissing mirrors the rule so the button can explain
+    // itself before the round-trip). Editable in Draft/Rejected only, like the rest of the header.
+    private string? invoiceNo;
+    private string? billOfLading;
+    private string? packingList;
+
+    // R11 (D4/D12) — derived, read-only. Warehouse is snapshotted from the covered PO; created/shipment dates
+    // come off the ASN itself (shipment date is the buyer-approval instant, so it is null until approved).
+    private string? asnWarehouse;
+    private DateTime? asnCreatedOn;
+    private DateTime? asnShipmentDate;
+
     // Attachments — R5 (§13): the reusable AttachmentPanel now OWNS upload/list/remove (slots from the policy
     // read-model, files via /api/document-uploads/attach + DELETE). The page keeps only a lightweight count of the
     // ASN's attachments (for the step-4 review summary), refreshed from the by-asn list endpoint on panel changes.
@@ -1125,6 +1188,14 @@
     // already-selected POs, or null when nothing is selected yet / every selected PO is a pre-R11 null. Once
     // pinned, the picker offers only POs that match it, so the supplier never builds a selection the server would
     // reject. Nulls are not a distinct group here either — same rule as AsnWarehouseRules.ResolveSingle.
+    // R11 (D6/D7) — true while any of the three shipment refs is blank. The SERVER is the authority (it hard-
+    // blocks Send-For-Approval); this only lets the UI say so before the round-trip. Deliberately NOT wired into
+    // CanProceed — a draft with blanks is still saveable, which is the whole point of D7.
+    private bool ShipmentRefsMissing =>
+        string.IsNullOrWhiteSpace(invoiceNo)
+        || string.IsNullOrWhiteSpace(billOfLading)
+        || string.IsNullOrWhiteSpace(packingList);
+
     private string? PinnedWarehouse =>
         openPos.Where(p => selectedPoIds.Contains(p.Id))
                .Select(p => p.Warehouse)
@@ -1229,6 +1300,12 @@
                 driverName = detail.DriverName;
                 driverPhone = detail.DriverPhone;
                 notes = detail.Notes;
+                invoiceNo = detail.InvoiceNo;
+                billOfLading = detail.BillOfLading;
+                packingList = detail.PackingList;
+                asnWarehouse = detail.Warehouse;
+                asnCreatedOn = detail.CreatedOn;
+                asnShipmentDate = detail.SubmittedAt;
 
                 attachments.Clear();
                 attachments.AddRange(detail.Attachments);
@@ -1525,7 +1602,8 @@
         }
         else
         {
-            var req = new UpdateAsnRequest(expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
+            var req = new UpdateAsnRequest(expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
+                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList);
             var resp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", req);
             if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft saved" }); await Reload(); }
             else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed to save (the ASN may no longer be Draft)."; }
@@ -1552,7 +1630,8 @@
         // Persist any pending header/line edits first (send-for-approval validates the stored ASN; a save on a Rejected
         // ASN returns it to Draft).
         var lineReqs = BuildLineRequests();
-        var upd = new UpdateAsnRequest(expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs);
+        var upd = new UpdateAsnRequest(expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
+                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList);
         var saveResp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", upd);
         if (saveResp?.Success != true)
         {
@@ -1574,7 +1653,8 @@
             poList.Count > 1 ? poList : null,
             expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
             StagingKey: _stagingKey,
-            OverrideReason: string.IsNullOrWhiteSpace(overrideReason) ? null : overrideReason.Trim());
+            OverrideReason: string.IsNullOrWhiteSpace(overrideReason) ? null : overrideReason.Trim(),
+            InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList);
         var resp = await Api.PostAsync<AsnDetailDto, CreateAsnRequest>("api/asns", req);
         if (resp?.Success == true && resp.Data != null)
         {

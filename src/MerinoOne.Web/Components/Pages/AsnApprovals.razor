@@ -36,11 +36,12 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 1fr 1fr 1fr 80px 160px 130px; --tl-min-width: 960px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 1fr 1fr 1fr 120px 80px 160px 130px; --tl-min-width: 1080px;">
             <div class="tlg-header">
                 <div class="tlg-col">ASN Number</div>
                 <div class="tlg-col">Supplier</div>
                 <div class="tlg-col">Ship-to</div>
+                <div class="tlg-col">Warehouse</div>
                 <div class="tlg-col">#POs</div>
                 <div class="tlg-col">Submitted by</div>
                 <div class="tlg-col">Submitted on</div>
@@ -52,6 +53,8 @@
                     <div class="tlg-col tlg-code">@row.AsnNumber</div>
                     <div class="tlg-col tlg-name">@row.SupplierName</div>
                     <div class="tlg-col tlg-name">@(string.IsNullOrWhiteSpace(row.ShipToAddressName) ? "—" : row.ShipToAddressName)</div>
+                    @* R11 (D4) — which dock this shipment is bound for, at a glance in the approval queue. *@
+                    <div class="tlg-col tlg-code">@(string.IsNullOrWhiteSpace(row.Warehouse) ? "—" : row.Warehouse)</div>
                     <div class="tlg-col">@row.PoCount</div>
                     <div class="tlg-col tlg-name">@(string.IsNullOrWhiteSpace(row.SubmittedBy) ? "—" : row.SubmittedBy)</div>
                     <div class="tlg-col tlg-code">@(row.SubmittedOn?.ToString("yyyy-MM-dd") ?? "—")</div>
