@@ -90,6 +90,7 @@ public class DeliveryScheduleTests
                     new PoLineRecord(20, 2, $"ITM-B-{tag}", OrderUnit: "EA", OrderQty: 40, PriceUnit: 1, Price: 40),
                 },
                 ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
 
@@ -133,6 +134,7 @@ public class DeliveryScheduleTests
             new PoRecord(setup.PoNumber, setup.Supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(setup.PoPositionNo, 1, setup.ItemCode, OrderUnit: "EA", OrderQty: 25, PriceUnit: setup.PriceUnit, Price: setup.PriceUnit * 25) },
                 ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
         await AssertPoStatus(setup.PoId, PoStatus.Released);   // material modify re-armed the gate
@@ -258,6 +260,7 @@ public class DeliveryScheduleTests
                     PositionNo: l.Position, SequenceNo: 1, ItemCode: $"ITM-{tag}-{l.Position}",
                     OrderUnit: "EA", OrderQty: l.Qty, PriceUnit: 1, Price: l.Qty, DeliveryDate: l.DeliveryDate)).ToArray(),
                 ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         });
 

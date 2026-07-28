@@ -146,9 +146,12 @@ public class InboundValidatorTests
         => new(new PushPurchaseOrdersRequest("2000", orders), NoBoundCompanies, null);
 
     // R5 — ShipToAddress is now REQUIRED; supply a valid one so the supplier-identity one-of rule is isolated.
-    private static PoRecord Po(string? supplierCode = null, string? erpSupplierCode = null, string shipToAddress = "DC-TEST-01")
+    // R11 — same for Warehouse. Both are overridable so the required-field rules can be exercised directly.
+    private static PoRecord Po(string? supplierCode = null, string? erpSupplierCode = null,
+                               string shipToAddress = "DC-TEST-01", string warehouse = "WH-TEST-01")
         => new(PoNumber: "PO-1", SupplierCode: supplierCode, PoDate: DateTime.UtcNow.Date,
-               Lines: Array.Empty<PoLineRecord>(), ShipToAddress: shipToAddress, ErpSupplierCode: erpSupplierCode);
+               Lines: Array.Empty<PoLineRecord>(), ShipToAddress: shipToAddress, Warehouse: warehouse,
+               ErpSupplierCode: erpSupplierCode);
 
     [Fact] // flow 2
     public void Po_with_only_supplierCode_passes()
@@ -193,5 +196,29 @@ public class InboundValidatorTests
         var result = new UpsertPurchaseOrdersCommandValidator()
             .Validate(PoCmd(Po(supplierCode: "S0001", shipToAddress: "  ")));
         result.IsValid.Should().BeFalse(because: "shipToAddress is mandatory");
+    }
+
+    [Fact] // R11 (D1) — Warehouse is required on the inbound PO. Blank/whitespace counts as absent.
+    public void Po_with_blank_warehouse_is_rejected()
+    {
+        var result = new UpsertPurchaseOrdersCommandValidator()
+            .Validate(PoCmd(Po(supplierCode: "S0001", warehouse: "  ")));
+        result.IsValid.Should().BeFalse(because: "warehouse is mandatory on the inbound contract");
+    }
+
+    [Fact] // R11 (D1) — warehouse is capped at 50 to match the column width.
+    public void Po_with_overlong_warehouse_is_rejected()
+    {
+        var result = new UpsertPurchaseOrdersCommandValidator()
+            .Validate(PoCmd(Po(supplierCode: "S0001", warehouse: new string('W', 51))));
+        result.IsValid.Should().BeFalse(because: "warehouse is capped at 50");
+    }
+
+    [Fact] // R11 — a well-formed warehouse passes; guards against the required rule being over-broad.
+    public void Po_with_valid_warehouse_passes()
+    {
+        var result = new UpsertPurchaseOrdersCommandValidator()
+            .Validate(PoCmd(Po(supplierCode: "S0001", warehouse: "WH-01")));
+        result.IsValid.Should().BeTrue(because: string.Join("; ", result.Errors.Select(e => e.ErrorMessage)));
     }
 }

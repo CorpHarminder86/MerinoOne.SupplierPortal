@@ -42,6 +42,10 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
             // R5 (§6.2/§6.3) — the ERP ship-to code is mandatory on the inbound PO. (Resolution to an active
             // CompanyAddress.erpCode happens in the handler; an unresolvable code is hard-failed per-row there.)
             o.RuleFor(r => r.ShipToAddress).NotEmpty().MaximumLength(50);
+            // R11 (D1) — warehouse is MANDATORY on the wire but nullable in the DB: existing POs keep null
+            // until LN re-pushes them. Unlike shipToAddress there is no master to resolve against, so an
+            // unknown code is accepted verbatim and never hard-fails the row.
+            o.RuleFor(r => r.Warehouse).NotEmpty().MaximumLength(50);
             // Length caps mirror the column sizes (erpStatus 50; term codes 20 — the PaymentTerm/DeliveryTerm
             // master Code cap). Master EXISTENCE is soft-checked in the handler (resolve-or-keep-snapshot +
             // an InforSyncLog diagnostic on a miss) — a hard reject here would lose POs to master-sync timing.
@@ -87,8 +91,11 @@ public class UpsertPurchaseOrdersCommandHandler(
         // correctly deduped).
         // R5 — ShipToAddress + ErpStatus are part of the canonical digest so a ship-to re-point or a raw-status change
         // hashes differently and is NOT short-circuited as a duplicate by the no-header idempotency fallback.
+        // R11 — Warehouse is in the digest for the same reason, and it matters most on the very first push that
+        // carries it: an otherwise-unchanged PO re-pushed only to deliver the new warehouse would otherwise be
+        // deduped away and the warehouse would never land. Silent data loss on exactly the backfill push.
         var canonical = recs.Select(r =>
-            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.ShipToAddress?.Trim()}|{r.ErpStatus?.Trim()}|{r.PoOrigin?.Trim()}|" +
+            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.ShipToAddress?.Trim()}|{r.ErpStatus?.Trim()}|{r.PoOrigin?.Trim()}|{r.Warehouse?.Trim()}|" +
             string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.ItemCode}/{l.OrderQty}/{l.AdditionalQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}")));
         var codes = recs.Select(r => r.PoNumber.Trim());
         return exec.ExecuteAsync(TransactionalInboundEntity.Po, request.Body.CompanyCode, request.BoundCompanyIds,
@@ -399,6 +406,7 @@ public class UpsertPurchaseOrdersCommandHandler(
                     po.ShipTo = ShipToSnapshot.From(shipToAddress);
                     po.ErpStatus = rec.ErpStatus;
                     po.PoOrigin = rec.PoOrigin?.Trim();
+                    po.Warehouse = rec.Warehouse?.Trim();
                     po.Version += 1; po.UpdatedBy = "infor:inbound"; po.UpdatedOn = now;
                     SyncLines(db, po, rec, resolvedQty, itemMap, taxMap, now);
 
@@ -459,6 +467,7 @@ public class UpsertPurchaseOrdersCommandHandler(
                         ShipTo = ShipToSnapshot.From(shipToAddress),
                         ErpStatus = rec.ErpStatus,
                         PoOrigin = rec.PoOrigin?.Trim(),
+                        Warehouse = rec.Warehouse?.Trim(),
                         CreatedBy = "infor:inbound", CreatedOn = now
                     };
                     // One stored line per positionNo (seq forced to 1 in Apply); the resolved qty is the absolute total.

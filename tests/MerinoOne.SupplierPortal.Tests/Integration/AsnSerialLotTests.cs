@@ -230,6 +230,7 @@ public class AsnSerialLotTests
                         OrderUnit: "KG", OrderQty: 100, PriceUnit: 1, Price: 5),
                 },
                 ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         });
         var poResp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", poBody);

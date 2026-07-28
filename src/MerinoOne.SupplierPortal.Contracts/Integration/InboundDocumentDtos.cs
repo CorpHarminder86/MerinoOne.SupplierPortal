@@ -64,6 +64,13 @@ public record PoRecord(
     /// <summary>R5 (§6.2/§6.3) — REQUIRED ERP ship-to CODE; resolves to <c>CompanyAddress.erpCode</c> within the PO's
     /// company. Unresolvable (no company / no matching active address) → the PO row is hard-failed.</summary>
     string ShipToAddress,
+    /// <summary>R11 (D1/D2) — REQUIRED receiving warehouse CODE, max 50. Free text, stored verbatim on the PO
+    /// header (no Warehouse master, no FK, no resolution step — unlike <see cref="ShipToAddress"/> an unknown
+    /// code does NOT fail the row). ERP-owned: overwritten on the next inbound sync. Flows onto every ASN
+    /// raised against the PO as the single-warehouse grouping key, and out to LN in the ASN payload.
+    /// <para>Declared non-defaulted (like <see cref="ShipToAddress"/>) so every C# construction site is
+    /// compile-enforced. JSON binding is name-based and unaffected by the parameter position.</para></summary>
+    string Warehouse,
     string? PoType = null,
     string? PoStatus = null,
     string? PaymentTerms = null,

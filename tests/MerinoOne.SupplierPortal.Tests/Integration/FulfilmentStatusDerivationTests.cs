@@ -109,6 +109,7 @@ public class FulfilmentStatusDerivationTests : IAsyncLifetime
                         Price: setup.PriceUnit * setup.OrderQty),
                 },
                 ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR", ErpStatus: erpStatus),
         });
         var resp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", body);

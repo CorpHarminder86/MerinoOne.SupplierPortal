@@ -44,6 +44,14 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     // admin.CompanyAddress.erpCode below; the resolution populates PurchaseOrder.shipToAddressId + the snapshot.
     public const string ShipToErpCode = "DC-TEST-01";
 
+    // R11 (D1) — the inbound PO warehouse CODE the tests push. Unlike ShipToErpCode there is no master to
+    // resolve against: it is stored verbatim on the PO header and copied onto every ASN raised against it.
+    public const string WarehouseCode = "WH-TEST-01";
+
+    // R11 (D4) — a SECOND warehouse, used only by the cross-warehouse ASN guard tests. Any ASN whose lines
+    // span POs carrying both codes must be rejected.
+    public const string WarehouseCodeAlt = "WH-TEST-02";
+
     // Deterministic ids (kept stable so the seed is idempotent across runs).
     public static readonly Guid TenantId      = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public static readonly Guid CompanyId     = Guid.Parse("22222222-2222-2222-2222-222222222222");

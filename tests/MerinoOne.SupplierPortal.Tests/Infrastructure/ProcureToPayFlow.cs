@@ -91,6 +91,7 @@ public static class ProcureToPayFlow
                         TaxCode: taxCode),
                 },
                 ShipToAddress: shipToErpCode,
+                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: currencyCode),
         });
         var poResp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", poBody);
