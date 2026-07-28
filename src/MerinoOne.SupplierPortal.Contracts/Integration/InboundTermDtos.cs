@@ -38,7 +38,9 @@ public record PushDeliveryTermsRequest(
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum RowOutcome { Inserted, Updated, Skipped, Failed }
 
-/// <summary>The result of one record in the inbound batch. <see cref="Error"/> is set only on Failed.</summary>
+/// <summary>The result of one record in the inbound batch. <see cref="Error"/> carries the failure reason on
+/// Failed; a SUCCESSFUL PO row may instead carry a "Warning — unresolved master codes: …" advisory (the row was
+/// saved; the listed reference codes did not resolve against the masters — see the matching Sync Log row).</summary>
 public record RowResult(string Code, RowOutcome Outcome, string? Error);
 
 /// <summary>

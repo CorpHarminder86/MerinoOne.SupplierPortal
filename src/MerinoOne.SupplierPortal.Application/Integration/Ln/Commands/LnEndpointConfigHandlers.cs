@@ -39,7 +39,7 @@ public class GetOutboundIntegrationConfigsQueryHandler : IRequestHandler<GetOutb
                 ? _catalog.TryGet(c.TransactionType) : null;
             return new OutboundIntegrationConfigDto(
                 c.Id, c.Seq, c.Kind.ToString(), c.ConnectionPointId, c.ConnectionPoint?.Name,
-                c.TransactionType, c.PortalEntity, c.AttachmentType, c.TargetEntityName, c.ContextJson,
+                c.TransactionType, c.PortalEntity, c.AttachmentType, c.TargetEntityName,
                 c.EndpointPath, c.HttpVerb, c.MutatePath, c.MutateVerb, c.DeletePath, c.DeleteVerb,
                 c.StaticHeadersJson, c.RequestFormat, c.ResponseFormat,
                 c.DispatchMode.ToString(), c.EligibilityGateExpr, c.RequestMappingExpr, c.MutateMappingExpr,
@@ -337,11 +337,6 @@ public class SaveOutboundIntegrationConfigCommandHandler : IRequestHandler<SaveO
                 if (syntax is not null) errors.Add($"{label}: {syntax}");
             }
             if (string.IsNullOrWhiteSpace(b.RequestMappingExpr)) errors.Add("request: mapping is required.");
-            if (!string.IsNullOrWhiteSpace(b.ContextJson))
-            {
-                try { System.Text.Json.JsonDocument.Parse(b.ContextJson); }
-                catch { errors.Add("context: not valid JSON."); }
-            }
             if (!string.IsNullOrWhiteSpace(b.StaticHeadersJson))
             {
                 try { System.Text.Json.JsonDocument.Parse(b.StaticHeadersJson); }
@@ -387,7 +382,6 @@ public class SaveOutboundIntegrationConfigCommandHandler : IRequestHandler<SaveO
         row.PortalEntity = b.PortalEntity;
         row.AttachmentType = kind == OutboundIntegrationKind.Document ? NullIfBlank(b.AttachmentType) : null;
         row.TargetEntityName = NullIfBlank(b.TargetEntityName);
-        row.ContextJson = NullIfBlank(b.ContextJson);
         row.EndpointPath = b.EndpointPath;
         row.HttpVerb = string.IsNullOrWhiteSpace(b.HttpVerb) ? "POST" : b.HttpVerb;
         row.MutatePath = NullIfBlank(b.MutatePath);

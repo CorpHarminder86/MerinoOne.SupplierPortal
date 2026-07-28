@@ -37,6 +37,9 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         b.Property(x => x.ShipToAddressId).HasColumnName("shipToAddressId").HasColumnType("uniqueidentifier");
         b.Property(x => x.ErpStatus).HasColumnName("erpStatus").HasMaxLength(50);
 
+        // Raw ERP-owned PO origin — stored verbatim from the inbound push (tracking/reference only).
+        b.Property(x => x.PoOrigin).HasColumnName("poOrigin").HasMaxLength(50);
+
         // R5 (TSD R5 Addendum §4.3) — point-in-time ship-to snapshot as an OWNED VALUE OBJECT mapped onto the
         // eight shipTo* columns ON THE PurchaseOrder table (one VO, one copy mapper, no separate table).
         // IsRequired(false) keeps the owned columns nullable (no PO is forced to have a snapshot in this phase).

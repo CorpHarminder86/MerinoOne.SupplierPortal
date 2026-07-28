@@ -13,8 +13,8 @@
         { "name": "MDS_id3",              "value": invoice.lnInvoiceNumber }
       ]},
       "resrs": { "res": [ { "filename": attachment.filename, "base64": attachment.base64 } ] },
-      "acl": { "name": config.acl },
-      "entityName": config.entityName,
+      "acl": { "name": "Public" },
+      "entityName": "MDS_GenericDocument",
       "pid": pid
     }
   }

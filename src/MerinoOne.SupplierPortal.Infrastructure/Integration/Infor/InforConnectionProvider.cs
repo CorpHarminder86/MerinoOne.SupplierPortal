@@ -53,7 +53,7 @@ public class InforConnectionProvider : IInforConnectionProvider
             Password: Decrypt(row.Password),
             ApiBaseUrl: row.ApiBaseUrl,
             IonC4wsBaseUrl: row.IonC4wsBaseUrl,
-            Company: row.Company,
+            Company: row.Company ?? string.Empty,
             IsActive: row.IsActive);
     }
 

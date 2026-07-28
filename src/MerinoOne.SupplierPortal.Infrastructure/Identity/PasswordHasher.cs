@@ -18,8 +18,7 @@ public static class PasswordHasher
 
     public static string Hash(string password, byte[] salt)
     {
-        using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, Iterations, HashAlgorithmName.SHA256);
-        var hash = pbkdf2.GetBytes(HashSize);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, Iterations, HashAlgorithmName.SHA256, HashSize);
         return $"{Convert.ToBase64String(salt)}.{Convert.ToBase64String(hash)}";
     }
 
@@ -29,8 +28,7 @@ public static class PasswordHasher
         if (parts.Length != 2) return false;
         var salt = Convert.FromBase64String(parts[0]);
         var expected = Convert.FromBase64String(parts[1]);
-        using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, Iterations, HashAlgorithmName.SHA256);
-        var actual = pbkdf2.GetBytes(HashSize);
+        var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, Iterations, HashAlgorithmName.SHA256, HashSize);
         return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
 

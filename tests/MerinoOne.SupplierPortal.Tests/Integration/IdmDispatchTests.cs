@@ -226,27 +226,21 @@ public class IdmDispatchTests
     }
 
     /// <summary>
-    /// R10 — config.acl / config.entityName (read by every mapping expression) must resolve from the unified
-    /// config row's contextJson, not a hardcoded literal. Proves the wiring by setting the row's context and
-    /// checking the persisted snapshot.
+    /// Option A (2026-07-08) — acl / entityName are INLINE LITERALS in the default IDM mapping ("Public" /
+    /// "MDS_GenericDocument"); the <c>config.*</c> context bag and its <c>contextJson</c> source are gone. Proves
+    /// the rendered request carries the literals end-to-end (regression guard for the inlined defaults).
     /// </summary>
     [SkippableFact]
-    public async Task Snapshot_config_acl_and_entityName_resolve_from_context_json()
+    public async Task Rendered_request_carries_literal_acl_and_entity_name()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
         Guid docId;
-        string attachmentType;
         using (var scope = _fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            (_, docId, attachmentType) = await SeedInvoiceDocAsync(db, Guid.NewGuid().ToString("N")[..8], "acl-entity.pdf");
+            (_, docId, _) = await SeedInvoiceDocAsync(db, Guid.NewGuid().ToString("N")[..8], "acl-entity.pdf");
             await db.SaveChangesAsync();
-
-            await db.OutboundIntegrationConfigs.IgnoreQueryFilters()
-                .Where(c => c.TenantId == IntegrationTestFixture.TenantId && c.AttachmentType == attachmentType)
-                .ExecuteUpdateAsync(s => s.SetProperty(
-                    c => c.ContextJson, "{\"acl\":\"CustomAcl-Test\",\"entityName\":\"CustomEntity-Test\"}"));
         }
 
         await DrainAsync();
@@ -258,10 +252,10 @@ public class IdmDispatchTests
                 .Where(o => o.DocumentUploadId == docId && o.Operation == IdmOutboxOperation.Create)
                 .Select(o => o.RequestSnapshotJson).SingleAsync();
 
-            snapshotJson.Should().Contain("CustomAcl-Test",
-                because: "config.acl must resolve from the unified config row's contextJson, not a hardcoded literal");
-            snapshotJson.Should().Contain("CustomEntity-Test",
-                because: "config.entityName must resolve from the same contextJson");
+            snapshotJson.Should().Contain("MDS_GenericDocument",
+                because: "entityName is the inlined literal in the default mapping (was config.entityName)");
+            snapshotJson.Should().Contain("Public",
+                because: "acl.name is the inlined literal \"Public\" in the default mapping (was config.acl)");
         }
     }
 

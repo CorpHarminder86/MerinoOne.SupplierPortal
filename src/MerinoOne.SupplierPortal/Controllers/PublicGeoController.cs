@@ -25,7 +25,7 @@ public class PublicGeoController(IMediator mediator) : ControllerBase
     [HttpGet("countries")]
     public async Task<Result<List<GeoLookupDto>>> Countries([FromQuery] string token, [FromQuery] string? search, [FromQuery] int skip, CancellationToken ct)
     {
-        if (TooShort(search)) return Empty();
+        if (TooShort(search)) return EmptyList();
         var tenantId = await mediator.Send(new GetInviteTenantQuery(token), ct);
         return Ok(await mediator.Send(new GeoCountryLookupQuery(search, tenantId, skip), ct));
     }
@@ -33,7 +33,7 @@ public class PublicGeoController(IMediator mediator) : ControllerBase
     [HttpGet("states")]
     public async Task<Result<List<GeoLookupDto>>> States([FromQuery] string token, [FromQuery] Guid countryId, [FromQuery] string? search, [FromQuery] int skip, CancellationToken ct)
     {
-        if (TooShort(search)) return Empty();
+        if (TooShort(search)) return EmptyList();
         var tenantId = await mediator.Send(new GetInviteTenantQuery(token), ct);
         return Ok(await mediator.Send(new GeoStateLookupQuery(countryId, search, tenantId, skip), ct));
     }
@@ -41,7 +41,7 @@ public class PublicGeoController(IMediator mediator) : ControllerBase
     [HttpGet("cities")]
     public async Task<Result<List<GeoLookupDto>>> Cities([FromQuery] string token, [FromQuery] Guid? countryId, [FromQuery] Guid? stateId, [FromQuery] string? search, [FromQuery] int skip, CancellationToken ct)
     {
-        if (TooShort(search)) return Empty();
+        if (TooShort(search)) return EmptyList();
         var tenantId = await mediator.Send(new GetInviteTenantQuery(token), ct);
         return Ok(await mediator.Send(new GeoCityLookupQuery(countryId, stateId, search, tenantId, skip), ct));
     }
@@ -49,7 +49,7 @@ public class PublicGeoController(IMediator mediator) : ControllerBase
     [HttpGet("postal-codes")]
     public async Task<Result<List<GeoLookupDto>>> PostalCodes([FromQuery] string token, [FromQuery] Guid? countryId, [FromQuery] Guid? stateId, [FromQuery] Guid? cityId, [FromQuery] string? search, [FromQuery] int skip, CancellationToken ct)
     {
-        if (TooShort(search)) return Empty();
+        if (TooShort(search)) return EmptyList();
         var tenantId = await mediator.Send(new GetInviteTenantQuery(token), ct);
         return Ok(await mediator.Send(new GeoPostalCodeLookupQuery(countryId, stateId, cityId, search, tenantId, skip), ct));
     }
@@ -68,5 +68,5 @@ public class PublicGeoController(IMediator mediator) : ControllerBase
 
     private static bool TooShort(string? s) => !string.IsNullOrEmpty(s) && s.Trim().Length < MinSearch;
     private Result<List<GeoLookupDto>> Ok(List<GeoLookupDto> data) => Result<List<GeoLookupDto>>.Ok(data, HttpContext.TraceIdentifier);
-    private Result<List<GeoLookupDto>> Empty() => Result<List<GeoLookupDto>>.Ok(new List<GeoLookupDto>(), HttpContext.TraceIdentifier);
+    private Result<List<GeoLookupDto>> EmptyList() => Result<List<GeoLookupDto>>.Ok(new List<GeoLookupDto>(), HttpContext.TraceIdentifier);
 }

@@ -56,7 +56,7 @@ public sealed class LnGateScanner : ILnGateScanner
         foreach (var c in candidates)
         {
             if (ct.IsCancellationRequested) break;
-            var gate = await _eligibility.EvaluateAsync(tenantId, config.TransactionType, c.EntityId, null, ct);
+            var gate = await _eligibility.EvaluateAsync(tenantId, config.TransactionType!, c.EntityId, null, ct);
             var existing = rowsByKey.TryGetValue(c.DeterministicKey, out var row) ? row : default((string, Guid)?);
             verdicts.Add(new LnScanVerdict(
                 c.EntityId, c.TenantId, c.EntityName, c.DeterministicKey,

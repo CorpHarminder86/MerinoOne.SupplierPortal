@@ -63,14 +63,14 @@ public class RunLnBackfillDryRunCommandHandler : IRequestHandler<RunLnBackfillDr
         foreach (var row in liveRows.Where(r => r.Status is OutboxStatus.Pending or OutboxStatus.Failed))
         {
             if (row.EntityId is not { } entityId) continue;
-            var gate = await _eligibility.EvaluateAsync(tid, config.TransactionType, entityId, null, ct);
+            var gate = await _eligibility.EvaluateAsync(tid, config.TransactionType!, entityId, null, ct);
             if (gate.HasGate && !gate.Eligible)
                 withdraw.Add(new LnBackfillRowDto(row.Id, entityId, row.DeterministicKey, row.Status.ToString(),
                     gate.Reason ?? "gate returned false"));
         }
 
         var preview = new LnBackfillPreviewDto(
-            Guid.Empty, config.Id, config.TransactionType, config.GateVersion,
+            Guid.Empty, config.Id, config.TransactionType!, config.GateVersion,
             enqueue, rearm, withdraw,
             SendingInFlight: liveRows.Count(r => r.Status == OutboxStatus.Sending),
             PostedImmutable: liveRows.Count(r => r.Status is OutboxStatus.Dispatched or OutboxStatus.Acked),
@@ -89,7 +89,7 @@ public class RunLnBackfillDryRunCommandHandler : IRequestHandler<RunLnBackfillDr
         {
             TenantId = tid,
             OutboundIntegrationConfigId = config.Id,
-            TransactionType = config.TransactionType,
+            TransactionType = config.TransactionType!,
             GateVersion = config.GateVersion,
             Status = "DryRun",
             EnqueueCount = enqueue.Count,
@@ -169,7 +169,7 @@ public class ApplyLnBackfillCommandHandler : IRequestHandler<ApplyLnBackfillComm
             {
                 Id = Guid.NewGuid(),
                 TenantId = tid,
-                TransactionType = config.TransactionType,
+                TransactionType = config.TransactionType!,
                 EntityName = EntityNameFor(config),
                 EntityId = rowDto.EntityId,
                 DeterministicKey = rowDto.DeterministicKey,
@@ -271,7 +271,7 @@ public class GetLnBackfillStatusQueryHandler : IRequestHandler<GetLnBackfillStat
         var gated = config.DispatchMode != OutboundDispatchMode.Legacy && !string.IsNullOrWhiteSpace(config.EligibilityGateExpr);
 
         return new LnBackfillStatusDto(
-            config.Id, config.TransactionType, config.GateVersion,
+            config.Id, config.TransactionType!, config.GateVersion,
             lastApplied,
             runs.FirstOrDefault(r => r.Status is "DryRun" or "Applied")?.CreatedOn,
             latestDryRun?.Id,

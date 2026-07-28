@@ -161,7 +161,7 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
                 .IgnoreQueryFilters()
                 .Where(c => !c.IsDeleted && c.Kind == OutboundIntegrationKind.Transaction && c.TransactionType != null)
                 .Select(c => new LnEndpointRoute(c.TenantId, c.TransactionType!, c.DispatchMode, c.PortalEntity,
-                    c.EndpointPath, c.HttpVerb, c.RequestMappingExpr, c.ResponseMappingExpr))
+                    c.EndpointPath, c.HttpVerb, c.RequestMappingExpr, c.ResponseMappingExpr ?? string.Empty))
                 .ToListAsync(ct))
             .ToDictionary(r => (r.TenantId, r.TransactionType));
 

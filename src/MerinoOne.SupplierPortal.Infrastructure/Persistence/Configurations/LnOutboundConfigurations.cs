@@ -26,7 +26,6 @@ public class OutboundIntegrationConfigConfiguration : IEntityTypeConfiguration<O
         // attachmentType matches doc.AttachmentType.code width; targetEntityName matches the old idmEntityType width.
         b.Property(x => x.AttachmentType).HasColumnName("attachmentType").HasMaxLength(50);
         b.Property(x => x.TargetEntityName).HasColumnName("targetEntityName").HasMaxLength(100);
-        b.Property(x => x.ContextJson).HasColumnName("contextJson").HasColumnType("nvarchar(max)");
         b.Property(x => x.EndpointPath).HasColumnName("endpointPath").HasMaxLength(400).IsRequired();
         b.Property(x => x.HttpVerb).HasColumnName("httpVerb").HasMaxLength(10).HasDefaultValue("POST").IsRequired();
         b.Property(x => x.MutatePath).HasColumnName("mutatePath").HasMaxLength(400);

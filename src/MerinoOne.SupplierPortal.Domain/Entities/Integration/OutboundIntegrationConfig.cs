@@ -61,10 +61,6 @@ public class OutboundIntegrationConfig : AuditableEntity, ITenantOwned
     /// selector for the snapshot provider and the <c>MDS_EntityType</c> payload value.</summary>
     public string? TargetEntityName { get; set; }
 
-    /// <summary>Static context JSON surfaced to mapping expressions as <c>config.*</c> (generalizes the R8
-    /// DefaultAcl/EntityName pair, e.g. <c>{"acl":"Public","entityName":"MDS_GenericDocument"}</c>).</summary>
-    public string? ContextJson { get; set; }
-
     /// <summary>Create/post path appended to the connection's base URL (absolute http(s) URL used verbatim).</summary>
     public string EndpointPath { get; set; } = string.Empty;
 

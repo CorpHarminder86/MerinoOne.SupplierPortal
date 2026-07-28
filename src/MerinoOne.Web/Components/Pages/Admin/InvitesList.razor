@@ -342,7 +342,7 @@
         else
         {
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Cancel failed",
-                Detail = resp?.Errors?.FirstOrDefault() });
+                Detail = resp?.Errors?.FirstOrDefault() ?? "Could not cancel the invite." });
         }
     }
 
@@ -359,7 +359,7 @@
         else
         {
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Resend failed",
-                Detail = resp?.Errors?.FirstOrDefault() });
+                Detail = resp?.Errors?.FirstOrDefault() ?? "Could not resend the invite." });
         }
     }
 

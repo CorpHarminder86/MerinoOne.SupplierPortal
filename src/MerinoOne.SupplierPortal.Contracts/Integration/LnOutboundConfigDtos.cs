@@ -22,7 +22,7 @@ public sealed record LnOutboundAck(
 /// List/edit projection of one <c>integration.OutboundIntegrationConfig</c> row (R10 unified plane).
 /// <c>Kind</c> = Transaction | Document selects which field group is meaningful — Transaction rows carry
 /// TransactionType/candidate-filter/sample/attestation; Document rows carry AttachmentType/TargetEntityName/
-/// Mutate-Delete routing/ContextJson.
+/// Mutate-Delete routing.
 /// </summary>
 public sealed record OutboundIntegrationConfigDto(
     Guid Id,
@@ -34,7 +34,6 @@ public sealed record OutboundIntegrationConfigDto(
     string PortalEntity,
     string? AttachmentType,
     string? TargetEntityName,
-    string? ContextJson,
     string EndpointPath,
     string HttpVerb,
     string? MutatePath,
@@ -79,7 +78,6 @@ public sealed record SaveOutboundIntegrationConfigRequest(
     string PortalEntity,
     string? AttachmentType,
     string? TargetEntityName,
-    string? ContextJson,
     string EndpointPath,
     string HttpVerb,
     string? MutatePath,

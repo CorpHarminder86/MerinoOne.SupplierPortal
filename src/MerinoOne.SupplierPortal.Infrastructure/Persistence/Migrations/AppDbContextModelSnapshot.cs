@@ -4149,10 +4149,6 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("connectionPointId");
 
-                    b.Property<string>("ContextJson")
-                        .HasColumnType("nvarchar(max)")
-                        .HasColumnName("contextJson");
-
                     b.Property<string>("CreatedBy")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -7677,6 +7673,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("poNumber");
+
+                    b.Property<string>("PoOrigin")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("poOrigin");
 
                     b.Property<string>("PoStatus")
                         .IsRequired()

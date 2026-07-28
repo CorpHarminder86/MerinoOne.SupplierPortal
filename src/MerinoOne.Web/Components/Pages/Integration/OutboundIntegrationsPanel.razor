@@ -111,40 +111,84 @@ else
     }
 }
 
-@* ---------------- Edit / create dialog (kind-adaptive) ---------------- *@
+@* ---------------- Edit / create dialog (kind-adaptive · 1c focus mode) ----------------
+   Config collapses to a summary pill bar ("Edit settings" reveals the full field set); one full-height
+   mapping editor with a kind-adaptive segmented switch takes the focus. Every field/binding is preserved. *@
 @if (editorOpen)
 {
+    var eyebrow = editing is null ? "New Document integration"
+        : (formIsTx ? $"{editing.TransactionType} · {editing.PortalEntity}" : $"{editing.PortalEntity} · {editing.AttachmentType ?? "all types"}");
+    var gateOn = !string.IsNullOrWhiteSpace(formGateExpr);
+    <style>
+        .oi-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 22px;background:var(--mer-ink-100);border-bottom:1px solid var(--mer-ink-200);flex:none;}
+        .oi-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:var(--mer-surface);border:1px solid var(--mer-ink-200);border-radius:20px;font-size:12px;color:var(--mer-ink-500);white-space:nowrap;}
+        .oi-pill b{color:var(--mer-ink-700);font-weight:600;max-width:230px;overflow:hidden;text-overflow:ellipsis;}
+        .oi-pill--ok b{color:#1f8a5b;}
+        .oi-settings{flex:none;max-height:44vh;overflow-y:auto;padding:16px 22px;border-bottom:1px solid var(--mer-ink-200);background:var(--mer-surface);display:flex;flex-direction:column;gap:14px;}
+        .oi-editor{flex:1;min-height:0;display:flex;flex-direction:column;padding:14px 22px 2px;background:var(--mer-surface);}
+        .oi-segbar{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex:none;flex-wrap:wrap;}
+        .oi-seg{display:inline-flex;background:var(--mer-ink-100);border-radius:10px;padding:3px;}
+        .oi-seg button{border:none;background:transparent;padding:7px 18px;border-radius:8px;font:600 13px/1 system-ui,sans-serif;color:var(--mer-ink-500);cursor:pointer;}
+        .oi-seg button.on{background:var(--mer-surface);color:var(--mer-ink-700);box-shadow:0 1px 3px rgba(20,22,40,.14);}
+        .oi-tabhint{font-size:12px;color:var(--mer-ink-500);flex:1;min-width:120px;}
+        .oi-edbox{flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid var(--mer-ink-200);border-radius:10px;overflow:hidden;}
+        .oi-edhead{display:flex;align-items:center;justify-content:space-between;padding:8px 13px;border-bottom:1px solid var(--mer-ink-100);background:var(--mer-ink-100);flex:none;font:500 12px ui-monospace,Menlo,monospace;color:var(--mer-ink-500);}
+        .oi-edbox textarea{flex:1;width:100%;border:none;resize:none;padding:12px 15px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.65;background:var(--mer-surface);color:var(--mer-ink-700);outline:none;}
+        .oi-preview{flex:none;max-height:170px;overflow:auto;margin:10px 0 0;background:var(--mer-ink-100);padding:10px;border-radius:8px;font-size:11.5px;}
+        .oi-fld{display:flex;flex-direction:column;gap:6px;}
+        .oi-fld label{font-size:12px;font-weight:600;color:var(--mer-ink-700);}
+        .oi-fld .rz-textbox,.oi-fld .rz-dropdown{width:100%;padding:8px 10px;}
+        .oi-fld .rz-dropdown{border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);}
+        .oi-mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;}
+        .oi-hint{font-size:11px;color:var(--mer-ink-500);margin-top:2px;}
+    </style>
     <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
-        <div class="merino-dialog" data-variant="info" data-size="lg" style="width:940px;max-width:94vw;max-height:92vh;overflow-y:auto;">
+        <div class="merino-dialog" data-variant="info" data-size="lg" style="width:1080px;max-width:96vw;height:88vh;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">
             <div class="merino-dialog__accent"></div>
             <header class="merino-dialog__header">
                 <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">cable</span></div>
                 <div class="merino-dialog__head-text">
-                    <div class="merino-dialog__eyebrow">@(editing is null ? "New Document integration" : (formIsTx ? $"{editing.TransactionType} · {editing.PortalEntity}" : $"{editing.PortalEntity} · {editing.AttachmentType ?? "all types"}"))</div>
+                    <div class="merino-dialog__eyebrow">@eyebrow</div>
                     <h2 class="merino-dialog__title">@(editing is null ? "Create Document integration" : "Edit outbound integration")</h2>
                 </div>
                 <button class="merino-dialog__close" @onclick="CloseEditor"><span class="material-symbols-outlined">close</span></button>
             </header>
-            <div class="merino-dialog__body">
-                <div style="display:flex;flex-direction:column;gap:14px;">
+
+            @* ---- collapsed config summary ---- *@
+            <div class="oi-summary">
+                <span class="oi-pill">Portal <b>@formPortalEntity</b></span>
+                <span class="oi-pill">@formHttpVerb <b title="@formEndpointPath">@(string.IsNullOrWhiteSpace(formEndpointPath) ? "—" : formEndpointPath)</b></span>
+                @if (!formIsTx)
+                {
+                    <span class="oi-pill">Format <b>@formResponseFormat</b></span>
+                }
+                <span class="oi-pill @(gateOn ? "oi-pill--ok" : "")">Gate <b>@(gateOn ? "active" : "none")</b></span>
+                <span style="flex:1"></span>
+                <button class="mbtn mbtn--outline" @onclick="() => settingsExpanded = !settingsExpanded">
+                    <span class="material-symbols-outlined">tune</span> @(settingsExpanded ? "Hide settings" : "Edit settings")
+                </button>
+            </div>
+
+            @* ---- expandable settings ---- *@
+            @if (settingsExpanded)
+            {
+                <div class="oi-settings">
                     @if (!formIsTx)
                     {
                         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Portal entity *</label>
-                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);"
-                                        @bind="formPortalEntity" disabled="@(editing is not null)">
+                            <div class="oi-fld">
+                                <label>Portal entity *</label>
+                                <select class="rz-dropdown" @bind="formPortalEntity" disabled="@(editing is not null)">
                                     <option value="Asn">Asn</option><option value="Invoice">Invoice</option><option value="Supplier">Supplier</option>
                                 </select>
                             </div>
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Attachment type (blank = all)</label>
-                                <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="formAttachmentType" disabled="@(editing is not null)" />
+                            <div class="oi-fld">
+                                <label>Attachment type (blank = all)</label>
+                                <input class="rz-textbox" @bind="formAttachmentType" disabled="@(editing is not null)" />
                             </div>
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Target entity name * (IDM entity type)</label>
-                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formTargetEntityName"
-                                       list="idm-entity-options" />
+                            <div class="oi-fld">
+                                <label>Target entity name * (IDM entity type)</label>
+                                <input class="rz-textbox oi-mono" @bind="formTargetEntityName" list="idm-entity-options" />
                                 <datalist id="idm-entity-options">
                                     @foreach (var o in entityTypeOptions) { <option value="@o.IdmEntityType">@o.OwnerEntityType</option> }
                                 </datalist>
@@ -152,19 +196,19 @@ else
                         </div>
                     }
                     <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px;">
-                        <div>
-                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Endpoint path * (relative to the connection base URL; absolute https:// used verbatim)</label>
-                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formEndpointPath" />
+                        <div class="oi-fld">
+                            <label>Endpoint path * (relative to the connection base URL; absolute https:// used verbatim)</label>
+                            <input class="rz-textbox oi-mono" @bind="formEndpointPath" />
                         </div>
-                        <div>
-                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">HTTP verb</label>
-                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formHttpVerb">
+                        <div class="oi-fld">
+                            <label>HTTP verb</label>
+                            <select class="rz-dropdown" @bind="formHttpVerb">
                                 <option>POST</option><option>PUT</option><option>PATCH</option>
                             </select>
                         </div>
-                        <div>
-                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Connection point</label>
-                            <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formConnectionId">
+                        <div class="oi-fld">
+                            <label>Connection point</label>
+                            <select class="rz-dropdown" @bind="formConnectionId">
                                 <option value="">— tenant default —</option>
                                 @foreach (var cp in connectionPoints)
                                 {
@@ -176,83 +220,47 @@ else
                     @if (!formIsTx)
                     {
                         <div style="display:grid;grid-template-columns:2fr 1fr 2fr 1fr;gap:14px;">
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Update path (blank = create path)</label>
-                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formMutatePath" />
+                            <div class="oi-fld">
+                                <label>Update path (blank = create path)</label>
+                                <input class="rz-textbox oi-mono" @bind="formMutatePath" />
                             </div>
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Update verb</label>
-                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formMutateVerb">
+                            <div class="oi-fld">
+                                <label>Update verb</label>
+                                <select class="rz-dropdown" @bind="formMutateVerb">
                                     <option value="">(create verb)</option><option>POST</option><option>PUT</option><option>PATCH</option>
                                 </select>
                             </div>
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Delete path (blank = create path)</label>
-                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formDeletePath" />
+                            <div class="oi-fld">
+                                <label>Delete path (blank = create path)</label>
+                                <input class="rz-textbox oi-mono" @bind="formDeletePath" />
                             </div>
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Delete verb</label>
-                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formDeleteVerb">
+                            <div class="oi-fld">
+                                <label>Delete verb</label>
+                                <select class="rz-dropdown" @bind="formDeleteVerb">
                                     <option value="">DELETE</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
                                 </select>
                             </div>
                         </div>
-                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Response format</label>
-                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formResponseFormat">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                            <div class="oi-fld">
+                                <label>Response format</label>
+                                <select class="rz-dropdown" @bind="formResponseFormat">
                                     <option>Xml</option><option>Json</option>
                                 </select>
-                                <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Xml → normalized to JSON before the response mapping runs (IDM). Declared, never hardcoded.</div>
+                                <div class="oi-hint">Xml → normalized to JSON before the response mapping runs (IDM). Declared, never hardcoded.</div>
                             </div>
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Context JSON (config.* in expressions)</label>
-                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formContextJson"
-                                       placeholder='{"acl":"Public","entityName":"MDS_GenericDocument"}' />
+                            <div class="oi-fld">
+                                <label>Static headers (JSON object)</label>
+                                <input class="rz-textbox oi-mono" @bind="formStaticHeaders" />
                             </div>
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Static headers (JSON object)</label>
-                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formStaticHeaders" />
-                            </div>
-                        </div>
-                    }
-                    <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Eligibility gate (JSONata boolean — blank = no gate)</label>
-                        <textarea class="rz-textbox" style="width:100%;min-height:60px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;"
-                                  @bind="formGateExpr" placeholder="e.g. invoice.erpCompany != null"></textarea>
-                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Strict-true, fail closed. Transaction: enqueue + dispatch re-check + sweep. Document: seed/promote gate. Changing it bumps the gate version.</div>
-                    </div>
-                    <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Request mapping (JSONata) *@(formIsTx ? " → target payload" : " → Create envelope { headers, body }")</label>
-                        <textarea class="rz-textbox" style="width:100%;min-height:150px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formRequestExpr"></textarea>
-                    </div>
-                    @if (!formIsTx)
-                    {
-                        <div>
-                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Mutate mapping (pid-keyed Update — blank = create shape)</label>
-                            <textarea class="rz-textbox" style="width:100%;min-height:90px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formMutateExpr"></textarea>
-                        </div>
-                        <div>
-                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Response mapping (normalized response → { pid } — blank = built-in parser)</label>
-                            <textarea class="rz-textbox" style="width:100%;min-height:70px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formResponseExpr"
-                                      placeholder="item.pid"></textarea>
                         </div>
                     }
                     else
                     {
-                        <div>
-                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Response mapping (response → closed contract) *</label>
-                            <textarea class="rz-textbox" style="width:100%;min-height:100px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formResponseExpr"></textarea>
-                            <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Must produce <span style="font-family:Inter,monospace;">{ erpKey, erpStatus, message?, correlationBag? }</span> — unknown keys block save (D-R9-4).</div>
-                        </div>
-                        <div>
-                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Ack mapping (erp-ack body → closed contract) — dormant, ack extraction stays code-owned</label>
-                            <textarea class="rz-textbox" style="width:100%;min-height:80px;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formAckExpr"></textarea>
-                        </div>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Candidate filter (code-registered, D-R9-15)</label>
-                                <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formFilterName">
+                            <div class="oi-fld">
+                                <label>Candidate filter (code-registered, D-R9-15)</label>
+                                <select class="rz-dropdown" @bind="formFilterName">
                                     <option value="">— none —</option>
                                     @foreach (var f in filterOptions)
                                     {
@@ -260,39 +268,91 @@ else
                                     }
                                 </select>
                             </div>
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Filter params (JSON)</label>
-                                <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;font-size:12.5px;" @bind="formFilterParams" placeholder="{&quot;statuses&quot;:[&quot;Accepted&quot;]}" />
+                            <div class="oi-fld">
+                                <label>Filter params (JSON)</label>
+                                <input class="rz-textbox oi-mono" @bind="formFilterParams" placeholder="{&quot;statuses&quot;:[&quot;Accepted&quot;]}" />
                             </div>
                         </div>
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <button class="mbtn mbtn--outline" @onclick="ValidateForm" disabled="@busy" title="Run the save-time pipeline without saving">
-                                <span class="material-symbols-outlined">rule</span> Validate
-                            </button>
-                            @if (editing is not null && (editing.RequestDrifted || editing.ResponseDrifted || editing.AckDrifted))
-                            {
-                                <button class="mbtn mbtn--outline" @onclick='() => RestoreSlot("request")' disabled="@(busy || !editing.RequestDrifted)" title="Restore the request expression to the repo default">
-                                    <span class="material-symbols-outlined">settings_backup_restore</span> Request default
-                                </button>
-                                <button class="mbtn mbtn--outline" @onclick='() => RestoreSlot("response")' disabled="@(busy || !editing.ResponseDrifted)" title="Restore the response expression to the repo default">
-                                    <span class="material-symbols-outlined">settings_backup_restore</span> Response default
-                                </button>
-                            }
-                        </div>
-                        @if (!string.IsNullOrEmpty(renderedPreview))
+                    }
+                    <div class="oi-fld">
+                        <label>Eligibility gate (JSONata boolean — blank = no gate)</label>
+                        <textarea class="rz-textbox oi-mono" style="min-height:60px;" @bind="formGateExpr" placeholder="e.g. invoice.erpCompany != null"></textarea>
+                        <div class="oi-hint">Strict-true, fail closed. Transaction: enqueue + dispatch re-check + sweep. Document: seed/promote gate. Changing it bumps the gate version.</div>
+                    </div>
+                </div>
+            }
+
+            @* ---- mapping editor (focus) ---- *@
+            <div class="oi-editor">
+                <div class="oi-segbar">
+                    <div class="oi-seg">
+                        <button class="@(mapTab == "request" ? "on" : "")" @onclick='() => mapTab = "request"'>Request</button>
+                        @if (!formIsTx)
                         {
-                            <div>
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Rendered request (against the pinned sample)</label>
-                                <pre style="max-height:200px;overflow:auto;background:var(--mer-ink-100);padding:10px;border-radius:6px;font-size:11.5px;">@renderedPreview</pre>
-                            </div>
+                            <button class="@(mapTab == "mutate" ? "on" : "")" @onclick='() => mapTab = "mutate"'>Mutate</button>
+                        }
+                        <button class="@(mapTab == "response" ? "on" : "")" @onclick='() => mapTab = "response"'>Response@(formIsTx ? " *" : "")</button>
+                        @if (formIsTx)
+                        {
+                            <button class="@(mapTab == "ack" ? "on" : "")" @onclick='() => mapTab = "ack"'>Ack</button>
+                        }
+                    </div>
+                    <span class="oi-tabhint">@MapHint()</span>
+                    @if (formIsTx)
+                    {
+                        <button class="mbtn mbtn--outline" @onclick="ValidateForm" disabled="@busy" title="Run the save-time pipeline without saving">
+                            <span class="material-symbols-outlined">rule</span> Validate
+                        </button>
+                        @if (editing is not null && mapTab == "request" && editing.RequestDrifted)
+                        {
+                            <button class="mbtn mbtn--outline" @onclick='() => RestoreSlot("request")' disabled="@busy" title="Restore the request expression to the repo default">
+                                <span class="material-symbols-outlined">settings_backup_restore</span> Restore default
+                            </button>
+                        }
+                        @if (editing is not null && mapTab == "response" && editing.ResponseDrifted)
+                        {
+                            <button class="mbtn mbtn--outline" @onclick='() => RestoreSlot("response")' disabled="@busy" title="Restore the response expression to the repo default">
+                                <span class="material-symbols-outlined">settings_backup_restore</span> Restore default
+                            </button>
                         }
                     }
                 </div>
+
+                <div class="oi-edbox">
+                    <div class="oi-edhead">
+                        <span>@MapFile()</span>
+                        <span style="font:400 11px system-ui;color:var(--mer-ink-400);">JSONata</span>
+                    </div>
+                    <textarea style="display:@(mapTab == "request" ? "block" : "none")" @bind="formRequestExpr"></textarea>
+                    @if (!formIsTx)
+                    {
+                        <textarea style="display:@(mapTab == "mutate" ? "block" : "none")" @bind="formMutateExpr"></textarea>
+                    }
+                    <textarea style="display:@(mapTab == "response" ? "block" : "none")" @bind="formResponseExpr" placeholder="@(formIsTx ? string.Empty : "item.pid")"></textarea>
+                    @if (formIsTx)
+                    {
+                        <textarea style="display:@(mapTab == "ack" ? "block" : "none")" @bind="formAckExpr"></textarea>
+                    }
+                </div>
+
+                @if (formIsTx && mapTab == "response")
+                {
+                    <div class="oi-hint">Must produce <span class="oi-mono">{ erpKey, erpStatus, message?, correlationBag? }</span> — unknown keys block save (D-R9-4).</div>
+                }
+                @if (formIsTx && mapTab == "ack")
+                {
+                    <div class="oi-hint">Dormant — ack extraction stays code-owned.</div>
+                }
+                @if (formIsTx && !string.IsNullOrEmpty(renderedPreview))
+                {
+                    <pre class="oi-preview">@renderedPreview</pre>
+                }
                 @if (!string.IsNullOrEmpty(formError))
                 {
-                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;white-space:pre-wrap;">@formError</div>
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:10px;white-space:pre-wrap;flex:none;">@formError</div>
                 }
             </div>
+
             <footer class="merino-dialog__footer">
                 <div class="merino-dialog__actions">
                     <button class="merino-dialog__btn" data-intent="ghost" @onclick="CloseEditor">Cancel</button>
@@ -451,6 +511,8 @@ else
     private bool editorOpen;
     private OutboundIntegrationConfigDto? editing;
     private bool formIsTx;
+    private bool settingsExpanded;        // 1c: config collapses to the summary bar; expanded on create.
+    private string mapTab = "request";    // 1c: active mapping-editor segment (request|mutate|response|ack).
     private string formPortalEntity = "Invoice";
     private string formAttachmentType = string.Empty;
     private string formTargetEntityName = string.Empty;
@@ -462,7 +524,6 @@ else
     private string formDeletePath = string.Empty;
     private string formDeleteVerb = string.Empty;
     private string formResponseFormat = "Xml";
-    private string formContextJson = string.Empty;
     private string formStaticHeaders = string.Empty;
     private string formGateExpr = string.Empty;
     private string formRequestExpr = string.Empty;
@@ -491,6 +552,27 @@ else
         && (enableFor.VerifiedAt is not null || !string.IsNullOrWhiteSpace(attestNote))
         && (enableFor.PathConfirmed || attestPathConfirmed)
         && enableFor.HasSample && !enableFor.SampleStale;
+
+    // 1c mapping-editor labels (kind-adaptive).
+    private string MapHint() => (formIsTx, mapTab) switch
+    {
+        (true, "request") => "JSONata → target ERP payload.",
+        (true, "response") => "Response → closed contract { erpKey, erpStatus, message?, correlationBag? } — required.",
+        (true, "ack") => "ERP-ack body → closed contract. Dormant — ack extraction stays code-owned.",
+        (false, "request") => "Xml → normalized to JSON before the mapping runs. Create envelope { headers, body }.",
+        (false, "mutate") => "pid-keyed Update payload — leave blank to reuse the create shape.",
+        (false, "response") => "Normalized response → { pid }. Blank = built-in parser.",
+        _ => string.Empty,
+    };
+
+    private string MapFile() => mapTab switch
+    {
+        "request" => "request-mapping.jsonata",
+        "mutate" => "mutate-mapping.jsonata",
+        "response" => "response-mapping.jsonata",
+        "ack" => "ack-mapping.jsonata",
+        _ => string.Empty,
+    };
 
     private static string ModeChipClass(string mode) => mode switch
     {
@@ -528,6 +610,8 @@ else
     {
         editing = null;
         formIsTx = false;
+        settingsExpanded = true;   // a new row has no config yet — reveal the fields.
+        mapTab = "request";
         formPortalEntity = "Invoice";
         formAttachmentType = string.Empty;
         formTargetEntityName = string.Empty;
@@ -537,7 +621,6 @@ else
         formMutatePath = string.Empty; formMutateVerb = string.Empty;
         formDeletePath = string.Empty; formDeleteVerb = string.Empty;
         formResponseFormat = "Xml";
-        formContextJson = "{\"acl\":\"Public\",\"entityName\":\"MDS_GenericDocument\"}";
         formStaticHeaders = string.Empty;
         formGateExpr = string.Empty;
         formRequestExpr = string.Empty;
@@ -554,6 +637,8 @@ else
     {
         editing = c;
         formIsTx = c.Kind == "Transaction";
+        settingsExpanded = false;   // focus the mapping editor; config is a click away.
+        mapTab = "request";
         formPortalEntity = c.PortalEntity;
         formAttachmentType = c.AttachmentType ?? string.Empty;
         formTargetEntityName = c.TargetEntityName ?? string.Empty;
@@ -565,7 +650,6 @@ else
         formDeletePath = c.DeletePath ?? string.Empty;
         formDeleteVerb = c.DeleteVerb ?? string.Empty;
         formResponseFormat = c.ResponseFormat;
-        formContextJson = c.ContextJson ?? string.Empty;
         formStaticHeaders = c.StaticHeadersJson ?? string.Empty;
         formGateExpr = c.EligibilityGateExpr ?? string.Empty;
         formRequestExpr = c.RequestMappingExpr;
@@ -597,7 +681,6 @@ else
         PortalEntity: formPortalEntity,
         AttachmentType: string.IsNullOrWhiteSpace(formAttachmentType) ? null : formAttachmentType.Trim(),
         TargetEntityName: string.IsNullOrWhiteSpace(formTargetEntityName) ? null : formTargetEntityName.Trim(),
-        ContextJson: string.IsNullOrWhiteSpace(formContextJson) ? null : formContextJson,
         EndpointPath: formEndpointPath.Trim(),
         HttpVerb: formHttpVerb,
         MutatePath: string.IsNullOrWhiteSpace(formMutatePath) ? null : formMutatePath.Trim(),

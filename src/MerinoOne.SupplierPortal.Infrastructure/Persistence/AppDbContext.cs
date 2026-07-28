@@ -447,6 +447,6 @@ public class AppDbContext : DbContext, IAppDbContext
         => ChangeTracker.Entries().ToList();
 
     /// <summary>FIX #1 — attach a detached entity for an individual replay flush during poison-row isolation.</summary>
-    public Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry Attach(object entity)
+    public new Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry Attach(object entity)
         => base.Attach(entity);
 }

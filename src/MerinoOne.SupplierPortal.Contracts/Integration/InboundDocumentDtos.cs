@@ -78,7 +78,10 @@ public record PoRecord(
     string? ErpSupplierCode = null,
     /// <summary>R5 (§4.8/§6.3) — raw ERP status (e.g. 'Released', 'modified'). Stored on the PO for tracking/audit
     /// only; the portal PoStatus is NOT resolved from it in this phase (PoStatusMapping is Phase 2).</summary>
-    string? ErpStatus = null);
+    string? ErpStatus = null,
+    /// <summary>Raw ERP-owned PO origin (e.g. the LN order origin / originating document indicator). Stored on the
+    /// PO header verbatim for tracking/reference; ERP-owned (overwritten on the next inbound sync). Max length 50.</summary>
+    string? PoOrigin = null);
 
 /// <summary>Inbound PO push body. See <see cref="PushGrnStatusRequest"/> for company semantics.</summary>
 public record PushPurchaseOrdersRequest(

@@ -34,7 +34,6 @@ public sealed class InvoiceSnapshotProvider : IEntitySnapshotProvider
         if (inv is null || doc is null) return null;
 
         var base64 = includeFileContent ? await _files.ToBase64Async(doc.FileUrl, ct) : null;
-        var (acl, entityName) = await IdmConfigDefaults.ResolveAsync(_db, tenantId, IdmEntityType, ct);
 
         return new Dictionary<string, object?>
         {
@@ -53,11 +52,6 @@ public sealed class InvoiceSnapshotProvider : IEntitySnapshotProvider
             {
                 ["filename"] = doc.FileName,
                 ["base64"] = base64,
-            },
-            ["config"] = new Dictionary<string, object?>
-            {
-                ["acl"] = acl,
-                ["entityName"] = entityName,
             },
             ["pid"] = doc.Pid ?? string.Empty,
         };

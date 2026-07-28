@@ -75,7 +75,6 @@ public class OutboundIntegrationConfigHandlerTests
             PortalEntity: LnPortalEntity.Invoice,
             AttachmentType: null,
             TargetEntityName: null,
-            ContextJson: null,
             EndpointPath: "LN/lnapi/odata/cisli.selfBillingInvoices/Invoices",
             HttpVerb: "POST",
             MutatePath: null, MutateVerb: null, DeletePath: null, DeleteVerb: null,

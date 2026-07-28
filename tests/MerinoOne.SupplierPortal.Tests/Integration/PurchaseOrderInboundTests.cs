@@ -161,7 +161,7 @@ public class PurchaseOrderInboundTests
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 10) },
                 ShipToAddress: IntegrationTestFixture.ShipToErpCode,
-                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR", ErpStatus: "Released"),
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR", ErpStatus: "Released", PoOrigin: "LN"),
         }));
 
         Guid poId;
@@ -174,6 +174,7 @@ public class PurchaseOrderInboundTests
             po.ShipToAddressId.Should().Be(IntegrationTestFixture.ShipToAddressId,
                 because: "the ship-to code resolved to the seeded CompanyAddress FK");
             po.ErpStatus.Should().Be("Released", because: "the raw ERP status is stored (tracking only)");
+            po.PoOrigin.Should().Be("LN", because: "the raw ERP-owned PO origin is stored verbatim from the inbound push");
             po.ShipTo.Should().NotBeNull(because: "the point-in-time ship-to snapshot is captured at resolution");
             po.ShipTo!.ErpCode.Should().Be(IntegrationTestFixture.ShipToErpCode);
             po.ShipTo!.AddressName.Should().Be("IntTest DC");
@@ -297,6 +298,92 @@ public class PurchaseOrderInboundTests
         var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
         (await db.PurchaseOrders.IgnoreQueryFilters().AnyAsync(p => p.PoNumber == poNumber))
             .Should().BeFalse(because: "a PO with an unresolvable ship-to is never created");
+    }
+
+    /// <summary>
+    /// Validator hardening — a line with a NULL/empty itemCode is rejected up front (400). Previously a null
+    /// itemCode NRE'd inside the handler and aborted the whole batch instead of failing validation.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_null_itemCode_rejected_400()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-NULLITEM-{tag}";
+
+        var body = new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, ItemCode: null!, OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 10) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        });
+        var resp = await _fx.CreateInboundClient().PostAsJsonAsync("/api/integration/inbound/purchase-orders", body);
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: "itemCode is required per line");
+
+        using var s = _fx.Factory.Services.CreateScope();
+        var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.PurchaseOrders.IgnoreQueryFilters().AnyAsync(p => p.PoNumber == poNumber))
+            .Should().BeFalse(because: "a 400 persists nothing");
+    }
+
+    /// <summary>
+    /// Master-existence soft-check — unresolved paymentTermCode / deliveryTermCode / itemCode / taxCode /
+    /// orderUnit do NOT fail the row: the PO is saved (FKs null, snapshots kept), the row result carries a
+    /// warning advisory listing the codes, and a standalone Failed InforSyncLog records the drift.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_unresolved_master_codes_warn_but_save()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-DRIFT-{tag}";
+
+        var body = new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[]
+                {
+                    new PoLineRecord(10, 1, ItemCode: $"NOITEM-{tag}", OrderUnit: $"NOUNIT-{tag}",
+                        OrderQty: 10, PriceUnit: 1, Price: 10, TaxCode: $"NOTAX-{tag}"),
+                },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR",
+                PaymentTermCode: $"NOPAY-{tag}", DeliveryTermCode: $"NODEL-{tag}"),
+        });
+        var resp = await _fx.CreateInboundClient().PostAsJsonAsync("/api/integration/inbound/purchase-orders", body);
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var r = await Read<UpsertResultDto>(resp);
+        r.Data!.Failed.Should().Be(0, because: "unresolved master codes are a warning, not a per-row failure");
+        r.Data!.Inserted.Should().Be(1);
+        var row = r.Data!.Rows.Single();
+        row.Error.Should().Contain("Warning — unresolved master codes", because: "the advisory is echoed on the successful row");
+        row.Error.Should().Contain($"NOPAY-{tag}").And.Contain($"NODEL-{tag}")
+            .And.Contain($"NOITEM-{tag}").And.Contain($"NOUNIT-{tag}").And.Contain($"NOTAX-{tag}");
+
+        using var s = _fx.Factory.Services.CreateScope();
+        var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+        var po = await db.PurchaseOrders.IgnoreQueryFilters().Include(p => p.Lines)
+            .FirstAsync(p => p.PoNumber == poNumber && p.TenantId == IntegrationTestFixture.TenantId);
+        po.PaymentTermId.Should().BeNull(because: "the term code did not resolve — FK stays null");
+        po.DeliveryTermId.Should().BeNull();
+        var line = po.Lines.Single();
+        line.ItemId.Should().BeNull(because: "the item code did not resolve — FK stays null, snapshot kept");
+        line.TaxId.Should().BeNull();
+        line.OrderUnit.Should().Be($"NOUNIT-{tag}", because: "the raw unit string is stored as pushed");
+
+        var driftLog = await db.InforSyncLogs.IgnoreQueryFilters()
+            .Where(l => l.EntityName == "PurchaseOrder" && l.EntityId == poNumber
+                && l.Status == SyncStatus.Failed && l.ErrorMessage!.Contains("Unresolved master codes"))
+            .FirstOrDefaultAsync();
+        driftLog.Should().NotBeNull(because: "the drift diagnostic is recorded on the sync log");
+        driftLog!.ErrorMessage.Should().Contain($"NOITEM-{tag}").And.Contain($"NOUNIT-{tag}");
     }
 
     /// <summary>

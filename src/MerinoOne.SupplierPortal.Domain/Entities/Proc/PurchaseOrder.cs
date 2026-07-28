@@ -53,5 +53,9 @@ public class PurchaseOrder : BaseAggregateRoot
     // (resolved from erpStatus via the PoStatusMapping master — a later phase).
     public string? ErpStatus { get; set; }
 
+    // Raw ERP-owned PO origin (e.g. the LN order origin / originating document indicator). Stored verbatim from
+    // the inbound push for tracking/reference; ERP-owned (overwritten on the next PO inbound sync).
+    public string? PoOrigin { get; set; }
+
     public ICollection<PurchaseOrderLine> Lines { get; set; } = new List<PurchaseOrderLine>();
 }

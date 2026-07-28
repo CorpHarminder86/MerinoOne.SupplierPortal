@@ -42,6 +42,13 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
             // R5 (§6.2/§6.3) — the ERP ship-to code is mandatory on the inbound PO. (Resolution to an active
             // CompanyAddress.erpCode happens in the handler; an unresolvable code is hard-failed per-row there.)
             o.RuleFor(r => r.ShipToAddress).NotEmpty().MaximumLength(50);
+            // Length caps mirror the column sizes (erpStatus 50; term codes 20 — the PaymentTerm/DeliveryTerm
+            // master Code cap). Master EXISTENCE is soft-checked in the handler (resolve-or-keep-snapshot +
+            // an InforSyncLog diagnostic on a miss) — a hard reject here would lose POs to master-sync timing.
+            o.RuleFor(r => r.ErpStatus).MaximumLength(50);
+            o.RuleFor(r => r.PoOrigin).MaximumLength(50);
+            o.RuleFor(r => r.PaymentTermCode).MaximumLength(20);
+            o.RuleFor(r => r.DeliveryTermCode).MaximumLength(20);
             o.RuleFor(r => r.Lines).NotNull();
             // R4 (2026-06-30) — orderQty is an absolute qty (>= 0); additionalQty is a signed delta (may be
             // negative to reduce). They are MUTUALLY EXCLUSIVE on a line: send orderQty to REPLACE the absolute
@@ -49,6 +56,11 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
             // for storage; the runtime below-floor check — result < already-shipped — is per-row in the handler.)
             o.RuleForEach(r => r.Lines).ChildRules(line =>
             {
+                // itemCode is REQUIRED (the column is NOT NULL; a null itemCode previously NRE'd the whole
+                // batch in the handler). orderUnit/taxCode caps mirror the Unit/Tax master Code columns (20).
+                line.RuleFor(l => l.ItemCode).NotEmpty().MaximumLength(50).WithName("itemCode");
+                line.RuleFor(l => l.OrderUnit).MaximumLength(20).WithName("orderUnit");
+                line.RuleFor(l => l.TaxCode).MaximumLength(20).WithName("taxCode");
                 line.RuleFor(l => l.OrderQty).GreaterThanOrEqualTo(0).WithMessage("orderQty must be >= 0.");
                 line.RuleFor(l => l).Must(l => !(l.OrderQty > 0 && l.AdditionalQty != 0))
                     .WithMessage("orderQty and additionalQty are mutually exclusive on a line — send orderQty to set the absolute qty OR additionalQty to add to the current qty, not both.");
@@ -76,7 +88,7 @@ public class UpsertPurchaseOrdersCommandHandler(
         // R5 — ShipToAddress + ErpStatus are part of the canonical digest so a ship-to re-point or a raw-status change
         // hashes differently and is NOT short-circuited as a duplicate by the no-header idempotency fallback.
         var canonical = recs.Select(r =>
-            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.ShipToAddress?.Trim()}|{r.ErpStatus?.Trim()}|" +
+            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.ShipToAddress?.Trim()}|{r.ErpStatus?.Trim()}|{r.PoOrigin?.Trim()}|" +
             string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.ItemCode}/{l.OrderQty}/{l.AdditionalQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}")));
         var codes = recs.Select(r => r.PoNumber.Trim());
         return exec.ExecuteAsync(TransactionalInboundEntity.Po, request.Body.CompanyCode, request.BoundCompanyIds,
@@ -102,6 +114,58 @@ public class UpsertPurchaseOrdersCommandHandler(
                 CreatedBy = "infor:inbound",
                 CreatedOn = now
             };
+
+        // Unresolved-master diagnostic (mirrors UnmappedStatusLog): the PO row is still created/updated —
+        // resolve-or-keep-snapshot stands (master-sync timing must not lose POs) — but the miss is no longer
+        // SILENT: one standalone Failed InforSyncLog row per affected PO lists every code that did not resolve
+        // (paymentTermCode / deliveryTermCode / itemCode / taxCode / orderUnit), so the operator sees master
+        // drift. An unresolved itemCode matters most: ItemId stays null, so the ASN serial/lot + over-ship
+        // guards silently cannot fire for that line until the Item master lands and the PO is re-pushed.
+        static InforSyncLog UnresolvedMastersLog(Guid tenantId, string poNum, IReadOnlyList<string> missing, string? payloadJson, DateTime now)
+            => new()
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                EntityName = "PurchaseOrder",
+                Direction = SyncDirection.Inbound,
+                Status = SyncStatus.Failed,
+                PayloadRef = poNum,
+                EntityId = poNum,
+                EntityCount = 1,
+                PayloadJson = payloadJson,
+                SyncedAt = now,
+                ErrorMessage = CapLength($"Unresolved master codes (PO still saved): {string.Join(", ", missing)}", 2000),
+                CreatedBy = "infor:inbound",
+                CreatedOn = now
+            };
+
+        static string CapLength(string s, int max) => s.Length <= max ? s : s[..(max - 1)] + "…";
+
+        // Collect every master code on the PO that did NOT resolve (header terms + per-line item/tax/unit).
+        // Distinct so a code repeated across folded lines is reported once.
+        static List<string> CollectUnresolvedMasterCodes(PoRecord rec,
+            IReadOnlyDictionary<string, (Guid Id, string Desc)> payTermMap,
+            IReadOnlyDictionary<string, (Guid Id, string Desc)> delTermMap,
+            IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap,
+            IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap,
+            IReadOnlySet<string> knownUnits)
+        {
+            var missing = new List<string>();
+            var pay = rec.PaymentTermCode?.Trim();
+            if (!string.IsNullOrWhiteSpace(pay) && !payTermMap.ContainsKey(pay)) missing.Add($"paymentTermCode '{pay}'");
+            var del = rec.DeliveryTermCode?.Trim();
+            if (!string.IsNullOrWhiteSpace(del) && !delTermMap.ContainsKey(del)) missing.Add($"deliveryTermCode '{del}'");
+            foreach (var l in rec.Lines)
+            {
+                var item = l.ItemCode?.Trim();
+                if (!string.IsNullOrWhiteSpace(item) && !itemMap.ContainsKey(item)) missing.Add($"itemCode '{item}' (line {l.PositionNo})");
+                var unit = l.OrderUnit?.Trim();
+                if (!string.IsNullOrWhiteSpace(unit) && !knownUnits.Contains(unit)) missing.Add($"orderUnit '{unit}' (line {l.PositionNo})");
+                var tax = l.TaxCode?.Trim();
+                if (!string.IsNullOrWhiteSpace(tax) && !taxMap.ContainsKey(tax)) missing.Add($"taxCode '{tax}' (line {l.PositionNo})");
+            }
+            return missing.Distinct().ToList();
+        }
 
         async Task<IReadOnlyList<RowResult>> Upsert(IAppDbContext db, Guid tenantId, Guid sourceId, CancellationToken token)
         {
@@ -162,6 +226,15 @@ public class UpsertPurchaseOrdersCommandHandler(
                 : (await db.Items.IgnoreQueryFilters().Where(i => !i.IsDeleted && i.TenantEntityId == sourceId && itemCodes.Contains(i.Code))
                     .Select(i => new { i.Code, i.Id, i.Description }).ToListAsync(token))
                     .ToDictionary(i => i.Code, i => (i.Id, i.Description), StringComparer.OrdinalIgnoreCase);
+
+            // orderUnit master soft-check (existence only — the line stores the raw string, no FK): batch-load the
+            // known Unit codes for the source company so an unknown unit lands in the unresolved-masters diagnostic
+            // below. NOTE: the DTO defaults a missing orderUnit to "EA", so "EA" must exist in the Unit master or
+            // every default-unit push raises the diagnostic (seed it, or have LN always send the unit explicitly).
+            var unitCodes = recs.SelectMany(r => r.Lines).Where(l => !string.IsNullOrWhiteSpace(l.OrderUnit)).Select(l => l.OrderUnit.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var knownUnits = unitCodes.Count == 0 ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                : (await db.Units.IgnoreQueryFilters().Where(u => !u.IsDeleted && u.TenantEntityId == sourceId && unitCodes.Contains(u.Code))
+                    .Select(u => u.Code).ToListAsync(token)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var taxCodes = recs.SelectMany(r => r.Lines).Where(l => !string.IsNullOrWhiteSpace(l.TaxCode)).Select(l => l.TaxCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             // code → (id, description). The description feeds the WRITE-TIME snapshot on the line so the read side
@@ -255,6 +328,15 @@ public class UpsertPurchaseOrdersCommandHandler(
                     results.Add(new RowResult(poNum, RowOutcome.Failed, why)); continue;
                 }
 
+                // Master-existence soft-check: log the diagnostic + echo a warning on the (still successful) row.
+                // Runs AFTER the hard early-outs so a Failed row doesn't also raise a drift diagnostic.
+                var missingMasters = CollectUnresolvedMasterCodes(rec, payTermMap, delTermMap, itemMap, taxMap, knownUnits);
+                if (missingMasters.Count > 0)
+                    db.InforSyncLogs.Add(UnresolvedMastersLog(tenantId, poNum, missingMasters,
+                        InboundUpsertSupport.SerializePayloadCapped(rec), now));
+                var rowWarning = missingMasters.Count == 0 ? null
+                    : CapLength($"Warning — unresolved master codes: {string.Join(", ", missingMasters)}", 2000);
+
                 Guid? curId = !string.IsNullOrWhiteSpace(rec.CurrencyCode) && curMap.TryGetValue(rec.CurrencyCode.Trim(), out var ci) ? ci : null;
                 var poType = Enum.TryParse<PoType>(rec.PoType, true, out var pt) ? pt : PoType.Material;
                 var poStatus = Enum.TryParse<PoStatus>(rec.PoStatus, true, out var ps) ? ps : PoStatus.Released;
@@ -316,6 +398,7 @@ public class UpsertPurchaseOrdersCommandHandler(
                     po.ShipToAddressId = shipToAddress.Id;
                     po.ShipTo = ShipToSnapshot.From(shipToAddress);
                     po.ErpStatus = rec.ErpStatus;
+                    po.PoOrigin = rec.PoOrigin?.Trim();
                     po.Version += 1; po.UpdatedBy = "infor:inbound"; po.UpdatedOn = now;
                     SyncLines(db, po, rec, resolvedQty, itemMap, taxMap, now);
 
@@ -335,7 +418,7 @@ public class UpsertPurchaseOrdersCommandHandler(
                         await AutoAcceptIfConfiguredAsync(db, po, sup.PoConfirmationMode, tenantId, now, token);
                     }
 
-                    results.Add(new RowResult(poNum, RowOutcome.Updated, null));
+                    results.Add(new RowResult(poNum, RowOutcome.Updated, rowWarning));
                 }
                 else
                 {
@@ -375,6 +458,7 @@ public class UpsertPurchaseOrdersCommandHandler(
                         ShipToAddressId = shipToAddress.Id,
                         ShipTo = ShipToSnapshot.From(shipToAddress),
                         ErpStatus = rec.ErpStatus,
+                        PoOrigin = rec.PoOrigin?.Trim(),
                         CreatedBy = "infor:inbound", CreatedOn = now
                     };
                     // One stored line per positionNo (seq forced to 1 in Apply); the resolved qty is the absolute total.
@@ -390,7 +474,7 @@ public class UpsertPurchaseOrdersCommandHandler(
                     // acceptedAt at ingest (ship-gate open immediately, no manual step); Acknowledge/AcceptToShip stay at
                     // Released (the supplier must confirm).
                     await AutoAcceptIfConfiguredAsync(db, po2, sup.PoConfirmationMode, tenantId, now, token);
-                    results.Add(new RowResult(poNum, RowOutcome.Inserted, null));
+                    results.Add(new RowResult(poNum, RowOutcome.Inserted, rowWarning));
                 }
             }
             return results;

@@ -122,7 +122,7 @@ internal sealed class LnGateReconciliationWorker : BackgroundService
                     var rowDb = rowScope.ServiceProvider.GetRequiredService<IAppDbContext>();
                     var rowEnqueuer = rowScope.ServiceProvider.GetRequiredService<ILnGatedOutboxEnqueuer>();
                     var result = await rowEnqueuer.EnqueueAsync(
-                        config.TransactionType, v.EntityName, v.EntityId, v.DeterministicKey, null,
+                        config.TransactionType!, v.EntityName, v.EntityId, v.DeterministicKey, null,
                         tenantIdOverride: v.TenantId, ct: ct);
                     if (result.Outcome is GatedEnqueueOutcome.Enqueued or GatedEnqueueOutcome.EnqueuedLegacy or GatedEnqueueOutcome.Rearmed)
                     {

@@ -21,19 +21,19 @@ public class GeoController(IMediator mediator) : ControllerBase
 
     [HttpGet("countries")]
     public async Task<Result<List<GeoLookupDto>>> Countries([FromQuery] string? search, [FromQuery] int skip, CancellationToken ct)
-        => TooShort(search) ? Empty() : Ok(await mediator.Send(new GeoCountryLookupQuery(search, null, skip), ct));
+        => TooShort(search) ? EmptyList() : Ok(await mediator.Send(new GeoCountryLookupQuery(search, null, skip), ct));
 
     [HttpGet("states")]
     public async Task<Result<List<GeoLookupDto>>> States([FromQuery] Guid countryId, [FromQuery] string? search, [FromQuery] int skip, CancellationToken ct)
-        => TooShort(search) ? Empty() : Ok(await mediator.Send(new GeoStateLookupQuery(countryId, search, null, skip), ct));
+        => TooShort(search) ? EmptyList() : Ok(await mediator.Send(new GeoStateLookupQuery(countryId, search, null, skip), ct));
 
     [HttpGet("cities")]
     public async Task<Result<List<GeoLookupDto>>> Cities([FromQuery] Guid? countryId, [FromQuery] Guid? stateId, [FromQuery] string? search, [FromQuery] int skip, CancellationToken ct)
-        => TooShort(search) ? Empty() : Ok(await mediator.Send(new GeoCityLookupQuery(countryId, stateId, search, null, skip), ct));
+        => TooShort(search) ? EmptyList() : Ok(await mediator.Send(new GeoCityLookupQuery(countryId, stateId, search, null, skip), ct));
 
     [HttpGet("postal-codes")]
     public async Task<Result<List<GeoLookupDto>>> PostalCodes([FromQuery] Guid? countryId, [FromQuery] Guid? stateId, [FromQuery] Guid? cityId, [FromQuery] string? search, [FromQuery] int skip, CancellationToken ct)
-        => TooShort(search) ? Empty() : Ok(await mediator.Send(new GeoPostalCodeLookupQuery(countryId, stateId, cityId, search, null, skip), ct));
+        => TooShort(search) ? EmptyList() : Ok(await mediator.Send(new GeoPostalCodeLookupQuery(countryId, stateId, cityId, search, null, skip), ct));
 
     [HttpGet("postal-codes/{id:guid}/detail")]
     public async Task<Result<PostalCodeDetailDto?>> PostalCodeDetail([FromRoute] Guid id, CancellationToken ct)
@@ -41,5 +41,5 @@ public class GeoController(IMediator mediator) : ControllerBase
 
     private static bool TooShort(string? s) => !string.IsNullOrEmpty(s) && s.Trim().Length < MinSearch;
     private Result<List<GeoLookupDto>> Ok(List<GeoLookupDto> data) => Result<List<GeoLookupDto>>.Ok(data, HttpContext.TraceIdentifier);
-    private Result<List<GeoLookupDto>> Empty() => Result<List<GeoLookupDto>>.Ok(new List<GeoLookupDto>(), HttpContext.TraceIdentifier);
+    private Result<List<GeoLookupDto>> EmptyList() => Result<List<GeoLookupDto>>.Ok(new List<GeoLookupDto>(), HttpContext.TraceIdentifier);
 }
