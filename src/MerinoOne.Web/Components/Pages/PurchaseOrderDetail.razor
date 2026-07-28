@@ -155,6 +155,22 @@ else
                     {
                         <p style="font-size:13px;color:var(--mer-ink-500);">— no ship-to</p>
                     }
+
+                    @* R11 (D3) — the receiving warehouse, ERP-owned and carried on the PO header. Shown beside
+                       ship-to because the two together are what an ASN is grouped by: an ASN may span neither a
+                       second ship-to nor a second warehouse. Free-text code with no master, so the code renders
+                       as-is with no description. Null on POs ingested before R11 (no backfill). *@
+                    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--mer-line);">
+                        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mer-ink-500);margin-bottom:4px;">Warehouse</div>
+                        @if (!string.IsNullOrEmpty(detail.Warehouse))
+                        {
+                            <span class="tlg-status tlg-status--info" style="font-family:Inter,monospace;">@detail.Warehouse</span>
+                        }
+                        else
+                        {
+                            <p style="font-size:13px;color:var(--mer-ink-500);margin:0;">— not set</p>
+                        }
+                    </div>
                 </div>
 
                 <div class="rz-card" style="padding:20px;">

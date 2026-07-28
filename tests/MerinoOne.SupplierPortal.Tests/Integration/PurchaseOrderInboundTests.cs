@@ -1176,6 +1176,46 @@ public class PurchaseOrderInboundTests
             because: "the code is stored verbatim (trimmed) with no master resolution");
     }
 
+    [SkippableFact] // R11 (D3) — warehouse round-trips to BOTH read DTOs: detail and list (the ASN picker reads list).
+    public async Task Inbound_po_warehouse_surfaces_on_detail_and_list_dtos()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poNumber = $"PO-WHDTO-{tag}";
+
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 10) },
+                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
+                Warehouse: IntegrationTestFixture.WarehouseCode,
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        Guid poId;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            poId = (await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.PoNumber == poNumber)).Id;
+        }
+
+        var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+
+        var detail = await Read<PurchaseOrderDetailDto>(await client.GetAsync($"/api/purchase-orders/{poId}"));
+        detail.Data!.Warehouse.Should().Be(IntegrationTestFixture.WarehouseCode,
+            because: "the PO detail header renders the warehouse beside ship-to");
+
+        var list = await Read<MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<PurchaseOrderListItemDto>>(
+            await client.GetAsync($"/api/purchase-orders?supplierId={supplier.SupplierId}&pageSize=200"));
+        list.Data!.Items.Single(p => p.PoNumber == poNumber).Warehouse
+            .Should().Be(IntegrationTestFixture.WarehouseCode,
+                because: "the ASN wizard's PO picker groups by warehouse off the LIST dto, not the detail one");
+    }
+
     [SkippableFact] // The backfill push: a PO re-sent ONLY to deliver a changed warehouse must NOT be deduped away.
     public async Task Inbound_po_repush_changing_only_warehouse_is_not_deduped()
     {

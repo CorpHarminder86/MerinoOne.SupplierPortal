@@ -28,7 +28,11 @@ public record PurchaseOrderListItemDto(
     string? ShipToAddressName = null,
     // R4 §6.2 — whether the PO is shippable for its supplier's confirmation mode (PoConfirmationPolicy). The ASN
     // PO-picker offers ONLY shippable POs. Computed server-side (the policy is not reachable from the Web layer).
-    bool IsShippable = true);
+    bool IsShippable = true,
+    // R11 (D3/D4) — the PO's receiving warehouse. On the LIST DTO specifically because the ASN wizard groups and
+    // filters open POs by warehouse the same way it does by ship-to, so an ASN never spans two warehouses.
+    // Null on POs ingested before R11 (no backfill).
+    string? Warehouse = null);
 
 public record PagedResult<T>(
     List<T> Items,
@@ -83,7 +87,10 @@ public record PurchaseOrderDetailDto(
     string? ShipToCity = null,
     string? ShipToState = null,
     string? ShipToPincode = null,
-    string? ShipToCountry = null);
+    string? ShipToCountry = null,
+    // R11 (D3) — receiving warehouse code, ERP-owned free text (no master, so there is no description to pair
+    // with it — unlike ship-to this is the code itself, rendered as-is). Null on pre-R11 POs.
+    string? Warehouse = null);
 
 public record PurchaseOrderLineDto(
     Guid Id,

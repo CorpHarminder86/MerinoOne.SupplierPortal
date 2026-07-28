@@ -128,6 +128,8 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
             shipTo?.City,
             shipTo?.State,
             shipTo?.Pincode,
-            shipTo?.Country);
+            shipTo?.Country,
+            // R11 (D3) — receiving warehouse code, read straight off the header (no master, no snapshot VO).
+            row.po.Warehouse);
     }
 }

@@ -75,7 +75,11 @@ public class GetPurchaseOrderListQueryHandler : IRequestHandler<GetPurchaseOrder
                 // Term display: the header snapshot string (written at inbound from the term master — no read join).
                 x.po.CurrencyCode, x.po.PaymentTerms, x.po.DeliveryTerms,
                 // Ship-to (from the owned snapshot) — the ASN wizard groups/filters open POs by ship-to.
-                x.po.ShipToAddressId, x.po.ShipTo != null ? x.po.ShipTo.AddressName : null))
+                x.po.ShipToAddressId, x.po.ShipTo != null ? x.po.ShipTo.AddressName : null,
+                // IsShippable is stamped post-projection below (the policy is not translatable to SQL).
+                true,
+                // R11 (D4) — the ASN wizard groups/filters open POs by warehouse the same way.
+                x.po.Warehouse))
             .ToListAsync(ct);
 
         // R4 §6.2 — stamp the ship-gate result per row (the policy is not translatable to SQL and the Web layer
