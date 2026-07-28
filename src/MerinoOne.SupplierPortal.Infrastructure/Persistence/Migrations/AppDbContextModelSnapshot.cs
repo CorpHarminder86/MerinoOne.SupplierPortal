@@ -5600,6 +5600,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(30)")
                         .HasColumnName("asnStatus");
 
+                    b.Property<string>("BillOfLading")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("billOfLading");
+
                     b.Property<string>("CarrierName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)")
@@ -5675,6 +5680,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(20)")
                         .HasColumnName("invoiceGenerationStatus");
 
+                    b.Property<string>("InvoiceNo")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("invoiceNo");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -5685,6 +5695,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)")
                         .HasColumnName("notes");
+
+                    b.Property<string>("PackingList")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("packingList");
 
                     b.Property<Guid?>("PurchaseOrderId")
                         .HasColumnType("uniqueidentifier")
@@ -5756,6 +5771,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("vehicleNumber");
+
+                    b.Property<string>("Warehouse")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("warehouse");
 
                     b.HasKey("Id")
                         .HasName("PK_Asn");
@@ -7742,6 +7762,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Property<int>("Version")
                         .HasColumnType("int")
                         .HasColumnName("version");
+
+                    b.Property<string>("Warehouse")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("warehouse");
 
                     b.HasKey("Id")
                         .HasName("PK_PurchaseOrder");

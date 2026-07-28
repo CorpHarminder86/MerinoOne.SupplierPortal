@@ -38,8 +38,29 @@ public class Asn : BaseAggregateRoot
     // R4 (2026-06-22) — Module 3: draft/submit lifecycle. Default flipped Submitted → Draft so a new ASN is a
     // draft until the supplier submits; submit stamps submittedAt/By, posts to ERP via the Increment-0 outbox
     // (erpSyncId = outbox correlation), and the ERP ack writes back erpCode (the ASNNo) via /inbound/erp-ack.
+    // R11 (2026-07-28, D4) — receiving warehouse, snapshotted from the covered PurchaseOrder.Warehouse at
+    // create/update. A GROUPING KEY exactly like ShipToAddressId above: every AsnLine under this ASN references
+    // a PO line whose PurchaseOrder.Warehouse == this value, and a cross-warehouse line selection is rejected
+    // at selection time and at persist time. Nullable — legacy ASNs and ASNs whose POs predate the warehouse
+    // field have none. Free-text code (no FK), so this is a snapshot, not a reference.
+    public string? Warehouse { get; set; }
+
+    // R11 (2026-07-28, D6/D7) — supplier-entered shipment references, forwarded verbatim to LN. All three are
+    // mandatory at Send-For-Approval (NOT at draft creation, D7) and editable in Draft/Rejected only (D9), so
+    // nothing reaches the ERP without them while the "park a partial draft" flow survives. Pure LN passthrough
+    // (D13): InvoiceNo is the supplier's own commercial invoice reference and has NO link to the R6 invoice
+    // pipeline, which keeps numbering generated drafts DRAFT-{asnNumber}-{groupSeq}.
+    public string? InvoiceNo { get; set; }
+    public string? BillOfLading { get; set; }
+    public string? PackingList { get; set; }
+
     public AsnStatus AsnStatus { get; set; } = AsnStatus.Draft;
     public string? Notes { get; set; }
+
+    // NOTE (R11): submittedAt is stamped ONLY at AsnSubmitExecutor:348, whose only caller is the buyer's
+    // ApproveAsnCommandHandler — it shares that handler's `now` with AsnApproval.DecisionOn. So it means
+    // "submitted TO ERP at buyer approval", not "submitted by the supplier", and it IS the LN payload's
+    // ShipmentDate (D11). The supplier's SendForApproval does not touch it.
     public DateTime? SubmittedAt { get; set; }
     public string? SubmittedBy { get; set; }
     public string? ErpSyncId { get; set; }

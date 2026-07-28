@@ -57,5 +57,12 @@ public class PurchaseOrder : BaseAggregateRoot
     // the inbound push for tracking/reference; ERP-owned (overwritten on the next PO inbound sync).
     public string? PoOrigin { get; set; }
 
+    // R11 (2026-07-28, D1/D2) — receiving warehouse code, ERP-owned. Free-text code stored verbatim from the
+    // inbound push (no Warehouse master, no FK, no description snapshot); overwritten on the next PO inbound
+    // sync. REQUIRED on the inbound contract but NULLABLE here: existing POs keep null until LN re-pushes them
+    // (the R5 ShipToAddress precedent — mandatory on the wire, nullable in the DB, no backfill). Flows onto the
+    // ASN as the §D4 single-warehouse grouping key and out to LN as the ASN payload's Warehouse.
+    public string? Warehouse { get; set; }
+
     public ICollection<PurchaseOrderLine> Lines { get; set; } = new List<PurchaseOrderLine>();
 }

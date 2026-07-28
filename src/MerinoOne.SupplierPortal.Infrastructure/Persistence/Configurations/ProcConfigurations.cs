@@ -40,6 +40,11 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         // Raw ERP-owned PO origin — stored verbatim from the inbound push (tracking/reference only).
         b.Property(x => x.PoOrigin).HasColumnName("poOrigin").HasMaxLength(50);
 
+        // R11 (2026-07-28, D1/D2) — receiving warehouse code, ERP-owned free text. REQUIRED on the inbound
+        // contract, NULLABLE here: existing POs keep null until LN re-pushes them (no backfill). No FK — there
+        // is no Warehouse master; the code is stored verbatim like poOrigin above.
+        b.Property(x => x.Warehouse).HasColumnName("warehouse").HasMaxLength(50);
+
         // R5 (TSD R5 Addendum §4.3) — point-in-time ship-to snapshot as an OWNED VALUE OBJECT mapped onto the
         // eight shipTo* columns ON THE PurchaseOrder table (one VO, one copy mapper, no separate table).
         // IsRequired(false) keeps the owned columns nullable (no PO is forced to have a snapshot in this phase).
@@ -288,6 +293,14 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.DriverPhone).HasColumnName("driverPhone").HasMaxLength(20);
         b.Property(x => x.AsnStatus).HasColumnName("asnStatus").HasConversion<string>().HasMaxLength(30);
         b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
+
+        // R11 (2026-07-28) — warehouse: the D4 grouping key, snapshotted from PurchaseOrder.warehouse (same
+        // 50 width as the PO column it copies). invoiceNo/billOfLading/packingList: supplier-entered shipment
+        // references (D6), 50 each per the stated "open text textbox with max length 50".
+        b.Property(x => x.Warehouse).HasColumnName("warehouse").HasMaxLength(50);
+        b.Property(x => x.InvoiceNo).HasColumnName("invoiceNo").HasMaxLength(50);
+        b.Property(x => x.BillOfLading).HasColumnName("billOfLading").HasMaxLength(50);
+        b.Property(x => x.PackingList).HasColumnName("packingList").HasMaxLength(50);
 
         // R4 (2026-06-22) — Module 3: draft/submit lifecycle + ERP ack write-back. erpCode populated via
         // /inbound/erp-ack (the ASNNo). PurchaseOrderId is now NULLABLE (multi-PO via the junction below).
