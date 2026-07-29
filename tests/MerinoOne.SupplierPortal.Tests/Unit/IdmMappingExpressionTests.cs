@@ -61,7 +61,11 @@ public class IdmMappingExpressionTests
     }
 
     [Fact]
-    public async Task Asn_create_reproduces_the_spec_envelope()
+    // R11.2 (2026-07-29) — INTERIM envelope: the old mapping's MDS_id2/MDS_id3 (erpTransactionType/
+    // erpDocumentNo, dropped in migration 0055) are gone pending the user's fresh mapping; the config is
+    // Held meanwhile. The snapshot mirrors AsnSnapshotProvider's real keys — the pre-R11.2 test fed keys
+    // the provider could never produce, so it asserted an envelope production could never emit.
+    public async Task Asn_create_reproduces_the_interim_envelope()
     {
         var expr = _defaults.TryGet("InforAdvanceShipmentNoticeSupplierASN")!.CreateExpression;
         var snapshot = new Dictionary<string, object?>
@@ -69,13 +73,13 @@ public class IdmMappingExpressionTests
             ["entityType"] = "InforAdvanceShipmentNoticeSupplierASN",
             ["asn"] = new Dictionary<string, object?>
             {
-                ["financialCompany"] = "1100",
-                ["logisticCompany"] = "1100",
-                ["transactionType"] = "SUP",
-                ["lnDocumentNumber"] = "100000001",
-                ["erpCompany"] = "1100",
-                ["erpTransactionType"] = "SUP",
-                ["erpDocumentNo"] = "100000001",
+                ["financialCompany"] = "2000",
+                ["logisticCompany"] = "2000",
+                ["companyCode"] = "2000",
+                ["asnNumber"] = "ASN-S0001-1",
+                ["erpCode"] = "ASN-LN-0001",
+                ["erpSyncId"] = "key-1",
+                ["status"] = "Submitted",
             },
             ["attachment"] = new Dictionary<string, object?> { ["filename"] = "packing.pdf", ["base64"] = "UERG" },
             ["config"] = new Dictionary<string, object?> { ["acl"] = "Public", ["entityName"] = "MDS_GenericDocument" },
@@ -84,14 +88,16 @@ public class IdmMappingExpressionTests
 
         var envelope = await _builder.BuildAsync(expr, snapshot, CancellationToken.None);
 
-        envelope.Headers["X-Infor-LnCompany"].Should().Be("1100");
+        envelope.Headers["X-Infor-LnCompany"].Should().Be("2000");
         using var doc = JsonDocument.Parse(envelope.Body);
         var attrs = doc.RootElement.GetProperty("item").GetProperty("attrs").GetProperty("attr");
 
         AttrValue(attrs, "MDS_EntityType").Should().Be("InforAdvanceShipmentNoticeSupplierASN");
-        AttrValue(attrs, "MDS_AccountingEntity").Should().Be("infor.ln.1100");
-        AttrValue(attrs, "MDS_id1").Should().Be("1100");
-        AttrValue(attrs, "MDS_id3").Should().Be("100000001");
+        AttrValue(attrs, "MDS_AccountingEntity").Should().Be("infor.ln.2000");
+        AttrValue(attrs, "MDS_id1").Should().Be("2000");
+        // MDS_id2/MDS_id3 must be ABSENT until the fresh mapping defines them.
+        attrs.EnumerateArray().Select(a => a.GetProperty("name").GetString())
+            .Should().NotContain(new[] { "MDS_id2", "MDS_id3" });
     }
 
     [Fact]

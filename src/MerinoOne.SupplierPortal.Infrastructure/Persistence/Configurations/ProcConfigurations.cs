@@ -309,10 +309,8 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
 
-        // R8 (2026-07-04) — TSD R8 §3.2 / D2: LN ERP composite key (IDM eligibility gate). Written by /inbound/erp-ack.
-        b.Property(x => x.ErpCompany).HasColumnName("erpCompany").HasMaxLength(20);
-        b.Property(x => x.ErpTransactionType).HasColumnName("erpTransactionType").HasMaxLength(20);
-        b.Property(x => x.ErpDocumentNo).HasColumnName("erpDocumentNo").HasMaxLength(40);
+        // R11.2 (2026-07-29) — the R8 erpCompany/erpTransactionType/erpDocumentNo columns were DROPPED from
+        // proc.Asn (migration 0055). Invoice keeps its trio; the ASN IDM gate keys on erpCode alone.
 
         // R6 (2026-07-02) — draft-invoice generation outcome: 'Generated' / 'Blocked' / NULL (never attempted).
         // Plain string (not enum), no DB CHECK — per spec DDL nvarchar(20)/nvarchar(500).

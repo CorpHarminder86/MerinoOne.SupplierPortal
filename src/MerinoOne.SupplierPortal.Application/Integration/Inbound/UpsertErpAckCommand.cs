@@ -245,9 +245,13 @@ public class UpsertErpAckCommandHandler(
                 // ASN is transactional — a null company is a corrupt target; fail the row (D4 transactional=true).
                 if (!CompanyBound(boundCompanyIds, e.TenantEntityId, transactional: true))
                     return (false, $"Asn {id} company is missing or not in the API key's bound set (review S3/D4 — no write).");
+                // R11.2 — the R8 ASN composite trio is gone (erpCompany duplicated the company already held via
+                // TenantEntityId; the IDM mapping that consumed the other two is being replaced). erpCode — the
+                // LN ASNNo — IS the ASN IDM gate field now, so its change carries the D4b auto-enqueue.
+                var asnErpCodeChanged = !string.Equals(e.ErpCode, erpCode, StringComparison.Ordinal);
                 e.ErpCode = erpCode; e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
-                // R8 — stamp the ERP composite key (IDM gate) + enqueue IDM Update ops on change (D2/D4b).
-                await StampAsnCompositeAsync(db, tenantId, e, rec, now, ct);
+                if (asnErpCodeChanged)
+                    await idmEnqueuer.EnqueueOwnerUpdatesAsync(db, tenantId, DocumentOwnerTypes.Asn, e.Id, "infor:inbound", ct);
                 return (true, null);
             }
             case OutboxTransactionType.InvoicePost:
@@ -348,7 +352,13 @@ public class UpsertErpAckCommandHandler(
                 var e = await db.Asns.IgnoreQueryFilters()
                     .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId && !x.IsDeleted, ct);
                 if (e is null || !CompanyBound(boundCompanyIds, e.TenantEntityId, transactional: true)) return;
-                await StampAsnCompositeAsync(db, tenantId, e, rec, now, ct);
+                // R11.2 — trio dropped; a correction re-ack may re-point erpCode (the ASN IDM gate field).
+                var code = rec.ErpCode?.Trim();
+                if (!string.IsNullOrWhiteSpace(code) && !string.Equals(e.ErpCode, code, StringComparison.Ordinal))
+                {
+                    e.ErpCode = code; e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
+                    await idmEnqueuer.EnqueueOwnerUpdatesAsync(db, tenantId, DocumentOwnerTypes.Asn, e.Id, "infor:inbound", ct);
+                }
                 break;
             }
         }
@@ -367,14 +377,4 @@ public class UpsertErpAckCommandHandler(
         await idmEnqueuer.EnqueueOwnerUpdatesAsync(db, tenantId, DocumentOwnerTypes.Invoice, e.Id, "infor:inbound", ct);
     }
 
-    private async Task StampAsnCompositeAsync(IAppDbContext db, Guid tenantId, Asn e, ErpAckRecord rec, DateTime now, CancellationToken ct)
-    {
-        var before = (e.ErpCompany, e.ErpTransactionType, e.ErpDocumentNo);
-        if (!string.IsNullOrWhiteSpace(rec.ErpCompany)) e.ErpCompany = rec.ErpCompany!.Trim();
-        if (!string.IsNullOrWhiteSpace(rec.ErpTransactionType)) e.ErpTransactionType = rec.ErpTransactionType!.Trim();
-        if (!string.IsNullOrWhiteSpace(rec.ErpDocumentNo)) e.ErpDocumentNo = rec.ErpDocumentNo!.Trim();
-        if (before == (e.ErpCompany, e.ErpTransactionType, e.ErpDocumentNo)) return;
-        e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
-        await idmEnqueuer.EnqueueOwnerUpdatesAsync(db, tenantId, DocumentOwnerTypes.Asn, e.Id, "infor:inbound", ct);
-    }
 }

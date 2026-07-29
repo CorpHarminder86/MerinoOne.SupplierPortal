@@ -80,9 +80,6 @@ public sealed class AsnInputDocumentBuilder : ILnInputDocumentBuilder
             Notes: asn.Notes,
             AsnStatus: asn.AsnStatus.ToString(),
             ErpCode: asn.ErpCode,
-            ErpCompany: asn.ErpCompany,
-            ErpTransactionType: asn.ErpTransactionType,
-            ErpDocumentNo: asn.ErpDocumentNo,
             Lines: lines);
 
         return LnJson.SerializeInputDoc(doc);

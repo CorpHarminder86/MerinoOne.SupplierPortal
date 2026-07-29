@@ -1,3 +1,7 @@
+/* R11.2 INTERIM (2026-07-29) — the previous mapping was wrong (user-confirmed) and its MDS_id2/MDS_id3
+   sources (the ack-stamped erpTransactionType/erpDocumentNo, dropped in migration 0055) no longer exist.
+   The FRESH mapping is pending from the user; the ASN document config stays HELD until it lands. Company
+   slots carry the portal company code (== what LN acks as erpCompany, user-confirmed identical). */
 {
   "headers": {
     "Content-Type": "application/json",
@@ -8,9 +12,7 @@
       "attrs": { "attr": [
         { "name": "MDS_EntityType",       "value": entityType },
         { "name": "MDS_AccountingEntity", "value": "infor.ln." & asn.financialCompany },
-        { "name": "MDS_id1",              "value": asn.financialCompany },
-        { "name": "MDS_id2",              "value": asn.transactionType },
-        { "name": "MDS_id3",              "value": asn.lnDocumentNumber }
+        { "name": "MDS_id1",              "value": asn.financialCompany }
       ]},
       "resrs": { "res": [ { "filename": attachment.filename, "base64": attachment.base64 } ] },
       "acl": { "name": "Public" },

@@ -32,6 +32,17 @@ public sealed class AsnSnapshotProvider : IEntitySnapshotProvider
             .FirstOrDefaultAsync(x => x.Id == documentUploadId && x.TenantId == tenantId, ct);
         if (asn is null || doc is null) return null;
 
+        // R11.2 (2026-07-29) — the ack-stamped ErpCompany/ErpTransactionType/ErpDocumentNo columns are gone
+        // from the ASN. The company is the code already held via TenantEntityId (user-confirmed identical to
+        // what LN acks as erpCompany); both company slots carry it. transactionType/lnDocumentNumber have no
+        // source any more — the mapping that consumed them was wrong and is being replaced (config Held until
+        // the fresh mapping lands), so the keys are gone from the snapshot contract.
+        var companyCode = asn.TenantEntityId is { } companyId
+            ? await _db.TenantEntities.IgnoreQueryFilters().AsNoTracking()
+                .Where(t => t.Id == companyId && !t.IsDeleted)
+                .Select(t => t.Code).FirstOrDefaultAsync(ct)
+            : null;
+
         var base64 = includeFileContent ? await _files.ToBase64Async(doc.FileUrl, ct) : null;
 
         return new Dictionary<string, object?>
@@ -39,13 +50,9 @@ public sealed class AsnSnapshotProvider : IEntitySnapshotProvider
             ["entityType"] = IdmEntityType,
             ["asn"] = new Dictionary<string, object?>
             {
-                ["financialCompany"] = asn.ErpCompany,
-                ["logisticCompany"] = asn.ErpCompany,
-                ["transactionType"] = asn.ErpTransactionType,
-                ["lnDocumentNumber"] = asn.ErpDocumentNo,
-                ["erpCompany"] = asn.ErpCompany,
-                ["erpTransactionType"] = asn.ErpTransactionType,
-                ["erpDocumentNo"] = asn.ErpDocumentNo,
+                ["financialCompany"] = companyCode,
+                ["logisticCompany"] = companyCode,
+                ["companyCode"] = companyCode,
                 // R10 (2026-07-07) — portal identifiers the mapping/gate expressions kept reaching for.
                 ["asnNumber"] = asn.AsnNumber,
                 ["erpCode"] = asn.ErpCode,

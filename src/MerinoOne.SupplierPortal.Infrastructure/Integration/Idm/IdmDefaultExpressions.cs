@@ -22,8 +22,10 @@ public sealed class IdmDefaultExpressions : IIdmExpressionCatalog
         {
             ["InforInvoice"] = ("Invoice", "Invoice",
                 IdmGateConversion.ToJsonata(new[] { "invoice.erpCompany", "invoice.erpTransactionType", "invoice.erpDocumentNo" })),
+            // R11.2 (2026-07-29) — the ASN's erpCompany/erpTransactionType/erpDocumentNo columns were dropped;
+            // the "LN has the record" signal is erpCode (the ASNNo written back by /inbound/erp-ack).
             ["InforAdvanceShipmentNoticeSupplierASN"] = ("Asn", "AsnAttachment",
-                IdmGateConversion.ToJsonata(new[] { "asn.erpCompany", "asn.erpTransactionType", "asn.erpDocumentNo" })),
+                IdmGateConversion.ToJsonata(new[] { "asn.erpCode" })),
         };
 
     private readonly Dictionary<string, Entry> _byType = new(StringComparer.Ordinal);

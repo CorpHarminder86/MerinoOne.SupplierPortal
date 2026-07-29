@@ -33,11 +33,12 @@ public static class LnPortalEntity
 public static class LnInputDocumentVersions
 {
     public const string Invoice = "invoice-v1";
-    // R11 (2026-07-28) — bumped from asn-v1: the ASN input document gained company/supplier/warehouse/date/
-    // shipment-ref header fields and per-line PO reference + UoM, and serials became objects. Every pinned
-    // SampleDocumentJson stamped asn-v1 now renders "sample stale — re-snapshot", which is an ATTESTATION
-    // BLOCKER for any AsnPost config already attested for Dynamic. Re-pin in the Endpoints UI after deploy.
-    public const string Asn = "asn-v2";
+    // R11 (2026-07-28) — asn-v2: company/supplier/warehouse/date/shipment-ref header fields, per-line PO
+    // reference + UoM, serials as objects. R11.2 (2026-07-29) — asn-v3: erpCompany/erpTransactionType/
+    // erpDocumentNo removed (columns dropped in migration 0055). Neither v2 nor v3 has shipped to a tenant,
+    // but each bump makes any pinned SampleDocumentJson stale — an ATTESTATION BLOCKER for a Dynamic AsnPost
+    // config until re-pinned in the Endpoints UI.
+    public const string Asn = "asn-v3";
     public const string PurchaseOrder = "purchaseOrder-v1";
     public const string Supplier = "supplier-v1";
     public const string SupplierChange = "supplierChange-v1";
@@ -111,10 +112,9 @@ public sealed record AsnInputDoc(
     [property: JsonPropertyName("packingList")] string? PackingList,
     [property: JsonPropertyName("notes")] string? Notes,
     [property: JsonPropertyName("asnStatus")] string AsnStatus,
+    // R11.2 — erpCompany/erpTransactionType/erpDocumentNo were dropped from the ASN (migration 0055; the
+    // Invoice input doc keeps its trio). erpCode — the LN ASNNo ack write-back — is the correlation field.
     [property: JsonPropertyName("erpCode")] string? ErpCode,
-    [property: JsonPropertyName("erpCompany")] string? ErpCompany,
-    [property: JsonPropertyName("erpTransactionType")] string? ErpTransactionType,
-    [property: JsonPropertyName("erpDocumentNo")] string? ErpDocumentNo,
     [property: JsonPropertyName("lines")] IReadOnlyList<AsnLineInputDoc> Lines);
 
 public sealed record AsnLineInputDoc(

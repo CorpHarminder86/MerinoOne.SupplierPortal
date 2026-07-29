@@ -5646,25 +5646,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("erpCode");
 
-                    b.Property<string>("ErpCompany")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)")
-                        .HasColumnName("erpCompany");
-
-                    b.Property<string>("ErpDocumentNo")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)")
-                        .HasColumnName("erpDocumentNo");
-
                     b.Property<string>("ErpSyncId")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("erpSyncId");
-
-                    b.Property<string>("ErpTransactionType")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)")
-                        .HasColumnName("erpTransactionType");
 
                     b.Property<DateTime>("ExpectedDeliveryDate")
                         .HasColumnType("datetime2")
