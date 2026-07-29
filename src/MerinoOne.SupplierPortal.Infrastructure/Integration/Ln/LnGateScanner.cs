@@ -73,6 +73,12 @@ public sealed class LnGateScanner : ILnGateScanner
     /// Key material per transaction type — VERBATIM from each enqueue site (golden-pinned by
     /// LnOutboxKeyDerivationTests; drift here means the sweep double-enqueues or never reconciles).
     /// </summary>
+    // NEWEST-FIRST (Seq DESC) window, deliberately. With oldest-first, a backlog of more than `take`
+    // permanently-ineligible candidates (filtered in, gated out, never enqueued) occupies the window on every
+    // pass and STARVES all newer documents out of the sweep forever — observed 2026-07-29 when the test DB's
+    // 568 accumulated unposted invoices pushed freshly-created ones past the 500 cap. Newest-first puts the
+    // recently-actionable documents in the window; an old eligible row is only deferred while >take newer
+    // candidates exist, instead of a new row being starved by an ever-growing pile of dead old ones.
     private async Task<List<Candidate>> CandidatesAsync(
         OutboundIntegrationConfig config, Guid tenantId, LambdaExpression filter, int take, CancellationToken ct)
     {
@@ -83,7 +89,7 @@ public sealed class LnGateScanner : ILnGateScanner
                 var rows = await _db.Invoices.IgnoreQueryFilters()
                     .Where((Expression<Func<Domain.Entities.Proc.Invoice, bool>>)filter)
                     .Where(i => i.TenantId == tenantId)
-                    .OrderBy(i => i.Seq).Take(take)
+                    .OrderByDescending(i => i.Seq).Take(take)
                     .Select(i => new { i.Id, i.SupplierId, i.InvoiceNumber })
                     .ToListAsync(ct);
                 return rows.Select(i => new Candidate(i.Id, tenantId, OutboxEntity.Invoice,
@@ -94,7 +100,7 @@ public sealed class LnGateScanner : ILnGateScanner
                 var rows = await _db.Asns.IgnoreQueryFilters()
                     .Where((Expression<Func<Domain.Entities.Proc.Asn, bool>>)filter)
                     .Where(a => a.TenantId == tenantId)
-                    .OrderBy(a => a.Seq).Take(take)
+                    .OrderByDescending(a => a.Seq).Take(take)
                     .Select(a => new { a.Id, a.AsnNumber })
                     .ToListAsync(ct);
                 return rows.Select(a => new Candidate(a.Id, tenantId, OutboxEntity.Asn,
@@ -112,7 +118,7 @@ public sealed class LnGateScanner : ILnGateScanner
                 var rows = await _db.PurchaseOrders.IgnoreQueryFilters()
                     .Where((Expression<Func<Domain.Entities.Proc.PurchaseOrder, bool>>)filter)
                     .Where(p => p.TenantId == tenantId)
-                    .OrderBy(p => p.Seq).Take(take)
+                    .OrderByDescending(p => p.Seq).Take(take)
                     .Select(p => new { p.Id, p.PoNumber })
                     .ToListAsync(ct);
                 return rows.Select(p => new Candidate(p.Id, tenantId, OutboxEntity.PurchaseOrder,

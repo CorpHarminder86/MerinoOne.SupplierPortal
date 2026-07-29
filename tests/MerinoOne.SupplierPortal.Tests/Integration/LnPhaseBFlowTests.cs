@@ -123,6 +123,12 @@ public class LnPhaseBFlowTests
     public async Task Sweep_enqueues_missed_eligible_once_claims_invoice_and_never_resurrects_skipped()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+        // Clean at START, not only at the end: a prior FAILED run skips its trailing CleanupAsync and leaves a
+        // Held InvoicePost config with a stale SWEEP gate behind. That row then poisons BOTH this test (its
+        // SetGateAsync FirstOrDefault may update a different row than the sweep reads) and every invoice
+        // auto-post test in the suite (the Held row fences the gated enqueue → AutoPostsEnqueued 0). Observed
+        // 2026-07-29: 32 accumulated test-created InvoicePost rows + one Held SWEEP-gated row in the test DB.
+        await CleanupAsync();
         var tag = Guid.NewGuid().ToString("N")[..8];
         await SetGateAsync($"SWEEP-{tag}", gateVersion: 3);
 
@@ -178,6 +184,7 @@ public class LnPhaseBFlowTests
     public async Task Backfill_worked_example_five_new_five_withdrawn_five_untouched()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+        await CleanupAsync();   // self-heal from a prior failed run (see the sweep test's comment).
         var tag = Guid.NewGuid().ToString("N")[..8];
 
         // HOLD the endpoint FIRST so the live dispatcher never claims the seeded Pending rows mid-test.
