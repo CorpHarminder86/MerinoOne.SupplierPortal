@@ -158,6 +158,10 @@ public sealed class AsnSubmitExecutor
 
         var allSerials = new List<string>();
         var allLotNos = new List<string>();
+        // R11.1 — the same captures tagged with their item, for the per-item-within-company uniqueness rule
+        // that replaced the old per-PO scope below.
+        var serialCaptures = new List<AsnCaptureUniqueness.Capture>();
+        var lotCaptures = new List<AsnCaptureUniqueness.Capture>();
 
         foreach (var l in lineCtx)
         {
@@ -172,7 +176,9 @@ public sealed class AsnSubmitExecutor
                     AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) is serialized; expected {(int)l.ShippedQty} serial(s) but got {serials.Count}.");
                 if (serials.Any(string.IsNullOrWhiteSpace))
                     AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) has an empty serial number.");
-                allSerials.AddRange(serials.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()));
+                var trimmedSerials = serials.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList();
+                allSerials.AddRange(trimmedSerials);
+                serialCaptures.AddRange(trimmedSerials.Select(s => new AsnCaptureUniqueness.Capture(l.ItemCode, s)));
             }
             else if (flags.IsLotControlled)
             {
@@ -186,53 +192,24 @@ public sealed class AsnSubmitExecutor
                 var lotSum = lots.Sum(x => x.Qty);
                 if (lotSum != l.ShippedQty)
                     AddErr("lines", $"Line '{l.ItemCode}' (pos {l.PositionNo}) is lot-controlled; Σ(lot qty) {lotSum} must equal ShippedQty {l.ShippedQty}.");
-                allLotNos.AddRange(lots.Where(x => !string.IsNullOrWhiteSpace(x.LotNo)).Select(x => x.LotNo.Trim()));
+                var trimmedLots = lots.Where(x => !string.IsNullOrWhiteSpace(x.LotNo)).Select(x => x.LotNo.Trim()).ToList();
+                allLotNos.AddRange(trimmedLots);
+                lotCaptures.AddRange(trimmedLots.Select(x => new AsnCaptureUniqueness.Capture(l.ItemCode, x)));
             }
         }
 
-        foreach (var dup in allSerials.GroupBy(s => s, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1).Select(g => g.Key))
-            AddErr("lines", $"Serial number '{dup}' appears more than once on this ASN.");
-        foreach (var dup in allLotNos.GroupBy(s => s, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1).Select(g => g.Key))
-            AddErr("lines", $"Lot number '{dup}' appears more than once on this ASN.");
-
-        if (poIdList.Count > 0)
-        {
-            var otherAsnIdsViaJunction = _db.AsnPurchaseOrders
-                .Where(j => !j.IsDeleted && j.AsnId != asn.Id && poIdList.Contains(j.PurchaseOrderId))
-                .Select(j => j.AsnId);
-            var otherAsnIdsViaScalar = _db.Asns
-                .Where(a => a.Id != asn.Id && !a.IsDeleted && a.PurchaseOrderId != null && poIdList.Contains(a.PurchaseOrderId.Value))
-                .Select(a => a.Id);
-            // R5 — schedule-built ASNs have no junction/scalar PO; also cover ASNs whose LINES reference these POs.
-            var otherAsnIdsViaLine = _db.AsnLines
-                .Where(al => !al.IsDeleted && al.AsnId != asn.Id)
-                .Join(_db.PurchaseOrderLines, al => al.PurchaseOrderLineId, pol => pol.Id, (al, pol) => new { al.AsnId, pol.PurchaseOrderId })
-                .Where(x => poIdList.Contains(x.PurchaseOrderId))
-                .Select(x => x.AsnId);
-            var otherLineIds = _db.AsnLines
-                .Where(al => !al.IsDeleted
-                             && (otherAsnIdsViaJunction.Contains(al.AsnId)
-                                 || otherAsnIdsViaScalar.Contains(al.AsnId)
-                                 || otherAsnIdsViaLine.Contains(al.AsnId)))
-                .Select(al => al.Id);
-
-            if (allSerials.Count > 0)
-            {
-                var clash = await _db.AsnLineSerials
-                    .Where(s => otherLineIds.Contains(s.AsnLineId) && allSerials.Contains(s.SerialNumber))
-                    .Select(s => s.SerialNumber).Distinct().ToListAsync(ct);
-                foreach (var s in clash)
-                    AddErr("lines", $"Serial number '{s}' is already used on another ASN for the same PO.");
-            }
-            if (allLotNos.Count > 0)
-            {
-                var clash = await _db.AsnLineLots
-                    .Where(l => otherLineIds.Contains(l.AsnLineId) && allLotNos.Contains(l.LotNo))
-                    .Select(l => l.LotNo).Distinct().ToListAsync(ct);
-                foreach (var l in clash)
-                    AddErr("lines", $"Lot number '{l}' is already used on another ASN for the same PO.");
-            }
-        }
+        // R11.1 — intra-ASN duplicates AND cross-ASN reuse, scoped PER ITEM WITHIN THE COMPANY.
+        //
+        // This replaces the original per-PO scope, which only compared against other ASNs covering the SAME PO.
+        // Found in E2E: one ASN carried serial 2222 on both a PO-3000 line and a PO-4000 line — same item, two
+        // POs — and passed every check, because neither ASN shared a PO with the other. Serials identify physical
+        // units, so the PO a unit happens to be ordered against is the wrong boundary.
+        //
+        // Cancelled and Rejected ASNs release their captures for reuse; every other state reserves.
+        // The identical rule runs at create/update (fail fast); this call is the atomic authority, because
+        // another ASN can claim a serial between the draft being saved and the buyer approving it.
+        await AsnCaptureUniqueness.ValidateAsync(
+            _db, excludeAsnId: asn.Id, asn.TenantEntityId, serialCaptures, lotCaptures, AddErr, ct);
 
         if (errors.Count > 0)
             throw new ValidationException(errors.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToArray()));

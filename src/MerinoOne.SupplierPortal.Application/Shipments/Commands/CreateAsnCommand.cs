@@ -169,6 +169,11 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
             .ToListAsync(ct);
         var itemFlags = itemFlagRows.ToDictionary(i => i.Code, i => i, StringComparer.OrdinalIgnoreCase);
 
+        // R11.1 — serial/lot uniqueness, per item within the company. Fails fast here rather than waiting for
+        // the submit-time guard, which only ran after the buyer had already approved.
+        await AsnCaptureUniquenessSupport.ValidateRequestAsync(
+            _db, excludeAsnId: null, itemCompany, body.Lines, poLines, ct);
+
         // R5 (TSD R5 Addendum §10.4) — NO over-ship tolerance resolution / no balance consumption at create; the
         // authoritative atomic guard (which needs the tolerance factor) now runs ONCE at final Submit
         // (AsnSubmitExecutor). The create path only persists the Draft + its serial/lot capture.

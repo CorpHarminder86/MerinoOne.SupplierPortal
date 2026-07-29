@@ -52,6 +52,8 @@ public class GetDeliveryScheduleListQueryHandler
                 sch,
                 line,
                 PoNumber = po.PoNumber,
+                // R11 (D4) — the receiving warehouse, carried through for the grid column.
+                PoWarehouse = po.Warehouse,
                 SupplierId = po.SupplierId,
                 SupplierName = sup != null ? sup.LegalName : null,
                 ShipToAddressName = addr != null ? addr.AddressName : null,
@@ -102,6 +104,8 @@ public class GetDeliveryScheduleListQueryHandler
                 x.line.ShippedQtyToDate,
                 x.sch.ShipToAddressId,
                 x.ShipToAddressName,
+                // R11 (D4) — the owning PO's receiving warehouse.
+                x.PoWarehouse,
                 x.SupplierId,
                 x.SupplierName,
                 x.sch.ScheduledQty,
@@ -120,7 +124,8 @@ public class GetDeliveryScheduleListQueryHandler
             r.OrderQty - r.ShippedQtyToDate > 0 ? r.OrderQty - r.ShippedQtyToDate : 0m,
             r.ShipToAddressId, r.ShipToAddressName, r.SupplierId, r.SupplierName, r.ScheduledQty,
             r.DeliveryDate, r.Status.ToString(), r.CreatedOn,
-            PoConfirmationPolicy.AllowsShipping(r.PoStatus, r.PoConfirmationMode))).ToList();
+            PoConfirmationPolicy.AllowsShipping(r.PoStatus, r.PoConfirmationMode),
+            r.PoWarehouse)).ToList();
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling(total / (double)pageSize);
         var paged = new PagedResult<DeliveryScheduleDto>(rows, page, pageSize, total, totalPages);

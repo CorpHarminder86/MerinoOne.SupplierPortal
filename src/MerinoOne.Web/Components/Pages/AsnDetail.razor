@@ -432,6 +432,12 @@
                                             <span style="font-family:Inter,monospace;font-weight:600;font-size:13px;color:var(--mer-blue-darker);">@p.PoNumber</span>
                                             <span style="font-size:12px;color:var(--mer-ink-500);">@p.PoDate.ToString("yyyy-MM-dd")</span>
                                             <span class="tlg-status tlg-status--info">@p.PoStatus</span>
+                                            @* R11 (D4) — the PO's warehouse, so the supplier can see WHY the list
+                                               narrows after the first pick (an ASN never spans two warehouses). *@
+                                            @if (!string.IsNullOrWhiteSpace(p.Warehouse))
+                                            {
+                                                <span style="font-family:Inter,monospace;font-size:12px;color:var(--mer-ink-600);" title="Receiving warehouse">@p.Warehouse</span>
+                                            }
                                             <span style="margin-left:auto;color:var(--mer-blue);font-size:12px;font-weight:600;"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">add</span> Add</span>
                                         </button>
                                     }

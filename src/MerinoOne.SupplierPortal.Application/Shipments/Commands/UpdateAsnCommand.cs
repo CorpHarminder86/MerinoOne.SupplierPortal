@@ -112,6 +112,11 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
             .ToListAsync(ct);
         var itemFlags = itemFlagRows.ToDictionary(i => i.Code, i => i, StringComparer.OrdinalIgnoreCase);
 
+        // R11.1 — serial/lot uniqueness, per item within the company. excludeAsnId is THIS ASN, so re-saving a
+        // draft without changing its capture does not clash with itself.
+        await AsnCaptureUniquenessSupport.ValidateRequestAsync(
+            _db, excludeAsnId: asn.Id, itemCompany, body.Lines, poLines, ct);
+
         // R5 (TSD R5 Addendum §10.4) — NO over-ship tolerance resolution / no balance delta at update; a Draft (or
         // Rejected→Draft) ASN does NOT consume shippedQtyToDate. The atomic guard moved to final Submit.
 

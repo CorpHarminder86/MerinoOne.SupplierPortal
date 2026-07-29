@@ -203,19 +203,137 @@ public class AsnWarehouseTests
         return ((await Read<AsnDetailDto>(create)).Data!.Id, client);
     }
 
+    // ── R11.1 — serial/lot uniqueness, per item within the company ──────────────────────────────────────
+
+    [SkippableFact] // THE E2E REGRESSION: same serial on two lines of ONE ASN, drawn from two DIFFERENT POs.
+    public async Task Same_serial_on_two_lines_from_different_pos_is_rejected_at_create()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var ctx = await SetupSerializedAsync();
+        var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+
+        // Both lines are the SAME item, so serial 2222 identifies one physical unit — it cannot be on both.
+        // Before R11.1 this passed: the cross-ASN check was PO-scoped and the intra-ASN check was per-LINE.
+        var req = new CreateAsnRequest(
+            PurchaseOrderId: null,
+            PurchaseOrderIds: new[] { ctx.PoIdA, ctx.PoIdB },
+            ExpectedDeliveryDate: DateTime.UtcNow.Date.AddDays(2),
+            TimeWindow: null, CarrierName: null, TrackingNumber: null, VehicleNumber: null,
+            DriverName: null, DriverPhone: null, Notes: null,
+            Lines: new List<CreateAsnLineRequest>
+            {
+                new(ctx.LineA, ShippedQty: 1, BatchNumber: null, ExpiryDate: null,
+                    Serials: new List<AsnLineSerialInput> { new("2222") }),
+                new(ctx.LineB, ShippedQty: 1, BatchNumber: null, ExpiryDate: null,
+                    Serials: new List<AsnLineSerialInput> { new("2222") }),
+            });
+
+        var resp = await client.PostAsJsonAsync("/api/asns", req);
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "one physical unit cannot ship twice, even across two POs");
+        (await resp.Content.ReadAsStringAsync()).Should().Contain("captured more than once");
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.Asns.IgnoreQueryFilters().AnyAsync(a => a.SupplierId == ctx.SupplierId))
+            .Should().BeFalse(because: "the rejected ASN must not be partially persisted");
+    }
+
+    [SkippableFact] // A serial already held by ANOTHER live ASN is rejected at create, not at submit.
+    public async Task Serial_already_used_on_another_asn_is_rejected_at_create()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var ctx = await SetupSerializedAsync();
+        var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+
+        var first = await client.PostAsJsonAsync("/api/asns", OneSerialAsn(ctx.PoIdA, ctx.LineA, "SN-DUP"));
+        first.StatusCode.Should().Be(HttpStatusCode.OK, because: await first.Content.ReadAsStringAsync());
+
+        // A DRAFT reserves its serials, so the second ASN cannot claim the same unit — even on a different PO.
+        var second = await client.PostAsJsonAsync("/api/asns", OneSerialAsn(ctx.PoIdB, ctx.LineB, "SN-DUP"));
+        second.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "a draft reserves its serials; the unit is already spoken for");
+        (await second.Content.ReadAsStringAsync()).Should().Contain("already used");
+    }
+
+    [SkippableFact] // Cancelling an ASN RELEASES its serials for reuse.
+    public async Task Cancelled_asn_releases_its_serials()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var ctx = await SetupSerializedAsync();
+        var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+
+        var first = await client.PostAsJsonAsync("/api/asns", OneSerialAsn(ctx.PoIdA, ctx.LineA, "SN-REL"));
+        first.StatusCode.Should().Be(HttpStatusCode.OK, because: await first.Content.ReadAsStringAsync());
+        var firstId = (await Read<AsnDetailDto>(first)).Data!.Id;
+
+        var cancel = await client.PostAsJsonAsync($"/api/asns/{firstId}/cancel", new { });
+        cancel.StatusCode.Should().Be(HttpStatusCode.OK, because: await cancel.Content.ReadAsStringAsync());
+
+        var second = await client.PostAsJsonAsync("/api/asns", OneSerialAsn(ctx.PoIdB, ctx.LineB, "SN-REL"));
+        second.StatusCode.Should().Be(HttpStatusCode.OK,
+            because: "a cancelled ASN releases its serials — otherwise a typo would burn a unit forever");
+    }
+
+    [SkippableFact] // Re-saving a draft without changing its capture must not clash with ITSELF.
+    public async Task Updating_a_draft_does_not_clash_with_its_own_serials()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var ctx = await SetupSerializedAsync();
+        var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+
+        var create = await client.PostAsJsonAsync("/api/asns", OneSerialAsn(ctx.PoIdA, ctx.LineA, "SN-SELF"));
+        create.StatusCode.Should().Be(HttpStatusCode.OK, because: await create.Content.ReadAsStringAsync());
+        var asnId = (await Read<AsnDetailDto>(create)).Data!.Id;
+
+        var update = new UpdateAsnRequest(
+            ExpectedDeliveryDate: DateTime.UtcNow.Date.AddDays(3),
+            TimeWindow: null, CarrierName: "Carrier", TrackingNumber: null, VehicleNumber: null,
+            DriverName: null, DriverPhone: null, Notes: null,
+            Lines: new List<CreateAsnLineRequest>
+            {
+                new(ctx.LineA, ShippedQty: 1, BatchNumber: null, ExpiryDate: null,
+                    Serials: new List<AsnLineSerialInput> { new("SN-SELF") }),
+            });
+
+        var resp = await client.PutAsJsonAsync($"/api/asns/{asnId}", update);
+        resp.StatusCode.Should().Be(HttpStatusCode.OK,
+            because: "the ASN being edited is excluded from its own uniqueness check");
+    }
+
+    private static CreateAsnRequest OneSerialAsn(Guid poId, Guid lineId, string serial) => new(
+        PurchaseOrderId: poId,
+        PurchaseOrderIds: null,
+        ExpectedDeliveryDate: DateTime.UtcNow.Date.AddDays(2),
+        TimeWindow: null, CarrierName: null, TrackingNumber: null, VehicleNumber: null,
+        DriverName: null, DriverPhone: null, Notes: null,
+        Lines: new List<CreateAsnLineRequest>
+        {
+            new(lineId, ShippedQty: 1, BatchNumber: null, ExpiryDate: null,
+                Serials: new List<AsnLineSerialInput> { new(serial) }),
+        });
+
+    /// <summary>Two POs in the SAME warehouse (so the D4 invariant is not what fails), one serialized item.</summary>
+    private async Task<Ctx> SetupSerializedAsync() =>
+        await SetupAsync(IntegrationTestFixture.WarehouseCode, IntegrationTestFixture.WarehouseCode, serialized: true);
+
     // ── helpers ────────────────────────────────────────────────────────────────────────────────────────
 
     private record Ctx(Guid SupplierId, Guid PoIdA, Guid PoIdB, Guid LineA, Guid LineB);
 
     /// <summary>Pushes two single-line POs for one fresh supplier, each in the given warehouse, and confirms both
     /// (a Released PO under the default AcceptToShip mode blocks ASN creation).</summary>
-    private async Task<Ctx> SetupAsync(string warehouseA, string warehouseB)
+    private async Task<Ctx> SetupAsync(string warehouseA, string warehouseB, bool serialized = false)
     {
         var tag = Guid.NewGuid().ToString("N")[..8];
         var supplier = await _fx.CreateSupplierAsync(tag,
             IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
             grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
-        var item = await _fx.CreateItemAsync($"WH-ITM-{tag}");
+        var item = await _fx.CreateItemAsync($"WH-ITM-{tag}", isSerialized: serialized);
 
         var poA = $"PO-WHA-{tag}";
         var poB = $"PO-WHB-{tag}";
