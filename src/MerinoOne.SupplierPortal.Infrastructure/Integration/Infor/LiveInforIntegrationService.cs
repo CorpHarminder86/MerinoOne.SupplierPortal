@@ -78,7 +78,7 @@ public class LiveInforIntegrationService : IInforIntegrationService
         // uses IgnoreQueryFilters (this can run under the tenant-less background dispatcher).
         var payload = await SupplierOutboundPayloadBuilder.BuildPayloadAsync(_db, supplierId, ct);
         if (payload is null) return Fail("Supplier", $"Supplier {supplierId} not found.");
-        return await SendAsync("Supplier", EndpointPaths.Supplier, payload, ct);
+        return await SendAsync("Supplier", supplierId, EndpointPaths.Supplier, payload, ct);
     }
 
     public async Task<InforSyncResult> AcknowledgePurchaseOrderAsync(Guid purchaseOrderId, CancellationToken ct = default)
@@ -88,7 +88,7 @@ public class LiveInforIntegrationService : IInforIntegrationService
 
         // TODO: confirm the real LN PO-acknowledgement field map (shape lives in PoResponseOutboundPayloadBuilder — R9 extraction).
         var payload = PoResponseOutboundPayloadBuilder.BuildAcknowledgePayload(po);
-        return await SendAsync("PurchaseOrder", EndpointPaths.PurchaseOrderAck, payload, ct);
+        return await SendAsync("PurchaseOrder", purchaseOrderId, EndpointPaths.PurchaseOrderAck, payload, ct);
     }
 
     public async Task<InforSyncResult> AcceptPurchaseOrderAsync(Guid purchaseOrderId, DateTime? proposedDate, CancellationToken ct = default)
@@ -100,7 +100,7 @@ public class LiveInforIntegrationService : IInforIntegrationService
         // R4 (2026-06-26) — D2: accept is accept-only (PurchaseOrder.ProposedDeliveryDate removed). The optional
         // proposedDate parameter is retained on the interface but is null on the accept path now.
         var payload = PoResponseOutboundPayloadBuilder.BuildAcceptPayload(po, proposedDate);
-        return await SendAsync("PurchaseOrder", EndpointPaths.PurchaseOrderAccept, payload, ct);
+        return await SendAsync("PurchaseOrder", purchaseOrderId, EndpointPaths.PurchaseOrderAccept, payload, ct);
     }
 
     public async Task<InforSyncResult> RejectPurchaseOrderAsync(Guid purchaseOrderId, string reason, CancellationToken ct = default)
@@ -110,7 +110,7 @@ public class LiveInforIntegrationService : IInforIntegrationService
 
         // TODO: confirm the real LN PO-rejection field map (shape lives in PoResponseOutboundPayloadBuilder — R9 extraction).
         var payload = PoResponseOutboundPayloadBuilder.BuildRejectPayload(po, reason);
-        return await SendAsync("PurchaseOrder", EndpointPaths.PurchaseOrderReject, payload, ct);
+        return await SendAsync("PurchaseOrder", purchaseOrderId, EndpointPaths.PurchaseOrderReject, payload, ct);
     }
 
     public async Task<InforSyncResult> SubmitInvoiceAsync(Guid invoiceId, CancellationToken ct = default)
@@ -120,7 +120,7 @@ public class LiveInforIntegrationService : IInforIntegrationService
         // background dispatcher).
         var payload = await InvoiceOutboundPayloadBuilder.BuildPayloadAsync(_db, invoiceId, ct);
         if (payload is null) return Fail("Invoice", $"Invoice {invoiceId} not found.");
-        return await SendAsync("Invoice", EndpointPaths.Invoice, payload, ct);
+        return await SendAsync("Invoice", invoiceId, EndpointPaths.Invoice, payload, ct);
     }
 
     public async Task<InforSyncResult> SubmitAsnAsync(Guid asnId, CancellationToken ct = default)
@@ -130,7 +130,7 @@ public class LiveInforIntegrationService : IInforIntegrationService
         // JSON SendAsync sends is surfaced on the result so the dispatcher persists it to InforSyncLog.PayloadJson.
         var payload = await AsnOutboundPayloadBuilder.BuildPayloadAsync(_db, asnId, ct);
         if (payload is null) return Fail("Asn", $"ASN {asnId} not found.");
-        return await SendAsync("Asn", EndpointPaths.Asn, payload, ct);
+        return await SendAsync("Asn", asnId, EndpointPaths.Asn, payload, ct);
     }
 
     // R4 Module 2 — pushes an APPROVED supplier change request to LN. Per the plan, it sends the FULL intended
@@ -146,7 +146,7 @@ public class LiveInforIntegrationService : IInforIntegrationService
         // payload. The builder uses IgnoreQueryFilters (this runs under the tenant-less background dispatcher).
         var payload = await SupplierChangeOutboundPayloadBuilder.BuildPayloadAsync(_db, changeRequestId, ct);
         if (payload is null) return Fail("SupplierChange", $"SupplierChangeRequest {changeRequestId} (or its supplier) not found.");
-        return await SendAsync("SupplierChange", EndpointPaths.SupplierChange, payload, ct);
+        return await SendAsync("SupplierChange", changeRequestId, EndpointPaths.SupplierChange, payload, ct);
     }
 
     // R4 (2026-06-24) — pushes a buyer-APPROVED PO negotiation (revised qty / delivery dates) to LN. The body is
@@ -158,12 +158,12 @@ public class LiveInforIntegrationService : IInforIntegrationService
     {
         var payload = await PoNegotiationOutboundPayloadBuilder.BuildPayloadAsync(_db, negotiationId, ct);
         if (payload is null) return Fail("PoNegotiation", $"PurchaseOrderNegotiation {negotiationId} not found.");
-        return await SendAsync("PoNegotiation", EndpointPaths.PoNegotiation, payload, ct);
+        return await SendAsync("PoNegotiation", negotiationId, EndpointPaths.PoNegotiation, payload, ct);
     }
 
     // ── plumbing ──────────────────────────────────────────────────────────────────────────────
 
-    private async Task<InforSyncResult> SendAsync(string entity, string relativePath, object payload, CancellationToken ct)
+    private async Task<InforSyncResult> SendAsync(string entity, Guid entityId, string relativePath, object payload, CancellationToken ct)
     {
         // Serialize once, up front, so the canonical "what we sent" body is captured on EVERY outcome (success,
         // ERP-reject, transport error, and even pre-flight config failures) and the dispatcher can persist it to
@@ -192,8 +192,12 @@ public class LiveInforIntegrationService : IInforIntegrationService
             using var req = new HttpRequestMessage(HttpMethod.Post, url);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            if (!string.IsNullOrWhiteSpace(conn.PrimaryCompany))
-                req.Headers.TryAddWithoutValidation("X-Infor-LnCompany", conn.PrimaryCompany);
+            // R11.3 — per-document X-Infor-LnCompany (LN routes on it); PrimaryCompany is only the fallback
+            // for a document with no resolvable company. See LnDocumentCompanyResolver.
+            var documentCompany = await LnDocumentCompanyResolver.ResolveAsync(_db, entity, entityId, ct);
+            var lnCompany = !string.IsNullOrWhiteSpace(documentCompany) ? documentCompany : conn.PrimaryCompany;
+            if (!string.IsNullOrWhiteSpace(lnCompany))
+                req.Headers.TryAddWithoutValidation("X-Infor-LnCompany", lnCompany);
             req.Headers.TryAddWithoutValidation("X-Idempotency-Key", idempotencyKey);
             req.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
 

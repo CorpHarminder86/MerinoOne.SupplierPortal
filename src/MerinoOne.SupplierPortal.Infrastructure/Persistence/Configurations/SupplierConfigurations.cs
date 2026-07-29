@@ -52,7 +52,6 @@ public class SupplierConfiguration : IEntityTypeConfiguration<SupplierEntity>
             .HasMaxLength(20).HasDefaultValue(PoConfirmationMode.AcceptToShip).IsRequired();
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
         // 2026-07-05 — mirrors Invoice/Asn.ErpCompany (same maxlength) for IDM integration.
-        b.Property(x => x.ErpCompany).HasColumnName("erpCompany").HasMaxLength(20);
 
         // R4 (2026-06-26) — TSD R4 Addendum §3.4: PO confirmation-gate action toggles. ADDITIVE this phase
         // (the PoResponseMode→PoConfirmationMode replacement + gate wiring is Phase 2). NOT NULL DEFAULT 1

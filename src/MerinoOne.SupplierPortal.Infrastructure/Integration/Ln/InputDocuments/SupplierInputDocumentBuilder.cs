@@ -30,7 +30,6 @@ public sealed class SupplierInputDocumentBuilder : ILnInputDocumentBuilder
             Id: supplier.Id,
             SupplierCode: supplier.SupplierCode,
             ErpCode: supplier.ErpCode,
-            ErpCompany: supplier.ErpCompany,
             Name: supplier.LegalName,
             TradeName: supplier.TradeName,
             GstNumber: supplier.GstNumber,

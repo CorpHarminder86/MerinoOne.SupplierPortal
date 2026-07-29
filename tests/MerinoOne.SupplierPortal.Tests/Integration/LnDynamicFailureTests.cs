@@ -30,7 +30,7 @@ public class LnDynamicFailureTests
     private sealed class StubTransport : ILnHttpTransport
     {
         public LnHttpOutcome Next { get; set; } = new(null, null, "not configured");
-        public Task<LnHttpOutcome> SendAsync(Guid tenantId, string httpVerb, string relativePath, string bodyJson, string idempotencyKey, CancellationToken ct = default)
+        public Task<LnHttpOutcome> SendAsync(Guid tenantId, string httpVerb, string relativePath, string bodyJson, string idempotencyKey, string? documentCompany = null, CancellationToken ct = default)
             => Task.FromResult(Next);
     }
 

@@ -40,7 +40,9 @@ public static class LnInputDocumentVersions
     // config until re-pinned in the Endpoints UI.
     public const string Asn = "asn-v3";
     public const string PurchaseOrder = "purchaseOrder-v1";
-    public const string Supplier = "supplier-v1";
+    // R11.3 (2026-07-29) — supplier-v2: the never-written erpCompany field removed with the Supplier.ErpCompany
+    // column (migration 0056).
+    public const string Supplier = "supplier-v2";
     public const string SupplierChange = "supplierChange-v1";
     public const string PoNegotiation = "poNegotiation-v1";
 
@@ -177,7 +179,6 @@ public sealed record SupplierInputDoc(
     [property: JsonPropertyName("id")] Guid Id,
     [property: JsonPropertyName("supplierCode")] string SupplierCode,
     [property: JsonPropertyName("erpCode")] string? ErpCode,
-    [property: JsonPropertyName("erpCompany")] string? ErpCompany,
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("tradeName")] string? TradeName,
     [property: JsonPropertyName("gstNumber")] string? GstNumber,

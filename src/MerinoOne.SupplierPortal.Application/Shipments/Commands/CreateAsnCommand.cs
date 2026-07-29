@@ -214,6 +214,13 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
             Notes = body.Notes,
             AsnStatus = AsnStatus.Draft,
             SeccodeId = pos[0].SeccodeId,
+            // R11.3 — SNAPSHOT the company from the covered PO, like SeccodeId above. Before this the
+            // ScopeStampInterceptor filled TenantEntityId from the session's X-Active-Company header (it only
+            // stamps when null, so this assignment wins) — session-derived, not document-derived, and the value
+            // feeds the LN payload's CompanyCode and the X-Infor-LnCompany routing header. It was correct only
+            // because the company query filter hides cross-company POs at create time — an accident, not a rule.
+            TenantEntityId = pos[0].TenantEntityId,
+            TenantId = pos[0].TenantId,
             CreatedBy = _user.UserCode,
             CreatedOn = now,
         };

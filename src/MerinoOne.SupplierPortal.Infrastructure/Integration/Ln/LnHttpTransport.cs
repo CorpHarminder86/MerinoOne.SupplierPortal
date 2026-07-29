@@ -15,7 +15,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Ln;
 /// </summary>
 public interface ILnHttpTransport
 {
-    Task<LnHttpOutcome> SendAsync(Guid tenantId, string httpVerb, string relativePath, string bodyJson, string idempotencyKey, CancellationToken ct = default);
+    /// <param name="documentCompany">R11.3 — the DOCUMENT's LN logistic company (TenantEntity.Code) for the
+    /// <c>X-Infor-LnCompany</c> routing header. Null falls back to the connection's PrimaryCompany (the first
+    /// entry of the tenant-wide list — the pre-R11.3 behaviour, wrong for multi-company tenants).</param>
+    Task<LnHttpOutcome> SendAsync(Guid tenantId, string httpVerb, string relativePath, string bodyJson, string idempotencyKey, string? documentCompany = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -48,7 +51,7 @@ public sealed class LnHttpTransport : ILnHttpTransport
         _logger = logger;
     }
 
-    public async Task<LnHttpOutcome> SendAsync(Guid tenantId, string httpVerb, string relativePath, string bodyJson, string idempotencyKey, CancellationToken ct = default)
+    public async Task<LnHttpOutcome> SendAsync(Guid tenantId, string httpVerb, string relativePath, string bodyJson, string idempotencyKey, string? documentCompany = null, CancellationToken ct = default)
     {
         var conn = await _connections.GetForTenantAsync(tenantId, ct);
         if (conn is null || !conn.IsActive)
@@ -68,8 +71,12 @@ public sealed class LnHttpTransport : ILnHttpTransport
             using var req = new HttpRequestMessage(new HttpMethod(httpVerb), url);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            if (!string.IsNullOrWhiteSpace(conn.PrimaryCompany))
-                req.Headers.TryAddWithoutValidation("X-Infor-LnCompany", conn.PrimaryCompany);
+            // R11.3 — the DOCUMENT's company wins; PrimaryCompany (first of the tenant list) is only the
+            // fallback. LN routes on this header, so tenant-wide-first was a wrong-company write whenever a
+            // multi-company tenant posted for any company but the first-listed one.
+            var lnCompany = !string.IsNullOrWhiteSpace(documentCompany) ? documentCompany : conn.PrimaryCompany;
+            if (!string.IsNullOrWhiteSpace(lnCompany))
+                req.Headers.TryAddWithoutValidation("X-Infor-LnCompany", lnCompany);
             req.Headers.TryAddWithoutValidation("X-Idempotency-Key", idempotencyKey);
             req.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
 

@@ -110,7 +110,11 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
         if (row.TenantId is not Guid tenantId)
             return Permanent(row, "Outbox row carries no tenant — cannot resolve the LN connection.");
 
-        var outcome = await _transport.SendAsync(tenantId, route.HttpVerb, route.EndpointPath, canonicalBody, row.DeterministicKey, ct);
+        // R11.3 — per-document X-Infor-LnCompany: LN routes on the header, so it must be the DOCUMENT's
+        // company, not the tenant's first-listed one. Null (tenant-level doc) falls back inside the transport.
+        var documentCompany = await Infor.LnDocumentCompanyResolver.ResolveAsync(_db, route.PortalEntity, entityId, ct);
+
+        var outcome = await _transport.SendAsync(tenantId, route.HttpVerb, route.EndpointPath, canonicalBody, row.DeterministicKey, documentCompany, ct);
 
         if (outcome.StatusCode is null)
             return Retriable(row, $"[{route.PortalEntity}] {outcome.Error ?? "transport failure"}", canonicalBody);

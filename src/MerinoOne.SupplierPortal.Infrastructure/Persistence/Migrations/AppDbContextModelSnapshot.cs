@@ -8511,11 +8511,6 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("erpCode");
 
-                    b.Property<string>("ErpCompany")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)")
-                        .HasColumnName("erpCompany");
-
                     b.Property<string>("GstNumber")
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)")

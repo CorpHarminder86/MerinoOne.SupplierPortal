@@ -48,9 +48,9 @@ public class Supplier : BaseAggregateRoot
     public PoConfirmationMode PoConfirmationMode { get; set; } = PoConfirmationMode.AcceptToShip;
     public string? ErpCode { get; set; }
 
-    // 2026-07-05 — TSD R8: LN company code, mirroring Invoice/Asn.ErpCompany (IDM integration — a future
-    // Supplier snapshot provider would key MDS_AccountingEntity off this the same way Invoice/Asn do).
-    public string? ErpCompany { get; set; }
+    // R11.3 (2026-07-29) — the R8 ErpCompany column was DROPPED (migration 0056). It never had a writer, and
+    // the user confirmed erpCompany == the company code already reachable via TenantEntity — one identifier
+    // space, so a per-supplier copy was a dead duplicate on a frozen contract.
 
     // R4 (2026-06-26) — TSD R4 Addendum §3.4, Component 3 (PO Confirmation Gate). Per-supplier action toggles
     // that accompany the confirmation mode: whether the supplier may negotiate (propose new terms) or reject/

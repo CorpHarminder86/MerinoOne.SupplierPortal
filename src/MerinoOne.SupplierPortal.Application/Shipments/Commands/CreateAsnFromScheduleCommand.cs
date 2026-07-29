@@ -164,6 +164,8 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
             Notes = body.Notes,
             AsnStatus = AsnStatus.Draft,
             SeccodeId = rows[0].SeccodeId,
+            // R11.3 — snapshot the company from the covered PO (see CreateAsnCommand for the rationale).
+            TenantEntityId = rows[0].TenantEntityId,
             CreatedBy = _user.UserCode,
             CreatedOn = now,
         };
