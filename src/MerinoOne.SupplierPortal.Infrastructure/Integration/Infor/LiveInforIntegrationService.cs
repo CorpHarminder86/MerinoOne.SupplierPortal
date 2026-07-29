@@ -41,14 +41,35 @@ public class LiveInforIntegrationService : IInforIntegrationService
     internal static class EndpointPaths
     {
         public const string Supplier = "LN/lnapi/odata/tdapi.bpSuppliers/Suppliers";
-        public const string PurchaseOrderAck = "LN/lnapi/odata/tdapi.purchaseOrders/Acknowledgements";
-        public const string PurchaseOrderAccept = "LN/lnapi/odata/tdapi.purchaseOrders/Acceptances";
-        public const string PurchaseOrderReject = "LN/lnapi/odata/tdapi.purchaseOrders/Rejections";
         public const string Invoice = "LN/lnapi/odata/cisli.selfBillingInvoices/Invoices";
         public const string Asn = "LN/lnapi/odata/whinh.advanceShipmentNotices/Asns";
         public const string SupplierChange = "LN/lnapi/odata/tdapi.bpSuppliers/SupplierChanges";
-        // TODO: confirm real Infor LN BOD path + field map (PO-negotiation cutover — see memory `infor-live-cutover-checklist`).
-        public const string PoNegotiation = "LN/lnapi/odata/tdapi.purchaseOrders/Negotiations";
+
+        /// <summary>
+        /// R12 (2026-07-29) — the REAL path, confirmed against the DEM tenant. All three PO-response
+        /// transactions (PoAccept / PoReject / PoNegotiationApprove) post here; <c>POStatus</c> in the body is
+        /// the only difference between them, so they seed three config rows sharing one path and a future
+        /// split stays a per-row edit.
+        ///
+        /// <para>NOT OData, unlike every other constant here: it is a custom ION API that routes on the body's
+        /// <c>CompanyCode</c> rather than the <c>X-Infor-LnCompany</c> header (D21). The base URL is expected to
+        /// end at the tenant segment — e.g. <c>https://mingle-ionapi.eu1.inforcloudsuite.com/&lt;TENANT&gt;</c> —
+        /// so a stored ApiBaseUrl that already contains <c>CustomerApi/…</c> would produce a doubled path.</para>
+        /// </summary>
+        public const string PoUpdate = "CustomerApi/LNAPI/PO_Update";
+
+        /// <summary>
+        /// R12 — the pre-R12 starter paths for the four PO transactions, kept ONLY so
+        /// <c>LnOutboundSeeder</c> can recognise an already-seeded row that nobody hand-edited and correct it
+        /// to <see cref="PoUpdate"/>. Nothing dispatches through these. Delete once every tenant is re-seeded.
+        /// </summary>
+        internal static readonly string[] RetiredPoStarterPaths =
+        {
+            "LN/lnapi/odata/tdapi.purchaseOrders/Acknowledgements",
+            "LN/lnapi/odata/tdapi.purchaseOrders/Acceptances",
+            "LN/lnapi/odata/tdapi.purchaseOrders/Rejections",
+            "LN/lnapi/odata/tdapi.purchaseOrders/Negotiations",
+        };
     }
 
     private readonly IInforConnectionProvider _connections;
@@ -81,37 +102,15 @@ public class LiveInforIntegrationService : IInforIntegrationService
         return await SendAsync("Supplier", supplierId, EndpointPaths.Supplier, payload, ct);
     }
 
-    public async Task<InforSyncResult> AcknowledgePurchaseOrderAsync(Guid purchaseOrderId, CancellationToken ct = default)
-    {
-        var po = await _db.PurchaseOrders.FindAsync(new object?[] { purchaseOrderId }, ct);
-        if (po is null) return Fail("PurchaseOrder", $"PurchaseOrder {purchaseOrderId} not found.");
-
-        // TODO: confirm the real LN PO-acknowledgement field map (shape lives in PoResponseOutboundPayloadBuilder — R9 extraction).
-        var payload = PoResponseOutboundPayloadBuilder.BuildAcknowledgePayload(po);
-        return await SendAsync("PurchaseOrder", purchaseOrderId, EndpointPaths.PurchaseOrderAck, payload, ct);
-    }
-
-    public async Task<InforSyncResult> AcceptPurchaseOrderAsync(Guid purchaseOrderId, DateTime? proposedDate, CancellationToken ct = default)
-    {
-        var po = await _db.PurchaseOrders.FindAsync(new object?[] { purchaseOrderId }, ct);
-        if (po is null) return Fail("PurchaseOrder", $"PurchaseOrder {purchaseOrderId} not found.");
-
-        // TODO: confirm the real LN PO-acceptance field map (shape lives in PoResponseOutboundPayloadBuilder — R9 extraction).
-        // R4 (2026-06-26) — D2: accept is accept-only (PurchaseOrder.ProposedDeliveryDate removed). The optional
-        // proposedDate parameter is retained on the interface but is null on the accept path now.
-        var payload = PoResponseOutboundPayloadBuilder.BuildAcceptPayload(po, proposedDate);
-        return await SendAsync("PurchaseOrder", purchaseOrderId, EndpointPaths.PurchaseOrderAccept, payload, ct);
-    }
-
-    public async Task<InforSyncResult> RejectPurchaseOrderAsync(Guid purchaseOrderId, string reason, CancellationToken ct = default)
-    {
-        var po = await _db.PurchaseOrders.FindAsync(new object?[] { purchaseOrderId }, ct);
-        if (po is null) return Fail("PurchaseOrder", $"PurchaseOrder {purchaseOrderId} not found.");
-
-        // TODO: confirm the real LN PO-rejection field map (shape lives in PoResponseOutboundPayloadBuilder — R9 extraction).
-        var payload = PoResponseOutboundPayloadBuilder.BuildRejectPayload(po, reason);
-        return await SendAsync("PurchaseOrder", purchaseOrderId, EndpointPaths.PurchaseOrderReject, payload, ct);
-    }
+    // R12 (D13) — AcknowledgePurchaseOrderAsync / AcceptPurchaseOrderAsync / RejectPurchaseOrderAsync /
+    // ApprovePoNegotiationAsync are GONE, along with PoResponseOutboundPayloadBuilder and
+    // PoNegotiationOutboundPayloadBuilder. The three surviving PO transactions are Dynamic-only: their bodies
+    // come from OutboundIntegrationConfig.requestMappingExpr via LnDynamicDispatcher, which is what makes a
+    // wire-literal correction a config edit instead of a deploy. PoAcknowledge stopped posting entirely (D14).
+    //
+    // A PO row whose config is still Legacy therefore has NO dispatch path — by design. OutboxDispatcherWorker
+    // fails it permanently with an explicit "attest and set dispatchMode=Dynamic" message rather than falling
+    // through to a builder that would post the pre-R12 shape.
 
     public async Task<InforSyncResult> SubmitInvoiceAsync(Guid invoiceId, CancellationToken ct = default)
     {
@@ -147,18 +146,6 @@ public class LiveInforIntegrationService : IInforIntegrationService
         var payload = await SupplierChangeOutboundPayloadBuilder.BuildPayloadAsync(_db, changeRequestId, ct);
         if (payload is null) return Fail("SupplierChange", $"SupplierChangeRequest {changeRequestId} (or its supplier) not found.");
         return await SendAsync("SupplierChange", changeRequestId, EndpointPaths.SupplierChange, payload, ct);
-    }
-
-    // R4 (2026-06-24) — pushes a buyer-APPROVED PO negotiation (revised qty / delivery dates) to LN. The body is
-    // built by the shared PoNegotiationOutboundPayloadBuilder so Mock and Live POST/log the identical canonical
-    // payload. The builder uses IgnoreQueryFilters (this runs under the tenant-less background dispatcher). The
-    // deterministic outbox key (replayed via IOutboundIdempotencyContext in SendAsync) is the correlation id LN
-    // echoes back on /inbound/erp-ack. The OutboxDispatcherWorker owns the InforSyncLog write on the result.
-    public async Task<InforSyncResult> ApprovePoNegotiationAsync(Guid negotiationId, CancellationToken ct = default)
-    {
-        var payload = await PoNegotiationOutboundPayloadBuilder.BuildPayloadAsync(_db, negotiationId, ct);
-        if (payload is null) return Fail("PoNegotiation", $"PurchaseOrderNegotiation {negotiationId} not found.");
-        return await SendAsync("PoNegotiation", negotiationId, EndpointPaths.PoNegotiation, payload, ct);
     }
 
     // ── plumbing ──────────────────────────────────────────────────────────────────────────────

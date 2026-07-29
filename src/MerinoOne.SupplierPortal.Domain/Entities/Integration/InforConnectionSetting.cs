@@ -31,7 +31,20 @@ public class InforConnectionSetting : AuditableEntity, ITenantOwned
     /// <summary>Service-account secret (sask). Stored encrypted via DataProtection.</summary>
     public string Password { get; set; } = string.Empty;
 
-    /// <summary>ION API base URL (e.g. https://mingle-ionapi.{...}/{tenant}/LN/...).</summary>
+    /// <summary>
+    /// ION API base URL. Per tenant, maintained in Settings → Infor CloudSuite.
+    ///
+    /// <para><b>Ends at the ION tenant segment — no trailing path.</b>
+    /// e.g. <c>https://mingle-ionapi.eu1.inforcloudsuite.com/HYGACDSPSYNX5TJF_DEM</c> (user-confirmed
+    /// 2026-07-29). Every <c>endpointPath</c> — the <c>EndpointPaths</c> constants and each
+    /// <c>OutboundIntegrationConfig.EndpointPath</c> — is appended to it verbatim, so the suffix belongs
+    /// in the path, never here: <c>LN/lnapi/odata/...</c> for the OData routes,
+    /// <c>CustomerApi/LNAPI/PO_Update</c> for the R12 PO custom API. A base carrying any of that suffix
+    /// produces a doubled URL and a 404 on every push.</para>
+    ///
+    /// <para>The prior example here read <c>.../{tenant}/LN/...</c>, which was wrong: it implied the
+    /// <c>LN/</c> segment lived in the base while every path constant also starts with it.</para>
+    /// </summary>
     public string ApiBaseUrl { get; set; } = string.Empty;
 
     /// <summary>ION C4ws (SOAP) base URL. Optional — only required for C4ws-mode modules.</summary>

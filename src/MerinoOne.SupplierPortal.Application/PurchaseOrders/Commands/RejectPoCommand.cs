@@ -51,6 +51,10 @@ public class RejectPoCommandHandler : IRequestHandler<RejectPoCommand, Unit>
 
         po.PoStatus = PoStatus.Rejected;
         po.RejectionReason = request.Body.Reason;
+        // R12 (D20) — mirrors AcceptPoCommand's AcceptedAt. Read by the R12 sweep cutoff (D18) to tell a PO
+        // rejected AFTER a gate was activated from one rejected years earlier; also the first time the portal
+        // records when a rejection actually happened.
+        po.RejectedAt = DateTime.UtcNow;
 
         var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "reject"); // tenant-qualified (review B2)
         var payload = JsonSerializer.Serialize(new { reason = request.Body.Reason });

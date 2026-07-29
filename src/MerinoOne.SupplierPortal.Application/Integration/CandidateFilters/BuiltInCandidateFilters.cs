@@ -40,8 +40,10 @@ public static class BuiltInCandidateFilters
         a => a.AsnStatus == AsnStatus.Submitted && !a.IsDeleted;
 
     /// <summary>
-    /// Parameterized built-in for the three PO-response configs: params <c>{"statuses":["Acknowledged"]}</c>
-    /// (PoAcknowledge), <c>["Accepted"]</c> (PoAccept), <c>["Rejected"]</c> (PoReject) — one filter, three configs.
+    /// Parameterized built-in for the PO-response configs: params <c>["Accepted"]</c> (PoAccept) and
+    /// <c>["Rejected"]</c> (PoReject) — one filter, two configs. R12 (D14) retired the third
+    /// (<c>["Acknowledged"]</c>, PoAcknowledge) along with its outbound push; the filter still accepts that
+    /// status, there is simply no config asking for it.
     /// </summary>
     [CandidateFilter(LnPortalEntity.PurchaseOrder, "StatusIn")]
     public static Expression<Func<PurchaseOrder, bool>> PurchaseOrderStatusIn(JsonElement paramsJson)

@@ -161,7 +161,8 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
                 .IgnoreQueryFilters()
                 .Where(c => !c.IsDeleted && c.Kind == OutboundIntegrationKind.Transaction && c.TransactionType != null)
                 .Select(c => new LnEndpointRoute(c.TenantId, c.TransactionType!, c.DispatchMode, c.PortalEntity,
-                    c.EndpointPath, c.HttpVerb, c.RequestMappingExpr, c.ResponseMappingExpr ?? string.Empty))
+                    c.EndpointPath, c.HttpVerb, c.RequestMappingExpr, c.ResponseMappingExpr ?? string.Empty,
+                    c.GateVersion))
                 .ToListAsync(ct))
             .ToDictionary(r => (r.TenantId, r.TransactionType));
 
@@ -361,7 +362,16 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         // Sending → Skipped (terminal, reason + gateVersion stamped) — NOT Failed, NO IntegrationError, NO LN
         // call (a skip is a decision, not a failure). Gate evaluation ERRORS also land Skipped (fail closed);
         // the outbox monitor is the surface for those.
-        if (route?.Mode is OutboundDispatchMode.Dynamic or OutboundDispatchMode.Held && row.TenantId is { } gateTenant && row.EntityId is { } gateEntity)
+        //
+        // R12 (D17) — the re-check applies ONLY to rows enqueued under the CURRENT gate. Turning a gate on
+        // must not reach backwards: without this, activating a gate would silently Skip every row already
+        // sitting Pending, and a Skip is terminal, so those business events would never reach LN at all.
+        // Matching gateVersion keeps the guard's real purpose intact (revoke-between-enqueue-and-dispatch,
+        // backfill races) because those rows carry the current version by construction. A row with a NULL
+        // gateVersion predates gating entirely and dispatches untouched.
+        if (route?.Mode is OutboundDispatchMode.Dynamic or OutboundDispatchMode.Held
+            && row.GateVersion == route.GateVersion
+            && row.TenantId is { } gateTenant && row.EntityId is { } gateEntity)
         {
             var verdict = await sp.GetRequiredService<Application.Integration.Ln.ILnEligibilityService>()
                 .EvaluateAsync(gateTenant, row.TransactionType, gateEntity, null, ct);
@@ -406,6 +416,12 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
             else
             {
                 result = await InvokeAsync(infor, row, ct);
+                // R12 — a PO transaction reaching the COMPILED path is a config fault, not a transport fault:
+                // either the row's config is still Legacy (D15) or it is a retired PoAcknowledge row (D14).
+                // Retrying cannot change either, so classify it Permanent — otherwise the monitor badges it
+                // Retriable and invites retries that will fail identically until a human flips the config.
+                if (!result.Success && IsCompiledPathRetired(row.TransactionType))
+                    permanentFailure = true;
             }
         }
         catch (Exception ex)
@@ -568,47 +584,45 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
         var id = row.EntityId ?? Guid.Empty;
         return row.TransactionType switch
         {
-            OutboxTransactionType.PoAcknowledge  => await infor.AcknowledgePurchaseOrderAsync(id, ct),
-            OutboxTransactionType.PoAccept        => await infor.AcceptPurchaseOrderAsync(id, ParseProposedDate(row.PayloadJson), ct),
-            OutboxTransactionType.PoReject        => await infor.RejectPurchaseOrderAsync(id, ParseReason(row.PayloadJson), ct),
             OutboxTransactionType.AsnPost         => await infor.SubmitAsnAsync(id, ct),
             OutboxTransactionType.InvoicePost     => await infor.SubmitInvoiceAsync(id, ct),
             OutboxTransactionType.SupplierSync    => await infor.SyncSupplierAsync(id, ct),
             OutboxTransactionType.SupplierChange  => await infor.SubmitSupplierChangeAsync(id, ct),
-            OutboxTransactionType.PoNegotiationApprove => await infor.ApprovePoNegotiationAsync(id, ct),
+
+            // R12 (D13/D15) — the three PO-response transactions are Dynamic-only; there is no compiled builder
+            // left to fall back to. Reaching this arm means the row's OutboundIntegrationConfig is still Legacy
+            // (or missing), so name the fix instead of failing anonymously. The caller stamps this Permanent via
+            // IsCompiledPathRetired: retrying changes nothing until an admin flips the config.
+            OutboxTransactionType.PoAccept or OutboxTransactionType.PoReject or OutboxTransactionType.PoNegotiationApprove
+                => new InforSyncResult(false, row.DeterministicKey,
+                    $"{row.TransactionType} is Dynamic-only (R12) — attest the outbound config, set "
+                    + "dispatchMode=Dynamic, then re-arm this row. Nothing was sent."),
+
+            // R12 (D14) — PoAcknowledge no longer posts to LN. Historical rows may still exist; say so plainly
+            // rather than letting them look like a routing bug.
+            OutboxTransactionType.PoAcknowledge
+                => new InforSyncResult(false, row.DeterministicKey,
+                    "PoAcknowledge no longer posts to LN (R12/D14) — this row predates the change and can be cancelled."),
+
             _ => new InforSyncResult(false, row.DeterministicKey,
                     $"No outbox dispatch route for transactionType '{row.TransactionType}'."),
         };
     }
 
-    private static DateTime? ParseProposedDate(string? payloadJson)
-    {
-        if (string.IsNullOrWhiteSpace(payloadJson)) return null;
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(payloadJson);
-            if (doc.RootElement.TryGetProperty("proposedDate", out var el) &&
-                el.ValueKind == System.Text.Json.JsonValueKind.String &&
-                DateTime.TryParse(el.GetString(), out var dt))
-                return dt;
-        }
-        catch { /* malformed payload → treat as no proposed date */ }
-        return null;
-    }
+    // R12 — ParseProposedDate / ParseReason removed with the PO routes above. The equivalent lenient parsing
+    // still exists in PurchaseOrderInputDocumentBuilder, which is now the only reader of OutboxMessage.PayloadJson
+    // for PO rows.
 
-    private static string ParseReason(string? payloadJson)
-    {
-        if (string.IsNullOrWhiteSpace(payloadJson)) return string.Empty;
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(payloadJson);
-            if (doc.RootElement.TryGetProperty("reason", out var el) &&
-                el.ValueKind == System.Text.Json.JsonValueKind.String)
-                return el.GetString() ?? string.Empty;
-        }
-        catch { /* malformed payload → empty reason */ }
-        return string.Empty;
-    }
+    /// <summary>
+    /// R12 — transaction types that have NO compiled builder any more. Reaching the compiled path with one of
+    /// these is always a configuration fault (Legacy/missing config, or a retired PoAcknowledge row), never a
+    /// transient one, so the failure is stamped Permanent.
+    /// </summary>
+    private static bool IsCompiledPathRetired(string transactionType)
+        => transactionType is OutboxTransactionType.PoAccept
+            or OutboxTransactionType.PoReject
+            or OutboxTransactionType.PoNegotiationApprove
+            or OutboxTransactionType.PoAcknowledge;
 
     private static string Truncate(string s, int max)
         => string.IsNullOrEmpty(s) || s.Length <= max ? s ?? string.Empty : s[..max];

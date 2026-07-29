@@ -1,7 +1,29 @@
-/* R9 STARTER (O-R9-2 — real LN response field names pending tenant Available-APIs export; the
-   pathConfirmed attestation gate blocks Dynamic until verified). LN OData POST returns the created
-   entity (O-R9-1); extract its key into the closed contract { erpKey, erpStatus, message?, correlationBag? }. */
-{
-    "erpKey": $string(id != null ? id : (OrderNumber != null ? OrderNumber : (DocumentNumber != null ? DocumentNumber : "UNCONFIRMED-O-R9-2"))),
-    "erpStatus": "Created"
-}
+/* R12 — LN PO_Update response → the closed contract { erpKey, erpStatus, message?, correlationBag? }.
+   Shape verified against the live DEM endpoint 2026-07-29 (probe runs 1-3):
+     { "PurchaseOrder": [ { "Header": { OrderNo, Status, Remarks, ... }, "Line": [ { LineNo, SeqNo, Status, Remarks } ] } ] }
+
+   erpKey = Header.OrderNo. A PO response creates no new ERP document, so the order number IS the handle;
+   the dispatcher writes it to OutboxMessage.ErpCode, which Acks the row synchronously (D11) rather than
+   leaving it Dispatched awaiting an inbound erp-ack.
+
+   A2 — per-line Status is REPORTED, never fatal: Header.Status alone decides pass/fail (the code-owned
+   predicate in LnDynamicDispatcher reads erpStatus). Failing lines are folded into the message so a header
+   "Success" hiding a rejected line is still visible in InforSyncLog.
+
+   !! Do not read Status:"Success" as proof the update applied. Probe run 3 sent POStatus:"Zzz" and got
+   Status:"Success" back — LN does not validate the field. This mapping extracts what the envelope offers;
+   it cannot certify more than that.
+
+   PurchaseOrder[0] is safe on a singleton: JSONata index-selects the first item whether or not the path
+   result collapsed to a bare object. */
+(
+    $po := PurchaseOrder[0];
+    $failed := [$po.Line[Status != "Success"]];
+    $lineText := $count($failed) = 0 ? "" : " [line failures: " & $join($failed.(LineNo & "/" & SeqNo), ", ") & "]";
+    $msg := ($po.Header.Remarks ? $po.Header.Remarks : "") & $lineText;
+    {
+        "erpKey": $string($po.Header.OrderNo),
+        "erpStatus": $string($po.Header.Status),
+        "message": $msg != "" ? $msg
+    }
+)

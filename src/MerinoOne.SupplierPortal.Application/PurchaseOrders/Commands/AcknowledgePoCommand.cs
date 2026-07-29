@@ -50,8 +50,10 @@ public class AcknowledgePoCommandHandler : IRequestHandler<AcknowledgePoCommand,
             po.AcknowledgmentAt = DateTime.UtcNow;
         }
 
-        var key = OutboxKey.For(OutboxEntity.PurchaseOrder, po.TenantId, po.PoNumber, "acknowledge"); // tenant-qualified (review B2)
-        await _outbox.EnqueueAsync(OutboxTransactionType.PoAcknowledge, OutboxEntity.PurchaseOrder, po.Id, key, null, ct);
+        // R12 (D14) — no outbox enqueue. Acknowledgement is a PORTAL state change only: LN never wanted the
+        // push, and the shape we were sending it was an unconfirmed R9 starter. Everything above and below
+        // this line is unchanged — PoStatus, acknowledgmentAt, notes, the ship gate and the delivery schedules
+        // all behave exactly as before; the transaction simply stops leaving the building.
 
         // R5 (§8.1) — AcknowledgeToShip becomes shippable ON Acknowledged: stage the per-line delivery schedules so
         // they commit in the SAME transaction. Idempotent — safe even when this is a no-op re-acknowledge.

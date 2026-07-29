@@ -108,16 +108,29 @@ public sealed class LnGateScanner : ILnGateScanner
             }
             case LnPortalEntity.PurchaseOrder:
             {
+                // R12 (D14) — no "acknowledge" arm: PoAcknowledge has no config row to scan for any more.
                 var op = config.TransactionType switch
                 {
-                    OutboxTransactionType.PoAcknowledge => "acknowledge",
                     OutboxTransactionType.PoAccept => "accept",
                     OutboxTransactionType.PoReject => "reject",
                     _ => throw new InvalidOperationException($"PurchaseOrder scan does not serve '{config.TransactionType}'."),
                 };
-                var rows = await _db.PurchaseOrders.IgnoreQueryFilters()
+
+                var poQuery = _db.PurchaseOrders.IgnoreQueryFilters()
                     .Where((Expression<Func<Domain.Entities.Proc.PurchaseOrder, bool>>)filter)
-                    .Where(p => p.TenantId == tenantId)
+                    .Where(p => p.TenantId == tenantId);
+
+                // R12 (D18) — gate-activation cutoff. The sweep's job is to find entities that were never
+                // enqueued, so without this the first pass after a gate goes live would enqueue the entire
+                // historical backlog of accepted/rejected POs. Bounded by the transition that MADE the PO a
+                // candidate, not by createdOn/updatedOn: an unrelated edit to an old PO must not drag it back
+                // into scope. NULL cutoff = never gated ⇒ pre-R12 behaviour, no filter.
+                if (config.GateActivatedAt is { } gateFrom)
+                    poQuery = config.TransactionType == OutboxTransactionType.PoAccept
+                        ? poQuery.Where(p => p.AcceptedAt != null && p.AcceptedAt >= gateFrom)
+                        : poQuery.Where(p => p.RejectedAt != null && p.RejectedAt >= gateFrom);
+
+                var rows = await poQuery
                     .OrderByDescending(p => p.Seq).Take(take)
                     .Select(p => new { p.Id, p.PoNumber })
                     .ToListAsync(ct);
@@ -151,9 +164,15 @@ public sealed class LnGateScanner : ILnGateScanner
             case LnPortalEntity.PoNegotiation:
             {
                 // PoNegotiationApprove rows carry EntityName=PurchaseOrder with EntityId = the negotiation id.
-                var rows = await _db.PurchaseOrderNegotiations.IgnoreQueryFilters()
+                var negQuery = _db.PurchaseOrderNegotiations.IgnoreQueryFilters()
                     .Where((Expression<Func<Domain.Entities.Proc.PurchaseOrderNegotiation, bool>>)filter)
-                    .Where(n => n.TenantId == tenantId)
+                    .Where(n => n.TenantId == tenantId);
+
+                // R12 (D18) — same cutoff, anchored on the buyer's approval instant (ReviewedAt).
+                if (config.GateActivatedAt is { } negGateFrom)
+                    negQuery = negQuery.Where(n => n.ReviewedAt != null && n.ReviewedAt >= negGateFrom);
+
+                var rows = await negQuery
                     .OrderBy(n => n.Seq).Take(take)
                     .Select(n => new { n.Id, n.PoNumber })
                     .ToListAsync(ct);

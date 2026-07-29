@@ -12,8 +12,8 @@ using Xunit;
 namespace MerinoOne.SupplierPortal.Tests.Integration;
 
 /// <summary>
-/// R9 — LnOutboundSeeder: 8 Legacy rows per tenant, twice-idempotent, and the per-slot hash-gate
-/// matrix (hand-edit survives; untouched row whose repo default changed is updated).
+/// R9 — LnOutboundSeeder: 7 Legacy rows per tenant (8 before R12 retired PoAcknowledge), twice-idempotent,
+/// and the per-slot hash-gate matrix (hand-edit survives; untouched row whose repo default changed is updated).
 /// </summary>
 [Collection(IntegrationCollection.Name)]
 public class LnOutboundSeederTests
@@ -29,7 +29,7 @@ public class LnOutboundSeederTests
     }
 
     [SkippableFact]
-    public async Task Seeds_eight_legacy_rows_per_tenant_and_is_idempotent()
+    public async Task Seeds_seven_legacy_rows_per_tenant_and_is_idempotent()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
         await SeedAsync();
@@ -42,7 +42,10 @@ public class LnOutboundSeederTests
             .Where(c => c.TenantId == IntegrationTestFixture.TenantId && c.Kind == OutboundIntegrationKind.Transaction && !c.IsDeleted)
             .ToListAsync();
 
-        rows.Should().HaveCount(8);
+        // R12 (D14) — seven, not eight: PoAcknowledge no longer posts to LN, and a pre-R12 row for it is
+        // soft-deleted on re-seed.
+        rows.Should().HaveCount(7);
+        rows.Should().NotContain(r => r.TransactionType == OutboxTransactionType.PoAcknowledge);
         rows.Should().OnlyContain(r => r.DispatchMode == OutboundDispatchMode.Legacy, "seeded rows must never change dispatch behaviour");
         rows.Should().OnlyContain(r => !string.IsNullOrWhiteSpace(r.RequestMappingExpr)
             && !string.IsNullOrWhiteSpace(r.ResponseMappingExpr)
@@ -50,8 +53,20 @@ public class LnOutboundSeederTests
             && !string.IsNullOrWhiteSpace(r.ResponseSampleJson)
             && !string.IsNullOrWhiteSpace(r.AckSampleJson));
         rows.Should().OnlyContain(r => !r.PathConfirmed && r.VerifiedAt == null, "attestation is never seeded");
-        rows.Where(r => r.CandidateFilterName == "StatusIn").Should().HaveCount(3)
+        // StatusIn now serves two configs (accept, reject) — PoAcknowledge was the third.
+        rows.Where(r => r.CandidateFilterName == "StatusIn").Should().HaveCount(2)
             .And.OnlyContain(r => r.CandidateFilterParams!.Contains("statuses"));
+
+        // R12 — the three PO_Update configs: one shared real endpoint, a seeded monotonic gate, and the real
+        // response envelope rather than the generic OData sample.
+        var poUpdate = rows.Where(r => r.TransactionType is OutboxTransactionType.PoAccept
+            or OutboxTransactionType.PoReject or OutboxTransactionType.PoNegotiationApprove).ToList();
+        poUpdate.Should().HaveCount(3);
+        poUpdate.Should().OnlyContain(r => r.EndpointPath == "CustomerApi/LNAPI/PO_Update");
+        poUpdate.Should().OnlyContain(r => !string.IsNullOrWhiteSpace(r.EligibilityGateExpr));
+        poUpdate.Should().OnlyContain(r => r.ResponseSampleJson!.Contains("PurchaseOrder"));
+        poUpdate.Should().NotContain(r => r.EligibilityGateExpr!.Contains("Negotiated"),
+            "\"Negotiated\" is a wire-only POStatus; as a gate it would fail closed on every row");
     }
 
     [SkippableFact]

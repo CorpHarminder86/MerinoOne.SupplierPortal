@@ -193,10 +193,17 @@ public class RetryIntegrationErrorCommandHandler : IRequestHandler<RetryIntegrat
         return (entityName, targetId) switch
         {
             ("Supplier", Guid id)        => await _infor.SyncSupplierAsync(id, ct),
-            ("PurchaseOrder", Guid id)   => await _infor.AcknowledgePurchaseOrderAsync(id, ct),
             ("Invoice", Guid id)         => await _infor.SubmitInvoiceAsync(id, ct),
             ("Asn", Guid id)             => await _infor.SubmitAsnAsync(id, ct),
             ("SupplierChange", Guid id)  => await _infor.SubmitSupplierChangeAsync(id, ct),
+            // R12 (D13) — "PurchaseOrder" deliberately has no arm. It used to retry via
+            // AcknowledgePurchaseOrderAsync, which was wrong even before R12 (it re-sent an ACKNOWLEDGEMENT
+            // for an error raised by an accept or a reject) and is impossible now that the PO transactions
+            // are Dynamic-only. Re-arming the outbox row is the correct recovery: it replays the deterministic
+            // key so LN dedupes, and it goes through the config the row was actually dispatched under.
+            ("PurchaseOrder", _)         => new InforSyncResult(false, null,
+                                              "PO responses are dispatched from the outbound config (R12) — "
+                                              + "re-arm the outbox row instead of retrying the integration error."),
             _                            => new InforSyncResult(false, null,
                                               $"No retry handler for entity '{entityName}'" +
                                               (payloadRef is null ? " (no payloadRef)." : "."))

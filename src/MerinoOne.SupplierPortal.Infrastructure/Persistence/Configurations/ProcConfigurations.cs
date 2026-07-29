@@ -23,6 +23,8 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         b.Property(x => x.PoStatus).HasColumnName("poStatus").HasConversion<string>().HasMaxLength(30);
         b.Property(x => x.AcknowledgmentAt).HasColumnName("acknowledgmentAt").HasColumnType("datetime2");
         b.Property(x => x.AcceptedAt).HasColumnName("acceptedAt").HasColumnType("datetime2");
+        // R12 (D20) — AcceptedAt's twin; backs the D18 sweep cutoff for PoReject.
+        b.Property(x => x.RejectedAt).HasColumnName("rejectedAt").HasColumnType("datetime2");
         b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
         // R4 (2026-06-26) — D2: proposedDeliveryDate mapping REMOVED (column dropped by migration 2b).
         b.Property(x => x.Version).HasColumnName("version");

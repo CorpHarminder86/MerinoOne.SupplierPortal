@@ -137,59 +137,15 @@ public class LnRequestExpressionParityTests
         return po.Id;
     }
 
-    [SkippableFact]
-    public async Task PoAcknowledge_parity()
-    {
-        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-        var poId = await SeedResponsePoAsync();
-        await AssertParityAsync(
-            OutboxTransactionType.PoAcknowledge,
-            new PurchaseOrderInputDocumentBuilder(),
-            poId,
-            async db =>
-            {
-                var po = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.Id == poId);
-                return PoResponseOutboundPayloadBuilder.BuildAcknowledgeJson(po);
-            });
-    }
-
-    [SkippableFact]
-    public async Task PoAccept_parity_with_proposed_date()
-    {
-        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-        var poId = await SeedResponsePoAsync();
-        var payloadJson = "{\"proposedDate\":\"2026-07-15T10:30:00Z\"}";
-        await AssertParityAsync(
-            OutboxTransactionType.PoAccept,
-            new PurchaseOrderInputDocumentBuilder(),
-            poId,
-            async db =>
-            {
-                var po = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.Id == poId);
-                // EXACTLY the legacy dispatcher's lenient parse (plain TryParse — kind/zone semantics included),
-                // so the legacy argument here equals what the input-document builder derives from PayloadJson.
-                DateTime.TryParse("2026-07-15T10:30:00Z", out var proposed).Should().BeTrue();
-                return PoResponseOutboundPayloadBuilder.BuildAcceptJson(po, proposed);
-            },
-            payloadJson);
-    }
-
-    [SkippableFact]
-    public async Task PoReject_parity()
-    {
-        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-        var poId = await SeedResponsePoAsync();
-        await AssertParityAsync(
-            OutboxTransactionType.PoReject,
-            new PurchaseOrderInputDocumentBuilder(),
-            poId,
-            async db =>
-            {
-                var po = await db.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.Id == poId);
-                return PoResponseOutboundPayloadBuilder.BuildRejectJson(po, "Price too high");
-            },
-            "{\"reason\":\"Price too high\"}");
-    }
+    // R12 (D13) — PoAcknowledge_parity / PoAccept_parity_with_proposed_date / PoReject_parity /
+    // PoNegotiationApprove_parity are GONE. Parity is a comparison against a compiled builder, and the PO
+    // builders were deleted: the expression is now the sole source of the request body, so there is nothing
+    // left to be at parity WITH.
+    //
+    // Their replacement is PoUpdateExpressionTests — the shipped expression evaluated against fixture input
+    // documents and asserted field by field. Deliberately DB-free, unlike this class: these are SkippableFact
+    // behind a SQL fixture, and the PO wire contract is too load-bearing to silently skip on a machine with no
+    // test database.
 
     private async Task<Guid> SeedSupplierWithChildrenAsync()
     {
@@ -284,50 +240,4 @@ public class LnRequestExpressionParityTests
             db => SupplierChangeOutboundPayloadBuilder.BuildJsonAsync(db, crId));
     }
 
-    [SkippableFact]
-    public async Task PoNegotiationApprove_parity()
-    {
-        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-
-        Guid negotiationId;
-        using (var scope = _fx.Factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var now = DateTime.UtcNow;
-            var tag = Guid.NewGuid().ToString("N")[..8];
-            var neg = new PurchaseOrderNegotiation
-            {
-                Id = Guid.NewGuid(), PurchaseOrderId = IntegrationTestFixture.PoId,
-                PoNumber = $"PO-NEG-{tag}", SupplierId = IntegrationTestFixture.SupplierId,
-                NegotiationStatus = PoNegotiationStatus.Approved, PreviousPoStatus = PoStatus.Released,
-                SubmittedAt = new DateTime(2026, 7, 3, 8, 0, 0, DateTimeKind.Utc),
-                SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
-                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now,
-            };
-            neg.Lines.Add(new PurchaseOrderNegotiationLine
-            {
-                Id = Guid.NewGuid(), PurchaseOrderNegotiationId = neg.Id, PurchaseOrderLineId = IntegrationTestFixture.PoLine1Id,
-                PositionNo = 10, SequenceNo = 1, ItemCode = "ITEM-A", OriginalQty = 100, NegotiatedQty = 80,
-                OriginalDeliveryDate = new DateTime(2026, 7, 20, 0, 0, 0, DateTimeKind.Utc),
-                NegotiatedDeliveryDate = new DateTime(2026, 7, 25, 0, 0, 0, DateTimeKind.Utc),
-                OriginalPrice = 10.50m, NegotiatedPrice = 9.75m, CreatedBy = "seed", CreatedOn = now,
-            });
-            neg.Lines.Add(new PurchaseOrderNegotiationLine
-            {
-                Id = Guid.NewGuid(), PurchaseOrderNegotiationId = neg.Id, PurchaseOrderLineId = IntegrationTestFixture.PoLine2Id,
-                PositionNo = 20, SequenceNo = 2, ItemCode = "ITEM-B", OriginalQty = 50, NegotiatedQty = 50,
-                OriginalDeliveryDate = null, NegotiatedDeliveryDate = null,
-                OriginalPrice = 20m, NegotiatedPrice = 20m, CreatedBy = "seed", CreatedOn = now,
-            });
-            db.PurchaseOrderNegotiations.Add(neg);
-            await db.SaveChangesAsync();
-            negotiationId = neg.Id;
-        }
-
-        await AssertParityAsync(
-            OutboxTransactionType.PoNegotiationApprove,
-            new PoNegotiationInputDocumentBuilder(),
-            negotiationId,
-            db => PoNegotiationOutboundPayloadBuilder.BuildJsonAsync(db, negotiationId));
-    }
 }

@@ -1,6 +1,7 @@
 using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Integration.Ln;
+using MerinoOne.SupplierPortal.Contracts.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -42,7 +43,10 @@ public sealed record LnEndpointRoute(
     string EndpointPath,
     string HttpVerb,
     string RequestMappingExpr,
-    string ResponseMappingExpr);
+    string ResponseMappingExpr,
+    /// <summary>R12 (D17) — the config's current gateVersion, matched against the row's to decide whether the
+    /// dispatch-time gate re-check applies to THIS row. See <c>OutboxDispatcherWorker.DispatchOneAsync</c>.</summary>
+    int GateVersion = 0);
 
 public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
 {
@@ -84,6 +88,17 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
         var inputJson = await builder.BuildJsonAsync(_db, entityId, row.TransactionType, row.PayloadJson, ct);
         if (inputJson is null)
             return Retriable(row, $"[{route.PortalEntity}] entity {entityId} not found.", null);
+
+        // --- 1a. R12 (D9) — company guard for the PO_Update transactions, code-owned and BEFORE any mapping. ---
+        // LN's PO_Update routes on the body's CompanyCode, not the X-Infor-LnCompany header (D21), so unlike the
+        // OData endpoints there is no header fallback that could rescue a PO with no TenantEntityId. R11.3
+        // established that a wrong company is a wrong-company WRITE in LN; a missing one must therefore stop the
+        // dispatch outright rather than post an order without a company and let LN decide where it lands.
+        // Deliberately not left to the expression: a mapping is admin-editable, and this is a safety rule.
+        if (IsPoUpdateTransaction(row.TransactionType) && !HasCompanyCode(inputJson))
+            return Permanent(row,
+                $"[{route.PortalEntity}] {row.TransactionType} has no company: the {(route.PortalEntity == LnPortalEntity.PoNegotiation ? "negotiation's purchase order" : "purchase order")} "
+                + "carries no tenantEntityId, so CompanyCode cannot be set. Nothing was sent — fix the PO's company and re-arm.");
 
         // --- 2. Request mapping (an eval failure is a CONFIG bug — permanent, no LN call). -----------------------
         var request = _mapping.Evaluate(route.RequestMappingExpr, inputJson);
@@ -146,8 +161,29 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
             return new LnDispatchOutcome(new InforSyncResult(false, row.DeterministicKey, message, canonicalBody), false);
         }
 
+        // --- 6a. R12 (D12) — LN answers HTTP 200 with a LOGICAL verdict in Header.Status. A non-Success verdict
+        // is a failed post that merely arrived intact, so it must not Ack the row. Retriable: the deterministic
+        // key is replayed verbatim, so LN dedupes if the retry turns out to be a duplicate.
+        //
+        // Code-owned, not expression-owned, for the same reason as the HTTP classifier (D-R9-5): no admin-edited
+        // mapping may decide whether a row is finished.
+        //
+        // !! Success here means "LN parsed the request", NOT "LN applied it". Probe run 3 (2026-07-29) posted
+        // POStatus:"Zzz" and got Status:"Success" back — LN does not validate that field. This is the strongest
+        // signal the envelope offers; it is not proof of application.
+        if (IsPoUpdateTransaction(row.TransactionType)
+            && !string.Equals(ack.ErpStatus, "Success", StringComparison.OrdinalIgnoreCase))
+        {
+            var detail = string.IsNullOrWhiteSpace(ack.Message) ? "no remarks returned" : ack.Message;
+            return Retriable(row,
+                $"[{route.PortalEntity}] LN accepted the request (HTTP {outcome.StatusCode}) but reported "
+                + $"'{ack.ErpStatus}': {detail}", canonicalBody);
+        }
+
         // --- 7. D-R9-20 — erpStatus → the entity's existing ERP-owned status column (PO responses only today). ----
-        if (row.TransactionType is OutboxTransactionType.PoAcknowledge or OutboxTransactionType.PoAccept or OutboxTransactionType.PoReject)
+        // PoNegotiationApprove is absent by necessity, not oversight: its EntityId is the NEGOTIATION id, so this
+        // update would match no PurchaseOrder row. PoAcknowledge is gone with the transaction (R12/D14).
+        if (row.TransactionType is OutboxTransactionType.PoAccept or OutboxTransactionType.PoReject)
         {
             await _db.PurchaseOrders
                 .IgnoreQueryFilters()
@@ -175,6 +211,29 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
         return text.Length >= 2 && text[0] == '"' && text[^1] == '"'
             ? System.Text.Json.JsonSerializer.Deserialize<string>(text)
             : text;
+    }
+
+    /// <summary>R12 — the three transactions that post the LN <c>PO_Update</c> contract (D13).</summary>
+    private static bool IsPoUpdateTransaction(string transactionType)
+        => transactionType is OutboxTransactionType.PoAccept
+            or OutboxTransactionType.PoReject
+            or OutboxTransactionType.PoNegotiationApprove;
+
+    /// <summary>
+    /// R12 (D9) — does the input document carry a usable <c>companyCode</c>? Read off the code-owned input
+    /// document rather than the mapped body on purpose: the body's shape is admin-editable, this guard is not.
+    /// A document that will not even parse fails closed (treated as "no company").
+    /// </summary>
+    private static bool HasCompanyCode(string inputJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(inputJson);
+            return doc.RootElement.TryGetProperty("companyCode", out var el)
+                   && el.ValueKind == System.Text.Json.JsonValueKind.String
+                   && !string.IsNullOrWhiteSpace(el.GetString());
+        }
+        catch { return false; }
     }
 
     private static LnDispatchOutcome Permanent(OutboxMessage row, string message)

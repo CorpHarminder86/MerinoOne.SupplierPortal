@@ -174,7 +174,7 @@ PO response actions are gated by the supplier's PO-response mode: for an `Auto` 
 - `POST api/purchase-orders/{id}/propose-date` (`PurchaseOrder.Accept`) — counter-propose a revised line delivery date; records a pending proposal (PO stays in its current state).
 - `POST api/purchase-orders/{id}/approve-proposal` (`PurchaseOrder.ApproveProposal`, buyer) — approve a supplier-proposed date; commits the new line date and clears the proposal.
 
-PO lifecycle status (`PoStatus`): `Draft`, `Released`, `Acknowledged`, `Accepted`, `Rejected`, `DateProposed`, `PartiallyDelivered`, `Delivered`, `Closed`, `Cancelled`. Each accept / reject / proposal-relay is enqueued to ERP through the outbox (`PoAcknowledge` / `PoAccept` / `PoReject` transaction types). Blazor pages: `/purchase-orders` (list) and `/purchase-orders/{id}` (detail with the response actions).
+PO lifecycle status (`PoStatus`): `Draft`, `Released`, `Acknowledged`, `Accepted`, `Rejected`, `DateProposed`, `PartiallyDelivered`, `Delivered`, `Closed`, `Cancelled`. Each accept / reject / negotiation-approval is enqueued to ERP through the outbox (`PoAccept` / `PoReject` / `PoNegotiationApprove` transaction types); all three post the LN `PO_Update` contract and are **config-driven** — their request and response mappings live on the tenant's outbound integration config, not in compiled code (R12). Acknowledgement is a portal-only state change and is **not** pushed to ERP. Blazor pages: `/purchase-orders` (list) and `/purchase-orders/{id}` (detail with the response actions).
 
 ### Advance Shipment Notices (ASN)
 

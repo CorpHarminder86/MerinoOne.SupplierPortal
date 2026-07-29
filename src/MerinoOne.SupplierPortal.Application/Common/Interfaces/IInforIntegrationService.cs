@@ -1,11 +1,21 @@
 namespace MerinoOne.SupplierPortal.Application.Common.Interfaces;
 
+/// <summary>
+/// The COMPILED outbound surface — one method per transaction type that still has a code-owned payload
+/// builder.
+///
+/// <para><b>R12 (D13) — the four PO methods were removed.</b> <c>PoAccept</c>, <c>PoReject</c> and
+/// <c>PoNegotiationApprove</c> are Dynamic-only now: their bodies come from
+/// <c>OutboundIntegrationConfig.requestMappingExpr</c> through <c>LnDynamicDispatcher</c>, so a wire-literal
+/// correction is a per-tenant config edit rather than a deploy. <c>PoAcknowledge</c> no longer posts to LN at
+/// all (D14) — the portal Acknowledge action is unchanged, it just stops enqueuing.</para>
+///
+/// <para>Do not re-add a PO method here to "fix" a failing row. A PO row that cannot dispatch means its config
+/// is still Legacy; the fix is to attest it and set <c>dispatchMode = Dynamic</c>, then re-arm.</para>
+/// </summary>
 public interface IInforIntegrationService
 {
     Task<InforSyncResult> SyncSupplierAsync(Guid supplierId, CancellationToken ct = default);
-    Task<InforSyncResult> AcknowledgePurchaseOrderAsync(Guid purchaseOrderId, CancellationToken ct = default);
-    Task<InforSyncResult> AcceptPurchaseOrderAsync(Guid purchaseOrderId, DateTime? proposedDate, CancellationToken ct = default);
-    Task<InforSyncResult> RejectPurchaseOrderAsync(Guid purchaseOrderId, string reason, CancellationToken ct = default);
     Task<InforSyncResult> SubmitInvoiceAsync(Guid invoiceId, CancellationToken ct = default);
     Task<InforSyncResult> SubmitAsnAsync(Guid asnId, CancellationToken ct = default);
 
@@ -15,14 +25,6 @@ public interface IInforIntegrationService
     /// owns the Mock + Live implementations (Increment C).
     /// </summary>
     Task<InforSyncResult> SubmitSupplierChangeAsync(Guid changeRequestId, CancellationToken ct = default);
-
-    /// <summary>
-    /// R4 (2026-06-24) — pushes a buyer-APPROVED PO negotiation (revised qty / delivery dates) to ERP. The
-    /// dispatcher routes the <c>PoNegotiationApprove</c> outbox row here; this method builds the canonical payload
-    /// (via <c>PoNegotiationOutboundPayloadBuilder</c>) and performs the outbound call. The InforSyncLog write is
-    /// owned by the <c>OutboxDispatcherWorker</c> on the result.
-    /// </summary>
-    Task<InforSyncResult> ApprovePoNegotiationAsync(Guid negotiationId, CancellationToken ct = default);
 }
 
 /// <summary>

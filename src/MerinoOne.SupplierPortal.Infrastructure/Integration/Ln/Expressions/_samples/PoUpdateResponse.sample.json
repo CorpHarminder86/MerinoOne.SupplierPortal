@@ -1,0 +1,24 @@
+{
+  "PurchaseOrder": [
+    {
+      "Header": {
+        "CompanyCode": "2000",
+        "OrderNo": "PUR000323",
+        "PlannedDeliveryDate": "2026-12-29T11:00:00Z",
+        "ConfirmedReceiptDate": "2026-12-29T11:00:00Z",
+        "POStatus": "Accepted",
+        "Status": "Success",
+        "Remarks": ""
+      },
+      "Line": [
+        {
+          "LineNo": "10",
+          "SeqNo": "1",
+          "PlannedDeliveryDate": "2026-12-29T11:00:00Z",
+          "Status": "Success",
+          "Remarks": ""
+        }
+      ]
+    }
+  ]
+}

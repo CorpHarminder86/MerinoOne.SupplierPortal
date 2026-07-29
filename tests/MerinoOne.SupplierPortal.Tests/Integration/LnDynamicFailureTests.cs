@@ -30,8 +30,15 @@ public class LnDynamicFailureTests
     private sealed class StubTransport : ILnHttpTransport
     {
         public LnHttpOutcome Next { get; set; } = new(null, null, "not configured");
+
+        /// <summary>R12 — null until something is actually sent, so a test can assert nothing reached LN.</summary>
+        public string? LastBody { get; private set; }
+
         public Task<LnHttpOutcome> SendAsync(Guid tenantId, string httpVerb, string relativePath, string bodyJson, string idempotencyKey, string? documentCompany = null, CancellationToken ct = default)
-            => Task.FromResult(Next);
+        {
+            LastBody = bodyJson;
+            return Task.FromResult(Next);
+        }
     }
 
     private readonly IntegrationTestFixture _fx;
@@ -90,7 +97,7 @@ public class LnDynamicFailureTests
         var entry = Defaults.TryGet(OutboxTransactionType.PoAccept)!;
         var route = new LnEndpointRoute(
             IntegrationTestFixture.TenantId, OutboxTransactionType.PoAccept, OutboundDispatchMode.Dynamic,
-            LnPortalEntity.PurchaseOrder, "LN/lnapi/odata/tdapi.purchaseOrders/Acceptances", "POST",
+            LnPortalEntity.PurchaseOrder, "CustomerApi/LNAPI/PO_Update", "POST",
             entry.RequestExpr, entry.ResponseExpr);
         return (row, route, po.Id);
     }
@@ -134,7 +141,12 @@ public class LnDynamicFailureTests
         var (dispatcher, transport, scope) = Build();
         using (scope)
         {
-            transport.Next = new LnHttpOutcome(201, "{\"id\":\"LN-ACC-777\"}", null);
+            // R12 — the REAL LN PO_Update envelope, not an OData created-entity. erpKey is Header.OrderNo:
+            // a PO response creates no new ERP document, so the order number IS the handle.
+            transport.Next = new LnHttpOutcome(201, """
+                { "PurchaseOrder": [ { "Header": { "OrderNo": "LN-ACC-777", "Status": "Success", "Remarks": "" },
+                                       "Line": [ { "LineNo": "10", "SeqNo": "1", "Status": "Success", "Remarks": "" } ] } ] }
+                """, null);
             var outcome = await dispatcher.DispatchAsync(row, route);
             outcome.Result.Success.Should().BeTrue(outcome.Result.Message);
             outcome.Result.ErpCode.Should().Be("LN-ACC-777"); // → worker sync-ack seam flips the row Acked
@@ -144,8 +156,65 @@ public class LnDynamicFailureTests
         var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
         var po = await db.PurchaseOrders.IgnoreQueryFilters().AsNoTracking().FirstAsync(p => p.Id == poId);
         // D-R9-20: erpStatus lands in the EXISTING ERP-owned column; the portal workflow status is untouched.
-        po.ErpStatus.Should().Be("Created");
+        po.ErpStatus.Should().Be("Success");
         po.PoStatus.Should().Be(PoStatus.Accepted);
+    }
+
+    [SkippableFact]
+    public async Task Landed_200_with_a_non_success_header_status_fails_retriably()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+        // R12 (D12) — LN answers HTTP 200 with a LOGICAL verdict in Header.Status. A non-Success verdict is a
+        // failed post that merely arrived intact: it must NOT Ack the row, and it must not stamp erpStatus.
+        // Retriable, because the deterministic key is replayed verbatim and LN dedupes a genuine duplicate.
+        var (row, route, poId) = await SeedPoAcceptAsync();
+        var (dispatcher, transport, scope) = Build();
+        using (scope)
+        {
+            transport.Next = new LnHttpOutcome(200, """
+                { "PurchaseOrder": [ { "Header": { "OrderNo": "PO-X", "Status": "Error", "Remarks": "order is closed" },
+                                       "Line": [] } ] }
+                """, null);
+            var outcome = await dispatcher.DispatchAsync(row, route);
+
+            outcome.Result.Success.Should().BeFalse("a logical rejection is a failed post, not a slow success");
+            outcome.PermanentFailure.Should().BeFalse("the key replays, so LN dedupes if the retry is a duplicate");
+            outcome.Result.Message.Should().Contain("Error").And.Contain("order is closed");
+            outcome.Result.ErpCode.Should().BeNull("nothing was applied, so there is no ERP handle to record");
+        }
+
+        using var verify = _fx.Factory.Services.CreateScope();
+        var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+        var po = await db.PurchaseOrders.IgnoreQueryFilters().AsNoTracking().FirstAsync(p => p.Id == poId);
+        po.ErpStatus.Should().BeNull("a rejected post must not stamp the ERP-owned status column");
+    }
+
+    [SkippableFact]
+    public async Task A_po_with_no_company_fails_permanently_without_calling_ln()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+        // R12 (D9) — PO_Update routes on the BODY's CompanyCode (D21), so unlike the OData endpoints there is
+        // no X-Infor-LnCompany fallback to rescue a PO with no company. R11.3 established that a wrong company
+        // is a wrong-company WRITE in LN, so a missing one stops the dispatch outright.
+        var (row, route, poId) = await SeedPoAcceptAsync();
+        using (var seed = _fx.Factory.Services.CreateScope())
+        {
+            var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.PurchaseOrders.IgnoreQueryFilters().Where(p => p.Id == poId)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.TenantEntityId, (Guid?)null));
+        }
+
+        var (dispatcher, transport, scope) = Build();
+        using (scope)
+        {
+            transport.Next = new LnHttpOutcome(201, "{}", null);
+            var outcome = await dispatcher.DispatchAsync(row, route);
+
+            outcome.Result.Success.Should().BeFalse();
+            outcome.PermanentFailure.Should().BeTrue("retrying cannot invent a company — a human must fix the PO");
+            outcome.Result.Message.Should().Contain("company");
+            transport.LastBody.Should().BeNull("nothing may reach LN without a company");
+        }
     }
 
     [SkippableFact]

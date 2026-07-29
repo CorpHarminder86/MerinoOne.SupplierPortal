@@ -22,9 +22,11 @@ public class MockInforIntegrationService : IInforIntegrationService
     private InforSyncResult Ok(string action, Guid id, string? payloadJson = null)
         => new(true, _idempotency.CurrentKey ?? Guid.NewGuid().ToString("N"), $"[mock] {action} for {id}", payloadJson);
 
-    public Task<InforSyncResult> AcknowledgePurchaseOrderAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Ok("AckPO", id));
-    public Task<InforSyncResult> AcceptPurchaseOrderAsync(Guid id, DateTime? proposed, CancellationToken ct = default) => Task.FromResult(Ok("AcceptPO", id));
-    public Task<InforSyncResult> RejectPurchaseOrderAsync(Guid id, string reason, CancellationToken ct = default) => Task.FromResult(Ok("RejectPO", id));
+    // R12 (D13) — the PO methods are gone here too. Mock parity is preserved without them: a Dynamic route
+    // still runs its request expression under Integration:Mode=Mock and lands the canonical payload in
+    // InforSyncLog.PayloadJson — LnDynamicDispatcher short-circuits only the HTTP call, not the mapping. That
+    // is strictly better than the old Mock PO methods, which returned a bare "[mock] AckPO for {id}" with no
+    // payload at all.
 
     // R4 (2026-06-23) — build the SAME canonical payload Live posts (via the shared builder) so dev/Mock submits land
     // a viewable InforSyncLog.PayloadJson the user can open and share with the LN team for field-map confirmation.
@@ -42,10 +44,4 @@ public class MockInforIntegrationService : IInforIntegrationService
     // PayloadRef='SupplierChange:<guid>') are written by the OutboxDispatcherWorker on this success.
     public async Task<InforSyncResult> SubmitSupplierChangeAsync(Guid id, CancellationToken ct = default)
         => Ok("SubmitSupplierChange", id, await SupplierChangeOutboundPayloadBuilder.BuildJsonAsync(_db, id, ct));
-
-    // R4 (2026-06-24) — PO negotiation approve. Builds the SAME canonical payload Live posts (via the shared
-    // builder) so dev/Mock approvals land a viewable InforSyncLog.PayloadJson (EntityName='PurchaseOrder',
-    // PayloadRef='PurchaseOrder:<negotiationId>') the user can share with the LN team for BOD field-map confirmation.
-    public async Task<InforSyncResult> ApprovePoNegotiationAsync(Guid id, CancellationToken ct = default)
-        => Ok("ApprovePoNegotiation", id, await PoNegotiationOutboundPayloadBuilder.BuildJsonAsync(_db, id, ct));
 }

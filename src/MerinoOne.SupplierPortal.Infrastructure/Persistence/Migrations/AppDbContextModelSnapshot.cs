@@ -4198,6 +4198,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("endpointPath");
 
+                    b.Property<DateTime?>("GateActivatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("gateActivatedAt");
+
                     b.Property<int>("GateVersion")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -7695,6 +7699,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)")
                         .HasColumnName("poType");
+
+                    b.Property<DateTime?>("RejectedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("rejectedAt");
 
                     b.Property<string>("RejectionReason")
                         .HasMaxLength(1000)

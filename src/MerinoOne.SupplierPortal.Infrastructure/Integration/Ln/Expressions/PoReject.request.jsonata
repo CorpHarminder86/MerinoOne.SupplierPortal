@@ -1,7 +1,21 @@
-/* R9 default — reproduces the legacy PO-reject payload (Reason always present; legacy emitted "" for a
-   missing reason, so the null-coalesce keeps that byte-exact). */
+/* R12 — LN PO_Update contract. Identical to PoAccept.request.jsonata bar the POStatus literal; see that
+   file for the full rationale on D6 / D7 / D8 / D24 and the "[object Object]" hazard.
+
+   NOTE — the rejection reason is NOT on the wire. PurchaseOrderDetail has no field for it, so LN learns THAT
+   a PO was rejected, never why. The reason is still carried into this document as responseContext.reason and
+   is still stored on PurchaseOrder.RejectionReason; the day LN supplies a placeholder field, adding it here
+   is a mapping edit with no deploy. */
 {
-    "PoNumber": poNumber,
-    "Action": "Reject",
-    "Reason": responseContext.reason != null ? responseContext.reason : ""
+    "PurchaseOrderDetail": {
+        "CompanyCode": companyCode,
+        "OrderNo": poNumber,
+        "PlannedDeliveryDate": headerDeliveryDate != null ? headerDeliveryDate,
+        "ConfirmedReceiptDate": headerDeliveryDate != null ? headerDeliveryDate,
+        "POStatus": "Rejected",
+        "Lines": [lines[deliveryDate != null].{
+            "LineNo": $string(positionNo),
+            "SeqNo": $string(sequenceNo),
+            "PlannedDeliveryDate": deliveryDate
+        }]
+    }
 }

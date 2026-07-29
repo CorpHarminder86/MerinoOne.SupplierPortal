@@ -374,6 +374,12 @@ public class SaveOutboundIntegrationConfigCommandHandler : IRequestHandler<SaveO
                           || row.CandidateFilterName != b.CandidateFilterName
                           || row.CandidateFilterParams != b.CandidateFilterParams;
             if (changed) row.GateVersion++;
+            // R12 (D18) — a NEW gate expression is a new gate, so restart its cutoff: the sweep must not
+            // retro-enqueue entities that transitioned while the previous gate (or no gate) was in force.
+            // Deliberately narrower than `changed` above — editing a request mapping does not re-scope
+            // eligibility, and moving the cutoff for that would silently hide a backlog the admin expects.
+            if (row.EligibilityGateExpr != b.EligibilityGateExpr && !string.IsNullOrWhiteSpace(b.EligibilityGateExpr))
+                row.GateActivatedAt = now;
             row.UpdatedBy = _user.UserCode;
             row.UpdatedOn = now;
         }
@@ -569,9 +575,22 @@ public class SetOutboundDispatchModeCommandHandler : IRequestHandler<SetOutbound
                 throw new ValidationException($"Cannot enable dispatch: {string.Join("; ", blockers)}.");
         }
 
+        var modeChangedAt = DateTime.UtcNow;
+
+        // R12 (D18) — a gate on a Legacy row is inert (LnEligibilityService returns NoConfig for Legacy), so
+        // the flip to Dynamic IS the activation moment for a gate that was authored earlier. Stamp the cutoff
+        // here so the sweep does not treat the entire pre-cutover backlog as newly eligible. Only on the
+        // Legacy/Held → Dynamic transition, and only when a gate actually exists: re-flipping an
+        // already-Dynamic row, or arming an ungated one, must not move the cutoff.
+        if (mode == OutboundDispatchMode.Dynamic
+            && row.DispatchMode != OutboundDispatchMode.Dynamic
+            && !string.IsNullOrWhiteSpace(row.EligibilityGateExpr)
+            && row.GateActivatedAt is null)
+            row.GateActivatedAt = modeChangedAt;
+
         row.DispatchMode = mode;
         row.UpdatedBy = _user.UserCode;
-        row.UpdatedOn = DateTime.UtcNow;
+        row.UpdatedOn = modeChangedAt;
         await _db.SaveChangesAsync(ct);
         return true;
     }

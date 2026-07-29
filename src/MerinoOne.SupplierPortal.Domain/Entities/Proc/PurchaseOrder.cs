@@ -28,6 +28,13 @@ public class PurchaseOrder : BaseAggregateRoot
     public PoStatus PoStatus { get; set; } = PoStatus.Released;
     public DateTime? AcknowledgmentAt { get; set; }
     public DateTime? AcceptedAt { get; set; }
+
+    // R12 (2026-07-29, D20) — when the supplier rejected the PO. AcceptedAt's missing twin: the reject path
+    // recorded only a reason, so "when was this rejected" was answerable solely by trawling the audit trail.
+    // Added for the R12 gate-activation cutoff (D18), which needs a qualifying-transition timestamp per
+    // transaction type — accept has AcceptedAt, negotiation has ReviewedAt, reject had nothing. NULL on every
+    // PO rejected before this shipped, which the cutoff correctly reads as "pre-activation".
+    public DateTime? RejectedAt { get; set; }
     public string? RejectionReason { get; set; }
     // R4 (2026-06-26) — D2: ProposedDeliveryDate REMOVED. The old date-only propose/approve flow is retired; the
     // single PurchaseOrderNegotiation aggregate is the sole negotiate path (per-line qty/price/date). 2b drops the

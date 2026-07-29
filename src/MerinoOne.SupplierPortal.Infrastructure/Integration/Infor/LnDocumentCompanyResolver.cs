@@ -40,8 +40,15 @@ internal static class LnDocumentCompanyResolver
             OutboxEntity.SupplierChange => await db.SupplierChangeRequests.IgnoreQueryFilters()
                 .Where(s => s.Id == entityId).Select(s => s.TenantEntityId).FirstOrDefaultAsync(ct),
             // LnPortalEntity.PoNegotiation — the dynamic route's portalEntity string; no OutboxEntity twin.
+            // R12: resolved through the negotiation's PURCHASE ORDER, not the negotiation's own TenantEntityId.
+            // The PO is what PoNegotiationInputDocumentBuilder puts in the body's CompanyCode, and LN's PO_Update
+            // routes on that body value — so if the two ever disagreed (a negotiation stamped with a different
+            // company than its PO) the header would say one company and the body another.
             "PoNegotiation" => await db.PurchaseOrderNegotiations.IgnoreQueryFilters()
-                .Where(n => n.Id == entityId).Select(n => n.TenantEntityId).FirstOrDefaultAsync(ct),
+                .Where(n => n.Id == entityId)
+                .Join(db.PurchaseOrders.IgnoreQueryFilters().Where(p => !p.IsDeleted),
+                    n => n.PurchaseOrderId, p => p.Id, (_, p) => p.TenantEntityId)
+                .FirstOrDefaultAsync(ct),
             _ => null,
         };
 

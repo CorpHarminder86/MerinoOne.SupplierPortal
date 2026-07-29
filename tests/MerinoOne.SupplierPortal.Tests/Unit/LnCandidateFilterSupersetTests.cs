@@ -94,7 +94,9 @@ public class LnCandidateFilterSupersetTests
         {
             (LnPortalEntity.Invoice, "InvoiceSubmittedUnposted", null),
             (LnPortalEntity.Asn, "AsnSubmitted", null),
-            (LnPortalEntity.PurchaseOrder, "StatusIn", "{\"statuses\":[\"Acknowledged\"]}"),
+            // R12 (D14) — the Acknowledged entry is gone: PoAcknowledge has no seeded config any more. The
+            // filter itself still accepts that status (see the parameterised test above); it is simply no
+            // longer one of the SEEDED configurations this array mirrors.
             (LnPortalEntity.PurchaseOrder, "StatusIn", "{\"statuses\":[\"Accepted\"]}"),
             (LnPortalEntity.PurchaseOrder, "StatusIn", "{\"statuses\":[\"Rejected\"]}"),
             (LnPortalEntity.SupplierChange, "SupplierChangeApproved", null),

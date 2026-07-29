@@ -30,7 +30,8 @@ public sealed class LnDefaultExpressions : ILnExpressionCatalog
         {
             [OutboxTransactionType.InvoicePost] = LnPortalEntity.Invoice,
             [OutboxTransactionType.AsnPost] = LnPortalEntity.Asn,
-            [OutboxTransactionType.PoAcknowledge] = LnPortalEntity.PurchaseOrder,
+            // R12 (D14) — PoAcknowledge removed: it no longer posts to LN, so it has no config row, no
+            // expressions and no seeded default. The constant survives for historical outbox/sync-log rows.
             [OutboxTransactionType.PoAccept] = LnPortalEntity.PurchaseOrder,
             [OutboxTransactionType.PoReject] = LnPortalEntity.PurchaseOrder,
             [OutboxTransactionType.SupplierChange] = LnPortalEntity.SupplierChange,
@@ -53,6 +54,7 @@ public sealed class LnDefaultExpressions : ILnExpressionCatalog
         ErrorMessageExpression = Read("LnErrorMessage.default.jsonata");
         ODataCreatedEntitySample = Read("ODataCreatedEntity.sample.json");
         ErpAckBodySample = Read("ErpAckBody.sample.json");
+        PoUpdateResponseSample = Read("PoUpdateResponse.sample.json");
     }
 
     public Entry? TryGet(string transactionType) => _byType.TryGetValue(transactionType, out var e) ? e : null;
@@ -67,6 +69,13 @@ public sealed class LnDefaultExpressions : ILnExpressionCatalog
 
     /// <summary>Seeded onto <c>OutboundIntegrationConfig.ackSampleJson</c> — one ErpAckRecord as pushed to /inbound/erp-ack.</summary>
     public string ErpAckBodySample { get; }
+
+    /// <summary>
+    /// R12 — seeded onto <c>responseSampleJson</c> for the three PO_Update configs instead of the generic OData
+    /// sample. Captured verbatim from the live DEM endpoint (2026-07-29), so save-time validation of a
+    /// hand-edited response mapping runs against the real envelope rather than a shape LN never sends.
+    /// </summary>
+    public string PoUpdateResponseSample { get; }
 
     // ── ILnExpressionCatalog (Application-facing view) ─────────────────────────────────────────────
     LnExpressionDefault? ILnExpressionCatalog.TryGet(string transactionType)

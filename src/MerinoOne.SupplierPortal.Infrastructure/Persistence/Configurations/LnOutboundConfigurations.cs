@@ -59,6 +59,8 @@ public class OutboundIntegrationConfigConfiguration : IEntityTypeConfiguration<O
         b.Property(x => x.VerifiedAt).HasColumnName("verifiedAt").HasColumnType("datetime2");
         b.Property(x => x.VerifiedNote).HasColumnName("verifiedNote").HasMaxLength(500);
         b.Property(x => x.PathConfirmed).HasColumnName("pathConfirmed").HasColumnType("bit").HasDefaultValue(false).IsRequired();
+        // R12 (D18) — gate-activation cutoff for the reconciliation sweep. NULL = never gated.
+        b.Property(x => x.GateActivatedAt).HasColumnName("gateActivatedAt").HasColumnType("datetime2");
 
         // Value guards (config table — hostile values here mean wrong HTTP calls, so DB CHECKs back the C# enums).
         b.ToTable(t =>

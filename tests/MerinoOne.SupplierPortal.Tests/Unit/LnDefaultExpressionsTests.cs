@@ -17,14 +17,16 @@ public class LnDefaultExpressionsTests
     private readonly LnMappingService _svc = new();
 
     [Fact]
-    public void All_eight_transaction_types_load_with_all_three_slots()
+    public void All_seven_transaction_types_load_with_all_three_slots()
     {
-        _catalog.All.Should().HaveCount(8);
+        // R12 (D14) — seven, not eight: PoAcknowledge stopped posting to LN, so it has no expressions, no
+        // config row and no seeded default. Its OutboxTransactionType constant survives for historical rows.
+        _catalog.All.Should().HaveCount(7);
         LnDefaultExpressions.PortalEntityByTransactionType.Keys.Should().BeEquivalentTo(
             new[]
             {
                 OutboxTransactionType.InvoicePost, OutboxTransactionType.AsnPost,
-                OutboxTransactionType.PoAcknowledge, OutboxTransactionType.PoAccept,
+                OutboxTransactionType.PoAccept,
                 OutboxTransactionType.PoReject, OutboxTransactionType.SupplierChange,
                 OutboxTransactionType.SupplierSync, OutboxTransactionType.PoNegotiationApprove,
             });
@@ -61,7 +63,10 @@ public class LnDefaultExpressionsTests
     [Fact]
     public void Starter_response_expressions_satisfy_the_closed_contract_against_the_seeded_sample()
     {
-        foreach (var e in _catalog.All)
+        // R12 — the PO_Update transactions are no longer starters: their response mapping targets the REAL
+        // LN envelope (PurchaseOrder[].Header/.Line), so validating them against the generic OData
+        // created-entity sample would be meaningless. They get their own sample and their own assertions below.
+        foreach (var e in _catalog.All.Where(e => !IsPoUpdate(e.TransactionType)))
         {
             var result = _svc.Evaluate(e.ResponseExpr, _catalog.ODataCreatedEntitySample);
             result.Ok.Should().BeTrue(result.Error);
@@ -71,6 +76,25 @@ public class LnDefaultExpressionsTests
             ack.ErpStatus.Should().Be("Created");
         }
     }
+
+    [Fact]
+    public void PoUpdate_response_expressions_satisfy_the_closed_contract_against_the_real_envelope()
+    {
+        foreach (var e in _catalog.All.Where(e => IsPoUpdate(e.TransactionType)))
+        {
+            var result = _svc.Evaluate(e.ResponseExpr, _catalog.PoUpdateResponseSample);
+            result.Ok.Should().BeTrue(result.Error);
+            var (ack, errors) = LnClosedContract.Parse(result.OutputJson);
+            errors.Should().BeEmpty($"{e.TransactionType} response must be contract-valid");
+            ack!.ErpKey.Should().Be("PUR000323", "erpKey is Header.OrderNo — a PO response creates no new ERP document");
+            ack.ErpStatus.Should().Be("Success");
+        }
+    }
+
+    private static bool IsPoUpdate(string transactionType)
+        => transactionType is OutboxTransactionType.PoAccept
+            or OutboxTransactionType.PoReject
+            or OutboxTransactionType.PoNegotiationApprove;
 
     [Fact]
     public void Starter_ack_expressions_satisfy_the_closed_contract_against_the_seeded_sample()

@@ -39,12 +39,19 @@ public static class LnInputDocumentVersions
     // but each bump makes any pinned SampleDocumentJson stale — an ATTESTATION BLOCKER for a Dynamic AsnPost
     // config until re-pinned in the Endpoints UI.
     public const string Asn = "asn-v3";
-    public const string PurchaseOrder = "purchaseOrder-v1";
+    // R12 (2026-07-29) — purchaseOrder-v2: companyCode + headerDeliveryDate + the full PO line set, for the
+    // LN PO_Update contract. D24: EVERY non-deleted line is carried with a nullable deliveryDate so the
+    // line filter (D6) and the header-node handling (D7) live in the JSONata, not here — both are still
+    // open against LN (probes P5a/P8) and this keeps their resolution a config edit.
+    public const string PurchaseOrder = "purchaseOrder-v2";
     // R11.3 (2026-07-29) — supplier-v2: the never-written erpCompany field removed with the Supplier.ErpCompany
     // column (migration 0056).
     public const string Supplier = "supplier-v2";
     public const string SupplierChange = "supplierChange-v1";
-    public const string PoNegotiation = "poNegotiation-v1";
+    // R12 (2026-07-29) — poNegotiation-v2: same three additions as purchaseOrder-v2. NOTE the rename —
+    // `lines` now means PO lines (identical shape to the PO document, so all three request expressions are
+    // the same text bar the POStatus literal); the negotiation delta rows moved to `negotiationLines`.
+    public const string PoNegotiation = "poNegotiation-v2";
 
     /// <summary>Current version for a portalEntity (throws on unknown — config rows are registry-validated).</summary>
     public static string For(string portalEntity) => portalEntity switch
@@ -154,10 +161,18 @@ public sealed record AsnLotInputDoc(
     [property: JsonPropertyName("expiryDate")] string? ExpiryDate);
 
 /// <summary>
-/// Purchase-order input document — shared by the three PO-response transactions
-/// (<c>PoAcknowledge</c>/<c>PoAccept</c>/<c>PoReject</c>). <see cref="ResponseContext"/> folds the
-/// per-row parameters historically carried on <c>OutboxMessage.PayloadJson</c> (proposed date, reject
-/// reason) into the document so gate + request read one root (D-R9-7).
+/// Purchase-order input document — shared by <c>PoAccept</c> and <c>PoReject</c> (R12/D14 retired the
+/// PoAcknowledge outbound push). <see cref="ResponseContext"/> folds the per-row parameters historically
+/// carried on <c>OutboxMessage.PayloadJson</c> (proposed date, reject reason) into the document so gate +
+/// request read one root (D-R9-7).
+///
+/// <para><b>R12 / D24 — why the whole line set is here.</b> <see cref="Lines"/> carries EVERY non-deleted
+/// line with a nullable <c>deliveryDate</c>, and <see cref="HeaderDeliveryDate"/> carries the precomputed
+/// all-lines-agree value (null when they disagree or any is missing). Which lines actually reach the wire
+/// (D6) and how "no common date" is expressed (D7) are therefore decisions the JSONata makes — both are
+/// still unconfirmed against LN, and this keeps their resolution a config edit rather than a code change.
+/// The agree/disagree TEST stays here on purpose: JSONata null-comparison over a nullable collection is a
+/// footgun, and C# is where the dates are already materialised.</para>
 /// </summary>
 public sealed record PurchaseOrderInputDoc(
     [property: JsonPropertyName("id")] Guid Id,
@@ -167,11 +182,30 @@ public sealed record PurchaseOrderInputDoc(
     [property: JsonPropertyName("acknowledgmentAt")] string? AcknowledgmentAt,
     [property: JsonPropertyName("acceptedAt")] string? AcceptedAt,
     [property: JsonPropertyName("rejectionReason")] string? RejectionReason,
+    /// <summary>R12 — LN logistic company (<c>TenantEntity.Code</c>) for THIS PO. Null ⇒ the dispatch fails
+    /// permanently (D9): PO_Update routes on the body company, so there is no header fallback to save it.</summary>
+    [property: JsonPropertyName("companyCode")] string? CompanyCode,
+    /// <summary>R12 — the delivery date every line agrees on, ISO-8601 UTC with <c>Z</c>; null when the lines
+    /// disagree or any line has none (D7).</summary>
+    [property: JsonPropertyName("headerDeliveryDate")] string? HeaderDeliveryDate,
+    [property: JsonPropertyName("lines")] IReadOnlyList<PurchaseOrderLineInputDoc> Lines,
     [property: JsonPropertyName("responseContext")] PoResponseContextInputDoc ResponseContext);
+
+/// <summary>
+/// R12 — one PO line as the PO_Update contract sees it. <c>deliveryDate</c> is the EFFECTIVE date: the PO
+/// line's own for accept/reject, or the negotiated one where an approved negotiation changed it (D10).
+/// Null is preserved rather than filtered so the expression owns the D6 decision.
+/// </summary>
+public sealed record PurchaseOrderLineInputDoc(
+    [property: JsonPropertyName("positionNo")] int PositionNo,
+    [property: JsonPropertyName("sequenceNo")] int SequenceNo,
+    [property: JsonPropertyName("deliveryDate")] string? DeliveryDate);
 
 public sealed record PoResponseContextInputDoc(
     [property: JsonPropertyName("action")] string Action,
     [property: JsonPropertyName("proposedDeliveryDate")] string? ProposedDeliveryDate,
+    /// <summary>Reject reason. NOT on the wire — <c>PurchaseOrderDetail</c> has no field for it (R12 §5).
+    /// Retained so that becomes a pure mapping edit the day LN supplies a placeholder.</summary>
     [property: JsonPropertyName("reason")] string? Reason);
 
 /// <summary>Supplier master input document (portalEntity <c>Supplier</c>, transaction <c>SupplierSync</c>).</summary>
@@ -287,14 +321,33 @@ public sealed record SupplierChangeEntityInputDoc(
     [property: JsonPropertyName("issueDate")] string? IssueDate,
     [property: JsonPropertyName("expiryDate")] string? ExpiryDate);
 
-/// <summary>PO-negotiation input document (portalEntity <c>PoNegotiation</c>, transaction <c>PoNegotiationApprove</c>).</summary>
+/// <summary>
+/// PO-negotiation input document (portalEntity <c>PoNegotiation</c>, transaction <c>PoNegotiationApprove</c>).
+///
+/// <para><b>R12 — `lines` was renamed.</b> It now carries the PO line set in the SAME shape as
+/// <see cref="PurchaseOrderInputDoc.Lines"/>, so all three PO_Update request expressions are identical text
+/// bar the <c>POStatus</c> literal. The negotiation delta rows (original vs negotiated qty/price/date) moved
+/// to <see cref="NegotiationLines"/> — still exposed, because a gate or a future mapping may want them, and
+/// because they are the audit trail for what <see cref="Lines"/>' effective dates were derived from.</para>
+///
+/// <para>D10: a line the approved negotiation changed carries its <c>negotiatedDeliveryDate</c>; every other
+/// line keeps the PO line's own. Local <c>PurchaseOrderLine</c> rows are NOT mutated on approve — the R4
+/// decision stands — so this document is the only place the agreed dates are assembled.</para>
+/// </summary>
 public sealed record PoNegotiationInputDoc(
     [property: JsonPropertyName("id")] Guid Id,
     [property: JsonPropertyName("poNumber")] string PoNumber,
     [property: JsonPropertyName("negotiationId")] Guid NegotiationId,
     [property: JsonPropertyName("submittedAt")] string SubmittedAt,
     [property: JsonPropertyName("negotiationStatus")] string NegotiationStatus,
-    [property: JsonPropertyName("lines")] IReadOnlyList<PoNegotiationLineInputDoc> Lines);
+    /// <summary>R12 — LN logistic company for the negotiation's PO. Resolved via the PO, never the
+    /// negotiation, so the body company and the <c>X-Infor-LnCompany</c> header cannot disagree.</summary>
+    [property: JsonPropertyName("companyCode")] string? CompanyCode,
+    /// <summary>R12 — the effective delivery date every PO line agrees on after the D10 overlay; null when
+    /// they disagree or any is missing (D7).</summary>
+    [property: JsonPropertyName("headerDeliveryDate")] string? HeaderDeliveryDate,
+    [property: JsonPropertyName("lines")] IReadOnlyList<PurchaseOrderLineInputDoc> Lines,
+    [property: JsonPropertyName("negotiationLines")] IReadOnlyList<PoNegotiationLineInputDoc> NegotiationLines);
 
 public sealed record PoNegotiationLineInputDoc(
     [property: JsonPropertyName("positionNo")] int PositionNo,

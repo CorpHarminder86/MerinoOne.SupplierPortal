@@ -137,4 +137,21 @@ public class OutboundIntegrationConfig : AuditableEntity, ITenantOwned
 
     /// <summary>D-R9-21 — hard enable gate: "endpoint path confirmed against tenant Available-APIs export".</summary>
     public bool PathConfirmed { get; set; }
+
+    /// <summary>
+    /// R12 (D18) — when the CURRENT gate came into force: stamped whenever <see cref="EligibilityGateExpr"/>
+    /// changes, and when <see cref="DispatchMode"/> flips to Dynamic (the moment a gate starts being evaluated
+    /// at all — a gate on a Legacy row is inert).
+    ///
+    /// <para><b>Why it exists.</b> Turning a gate on must not reach backwards. The dispatch re-check is handled
+    /// by matching <c>OutboxMessage.GateVersion</c> (D17), but the reconciliation sweep has no such anchor: its
+    /// whole job is to find entities that were never enqueued, so without a cutoff it would happily enqueue
+    /// years of historical POs the moment a gate first passes. The scanner compares each candidate's qualifying
+    /// transition (accepted-at, rejected-at, negotiation reviewed-at) against this stamp and ignores anything
+    /// older.</para>
+    ///
+    /// <para>NULL means "no gate has ever been activated on this row" — the scanner then applies no cutoff,
+    /// which is the pre-R12 behaviour and correct for a row that has never been gated.</para>
+    /// </summary>
+    public DateTime? GateActivatedAt { get; set; }
 }

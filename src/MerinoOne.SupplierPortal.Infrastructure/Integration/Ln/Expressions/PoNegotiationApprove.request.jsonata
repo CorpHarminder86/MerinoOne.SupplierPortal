@@ -1,18 +1,29 @@
-/* R9 default — reproduces PoNegotiationOutboundPayloadBuilder. NOTE the legacy shape's line keys are
-   camelCase (header PascalCase) — that asymmetry is the legacy contract, reproduce it verbatim. */
+/* R12 — LN PO_Update contract. Identical to PoAccept.request.jsonata bar the POStatus literal; see that
+   file for the full rationale on D6 / D7 / D8 / D24 and the "[object Object]" hazard.
+
+   The document root here is the NEGOTIATION (portalEntity PoNegotiation, entityId = the negotiation id), but
+   poNegotiation-v2 exposes `lines` in exactly the same shape as the PO document, so this text is
+   interchangeable with the other two. The per-line dates are already the AGREED ones: the builder overlays
+   each approved negotiation line's negotiatedDeliveryDate onto the PO's own line set (D10), because
+   ApprovePoNegotiationCommand deliberately does not mutate PurchaseOrderLine.
+
+   The untouched negotiation detail (original vs negotiated qty / price) stays available under
+   `negotiationLines` if LN ever wants it — nothing maps it today.
+
+   !! POStatus "Negotiated" is a WIRE-ONLY literal. PoStatus has no such member: approving a negotiation sets
+   the PO to Approved and the negotiation to Approved. Never copy this string into an eligibility gate — a
+   gate is strict-true/fail-closed, so `poStatus = "Negotiated"` would skip every negotiation silently. */
 {
-    "PoNumber": poNumber,
-    "NegotiationId": negotiationId,
-    "SubmittedAt": submittedAt,
-    "Lines": [lines.{
-        "positionNo": positionNo,
-        "sequenceNo": sequenceNo,
-        "itemCode": itemCode != null ? itemCode,
-        "originalQty": originalQty != null ? originalQty,
-        "negotiatedQty": negotiatedQty != null ? negotiatedQty,
-        "originalDeliveryDate": originalDeliveryDate != null ? originalDeliveryDate,
-        "negotiatedDeliveryDate": negotiatedDeliveryDate != null ? negotiatedDeliveryDate,
-        "originalPrice": originalPrice != null ? originalPrice,
-        "negotiatedPrice": negotiatedPrice != null ? negotiatedPrice
-    }]
+    "PurchaseOrderDetail": {
+        "CompanyCode": companyCode,
+        "OrderNo": poNumber,
+        "PlannedDeliveryDate": headerDeliveryDate != null ? headerDeliveryDate,
+        "ConfirmedReceiptDate": headerDeliveryDate != null ? headerDeliveryDate,
+        "POStatus": "Negotiated",
+        "Lines": [lines[deliveryDate != null].{
+            "LineNo": $string(positionNo),
+            "SeqNo": $string(sequenceNo),
+            "PlannedDeliveryDate": deliveryDate
+        }]
+    }
 }
