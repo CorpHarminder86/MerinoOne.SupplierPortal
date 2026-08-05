@@ -131,10 +131,16 @@ public class AsnDraftGateTests
         after.ShipBlocked.Should().BeTrue(because: "a PendingApproval ASN on a re-Released PO is gate-blocked for the buyer");
         after.ShipBlockReason.Should().Contain("Accept");
 
-        // And the buyer's Approve is hard-blocked server-side (belt-and-braces behind the disabled button).
+        // R14 — the buyer's Confirm itself is NO LONGER gate-checked server-side: it ships nothing, so there is
+        // nothing for the gate to stop. (The UI still disables it on ShipBlocked, asserted above, so the buyer is
+        // not invited to confirm a shipment that cannot go out.) The hard block now lands on the supplier's POST,
+        // which is the step that actually reaches the ERP.
         var buyer = await SecurityTestHarness.ClientAsAsync(_fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
         (await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest())).StatusCode
-            .Should().Be(HttpStatusCode.BadRequest, because: "Approve→Submit re-checks the confirmation gate");
+            .Should().Be(HttpStatusCode.OK, because: "confirming consumes nothing, so the gate does not apply to it");
+
+        (await ProcureToPayFlow.PostAsync(supplier, asnId)).StatusCode
+            .Should().Be(HttpStatusCode.BadRequest, because: "Post → Submit re-checks the confirmation gate");
     }
 
     // ── helpers ──

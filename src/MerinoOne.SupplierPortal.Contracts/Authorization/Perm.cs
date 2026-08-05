@@ -36,6 +36,11 @@ public static class Perm
     public const string AsnRead = "Asn.Read";
     public const string AsnWrite = "Asn.Write";
     public const string AsnApprove = "Asn.Approve";
+    // R14 — posting is the ERP dispatch, and it is SEPARATE from Asn.Write on purpose: the submit path carries
+    // the §6.5 PO-gate override, whose permission (PurchaseOrder.OverrideGate) sits with Admin. Admin holds no
+    // Asn.Write, so without a distinct post permission an admin could not rescue a gate-blocked shipment and the
+    // override would collapse to SuperAdmin-only. Seeded to SuperAdmin + Admin + Supplier.
+    public const string AsnPost = "Asn.Post";
 
     // Goods Receipt
     public const string GoodsReceiptRead = "GoodsReceipt.Read";
@@ -118,7 +123,7 @@ public static class Perm
         PurchaseOrderRead, PurchaseOrderAcknowledge, PurchaseOrderAccept, PurchaseOrderNegotiate,
         PurchaseOrderApproveNegotiation, PurchaseOrderOverrideGate, PurchaseOrderWrite,
         DeliveryScheduleRead, DeliverySchedulePropose, DeliveryScheduleApprove,
-        AsnRead, AsnWrite, AsnApprove,
+        AsnRead, AsnWrite, AsnApprove, AsnPost,
         GoodsReceiptRead,
         InvoiceRead, InvoiceSubmit, InvoiceReview, InvoiceApprove, InvoiceRevoke,
         CreditDebitNoteRead, CreditDebitNoteWrite, CreditDebitNoteApprove,

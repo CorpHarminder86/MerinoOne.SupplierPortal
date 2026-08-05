@@ -59,6 +59,11 @@ public class SupplierConfiguration : IEntityTypeConfiguration<SupplierEntity>
         b.Property(x => x.AllowNegotiate).HasColumnName("allowNegotiate").HasColumnType("bit").HasDefaultValue(true);
         b.Property(x => x.AllowReject).HasColumnName("allowReject").HasColumnType("bit").HasDefaultValue(true);
 
+        // R14 (2026-08-05) — buyer ASN confirmation toggle. NOT NULL DEFAULT 1 (EF-auto-named default) so every
+        // existing supplier keeps the approval step.
+        b.Property(x => x.AsnConfirmationRequired).HasColumnName("asnConfirmationRequired")
+            .HasColumnType("bit").HasDefaultValue(true);
+
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_Supplier_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
         // Company the supplier belongs to (TenantEntityId carried by BaseAggregateRoot). No nav prop

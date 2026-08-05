@@ -132,29 +132,39 @@ public class AsnWarehouseTests
         (await resp.Content.ReadAsStringAsync()).Should().Contain("cannot mix warehouses");
     }
 
-    // ── R11 (D6/D7/D8) — mandatory shipment references at Send-For-Approval ─────────────────────────────
+    // ── R11 (D6/D7/D8), re-timed by R14 — mandatory shipment references at POST ─────────────────────────
 
     [SkippableTheory] // Each ref is independently required, and the error names the missing one(s).
     [InlineData(null, "BOL-1", "PL-1", "invoice no.")]
     [InlineData("INV-1", null, "PL-1", "bill of lading")]
     [InlineData("INV-1", "BOL-1", null, "packing list")]
     [InlineData("   ", "BOL-1", "PL-1", "invoice no.")]   // whitespace counts as absent
-    public async Task Send_for_approval_is_blocked_until_all_three_shipment_refs_are_set(
+    public async Task Post_is_blocked_until_all_three_shipment_refs_are_set(
         string? invoiceNo, string? bol, string? packingList, string expectedInMessage)
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
         var (asnId, client) = await DraftWithRefsAsync(invoiceNo, bol, packingList);
 
+        // R14 — send-for-approval NO LONGER checks the references: a supplier may obtain buyer confirmation
+        // before the invoice / BoL / packing list exist. The block lands at Post instead.
         var send = await client.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
-        send.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            because: "all three shipment references are mandatory before an ASN leaves Draft");
-        (await send.Content.ReadAsStringAsync()).Should().Contain(expectedInMessage);
+        send.StatusCode.Should().Be(HttpStatusCode.OK,
+            because: "R14 defers the shipment references to Post so an ASN can be confirmed without them");
+
+        var buyer = await SecurityTestHarness.ClientAsAsync(_fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        (await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest())).StatusCode
+            .Should().Be(HttpStatusCode.OK);
+
+        var post = await ProcureToPayFlow.PostAsync(client, asnId);
+        post.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "all three shipment references are mandatory before an ASN reaches the ERP");
+        (await post.Content.ReadAsStringAsync()).Should().Contain(expectedInMessage);
 
         using var scope = _fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         (await db.Asns.IgnoreQueryFilters().FirstAsync(a => a.Id == asnId)).AsnStatus
-            .Should().Be(AsnStatus.Draft, because: "a blocked send must not move the ASN off Draft");
+            .Should().Be(AsnStatus.Approved, because: "a blocked post must leave the ASN confirmed, not submitted");
     }
 
     [SkippableFact] // The refs are optional at CREATE (D7) — a partial draft can still be parked.
@@ -168,7 +178,7 @@ public class AsnWarehouseTests
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var asn = await db.Asns.IgnoreQueryFilters().FirstAsync(a => a.Id == asnId);
         asn.AsnStatus.Should().Be(AsnStatus.Draft);
-        asn.InvoiceNo.Should().BeNull(because: "creation does not require the refs — only Send-For-Approval does");
+        asn.InvoiceNo.Should().BeNull(because: "creation does not require the refs — only Post does (R14)");
     }
 
     [SkippableFact] // With all three set, the send proceeds.

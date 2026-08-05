@@ -148,24 +148,37 @@ public class AsnApprovalFlowTests : IAsyncLifetime
 
         var (asnId, _, supplierClient) = await NewDraftWithBuyerAsync();
 
-        // Send without the certificate → blocked with the mandatory message; ASN stays Draft (never reaches buyer).
+        // R14 — the attachment check moved OFF this step. Sending for approval with NO documents at all is the
+        // requirement: the buyer confirms the shipment first, and the supplier uploads afterwards.
         // R11 (D6/D7) — the mandatory shipment refs are not what this test is about.
         await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
         var send = await supplierClient.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
-        send.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await Body(send));
-        (await Read<AsnDetailDto>(send)).Errors.Should()
-            .Contain(e => e.Contains("mandatory attachment") && e.Contains("TestCertificate"));
-        await AssertStatus(asnId, AsnStatus.Draft);
+        send.StatusCode.Should().Be(HttpStatusCode.OK,
+            because: "a missing mandatory attachment must NOT block send-for-approval (R14)");
+        await AssertStatus(asnId, AsnStatus.PendingApproval);
 
-        using var scope = _fx.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        (await db.AsnApprovals.IgnoreQueryFilters().AnyAsync(a => a.AsnId == asnId && !a.IsDeleted))
-            .Should().BeFalse(because: "a blocked Send-for-Approval creates NO session (UC-AP-02)");
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.AsnApprovals.IgnoreQueryFilters().AnyAsync(a => a.AsnId == asnId && !a.IsDeleted))
+                .Should().BeTrue(because: "the approval session is created even with no documents uploaded");
+        }
+
+        // The block lands at POST instead, after the buyer has confirmed.
+        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        (await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest()))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var post = await ProcureToPayFlow.PostAsync(supplierClient, asnId);
+        post.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await Body(post));
+        (await Read<AsnDetailDto>(post)).Errors.Should()
+            .Contain(e => e.Contains("mandatory attachment") && e.Contains("TestCertificate"));
+        await AssertStatus(asnId, AsnStatus.Approved);
     }
 
-    // ── UC-AP-03 — Approve → Submit (over-ship guard at Submit) ──────────────────────────────────────────
+    // ── UC-AP-03 (R14) — Confirm records the decision and does NOTHING else ──────────────────────────────
     [SkippableFact]
-    public async Task UC_AP_03_approve_then_submit_consumes_balance()
+    public async Task UC_AP_03_approve_confirms_without_submitting()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
@@ -176,12 +189,87 @@ public class AsnApprovalFlowTests : IAsyncLifetime
         var approve = await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
         approve.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(approve));
         var detail = (await Read<AsnDetailDto>(approve)).Data!;
-        detail.AsnStatus.Should().Be(nameof(AsnStatus.Submitted), because: "Approve runs the submit path (UC-AP-03)");
+        detail.AsnStatus.Should().Be(nameof(AsnStatus.Approved), because: "R14 — confirming no longer submits");
         detail.Approval!.Status.Should().Be(nameof(AsnApprovalStatus.Approved));
         detail.Approval.DecisionBy.Should().Be(SecurityTestHarness.Users.Buyer);
-        detail.DraftInvoiceId.Should().NotBeNull(because: "the draft invoice is created at submit");
+        detail.CanPost.Should().BeTrue(because: "the supplier's next action is Post");
+        detail.IsLocked.Should().BeFalse(because: "a confirmed ASN reopens so the supplier can attach documents");
 
-        (await ShippedToDate(setup.PoLineId)).Should().Be(10m, because: "the over-ship guard consumes balance at Submit (§10.4)");
+        detail.DraftInvoiceId.Should().BeNull(because: "no invoice is drafted until the ASN is posted");
+        detail.PostedAt.Should().BeNull();
+        (await ShippedToDate(setup.PoLineId)).Should().Be(0m,
+            because: "confirmation consumes NO balance — the guard runs at Post (R14)");
+        (await OutboxCountAsync(asnId)).Should().Be(0, because: "nothing is enqueued to the ERP at confirmation");
+    }
+
+    // ── UC-AP-03b (R14) — the supplier's Post is what reaches the ERP ────────────────────────────────────
+    [SkippableFact]
+    public async Task UC_AP_03b_post_consumes_balance_and_stamps_shipping_date()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var (asnId, setup, supplierClient) = await NewDraftWithBuyerAsync(orderQty: 10m);
+        await SendOkAsync(supplierClient, asnId);
+        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        (await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest()))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var before = DateTime.UtcNow.AddSeconds(-5);
+        var post = await ProcureToPayFlow.PostAsync(supplierClient, asnId);
+        post.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(post));
+        var detail = (await Read<AsnDetailDto>(post)).Data!;
+
+        detail.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
+        detail.DraftInvoiceId.Should().NotBeNull(because: "the draft invoice is created at post");
+        detail.PostedAt.Should().NotBeNull();
+        detail.PostedAt!.Value.Should().BeOnOrAfter(before, because: "the shipping date is the POST instant (D9)");
+        detail.PostedBy.Should().Be(SecurityTestHarness.Users.Supplier,
+            because: "the supplier posted it, not the confirming buyer");
+
+        (await ShippedToDate(setup.PoLineId)).Should().Be(10m,
+            because: "the over-ship guard consumes balance at Post (R14)");
+        (await OutboxCountAsync(asnId)).Should().BeGreaterThan(0, because: "the LN post is enqueued at Post");
+
+        // D9 — the LN payload's ShipmentDate is SubmittedAt, and it must equal the post instant.
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = await db.Asns.IgnoreQueryFilters().FirstAsync(a => a.Id == asnId);
+        asn.SubmittedAt.Should().Be(asn.PostedAt,
+            because: "the wire ShipmentDate must be the post date, with no LN contract change");
+    }
+
+    // ── R14 D12 — posting notifies the mapped buyers ─────────────────────────────────────────────────────
+    [SkippableFact]
+    public async Task Post_notifies_the_mapped_buyers()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var (asnId, _, supplierClient) = await NewDraftWithBuyerAsync(orderQty: 10m);
+        await SendOkAsync(supplierClient, asnId);
+
+        // Assert against the buyer's SEEDED address — do NOT overwrite it. The suite shares one DB serially, and
+        // other tests assert on that exact address.
+        string buyerEmail;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            buyerEmail = await db.AppUsers.IgnoreQueryFilters()
+                .Where(x => x.UserCode == SecurityTestHarness.Users.Buyer)
+                .Select(x => x.Email!)
+                .FirstAsync();
+        }
+        buyerEmail.Should().NotBeNullOrWhiteSpace(because: "the notification only enqueues for a buyer with an e-mail");
+
+        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        (await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest()))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ProcureToPayFlow.PostAsync(supplierClient, asnId)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db2 = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db2.EmailOutbox.IgnoreQueryFilters()
+                .AnyAsync(e => e.ToEmail == buyerEmail && e.TemplateKey == "AsnApproval" && e.Subject.Contains("posted")))
+            .Should().BeTrue(because: "the mapped buyers are told the shipment has gone to the ERP (D12)");
     }
 
     // ── §20 — Approve notifies the submitting supplier (audit/notification touchpoint) ───────────────────
@@ -264,19 +352,28 @@ public class AsnApprovalFlowTests : IAsyncLifetime
 
         await using var guardOn = await _fx.EnableOverShipGuardAsync();
 
-        // Simulate a concurrent ASN consuming the whole line balance AFTER this ASN is PendingApproval.
+        // Simulate a concurrent ASN consuming the whole line balance AFTER this ASN was confirmed.
+        // R14 — the window is now between CONFIRMATION and POST (it used to be between send and approve).
+        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        (await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest()))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
         await ConsumeBalanceAsync(setup.PoLineId, 10m);
 
-        var buyer = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
-        var approve = await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
-        approve.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await Body(approve));
-        (await Read<AsnDetailDto>(approve)).Errors.Should()
+        var post = await ProcureToPayFlow.PostAsync(supplierClient, asnId);
+        post.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await Body(post));
+        (await Read<AsnDetailDto>(post)).Errors.Should()
             .Contain(e => e.Contains("Ship qty exceeds order qty plus over-ship tolerance."),
-                because: "the guard returns 0 rows at submit — balance lost (UC-AP-05)");
+                because: "the guard returns 0 rows at post — balance lost (UC-AP-05)");
 
-        // The shipment did not proceed — the ASN stays PendingApproval (the approval flip rolled back with the guard).
-        await AssertStatus(asnId, AsnStatus.PendingApproval);
+        // The shipment did not proceed — the ASN stays Approved (the whole post rolled back with the guard).
+        await AssertStatus(asnId, AsnStatus.Approved);
         (await ShippedToDate(setup.PoLineId)).Should().Be(10m, because: "only the concurrent consumer's 10 is on the line");
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = await db.Asns.IgnoreQueryFilters().FirstAsync(a => a.Id == asnId);
+        asn.PostedAt.Should().BeNull(because: "a failed post must not leave a shipping date behind");
     }
 
     // ── UC-AP-06 — Any one of multiple buyers approves ───────────────────────────────────────────────────
@@ -306,11 +403,16 @@ public class AsnApprovalFlowTests : IAsyncLifetime
         var asnId = (await Read<AsnDetailDto>(create)).Data!.Id;
         await SendOkAsync(supplierClient, asnId);
 
-        // Buyer X (the PO-A buyer) approves alone — buyer Y's separate action is not required (UC-AP-06).
+        // Buyer X (the PO-A buyer) confirms alone — buyer Y's separate action is not required (UC-AP-06).
         var buyerX = await _fx.ClientAsAsync(SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
         var approve = await buyerX.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
         approve.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(approve));
-        (await Read<AsnDetailDto>(approve)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
+        (await Read<AsnDetailDto>(approve)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Approved));
+
+        // …and the supplier's single Post then ships it (R14).
+        var post = await ProcureToPayFlow.PostAsync(supplierClient, asnId);
+        post.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(post));
+        (await Read<AsnDetailDto>(post)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
     }
 
     // ════════════════════════════ C2 — buyer-facing approval queue ════════════════════════════
@@ -403,6 +505,14 @@ public class AsnApprovalFlowTests : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         return await db.PurchaseOrderLines.IgnoreQueryFilters().Where(l => l.Id == poLineId)
             .Select(l => l.ShippedQtyToDate).FirstAsync();
+    }
+
+    /// <summary>R14 — outbox rows for this ASN, to prove confirmation enqueues nothing and Post enqueues.</summary>
+    private async Task<int> OutboxCountAsync(Guid asnId)
+    {
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.OutboxMessages.IgnoreQueryFilters().CountAsync(m => m.EntityId == asnId && !m.IsDeleted);
     }
 
     private async Task AssertStatus(Guid asnId, AsnStatus expected)

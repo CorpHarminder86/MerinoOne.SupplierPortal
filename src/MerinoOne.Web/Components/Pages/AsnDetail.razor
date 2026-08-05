@@ -53,8 +53,8 @@
                 <button class="mbtn mbtn--danger" @onclick="OpenRejectDialog" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : null)">
                     <span class="material-symbols-outlined">cancel</span> Reject…
                 </button>
-                <button class="mbtn mbtn--primary-success" @onclick="OpenApproveDialog" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : null)">
-                    <span class="material-symbols-outlined">task_alt</span> Approve
+                <button class="mbtn mbtn--primary-success" @onclick="OpenApproveDialog" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : "Confirms the shipment details; the supplier posts it to the ERP afterwards")">
+                    <span class="material-symbols-outlined">task_alt</span> Confirm
                 </button>
             }
             @* Cancel — supplier-side, available on any of the supplier's active states (Draft / Rejected / PendingApproval).
@@ -115,7 +115,7 @@
                         }
                         else
                         {
-                            <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">Review the lines, attachments and shipment details below, then <b>Approve</b> (submits the shipment) or <b>Reject</b> with a reason.</div>
+                            <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">Review the lines and shipment details below, then <b>Confirm</b> or <b>Reject</b> with a reason. Confirming does not ship anything — the supplier completes the documents and posts it afterwards.</div>
                         }
                     }
                     else
@@ -125,13 +125,40 @@
                 </div>
             </div>
         }
-        @* Approved/submitted note (the approval session that led to Submitted) — small provenance line on the locked view. *@
-        else if (detail.Approval is { Status: "Approved" } ap && (detail.AsnStatus == "Submitted" || detail.AsnStatus == "InTransit" || detail.AsnStatus == "Delivered"))
+        @* R14 — Confirmed-but-not-yet-posted. This is the supplier's working state: the ASN is editable again and
+           the document rail is live, and nothing has reached the ERP yet. *@
+        else if (detail.AsnStatus == "Approved")
+        {
+            <div class="rz-card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:flex-start;gap:12px;background:var(--mer-green-50);border:1px solid var(--mer-green);">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--mer-green-dark);">verified</span>
+                <div style="flex:1;">
+                    <div style="font-size:13px;font-weight:700;color:var(--mer-green-dark);">Confirmed by the buyer</div>
+                    @if (detail.Approval is { } cap)
+                    {
+                        <div style="font-size:12px;color:var(--mer-ink-700);font-family:Inter,monospace;margin-top:2px;">
+                            Confirmed@(string.IsNullOrEmpty(cap.DecisionBy) ? "" : $" by {cap.DecisionBy}")@(cap.DecisionOn?.ToString(" · yyyy-MM-dd HH:mm"))
+                        </div>
+                    }
+                    <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">
+                        Upload the remaining shipment documents (Packing List, Commercial Invoice and any others required),
+                        complete the shipment references, then click <b>Post</b>. Nothing has been sent to the ERP yet —
+                        the shipping date will be the date you post.
+                    </div>
+                </div>
+            </div>
+        }
+        @* Posted note — provenance for a shipment that has reached the ERP. The confirmation half only renders when
+           there WAS a confirmation (a No-confirmation supplier's ASN has no approval session at all). *@
+        else if (detail.AsnStatus is "Submitted" or "InTransit" or "Delivered")
         {
             <div class="rz-card" style="padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;background:var(--mer-green-50);border:1px solid var(--mer-green);">
                 <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-green-dark);">verified</span>
                 <div style="font-size:12px;color:var(--mer-ink-700);font-family:Inter,monospace;">
-                    Approved@(string.IsNullOrEmpty(ap.DecisionBy) ? "" : $" by {ap.DecisionBy}")@(ap.DecisionOn?.ToString(" · yyyy-MM-dd HH:mm")) · sent by @(string.IsNullOrEmpty(ap.SubmittedBy) ? "—" : ap.SubmittedBy)
+                    @if (detail.Approval is { Status: "Approved" } ap)
+                    {
+                        <text>Confirmed@(string.IsNullOrEmpty(ap.DecisionBy) ? "" : $" by {ap.DecisionBy}")@(ap.DecisionOn?.ToString(" · yyyy-MM-dd HH:mm")) · sent by @(string.IsNullOrEmpty(ap.SubmittedBy) ? "—" : ap.SubmittedBy) · </text>
+                    }
+                    <text>Posted@(string.IsNullOrEmpty(detail.PostedBy) ? "" : $" by {detail.PostedBy}")@(detail.PostedAt?.ToString(" · yyyy-MM-dd HH:mm"))</text>
                 </div>
             </div>
         }
@@ -220,9 +247,10 @@
                     @if (!string.IsNullOrEmpty(detail.BillOfLading)) { <dt style="color:var(--mer-ink-500);">Bill of lading</dt><dd style="font-family:Inter,monospace;">@detail.BillOfLading</dd> }
                     @if (!string.IsNullOrEmpty(detail.PackingList)) { <dt style="color:var(--mer-ink-500);">Packing list</dt><dd style="font-family:Inter,monospace;">@detail.PackingList</dd> }
                     @if (detail.CreatedOn.HasValue) { <dt style="color:var(--mer-ink-500);">Created</dt><dd style="font-family:Inter,monospace;">@detail.CreatedOn.Value.ToString("yyyy-MM-dd HH:mm")</dd> }
-                    @* Shipment date IS submittedAt — the buyer-approval instant, which is when the ASN goes to the ERP. *@
-                    <dt style="color:var(--mer-ink-500);">Shipment date</dt><dd style="font-family:Inter,monospace;">@(detail.SubmittedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
-                    @if (detail.SubmittedAt.HasValue) { <dt style="color:var(--mer-ink-500);">Submitted</dt><dd style="font-family:Inter,monospace;">@detail.SubmittedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.SubmittedBy) ? "" : $"by {detail.SubmittedBy}")</dd> }
+                    @* R14 — the shipping date IS the POST date (postedAt), not the confirmation date. It equals the
+                       submittedAt the LN payload carries as ShipmentDate, because both are stamped at post. *@
+                    <dt style="color:var(--mer-ink-500);">Shipping date</dt><dd style="font-family:Inter,monospace;">@(detail.PostedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+                    @if (detail.PostedAt.HasValue) { <dt style="color:var(--mer-ink-500);">Posted</dt><dd style="font-family:Inter,monospace;">@detail.PostedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.PostedBy) ? "" : $"by {detail.PostedBy}")</dd> }
                     @if (!string.IsNullOrEmpty(detail.ErpSyncId)) { <dt style="color:var(--mer-ink-500);">ERP sync id</dt><dd style="font-family:Inter,monospace;font-size:11px;">@detail.ErpSyncId</dd> }
                     @if (!string.IsNullOrEmpty(detail.ErpCode)) { <dt style="color:var(--mer-ink-500);">ERP code</dt><dd style="font-family:Inter,monospace;">@detail.ErpCode</dd> }
                 </dl>
@@ -677,8 +705,9 @@
                         <div style="font-size:13px;font-family:Inter,monospace;">@(asnCreatedOn?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
                     </div>
                     <div>
-                        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mer-ink-500);margin-bottom:4px;">Shipment date</div>
-                        <div style="font-size:13px;font-family:Inter,monospace;">@(asnShipmentDate?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+                        @* R14 — blank until the ASN is posted, because posting is what sets it. *@
+                        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mer-ink-500);margin-bottom:4px;">Shipping date</div>
+                        <div style="font-size:13px;font-family:Inter,monospace;" title="Set when you post the ASN">@(asnShipmentDate?.ToString("yyyy-MM-dd HH:mm") ?? "on post")</div>
                     </div>
                 </div>
 
@@ -738,12 +767,28 @@
                     @if (currentStep == 4)
                     {
                         <button class="mbtn mbtn--outline" @onclick="SaveDraft" disabled="@(busy || (!IsNew && detail?.ShipBlocked == true))">@(busy && savingDraft ? "Saving…" : (IsNew ? "Save draft" : "Save changes"))</button>
-                        @if (!IsNew)
+                        @if (!IsNew && detail is not null)
                         {
-                            @* R5 (§10.2) — replaces the old direct Submit. Sends Draft/Rejected → PendingApproval. *@
-                            <button class="mbtn mbtn--primary-success" @onclick="SendForApproval" disabled="@(busy || detail?.ShipBlocked == true)">
-                                <span class="material-symbols-outlined">send</span> @(busy && !savingDraft ? "Sending…" : "Send for approval")
-                            </button>
+                            @* R14 — which final action the supplier gets depends on the supplier's ASN-confirmation
+                               mode and the ASN's state:
+                                 • confirmation required + Draft/Rejected → Send for approval (buyer confirms first);
+                                 • confirmation NOT required + Draft       → Post (no buyer in the loop at all);
+                                 • Approved (either mode)                  → Post (the buyer has confirmed).
+                               CanPost comes from the server and mirrors AsnLifecycle.AssertCanPost exactly. *@
+                            @if (detail.CanPost)
+                            {
+                                <button class="mbtn mbtn--primary-success" @onclick="PostAsn" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : "Posts the shipment to the ERP and records today as the shipping date")">
+                                    <span class="material-symbols-outlined">local_shipping</span> @(busy && !savingDraft ? "Posting…" : "Post")
+                                </button>
+                            }
+                            else if (detail.AsnConfirmationRequired)
+                            {
+                                @* R5 (§10.2) — Draft/Rejected → PendingApproval. No documents or shipment refs
+                                   required at this point (R14); both are enforced at Post. *@
+                                <button class="mbtn mbtn--primary-success" @onclick="SendForApproval" disabled="@(busy || detail.ShipBlocked)">
+                                    <span class="material-symbols-outlined">send</span> @(busy && !savingDraft ? "Sending…" : "Send for approval")
+                                </button>
+                            }
                         }
                     }
                     else
@@ -919,14 +964,16 @@
             <header class="merino-dialog__header">
                 <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">task_alt</span></div>
                 <div class="merino-dialog__head-text">
-                    <div class="merino-dialog__eyebrow">ASN · Approval</div>
-                    <h2 class="merino-dialog__title">Approve @detail.AsnNumber?</h2>
-                    <p class="merino-dialog__subtitle">Approving submits the shipment — it consumes the line balances, creates the draft invoice, and posts to the ERP outbox.</p>
+                    <div class="merino-dialog__eyebrow">ASN · Confirmation</div>
+                    <h2 class="merino-dialog__title">Confirm @detail.AsnNumber?</h2>
+                    @* R14 — approval no longer submits anything. It confirms the shipment details and hands the ASN
+                       back to the supplier to complete and post. *@
+                    <p class="merino-dialog__subtitle">Confirming verifies the shipment details. The supplier then uploads the remaining documents and posts the ASN — posting is what sends it to the ERP and sets the shipping date.</p>
                 </div>
                 <button class="merino-dialog__close" @onclick="() => showApprove = false"><span class="material-symbols-outlined">close</span></button>
             </header>
             <div class="merino-dialog__body">
-                <p style="font-size:13px;color:var(--mer-ink-700);">Confirm you have reviewed the lines, attachments and shipment details. This cannot be undone.</p>
+                <p style="font-size:13px;color:var(--mer-ink-700);">Confirm you have reviewed the lines and shipment details. No balances are consumed and nothing is sent to the ERP until the supplier posts.</p>
                 @if (!string.IsNullOrEmpty(approveError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:10px;white-space:pre-wrap;">@approveError</div> }
             </div>
             <footer class="merino-dialog__footer">
@@ -1073,6 +1120,9 @@
     private bool showAttachConfirm = false;
     private string attachConfirmMessage = string.Empty;
     private List<string> attachMissing = new();
+    // R14 — which action raised the two-step dialogs, so the confirm retries the right endpoint.
+    private bool confirmingPost = false;
+    private bool gateOverrideForPost = false;
 
     // R5 (§10.2) — buyer Approve / Reject dialog state.
     private bool showApprove = false;
@@ -1111,9 +1161,11 @@
     // R5 (§10.2) — buyer decision permission. Asn.Approve is seeded to SuperAdmin/Admin/Buyer (not Supplier). The
     // server AsnApprovalGate additionally asserts the caller is a MAPPED PO buyer; we only gate the affordance here.
     private bool CanApprove => Token.HasPermission("Asn.Approve");
-    // Cancel is supplier-side and valid on any of the supplier's active states (Draft / Rejected / PendingApproval).
+    // Cancel is supplier-side and valid on any of the supplier's active states.
+    // R14 — Approved joins them: a confirmed-but-unposted ASN has consumed nothing and dispatched nothing, so the
+    // supplier must still be able to withdraw it (mirrors AsnLifecycle.Cancellable).
     // Submitted/InTransit/Delivered/Cancelled are terminal-for-cancel here (the read-only view hides it via this flag).
-    private bool CanCancel => detail?.AsnStatus is "Draft" or "Rejected" or "PendingApproval";
+    private bool CanCancel => detail?.AsnStatus is "Draft" or "Rejected" or "PendingApproval" or "Approved";
 
     // The gate block message names the required action; the API stamps it under the "poStatus" error key. Match the
     // stable prefix so we route it to the override dialog rather than the generic error banner.
@@ -1244,7 +1296,8 @@
                 packingList = detail.PackingList;
                 asnWarehouse = detail.Warehouse;
                 asnCreatedOn = detail.CreatedOn;
-                asnShipmentDate = detail.SubmittedAt;
+                // R14 — the shipping date is the post date.
+                asnShipmentDate = detail.PostedAt;
 
                 attachments.Clear();
                 attachments.AddRange(detail.Attachments);
@@ -1487,36 +1540,71 @@
     }
 
     // ---- R5 (§10.2) Send for approval (Draft/Rejected -> PendingApproval) ----
-    // Replaces the old direct Submit. The supplier persists pending edits (an edit on a Rejected ASN flips it back to
-    // Draft server-side), then POSTs /send-for-approval. The §10.3 attachment-requirement check runs server-side here:
-    // a missing Mandatory blocks (400), a missing Warning returns ConfirmationRequired (two-step, same UX as R4 submit).
+    // R14 — the attachment-requirement check and the mandatory shipment references BOTH moved off this path to
+    // Post, so a supplier can obtain buyer confirmation before the documents exist. This call now only has to get
+    // past the PO ship gate.
     private async Task SendForApproval()
     {
         if (IsNew) { await SaveDraft(); return; }
         busy = true; savingDraft = false; submitError = string.Empty;
 
-        // Block the obvious serial/lot failures before the round-trip (the backend re-enforces at Approve/Submit).
+        // Block the obvious serial/lot failures before the round-trip (the backend re-enforces at Post).
         if (!SerialLotCaptureValid)
         {
             submitError = "Fix the serial/lot capture before sending: every serialized line needs one serial per unit, and every lot line's quantities must sum to the shipped quantity (no duplicates).";
             busy = false; currentStep = 2; return;
         }
 
-        // Persist any pending header/line edits first (send-for-approval validates the stored ASN; a save on a Rejected
-        // ASN returns it to Draft).
+        if (!await SavePendingEditsAsync("sending for approval")) { busy = false; return; }
+
+        await SendForApprovalAsync(acknowledgeMissingAttachments: false);
+        busy = false;
+    }
+
+    // ---- R14 Post (Approved -> Submitted, or Draft -> Submitted when the supplier needs no confirmation) ----
+    // The ERP dispatch. Everything deferred from send-for-approval lands here server-side: the three mandatory
+    // shipment references, the attachment policy (Mandatory blocks / Warning two-step), the PO confirmation gate
+    // (with the §6.5 admin override), the over-ship balance guard, draft-invoice generation and the LN outbox.
+    private async Task PostAsn()
+    {
+        if (IsNew) { await SaveDraft(); return; }
+        busy = true; savingDraft = false; submitError = string.Empty;
+
+        if (!SerialLotCaptureValid)
+        {
+            submitError = "Fix the serial/lot capture before posting: every serialized line needs one serial per unit, and every lot line's quantities must sum to the shipped quantity (no duplicates).";
+            busy = false; currentStep = 2; return;
+        }
+
+        // Client-side pre-check on the three references so the supplier is sent straight to the field that is
+        // missing rather than bouncing off a 400. The server enforces them regardless.
+        var missingRefs = new List<string>();
+        if (string.IsNullOrWhiteSpace(invoiceNo)) missingRefs.Add("invoice no.");
+        if (string.IsNullOrWhiteSpace(billOfLading)) missingRefs.Add("bill of lading");
+        if (string.IsNullOrWhiteSpace(packingList)) missingRefs.Add("packing list");
+        if (missingRefs.Count > 0)
+        {
+            submitError = $"Fill in {string.Join(", ", missingRefs)} before posting the ASN.";
+            busy = false; currentStep = 3; return;
+        }
+
+        if (!await SavePendingEditsAsync("posting")) { busy = false; return; }
+
+        await PostAsnAsync(acknowledgeMissingAttachments: false, overrideReason: null);
+        busy = false;
+    }
+
+    // Persist pending header/line edits before a final action. Both final actions validate the STORED ASN, and an
+    // edit on a Rejected ASN flips it back to Draft server-side (an Approved one stays Approved).
+    private async Task<bool> SavePendingEditsAsync(string actionLabel)
+    {
         var lineReqs = BuildLineRequests();
         var upd = new UpdateAsnRequest(expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
                 InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList);
         var saveResp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", upd);
-        if (saveResp?.Success != true)
-        {
-            submitError = saveResp?.Errors?.FirstOrDefault() ?? "Could not save before sending for approval.";
-            busy = false;
-            return;
-        }
-
-        await SendForApprovalAsync(acknowledgeMissingAttachments: false);
-        busy = false;
+        if (saveResp?.Success == true) return true;
+        submitError = saveResp?.Errors?.FirstOrDefault() ?? $"Could not save before {actionLabel}.";
+        return false;
     }
 
     // ---- Create draft (with optional gate override). On a gate block, route to the override dialog. ----
@@ -1546,9 +1634,9 @@
         else { submitError = err ?? "Failed to create ASN."; }
     }
 
-    // ---- R5 (§10.2/§10.3) Send-for-approval — handles the §13.6 Warning-attachment confirm two-step. ----
-    // Note: the PO confirmation gate + over-ship guard NO LONGER fire here (§10.4) — they moved to the buyer's
-    // Approve (the final Submit). So the only two-step on this path is the Warning-attachment confirm.
+    // ---- R5 (§10.2) Send-for-approval. ----
+    // R14 — with the attachment guard moved to Post, this path can no longer return ConfirmationRequired and can
+    // no longer be blocked by a missing document. Only the PO ship gate can stop it.
     private async Task SendForApprovalAsync(bool acknowledgeMissingAttachments)
     {
         var body = new SendForApprovalRequest(acknowledgeMissingAttachments);
@@ -1561,29 +1649,65 @@
             detail = resp.Data;
             attachments.Clear();
             attachments.AddRange(resp.Data.Attachments);
-            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Sent for approval", Detail = "The PO buyer(s) will review and approve or reject this ASN." });
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Sent for approval", Detail = "The buyer will review and confirm this ASN. You can upload the shipping documents once it is confirmed." });
             await Reload();   // re-render in the locked/read-only PendingApproval view
             return;
         }
 
-        // (2) Warning attachments missing — 200 ConfirmationRequired, nothing committed. Show the confirm dialog.
+        // (2) Blocking error — PO gate, wrong state, or a supplier that needs no confirmation at all.
+        submitError = resp?.Errors?.FirstOrDefault()
+            ?? "Could not send for approval (the ASN may no longer be Draft/Rejected).";
+    }
+
+    // ---- R14 Post — carries BOTH two-steps: the Warning-attachment confirm and the §6.5 PO gate override. ----
+    private async Task PostAsnAsync(bool acknowledgeMissingAttachments, string? overrideReason)
+    {
+        var body = new PostAsnRequest(acknowledgeMissingAttachments,
+            string.IsNullOrWhiteSpace(overrideReason) ? null : overrideReason.Trim());
+        var resp = await Api.PostAsync<AsnDetailDto, PostAsnRequest>($"api/asns/{Id}/post", body);
+
+        // (1) Success — Submitted, dispatched to the ERP, shipping date stamped.
+        if (resp?.Success == true && resp.Data != null)
+        {
+            showAttachConfirm = false;
+            showGateOverride = false;
+            detail = resp.Data;
+            attachments.Clear();
+            attachments.AddRange(resp.Data.Attachments);
+            Notif.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Success,
+                Summary = "ASN posted",
+                Detail = resp.Data.PostedAt is { } p
+                    ? $"Sent to the ERP. Shipping date recorded as {p:dd MMM yyyy}."
+                    : "Sent to the ERP.",
+            });
+            await Reload();   // re-render read-only (Submitted)
+            return;
+        }
+
+        // (2) Warning attachments missing — 200 ConfirmationRequired, nothing committed.
         if (resp?.ConfirmationRequired == true)
         {
             attachConfirmMessage = string.IsNullOrEmpty(resp.ConfirmationMessage)
                 ? "One or more required attachments were not uploaded, do you wish to proceed?"
                 : resp.ConfirmationMessage!;
             attachMissing = resp.MissingAttachments ?? new();
+            confirmingPost = true;
             showAttachConfirm = true;
             return;
         }
 
-        // (3) Blocking error — missing Mandatory attachment, not-Draft, etc.
-        submitError = resp?.Errors?.FirstOrDefault()
-            ?? "Could not send for approval (a mandatory attachment may be missing, or the ASN is no longer Draft/Rejected).";
+        // (3) PO confirmation gate — offer the §6.5 override to a caller who holds PurchaseOrder.OverrideGate.
+        var err = resp?.Errors?.FirstOrDefault();
+        if (IsGateBlock(err)) { gateOverrideForPost = true; OpenGateOverride(err!); return; }
+
+        // (4) Blocking error — mandatory attachment, missing refs, over-ship, wrong state.
+        submitError = err ?? "Could not post the ASN (a mandatory attachment or shipment reference may be missing).";
     }
 
-    // The PO confirmation-gate override dialog only fires on CREATE now (§6.5 / UC-PO-09) — §10.4 moved the submit-time
-    // gate to the buyer's Approve, so send-for-approval never hits it.
+    // The PO confirmation-gate override dialog fires on CREATE and — R14 — on POST, which is where the submit-time
+    // gate now lives. gateOverrideForPost records which one so ConfirmGateOverride retries the right call.
     private void OpenGateOverride(string message)
     {
         gateBlockMessage = message;
@@ -1597,17 +1721,29 @@
     {
         if (string.IsNullOrWhiteSpace(gateOverrideReason)) { gateOverrideError = "A reason is required to override the gate."; return; }
         busy = true; gateOverrideError = string.Empty; submitError = string.Empty;
-        // Only the create path can reach the gate now (§10.4 moved the submit-time gate to the buyer's Approve).
-        var lineReqs = BuildLineRequests();
-        await CreateDraftAsync(lineReqs, gateOverrideReason);
+        // R14 — two paths can reach the gate: CREATE (§6.5) and POST (the submit-time gate, moved here from the
+        // buyer's Approve). Retry whichever one raised it.
+        if (gateOverrideForPost)
+        {
+            await PostAsnAsync(acknowledgeMissingAttachments: false, overrideReason: gateOverrideReason);
+        }
+        else
+        {
+            var lineReqs = BuildLineRequests();
+            await CreateDraftAsync(lineReqs, gateOverrideReason);
+        }
         busy = false;
     }
 
-    // Re-send acknowledging the missing Warning attachments (§13.6 / §10.3 two-step).
+    // Re-send acknowledging the missing Warning attachments (§13.6 two-step).
+    // R14 — only the Post path can raise this now, but the flag keeps the dialog honest if that ever changes.
     private async Task ConfirmSubmitWithMissingAttachments()
     {
         busy = true; submitError = string.Empty;
-        await SendForApprovalAsync(acknowledgeMissingAttachments: true);
+        if (confirmingPost)
+            await PostAsnAsync(acknowledgeMissingAttachments: true, overrideReason: null);
+        else
+            await SendForApprovalAsync(acknowledgeMissingAttachments: true);
         busy = false;
     }
 
@@ -1711,8 +1847,10 @@
 
     private string StatusClass(string status) => status switch
     {
-        "Delivered" => "tlg-status--active",
-        // R5 (§10.1) — PendingApproval sits between Draft and Submitted; treated like the other in-flight states.
+        // R14 — Approved reads as a positive milestone (the buyer confirmed), distinct from the in-flight
+        // "waiting on someone" states; it still needs the supplier's Post to become Submitted.
+        "Delivered" or "Approved" => "tlg-status--active",
+        // R5 (§10.1) — PendingApproval sits between Draft and Approved; treated like the other in-flight states.
         "Submitted" or "InTransit" or "PendingApproval" => "tlg-status--pending",
         "Cancelled" or "Rejected" => "tlg-status--danger",
         _ => "tlg-status--info"

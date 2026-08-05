@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.Shipments;
 using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
+using MerinoOne.SupplierPortal.Domain.Entities.Audit;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -69,7 +70,11 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
 
         // R5 (§10.1) — editable in Draft OR Rejected (a rejected ASN returns to the supplier for edit). Editing a
         // Rejected ASN moves it back to Draft (it must be re-sent for approval afterwards).
+        // R14 (D5) — ALSO editable in Approved, so the supplier can complete the shipment after the buyer confirms.
+        // An Approved ASN stays Approved through the edit (it must NOT drop back to Draft — the buyer's
+        // confirmation still stands and the supplier's next action is Post, not Send-For-Approval).
         AsnLifecycle.AssertCanEdit(asn.AsnStatus);
+        var wasApproved = asn.AsnStatus == AsnStatus.Approved;
 
         var body = request.Body;
         var now = DateTime.UtcNow;
@@ -122,8 +127,26 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         // Rejected→Draft) ASN does NOT consume shippedQtyToDate. The atomic guard moved to final Submit.
 
         // R5 (§10.1) — editing a Rejected ASN returns it to Draft (must be re-sent for approval afterwards).
+        // An Approved ASN is deliberately NOT reset here — see the AssertCanEdit note above.
         if (asn.AsnStatus == AsnStatus.Rejected)
             asn.AsnStatus = AsnStatus.Draft;
+
+        // R14 (D5) — accountability for the one genuinely permissive part of this design: the supplier may change
+        // a shipment the buyer has already confirmed. Record that it happened, on the ASN, so the change is
+        // visible after the fact. (Quantities remain bounded — the atomic over-ship guard still runs at Post.)
+        if (wasApproved)
+            _db.AuditEntries.Add(new AuditEntry
+            {
+                EntityName = nameof(Asn),
+                EntityId = asn.Id,
+                Operation = "Update",
+                FieldName = "Edited after buyer confirmation",
+                OldValue = nameof(AsnStatus.Approved),
+                NewValue = $"ASN {asn.AsnNumber} edited by {_user.UserCode} after buyer confirmation",
+                ChangedBy = _user.UserCode,
+                ChangedOn = now,
+                TenantId = asn.TenantId,
+            });
 
         // Header fields.
         asn.ExpectedDeliveryDate = body.ExpectedDeliveryDate;

@@ -5701,6 +5701,15 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("packingList");
 
+                    b.Property<DateTime?>("PostedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("postedAt");
+
+                    b.Property<string>("PostedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("postedBy");
+
                     b.Property<Guid?>("PurchaseOrderId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("purchaseOrderId");
@@ -8490,6 +8499,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("approvedBy");
+
+                    b.Property<bool>("AsnConfirmationRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("asnConfirmationRequired");
 
                     b.Property<string>("CreatedBy")
                         .IsRequired()

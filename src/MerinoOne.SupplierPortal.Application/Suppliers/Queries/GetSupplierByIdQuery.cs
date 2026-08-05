@@ -163,7 +163,9 @@ public class GetSupplierByIdQueryHandler : IRequestHandler<GetSupplierByIdQuery,
             s.ErpCode,
             // R4 (2026-06-26) — Phase 5b / D1: the action toggles that travel with the confirmation mode.
             s.AllowNegotiate,
-            s.AllowReject
+            s.AllowReject,
+            // R14 (2026-08-05) — Supplier Master "ASN Confirmation Required".
+            s.AsnConfirmationRequired
         );
     }
 }

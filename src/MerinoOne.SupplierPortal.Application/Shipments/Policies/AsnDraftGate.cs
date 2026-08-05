@@ -13,12 +13,18 @@ namespace MerinoOne.SupplierPortal.Application.Shipments.Policies;
 /// <list type="number">
 ///   <item>a covered PO is not shippable per <see cref="PoConfirmationPolicy"/> (e.g. reset to Released by an ERP
 ///         Modify) — the same rule the create/submit paths enforce; or</item>
-///   <item>another ASN covering the SAME PO is already pending buyer approval (one pending shipment per PO at a
-///         time — avoids a second contested shipment against the same order while one awaits the buyer).</item>
+///   <item>another ASN covering the SAME PO is already in flight — pending buyer approval, or approved and
+///         awaiting post (one in-flight shipment per PO at a time — avoids a second contested shipment against
+///         the same order while one holds an unconsumed claim on it).</item>
 /// </list>
 /// No supplier override is offered on these paths — the block is hard (admin exceptions still flow through the
 /// create/submit override at §6.5). <see cref="EvaluateAsync"/> is the read-only form the DTO builder uses to
 /// disable the UI buttons with the same reason.
+///
+/// <para><b>R14 — deliberately NOT called on the Post path.</b> Post reaches <c>AsnSubmitExecutor</c>, which
+/// re-evaluates PO shippability through <c>PoConfirmationGateEnforcer</c> — and that carries the §6.5 admin
+/// override, whereas this gate is a hard block. Running this gate at Post would short-circuit the override and
+/// leave an ASN unshippable by anyone when an ERP Modify resets a covered PO after approval.</para>
 /// </summary>
 public static class AsnDraftGate
 {
@@ -38,17 +44,48 @@ public static class AsnDraftGate
             if (!PoConfirmationPolicy.AllowsShipping(po.PoStatus, mode))
                 return $"PO {po.PoNumber} requires {PoConfirmationPolicy.RequiredAction(mode)} before shipments can be created.";
 
-        // (2) Same-PO pending-approval block: another ASN covering one of these POs is at the buyer awaiting a
-        // decision — don't let a second shipment for the same PO be edited or sent until it is approved/rejected.
-        var pendingPo = await (from j in db.AsnPurchaseOrders
-                               join a in db.Asns on j.AsnId equals a.Id
-                               join po in db.PurchaseOrders on j.PurchaseOrderId equals po.Id
-                               where coveredPoIds.Contains(j.PurchaseOrderId)
-                                     && a.Id != asnId
-                                     && a.AsnStatus == AsnStatus.PendingApproval
-                               select po.PoNumber).FirstOrDefaultAsync(ct);
-        if (pendingPo is not null)
-            return $"Another ASN for PO {pendingPo} is pending buyer approval. Wait for it to be approved or rejected before editing or sending this ASN.";
+        // (2) Same-PO in-flight block: another ASN covering one of these POs is at the buyer awaiting a decision,
+        // or has been confirmed but not yet posted — don't let a second shipment for the same PO be edited or sent
+        // until that one posts, is rejected, or is cancelled.
+        //
+        // R14 — the state set WIDENED to include Approved. Before R14 approval consumed the PO balance immediately,
+        // so PendingApproval was the whole window of contention; now balance is consumed at POST, so an Approved
+        // ASN is still holding an unconsumed claim on the PO and must keep the lock.
+        //
+        // R14 fix (F1) — the "other ASN" side used to read the AsnPurchaseOrder junction ONLY, so a
+        // schedule-built ASN (whose junction is empty; its PO linkage lives on AsnLine → PurchaseOrderLine)
+        // slipped the lock entirely. Resolve the other ASNs' covered POs from ALL THREE sources, the same union
+        // AsnApprovalSupport.ResolveCoveredPoIdsAsync uses: line-derived, junction, and the legacy scalar header.
+        // NOTE: compare the status with explicit ||, NOT a local array + Contains. An `AsnStatus[]` closure hits
+        // the ReadOnlySpan Contains overload during expression evaluation and throws a TypeLoadException before
+        // EF ever gets to translate it.
+        var inFlight = db.Asns.Where(a =>
+            a.Id != asnId && !a.IsDeleted &&
+            (a.AsnStatus == AsnStatus.PendingApproval || a.AsnStatus == AsnStatus.Approved));
+
+        // Three separate look-ups rather than one Concat — same union, and each translates on its own.
+        var blockedPoId = await (from a in inFlight
+                                 join al in db.AsnLines on a.Id equals al.AsnId
+                                 join pol in db.PurchaseOrderLines on al.PurchaseOrderLineId equals pol.Id
+                                 where !al.IsDeleted && coveredPoIds.Contains(pol.PurchaseOrderId)
+                                 select (Guid?)pol.PurchaseOrderId).FirstOrDefaultAsync(ct);
+
+        blockedPoId ??= await (from a in inFlight
+                               join j in db.AsnPurchaseOrders on a.Id equals j.AsnId
+                               where !j.IsDeleted && coveredPoIds.Contains(j.PurchaseOrderId)
+                               select (Guid?)j.PurchaseOrderId).FirstOrDefaultAsync(ct);
+
+        blockedPoId ??= await inFlight
+            .Where(a => a.PurchaseOrderId != null && coveredPoIds.Contains(a.PurchaseOrderId.Value))
+            .Select(a => a.PurchaseOrderId)
+            .FirstOrDefaultAsync(ct);
+
+        if (blockedPoId is { } blocked)
+        {
+            var poNumber = await db.PurchaseOrders.Where(p => p.Id == blocked)
+                .Select(p => p.PoNumber).FirstOrDefaultAsync(ct);
+            return $"Another ASN for PO {poNumber} is pending buyer approval or awaiting post. Wait for it to be posted, rejected or cancelled before editing or sending this ASN.";
+        }
 
         return null;
     }

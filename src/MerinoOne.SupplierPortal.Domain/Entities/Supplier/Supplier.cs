@@ -59,6 +59,15 @@ public class Supplier : BaseAggregateRoot
     public bool AllowNegotiate { get; set; } = true;
     public bool AllowReject { get; set; } = true;
 
+    // R14 (2026-08-05) — TSD R14 §2/D1: does the buyer have to CONFIRM this supplier's ASN before the supplier
+    // posts it to the ERP? NOT NULL DEFAULT 1 so every existing supplier keeps buyer confirmation (the safe,
+    // strictest default — same reasoning as PoConfirmationMode.AcceptToShip above).
+    //   true  → Draft → PendingApproval → Approved → (supplier Post) → Submitted.
+    //   false → Draft → (supplier Post) → Submitted. No approval step at all; SendForApproval is rejected.
+    // ORTHOGONAL to PoConfirmationMode: that gates whether a PO may be shipped AT ALL, this gates whether the
+    // buyer confirms the shipment before it dispatches.
+    public bool AsnConfirmationRequired { get; set; } = true;
+
     public ICollection<SupplierVerification> Verifications { get; set; } = new List<SupplierVerification>();
     public ICollection<SupplierAddress> Addresses { get; set; } = new List<SupplierAddress>();
     public ICollection<SupplierContact> Contacts { get; set; } = new List<SupplierContact>();

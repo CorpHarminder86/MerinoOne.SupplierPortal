@@ -2,6 +2,7 @@ using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Models;
 using MerinoOne.SupplierPortal.Application.Common.Security;
+using MerinoOne.SupplierPortal.Application.Shipments;
 using MerinoOne.SupplierPortal.Contracts.Authorization;
 using MerinoOne.SupplierPortal.Contracts.SupplierRegistration;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
@@ -218,7 +219,13 @@ Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
                 return Result<DocumentAttachmentDto>.Fail("License not found for this supplier.");
         }
 
-        // Direct attach to an ASN: the ASN must belong to this supplier AND be Draft (lock-on-submit).
+        // Direct attach to an ASN: the ASN must belong to this supplier AND be in an editable state.
+        // R14 — the lock is now AsnDtoBuilder.IsLocked rather than a local "!= Draft", so it admits:
+        //   • Approved — the whole point of the confirmation flow is that documents arrive AFTER the buyer
+        //     confirms (Packing List, Commercial Invoice); and
+        //   • Rejected — which the old rule wrongly excluded, so a supplier could not fix the very attachment
+        //     the rejection was about without first saving an edit to flip it back to Draft.
+        // Still locked while PendingApproval (the buyer reviews a stable set) and once Submitted onwards.
         if (isAsn)
         {
             var asn = await _db.Asns
@@ -227,8 +234,9 @@ Returns DocumentAttachmentDto. Requires **Supplier.Write**.")]
                 .FirstOrDefaultAsync(ct);
             if (asn is null)
                 return Result<DocumentAttachmentDto>.Fail("ASN not found for this supplier.");
-            if (asn.AsnStatus != AsnStatus.Draft)
-                return Result<DocumentAttachmentDto>.Fail("ASN is not Draft; attachments are locked once it is Submitted.");
+            if (AsnDtoBuilder.IsLocked(asn.AsnStatus))
+                return Result<DocumentAttachmentDto>.Fail(
+                    $"ASN is {asn.AsnStatus}; attachments are locked while it is pending approval and once it is posted.");
         }
 
         // R6 (plan D16) — direct attach to an INVOICE: must belong to this supplier AND be Draft (mirrors the
@@ -392,8 +400,10 @@ is Submitted. Returns empty success; 404 if not found; error if the owning ASN/I
         {
             var asn = await _db.Asns.FirstOrDefaultAsync(a => a.Id == doc.OwnerEntityId, ct);
             if (asn is null) return Result.Fail("Owning ASN not found.");
-            if (asn.AsnStatus != AsnStatus.Draft)
-                return Result.Fail("ASN is not Draft; attachments are locked once it is Submitted.");
+            // R14 — same editable-state rule as the upload path above (admits Approved and Rejected).
+            if (AsnDtoBuilder.IsLocked(asn.AsnStatus))
+                return Result.Fail(
+                    $"ASN is {asn.AsnStatus}; attachments are locked while it is pending approval and once it is posted.");
             supplierId = asn.SupplierId;
             seccodeId = asn.SeccodeId;
         }

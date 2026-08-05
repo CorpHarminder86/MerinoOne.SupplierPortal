@@ -72,6 +72,33 @@ public static class AsnApprovalSupport
     }
 
     /// <summary>
+    /// R14 (2026-08-05, D12) — best-effort: notify each mapped buyer that the supplier has POSTED the ASN and it
+    /// has gone to the ERP. Fires in BOTH confirmation modes:
+    /// <list type="bullet">
+    ///   <item>confirmation NOT required — this is the buyer's ONLY signal that a shipment exists at all, since
+    ///         <see cref="NotifyBuyersForApprovalAsync"/> never runs and the approval queue never lists it;</item>
+    ///   <item>confirmation required — the buyer approved earlier but would otherwise never learn when the
+    ///         shipment actually dispatched, nor what shipping date was recorded.</item>
+    /// </list>
+    /// Staged on the same context as the post transaction, so the rows commit (or roll back) with it.
+    /// </summary>
+    public static async Task NotifyBuyersPostedAsync(
+        IAppDbContext db, Asn asn, IReadOnlyCollection<Guid> buyerUserIds, DateTime now, CancellationToken ct)
+    {
+        if (buyerUserIds.Count == 0) return;
+        var emails = await db.AppUsers.IgnoreQueryFilters()
+            .Where(u => buyerUserIds.Contains(u.Id) && !u.IsDeleted && u.IsActive && u.Email != null && u.Email != "")
+            .Select(u => u.Email)
+            .Distinct()
+            .ToListAsync(ct);
+
+        foreach (var email in emails)
+            db.EmailOutbox.Add(BuildOutbox(asn.TenantId, email!.Trim(),
+                $"ASN {asn.AsnNumber} was posted",
+                BuyerPostedBody(asn.AsnNumber, now), now));
+    }
+
+    /// <summary>
     /// R6 (2026-07-02) — best-effort: notify each mapped buyer that draft-invoice generation for a just-submitted
     /// ASN was BLOCKED by the tax gate (a PO-line tax code with no usable rate). Staged on the SAME context as the
     /// approval transaction, so the rows commit (or roll back) with it.
@@ -168,12 +195,25 @@ public static class AsnApprovalSupport
 </body></html>
 """;
 
+    // R14 — approval is no longer the end of the road; it is the supplier's cue to finish the shipment and post.
     private static string SupplierApprovedBody(string asnNumber) => $"""
 <!DOCTYPE html>
 <html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
-  <h2 style="color:#0f3b5e;">ASN {WebUtility.HtmlEncode(asnNumber)} approved</h2>
-  <p>Your advance shipment notice <b>{WebUtility.HtmlEncode(asnNumber)}</b> was approved by the buyer and has been submitted.</p>
-  <p>No further action is required.</p>
+  <h2 style="color:#0f3b5e;">ASN {WebUtility.HtmlEncode(asnNumber)} confirmed</h2>
+  <p>Your advance shipment notice <b>{WebUtility.HtmlEncode(asnNumber)}</b> was confirmed by the buyer.</p>
+  <p>Please upload the remaining shipment documents (Packing List, Commercial Invoice and any others required),
+     complete the shipment references, and then click <b>Post</b> to send the shipment to the ERP.</p>
+  <p>The shipping date recorded against this ASN will be the date you post it.</p>
+</body></html>
+""";
+
+    private static string BuyerPostedBody(string asnNumber, DateTime postedAt) => $"""
+<!DOCTYPE html>
+<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
+  <h2 style="color:#0f3b5e;">ASN {WebUtility.HtmlEncode(asnNumber)} posted</h2>
+  <p>Advance shipment notice <b>{WebUtility.HtmlEncode(asnNumber)}</b> has been posted by the supplier and sent to the ERP.</p>
+  <p><b>Shipping date:</b> {postedAt:yyyy-MM-dd HH:mm} UTC</p>
+  <p>Open the portal to review the shipment and its documents.</p>
 </body></html>
 """;
 }

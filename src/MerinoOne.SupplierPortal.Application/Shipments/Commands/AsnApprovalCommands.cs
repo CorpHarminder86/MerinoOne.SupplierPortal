@@ -2,7 +2,6 @@ using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
-using MerinoOne.SupplierPortal.Application.Documents;
 using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
@@ -17,17 +16,29 @@ namespace MerinoOne.SupplierPortal.Application.Shipments.Commands;
 
 // ============================================================================================================
 // R5 (TSD R5 Addendum §10) — ASN approval lifecycle: SendForApproval (supplier) → Approve / Reject (buyer).
-// The two R4 checks are RE-TIMED here:
-//   • Attachment-requirement check fires at SEND-FOR-APPROVAL (§10.3), NOT at submit.
-//   • Over-ship atomic balance consumption fires at the APPROVE→SUBMIT path (§10.4) via AsnSubmitExecutor.
+//
+// R14 (2026-08-05) RE-TIMES both checks AGAIN, and breaks approval apart from the ERP dispatch:
+//   • Attachment-requirement check moves from SEND-FOR-APPROVAL to POST (PostAsnCommand) — the whole point of
+//     the confirmation flow is that the supplier may send for approval BEFORE the documents exist.
+//   • The three mandatory shipment references move from SEND-FOR-APPROVAL to POST, for the same reason.
+//   • Approve no longer runs AsnSubmitExecutor. It sets AsnStatus.Approved and stops. The over-ship atomic
+//     balance consumption, draft-invoice generation and LN outbox enqueue all now fire at POST.
 // ============================================================================================================
 
 // ─────────────────────────────────── Send for Approval (supplier) ──────────────────────────────────────────
 
 /// <summary>
-/// R5 §10.2 / §10.3 — Draft → PendingApproval. Runs the attachment-requirement check (MOVED here from Submit),
-/// creates the <see cref="AsnApproval"/> session (Pending), resolves the buyer approver(s), and notifies them
-/// (best-effort). Returns the two-step confirm outcome when a Warning attachment is unacknowledged.
+/// R5 §10.2 — Draft → PendingApproval. Creates the <see cref="AsnApproval"/> session (Pending), resolves the
+/// buyer approver(s), and notifies them (best-effort).
+///
+/// <para>R14 — this step is now DELIBERATELY PERMISSIVE. The attachment-requirement check and the three
+/// mandatory shipment references both moved to <c>PostAsnCommand</c>, because the requirement is explicitly
+/// that a supplier may send an ASN for buyer confirmation before the Packing List / Invoice exist. Only the
+/// PO ship gate still applies here. Rejected for a supplier with
+/// <c>AsnConfirmationRequired = false</c> — that supplier has no approval step and must post directly.</para>
+///
+/// <para>The return type stays <see cref="SubmitOutcome{T}"/> for wire compatibility with the existing
+/// two-step client, but with the attachment guard gone this path now only ever returns Completed.</para>
 /// </summary>
 public record SendForApprovalCommand(Guid Id, bool AcknowledgeMissingAttachments = false)
     : IRequest<SubmitOutcome<AsnDetailDto>>;
@@ -41,13 +52,11 @@ public class SendForApprovalCommandHandler : IRequestHandler<SendForApprovalComm
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
-    private readonly AttachmentSubmitGuard _attachmentGuard;
     private readonly IFulfilmentSettings _fulfilment;
 
-    public SendForApprovalCommandHandler(
-        IAppDbContext db, ICurrentUser user, AttachmentSubmitGuard attachmentGuard, IFulfilmentSettings fulfilment)
+    public SendForApprovalCommandHandler(IAppDbContext db, ICurrentUser user, IFulfilmentSettings fulfilment)
     {
-        _db = db; _user = user; _attachmentGuard = attachmentGuard; _fulfilment = fulfilment;
+        _db = db; _user = user; _fulfilment = fulfilment;
     }
 
     public async Task<SubmitOutcome<AsnDetailDto>> Handle(SendForApprovalCommand request, CancellationToken ct)
@@ -59,44 +68,33 @@ public class SendForApprovalCommandHandler : IRequestHandler<SendForApprovalComm
         // ASN to the supplier's principal; canWrite is enforced by the Asn.Write policy + the supplier SecRight.
         AsnLifecycle.AssertCanSendForApproval(asn.AsnStatus);
 
-        // R11 (D6/D7) — the three supplier-entered shipment references are MANDATORY here, not at draft creation.
-        // This is the last point before the ASN leaves the supplier's hands: approval flips it straight to
-        // Submitted and enqueues the LN post in one transaction, and there is no post-approval edit path, so an
-        // ASN that passes here with a blank ref would reach the ERP incomplete and be unfixable.
-        // D8 — no grandfathering: pre-R11 drafts hit this too and must be filled in before they can be sent.
-        var missingRefs = new List<string>();
-        if (string.IsNullOrWhiteSpace(asn.InvoiceNo)) missingRefs.Add("invoice no.");
-        if (string.IsNullOrWhiteSpace(asn.BillOfLading)) missingRefs.Add("bill of lading");
-        if (string.IsNullOrWhiteSpace(asn.PackingList)) missingRefs.Add("packing list");
-        if (missingRefs.Count > 0)
+        // R14 — this supplier may not have an approval step at all. Fail loudly rather than parking the ASN in a
+        // PendingApproval state no buyer is watching (no buyer notification queue exists for a No-mode supplier).
+        var confirmationRequired = await _db.Suppliers
+            .Where(s => s.Id == asn.SupplierId)
+            .Select(s => s.AsnConfirmationRequired)
+            .FirstOrDefaultAsync(ct);
+        if (!confirmationRequired)
             throw new ValidationException(new Dictionary<string, string[]>
             {
-                ["shipmentReferences"] = new[]
+                ["asnConfirmation"] = new[]
                 {
-                    $"Fill in {string.Join(", ", missingRefs)} on the ASN before sending it for approval."
+                    "This supplier does not require buyer confirmation for ASNs; post the ASN directly instead of sending it for approval."
                 }
             });
+
+        // R14 — the shipment-reference check and the attachment-requirement check that used to live here BOTH
+        // moved to PostAsnCommand. Sending for approval with no documents and no references is the requirement.
 
         var now = DateTime.UtcNow;
 
         // R4 §6.2 — "submission of a Draft ASN" is inside the gate block scope. Hard-block Send-For-Approval if a
         // covered PO is not shippable (e.g. reset to Released by an ERP Modify) or another ASN for the same PO is
-        // already pending buyer approval. (The over-ship balance guard still runs later at Approve→Submit, §10.4.)
-        var coveredPoIds = await _db.AsnPurchaseOrders
-            .Where(j => j.AsnId == asn.Id)
-            .Select(j => j.PurchaseOrderId)
-            .Distinct()
-            .ToListAsync(ct);
-        await AsnDraftGate.EnsureEditableAsync(_db, asn, coveredPoIds, ct);
-
-        // ---- Attachment Requirement Governance (MOVED from Submit, §10.3) --------------------------------
-        // Mandatory missing → throws (400). Warning missing + not-acknowledged → ConfirmationRequired (no mutation).
-        // Acknowledged-skip stages a skip AuditEntry committing in this handler's SaveChanges.
-        var decision = await _attachmentGuard.EvaluateAsync(
-            _db, DocumentOwnerTypes.Asn, asn.Id, asn.AsnNumber, asn.SupplierId,
-            request.AcknowledgeMissingAttachments, asn.TenantId, now, ct);
-        if (decision.RequiresConfirmation)
-            return SubmitOutcome<AsnDetailDto>.Confirm(decision.MissingWarning);
+        // already in flight. (The over-ship balance guard runs later, at Post.)
+        // R14 fix (F1) — resolve covered POs from all three sources, not the junction alone: a schedule-built ASN
+        // carries its PO linkage on AsnLine → PurchaseOrderLine and used to slip this gate entirely.
+        var coveredPoIds = await AsnApprovalSupport.ResolveCoveredPoIdsAsync(_db, asn, ct);
+        await AsnDraftGate.EnsureEditableAsync(_db, asn, coveredPoIds.ToList(), ct);
 
         // ---- Create the approval session (Pending) + flip the ASN to PendingApproval ---------------------
         var approval = new AsnApproval
@@ -132,11 +130,18 @@ public class SendForApprovalCommandHandler : IRequestHandler<SendForApprovalComm
 // ─────────────────────────────────── Approve (buyer) → Submit ───────────────────────────────────────────────
 
 /// <summary>
-/// R5 §10.2 / §10.4 — PendingApproval → Submitted. Any ONE mapped PO buyer may approve (Phase 1). Sets the
-/// approval session Approved (DecisionBy/On), then runs the SUBMIT path through <see cref="AsnSubmitExecutor"/> —
-/// the over-ship atomic guard consumes balance, the ASN flips to Submitted, the draft invoice + ERP outbox are
-/// created. If the guard returns 0 rows (balance lost post-approval, UC-AP-05) the submit fails (400) and the ASN
-/// stays PendingApproval — the approval did not flip (the whole handler rolls back).
+/// R5 §10.2, as re-cut by R14 — PendingApproval → <b>Approved</b>. Any ONE mapped PO buyer may approve. Sets the
+/// approval session Approved (DecisionBy/On) and the ASN to Approved, and notifies the supplier that it may now
+/// upload its documents and post.
+///
+/// <para><b>This no longer submits anything to the ERP.</b> Before R14 this handler called
+/// <see cref="AsnSubmitExecutor"/> inline, so approval consumed PO balance, generated the draft invoice and
+/// enqueued the LN post in one transaction. All of that moved to <c>PostAsnCommand</c>, because the buyer's
+/// confirmation now happens BEFORE the supplier has finished the shipment (documents, references), and the
+/// shipping date must be the post date rather than the approval date.</para>
+///
+/// <para><paramref name="OverrideReason"/> is retained on the wire for compatibility but is IGNORED here — the
+/// PO confirmation-gate override belongs to whoever triggers the submit, which is now the Post caller.</para>
 /// </summary>
 public record ApproveAsnCommand(Guid Id, string? OverrideReason = null) : IRequest<AsnDetailDto>;
 
@@ -149,13 +154,11 @@ public class ApproveAsnCommandHandler : IRequestHandler<ApproveAsnCommand, AsnDe
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
-    private readonly AsnSubmitExecutor _submit;
     private readonly IFulfilmentSettings _fulfilment;
 
-    public ApproveAsnCommandHandler(
-        IAppDbContext db, ICurrentUser user, AsnSubmitExecutor submit, IFulfilmentSettings fulfilment)
+    public ApproveAsnCommandHandler(IAppDbContext db, ICurrentUser user, IFulfilmentSettings fulfilment)
     {
-        _db = db; _user = user; _submit = submit; _fulfilment = fulfilment;
+        _db = db; _user = user; _fulfilment = fulfilment;
     }
 
     public async Task<AsnDetailDto> Handle(ApproveAsnCommand request, CancellationToken ct)
@@ -183,15 +186,19 @@ public class ApproveAsnCommandHandler : IRequestHandler<ApproveAsnCommand, AsnDe
         approval.UpdatedBy = _user.UserCode;
         approval.UpdatedOn = now;
 
-        // R5 §20 — notify the supplier (the user who sent it for approval) that the buyer approved it. Staged on the
-        // SAME context BEFORE the executor's SaveChanges, so the email row commits in the executor's transaction and
-        // rolls back with it on a UC-AP-05 submit failure (no false "approved" email if the shipment can't proceed).
+        // R14 — the buyer's confirmation, and nothing more. No balance is consumed, no invoice is drafted and
+        // nothing is enqueued to LN here; the supplier's Post does all of that. The ASN becomes editable again
+        // (AsnLifecycle.AssertCanEdit / AsnDtoBuilder.IsLocked both admit Approved) so the supplier can attach
+        // the Packing List and Invoice and fill in the shipment references.
+        asn.AsnStatus = AsnStatus.Approved;
+        asn.UpdatedBy = _user.UserCode;
+        asn.UpdatedOn = now;
+
+        // R5 §20 — notify the supplier (the user who sent it for approval). R14 rewords it: approval is no longer
+        // the end of the road, it is the supplier's cue to finish and post.
         await AsnApprovalSupport.NotifySupplierApprovedAsync(_db, asn, approval.SubmittedBy, now, ct);
 
-        // The submit path: consumes balance (over-ship guard, §10.4), flips Submitted, draft invoice + outbox.
-        // The approval mutation above is tracked on the same context and commits inside the executor's SaveChanges
-        // + transaction — so a guard 0-row failure (UC-AP-05) throws BEFORE commit and rolls the approval back too.
-        await _submit.ExecuteAsync(asn, now, request.OverrideReason, ct);
+        await _db.SaveChangesAsync(ct);
 
         return await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct, _fulfilment.OverShipAllowanceRounding);
     }

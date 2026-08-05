@@ -57,7 +57,11 @@ public record SupplierDetailDto(
     // Trailing optional (default true) so existing positional constructions stay valid; the supplier-settings UI
     // round-trips all three via SetPoResponseModeRequest.
     bool AllowNegotiate = true,
-    bool AllowReject = true);
+    bool AllowReject = true,
+    // R14 (2026-08-05) — Supplier Master "ASN Confirmation Required". True (the default, and every pre-R14
+    // supplier) = the buyer must confirm an ASN before the supplier can post it to the ERP. False = no approval
+    // step; the supplier posts straight from Draft. Trailing optional for the same reason as the two above.
+    bool AsnConfirmationRequired = true);
 
 /// <summary>
 /// A portal user mapped to this supplier (via SupplierUserMap → SecRight). Resolved cross-company /
@@ -250,6 +254,13 @@ public record SupplierLicenseExpiringDto(
 /// callers stay source-compatible.
 /// </summary>
 public record SetPoResponseModeRequest(string PoResponseMode, bool AllowNegotiate = true, bool AllowReject = true);
+
+/// <summary>
+/// R14 (2026-08-05) — admin sets the Supplier Master's "ASN Confirmation Required" flag. Deliberately its OWN
+/// request rather than another field on <see cref="SetPoResponseModeRequest"/>: the two settings are orthogonal
+/// (PO shippability vs shipment confirmation) and are edited from separate cards on the supplier screen.
+/// </summary>
+public record SetAsnConfirmationRequest(bool AsnConfirmationRequired);
 
 /// <summary>
 /// Internal user sets the supplier's commercial terms (R4 #1) — Currency + Payment/Delivery term FKs. The

@@ -160,12 +160,21 @@ public record AsnDetailDto(
     // InvoiceNo/BillOfLading/PackingList are the D6 supplier-entered shipment references.
     // CreatedOn is the audit-block creation instant, surfaced because it is the LN payload's CreateDate (D10)
     // and the form shows it read-only (D12). The payload's ShipmentDate is SubmittedAt above (D11) — null until
-    // the buyer approves, which is exactly when the shipment goes to the ERP.
+    // the ASN is POSTED (R14), which is exactly when the shipment goes to the ERP.
     string? Warehouse = null,
     string? InvoiceNo = null,
     string? BillOfLading = null,
     string? PackingList = null,
-    DateTime? CreatedOn = null);
+    DateTime? CreatedOn = null,
+    // R14 (2026-08-05) — PostedAt is the SHIPPING DATE: the instant the supplier clicked Post (D9). Null until
+    // posted. AsnConfirmationRequired mirrors the owning supplier's flag so the UI knows which lifecycle to
+    // render (Send-for-approval first, or Post straight from Draft). CanPost is the server's own verdict on
+    // whether Post is the next legal action — mirrors AsnLifecycle.AssertCanPost so the button cannot disagree
+    // with the guard. The UI must still AND it with !ShipBlocked.
+    DateTime? PostedAt = null,
+    string? PostedBy = null,
+    bool AsnConfirmationRequired = true,
+    bool CanPost = false);
 
 /// <summary>One covered PO on a (possibly multi-PO) ASN.</summary>
 public record AsnPurchaseOrderDto(
@@ -316,16 +325,25 @@ public record CreateAsnFromScheduleRequest(
     IReadOnlyDictionary<Guid, decimal>? ShipQtyByScheduleId = null,
     Guid? StagingKey = null);
 
-// R5 (TSD R5 Addendum §10.2) — supplier sends a Draft ASN for buyer approval. The attachment-requirement check
-// runs here (§10.3); a Warning skip is confirmed via AcknowledgeMissingAttachments (two-step, same as R4 submit).
+// R5 (TSD R5 Addendum §10.2) — supplier sends a Draft ASN for buyer approval.
+// R14 — AcknowledgeMissingAttachments is now VESTIGIAL on this request: the attachment check moved to Post, so
+// this path never returns ConfirmationRequired. Kept on the wire so existing clients keep compiling/posting.
 public record SendForApprovalRequest(bool AcknowledgeMissingAttachments = false);
 
 // R5 (TSD R5 Addendum §10.2) — buyer rejects a PendingApproval ASN. Reason is MANDATORY.
 public record RejectAsnRequest(string Reason);
 
-// R5 (TSD R5 Addendum §10.2) — buyer approves a PendingApproval ASN → runs the submit path. OverrideReason is the
-// optional admin PO-confirmation-gate override carried through to the submit step (UC-PO-09 parity).
+// R5 (TSD R5 Addendum §10.2) — buyer confirms a PendingApproval ASN.
+// R14 — this no longer runs the submit path, so OverrideReason is accepted but IGNORED; the PO-gate override now
+// belongs to PostAsnRequest. Kept on the wire for compatibility.
 public record ApproveAsnRequest(string? OverrideReason = null);
+
+// R14 — the supplier posts a confirmed (or, in No-confirmation mode, a Draft) ASN to the ERP. This is where the
+// shipment references and the attachment policy are enforced, and where the §6.5 PO-gate override now applies:
+// a caller holding PurchaseOrder.OverrideGate may supply a non-empty OverrideReason to push past a blocked PO
+// (audited). AcknowledgeMissingAttachments confirms proceeding past a Warning-level attachment requirement —
+// first call (false) returns 200 with ConfirmationRequired=true + the warning list and commits nothing.
+public record PostAsnRequest(bool AcknowledgeMissingAttachments = false, string? OverrideReason = null);
 
 // R4 (2026-06-22) — Migration 0021 exposed: GrnStatus (ERP-owned receipt status), GrnApprovedAt, IssueReported
 // (ERP remark), and the deterministic GRN→Invoice link (InvoiceId + denormalised InvoiceNumber). Added as

@@ -190,31 +190,62 @@ public static class ProcureToPayFlow
     }
 
     /// <summary>
-    /// Drives the full Send-for-Approval → buyer Approve chain on a Draft ASN, returning the FINAL approve
-    /// response (Submitted on success). The supplier sends for approval; the buyer (must be a mapped PO buyer —
-    /// the caller should have called <see cref="AssignBuyerAsync"/>) approves, which runs the submit path.
+    /// Drives the full Send-for-Approval → buyer Confirm → supplier <b>Post</b> chain on a Draft ASN, returning
+    /// the FINAL post response (Submitted on success).
+    ///
+    /// <para>R14 — this helper gained the third leg. Confirmation no longer submits: the buyer's approve only
+    /// moves the ASN to Approved, and the SUPPLIER's post is what consumes balance, generates the draft invoice
+    /// and enqueues the ERP message. Every caller that asserts on "the ASN reached the ERP" therefore needs all
+    /// three legs, which is why they live here rather than in each test.</para>
+    ///
+    /// <para>The attachment guard and the §6.5 gate override also moved to Post, so
+    /// <paramref name="acknowledgeMissingAttachments"/> and <paramref name="overrideReason"/> are now applied
+    /// there. A ConfirmationRequired or a hard block at any leg short-circuits and is returned for the caller
+    /// to assert on.</para>
     /// </summary>
     public static async Task<HttpResponseMessage> SubmitViaApprovalAsync(
         IntegrationTestFixture fx, HttpClient supplierClient, Guid asnId,
         bool acknowledgeMissingAttachments = false, string? overrideReason = null)
     {
-        // R11 (D6/D7) — Send-For-Approval hard-blocks unless invoiceNo / billOfLading / packingList are set.
-        // Tests that are not ABOUT that gate should not each have to supply them, so stamp defaults here for any
-        // ASN that has not set them itself. Direct DB write, not a PUT, so the flow under test is unperturbed
-        // (a PUT would also re-run the draft gate and replace the line set).
+        // R11 (D6/D7) — POST hard-blocks unless invoiceNo / billOfLading / packingList are set (R14 moved this
+        // check off send-for-approval). Tests that are not ABOUT that gate should not each have to supply them,
+        // so stamp defaults here for any ASN that has not set them itself. Direct DB write, not a PUT, so the
+        // flow under test is unperturbed (a PUT would also re-run the draft gate and replace the line set).
         // Tests that DO exercise the gate must clear these afterwards, or drive the endpoint directly.
         await EnsureShipmentRefsAsync(fx, asnId);
 
         var send = await supplierClient.PostAsJsonAsync(
-            $"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest(acknowledgeMissingAttachments));
-        // If the attachment governance blocks/confirms, return that response (the caller asserts on it).
+            $"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest(false));
         if (send.StatusCode != HttpStatusCode.OK) return send;
-        var sendBody = await ReadHelper<AsnDetailDto>(send);
-        if (sendBody.ConfirmationRequired) return send;   // Warning confirm — not yet PendingApproval.
 
         // The buyer was mapped to this supplier at AssignBuyerAsync (approval is scoped by admin.SupplierUserMap).
         var buyer = await SecurityTestHarness.ClientAsAsync(fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
-        return await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest(overrideReason));
+        var approve = await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
+        if (approve.StatusCode != HttpStatusCode.OK) return approve;
+
+        // R14 — the supplier posts. This is the leg that reaches the ERP.
+        return await PostAsync(supplierClient, asnId, acknowledgeMissingAttachments, overrideReason);
+    }
+
+    /// <summary>R14 — the supplier's Post leg on its own, for tests that drive the earlier legs themselves.</summary>
+    public static Task<HttpResponseMessage> PostAsync(
+        HttpClient supplierClient, Guid asnId,
+        bool acknowledgeMissingAttachments = false, string? overrideReason = null)
+        => supplierClient.PostAsJsonAsync(
+            $"/api/asns/{asnId}/post", new PostAsnRequest(acknowledgeMissingAttachments, overrideReason));
+
+    /// <summary>
+    /// R14 — flips a supplier's <c>AsnConfirmationRequired</c> flag directly in the DB. Used by tests that need
+    /// the No-confirmation path (Draft → Post) or that assert the mode-flip behaviour.
+    /// </summary>
+    public static async Task SetAsnConfirmationRequiredAsync(IntegrationTestFixture fx, Guid supplierId, bool required)
+    {
+        using var scope = fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var supplier = await db.Suppliers.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.Id == supplierId);
+        if (supplier is null || supplier.AsnConfirmationRequired == required) return;
+        supplier.AsnConfirmationRequired = required;
+        await db.SaveChangesAsync();
     }
 
     /// <summary>

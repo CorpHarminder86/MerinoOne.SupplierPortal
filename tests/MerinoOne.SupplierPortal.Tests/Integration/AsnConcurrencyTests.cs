@@ -15,15 +15,16 @@ using Xunit;
 namespace MerinoOne.SupplierPortal.Tests.Integration;
 
 /// <summary>
-/// R5 — TSD R5 Addendum §10.4 (re-timed from R4 §4.3 / §13 / UC-ASN-06; DI-02; DI-03). The atomic cumulative-shipped
-/// guard under REAL row contention on REAL SQL Server — now at the <b>Approve → Submit</b> step (the over-ship guard
-/// MOVED there from ASN create). EF InMemory cannot reproduce the conditional <c>ExecuteUpdateAsync</c> WHERE +
-/// affected-row-count semantics, so these MUST run relationally.
+/// R5 §10.4, re-timed again by R14. The atomic cumulative-shipped guard under REAL row contention on REAL SQL
+/// Server. EF InMemory cannot reproduce the conditional <c>ExecuteUpdateAsync</c> WHERE + affected-row-count
+/// semantics, so these MUST run relationally.
 ///
-/// <para>Each writer creates a Draft + sends it for approval up front (no contention there — Draft/PendingApproval
-/// do not consume balance), then the contended step is N independent buyer-Approve calls fired simultaneously: the
-/// approve runs the submit path whose single conditional UPDATE reads OrderQty + ShippedQtyToDate LIVE — exactly
-/// what makes the race safe. Each approve is an INDEPENDENT HTTP request → fresh DI scope / context / connection.</para>
+/// <para><b>R14 — the contended step moved from the buyer's Approve to the supplier's POST.</b> Approval no longer
+/// runs the submit path; posting does. So each writer is seeded to <b>Approved</b> up front (no contention there —
+/// Draft/PendingApproval/Approved consume nothing), and the race is N independent supplier-Post calls fired
+/// simultaneously. The post runs the submit path whose single conditional UPDATE reads OrderQty +
+/// ShippedQtyToDate LIVE — exactly what makes the race safe. Each post is an INDEPENDENT HTTP request → fresh DI
+/// scope / context / connection.</para>
 /// </summary>
 [Collection(IntegrationCollection.Name)]
 public class AsnConcurrencyTests
@@ -39,32 +40,32 @@ public class AsnConcurrencyTests
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
-        // Line balance 100 (tolerance 0). Two ASNs, each shipping 60, both sent for approval, then approved at once.
+        // Line balance 100 (tolerance 0). Two ASNs, each shipping 60, both confirmed, then POSTED at once.
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx, orderQty: 100m);
         await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
 
         await using var guardOn = await _fx.EnableOverShipGuardAsync();
 
         var supplier = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
-        var asnA = await CreatePendingAsync(supplier, setup, 60m);
-        var asnB = await CreatePendingAsync(supplier, setup, 60m);
+        var asnA = await CreateApprovedAsync(supplier, setup, 60m);
+        var asnB = await CreateApprovedAsync(supplier, setup, 60m);
 
-        // Two distinct buyer clients → two independent HTTP approve requests (own scope/context/connection).
-        var buyerA = await SecurityTestHarness.ClientAsAsync(_fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
-        var buyerB = await SecurityTestHarness.ClientAsAsync(_fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+        // Two distinct supplier clients → two independent HTTP post requests (own scope/context/connection).
+        var supplierA = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var supplierB = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
 
         var barrier = new Barrier(2);
-        Task<HttpStatusCode> ApproveAsync(HttpClient client, Guid asnId) => Task.Run(async () =>
+        Task<HttpStatusCode> PostAsync(HttpClient client, Guid asnId) => Task.Run(async () =>
         {
             barrier.SignalAndWait();
-            var resp = await client.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
+            var resp = await ProcureToPayFlow.PostAsync(client, asnId);
             return resp.StatusCode;
         });
 
-        var results = await Task.WhenAll(ApproveAsync(buyerA, asnA), ApproveAsync(buyerB, asnB));
+        var results = await Task.WhenAll(PostAsync(supplierA, asnA), PostAsync(supplierB, asnB));
 
         // EXACTLY ONE commits (200); the other's guard hits 0 rows → ValidationException → 400. No over-ship.
-        results.Count(s => s == HttpStatusCode.OK).Should().Be(1, because: "exactly one of the two 60-ships submits (UC-ASN-06)");
+        results.Count(s => s == HttpStatusCode.OK).Should().Be(1, because: "exactly one of the two 60-ships posts (UC-ASN-06)");
         results.Count(s => s == HttpStatusCode.BadRequest).Should().Be(1,
             because: "the loser's guard evaluates 100−60=40 < 60 → 0 rows → rejected");
 
@@ -78,7 +79,7 @@ public class AsnConcurrencyTests
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
-        // Ceiling exactly 100 (tolerance 0). N approvals each ship 30 → at most 3 fit (3×30=90 ≤ 100; a 4th = 120 > 100).
+        // Ceiling exactly 100 (tolerance 0). N posts each ship 30 → at most 3 fit (3×30=90 ≤ 100; a 4th = 120 > 100).
         const int writers = 8;
         const decimal each = 30m;
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx, orderQty: 100m);
@@ -88,24 +89,24 @@ public class AsnConcurrencyTests
 
         var supplier = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
         var asnIds = new Guid[writers];
-        for (var i = 0; i < writers; i++) asnIds[i] = await CreatePendingAsync(supplier, setup, each);
+        for (var i = 0; i < writers; i++) asnIds[i] = await CreateApprovedAsync(supplier, setup, each);
 
-        var buyers = new HttpClient[writers];
+        var suppliers = new HttpClient[writers];
         for (var i = 0; i < writers; i++)
-            buyers[i] = await SecurityTestHarness.ClientAsAsync(_fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+            suppliers[i] = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
 
         var barrier = new Barrier(writers);
-        Task<HttpStatusCode> ApproveAsync(HttpClient client, Guid asnId) => Task.Run(async () =>
+        Task<HttpStatusCode> PostAsync(HttpClient client, Guid asnId) => Task.Run(async () =>
         {
             barrier.SignalAndWait();
-            var resp = await client.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
+            var resp = await ProcureToPayFlow.PostAsync(client, asnId);
             return resp.StatusCode;
         });
 
-        var results = await Task.WhenAll(Enumerable.Range(0, writers).Select(i => ApproveAsync(buyers[i], asnIds[i])));
+        var results = await Task.WhenAll(Enumerable.Range(0, writers).Select(i => PostAsync(suppliers[i], asnIds[i])));
         var accepted = results.Count(s => s == HttpStatusCode.OK);
 
-        accepted.Should().Be(3, because: "only three 30-ships fit under the 100 ceiling (3×30=90 ≤ 100; a 4th = 120 > 100)");
+        accepted.Should().Be(3, because: "only three 30-ship posts fit under the 100 ceiling (3×30=90 ≤ 100; a 4th = 120 > 100)");
         var cumulative = await ShippedToDate(setup.PoLineId);
         cumulative.Should().Be(accepted * each, because: "final cumulative == Σ accepted ships (no lost update — DI-02)");
         cumulative.Should().BeLessThanOrEqualTo(100m, because: "the cumulative never exceeds the ceiling under parallel load");
@@ -122,19 +123,19 @@ public class AsnConcurrencyTests
         await using var guardOn = await _fx.EnableOverShipGuardAsync();
         var supplier = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
 
-        // Ship 100 (cumulative 100), then a further 20-ship blocked at orderQty 100 — both at the approve step.
+        // Ship 100 (cumulative 100), then a further 20-ship blocked at orderQty 100 — both at the POST step.
         (await ProcureToPayFlow.CreateAndSubmitAsync(_fx, supplier, setup, shippedQty: 100m))
             .StatusCode.Should().Be(HttpStatusCode.OK, because: "the full order ships against orderQty 100");
 
-        var blockedAsn = await CreatePendingAsync(supplier, setup, 20m);
-        var blocked = await ApproveAsBuyerAsync(blockedAsn);
-        blocked.Should().Be(HttpStatusCode.BadRequest, because: "a further 20-ship over-ships orderQty 100 (guard blocks at submit)");
+        var blockedAsn = await CreateApprovedAsync(supplier, setup, 20m);
+        var blocked = await PostAsSupplierAsync(blockedAsn);
+        blocked.Should().Be(HttpStatusCode.BadRequest, because: "a further 20-ship over-ships orderQty 100 (guard blocks at post)");
 
-        // ERP revises orderQty 100 → 200. The SAME pending 20-ship now SUCCEEDS on re-approve — the guard read the
-        // revised orderQty live within the UPDATE (200 − 100 = 100 ≥ 20). The ASN is still PendingApproval after the
-        // failed approve (the approval did not flip), so we re-approve it.
+        // ERP revises orderQty 100 → 200. The SAME confirmed 20-ship now SUCCEEDS on re-post — the guard read the
+        // revised orderQty live within the UPDATE (200 − 100 = 100 ≥ 20). The ASN is still Approved after the
+        // failed post (nothing was committed), so we simply post it again.
         await SetOrderQtyAsync(setup.PoLineId, 200m);
-        var retried = await ApproveAsBuyerAsync(blockedAsn);
+        var retried = await PostAsSupplierAsync(blockedAsn);
         retried.Should().Be(HttpStatusCode.OK,
             because: "the guard evaluates orderQty LIVE — after the revision to 200 the 20-ship fits (DI-03)");
         (await ShippedToDate(setup.PoLineId)).Should().Be(120m,
@@ -143,13 +144,14 @@ public class AsnConcurrencyTests
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
     /// <summary>
-    /// Creates a Draft ASN (no consumption) and moves it to PendingApproval → returns the asnId. This suite
-    /// isolates the APPROVE-time atomic over-ship guard under contention, which requires MULTIPLE ASNs pending on
-    /// the SAME PO at once. The Send-For-Approval UX gate now permits only one pending ASN per PO (AsnDraftGate),
-    /// so we seed the pending state directly here rather than driving the gated send. The send gate itself is
-    /// covered by <see cref="AsnDraftGateTests"/>.
+    /// R14 — creates a Draft ASN (no consumption) and moves it straight to <b>Approved</b> → returns the asnId.
+    /// This suite isolates the POST-time atomic over-ship guard under contention, which requires MULTIPLE ASNs
+    /// confirmed on the SAME PO at once. The Send-For-Approval UX gate permits only one in-flight ASN per PO
+    /// (AsnDraftGate, widened in R14 to cover Approved), so we seed the confirmed state directly here rather than
+    /// driving the gated send. The send gate itself is covered by <see cref="AsnDraftGateTests"/>.
+    /// The shipment references are stamped too, since POST hard-blocks without them.
     /// </summary>
-    private async Task<Guid> CreatePendingAsync(HttpClient supplier, ProcureToPayFlow.Setup setup, decimal qty)
+    private async Task<Guid> CreateApprovedAsync(HttpClient supplier, ProcureToPayFlow.Setup setup, decimal qty)
     {
         var create = await supplier.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup, shippedQty: qty));
         create.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(create));
@@ -161,21 +163,25 @@ public class AsnConcurrencyTests
         var now = DateTime.UtcNow;
         db.AsnApprovals.Add(new AsnApproval
         {
-            Id = Guid.NewGuid(), AsnId = asn.Id, Status = AsnApprovalStatus.Pending,
-            SubmittedBy = "seed", SubmittedOn = now, SeccodeId = asn.SeccodeId,
+            Id = Guid.NewGuid(), AsnId = asn.Id, Status = AsnApprovalStatus.Approved,
+            SubmittedBy = "seed", SubmittedOn = now, DecisionBy = "seed", DecisionOn = now,
+            SeccodeId = asn.SeccodeId,
             TenantId = asn.TenantId, TenantEntityId = asn.TenantEntityId, CreatedBy = "seed", CreatedOn = now,
         });
-        asn.AsnStatus = AsnStatus.PendingApproval;
+        asn.AsnStatus = AsnStatus.Approved;
+        asn.InvoiceNo ??= "INV-TEST-1";
+        asn.BillOfLading ??= "BOL-TEST-1";
+        asn.PackingList ??= "PL-TEST-1";
         asn.UpdatedBy = "seed";
         asn.UpdatedOn = now;
         await db.SaveChangesAsync();
         return asnId;
     }
 
-    private async Task<HttpStatusCode> ApproveAsBuyerAsync(Guid asnId)
+    private async Task<HttpStatusCode> PostAsSupplierAsync(Guid asnId)
     {
-        var buyer = await SecurityTestHarness.ClientAsAsync(_fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
-        var resp = await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
+        var supplier = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var resp = await ProcureToPayFlow.PostAsync(supplier, asnId);
         return resp.StatusCode;
     }
 

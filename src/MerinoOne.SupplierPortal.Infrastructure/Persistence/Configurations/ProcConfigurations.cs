@@ -311,6 +311,11 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
 
+        // R14 (2026-08-05) — D9: the shipping date = the instant the supplier posted. Same width/shape as the
+        // submittedAt/By pair it runs alongside.
+        b.Property(x => x.PostedAt).HasColumnName("postedAt").HasColumnType("datetime2");
+        b.Property(x => x.PostedBy).HasColumnName("postedBy").HasMaxLength(100);
+
         // R11.2 (2026-07-29) — the R8 erpCompany/erpTransactionType/erpDocumentNo columns were DROPPED from
         // proc.Asn (migration 0055). Invoice keeps its trio; the ASN IDM gate keys on erpCode alone.
 

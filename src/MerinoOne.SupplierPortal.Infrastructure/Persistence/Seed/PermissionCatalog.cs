@@ -34,8 +34,11 @@ public static class PermissionCatalog
         new PermissionSeed(Perm.DeliveryScheduleApprove,     "Approve delivery schedule", "Shipment",       "Approve or reject a delivery schedule"),
         new PermissionSeed(Perm.AsnRead,                     "View ASNs",                 "Shipment",       "View ASNs"),
         new PermissionSeed(Perm.AsnWrite,                    "Create/update ASN",         "Shipment",       "Create or update ASNs"),
-        // R5 (TSD R5 Addendum §10.2) — buyer approval of a PendingApproval ASN (approve→submit / reject+reason).
+        // R5 (TSD R5 Addendum §10.2) — buyer confirmation of a PendingApproval ASN (approve / reject+reason).
         new PermissionSeed(Perm.AsnApprove,                  "Approve/reject ASN",        "Shipment",       "Approve or reject an ASN sent for buyer approval"),
+        // R14 — the supplier's Post: the ERP dispatch, stamping the shipping date. Held by Admin too so a
+        // gate-blocked shipment can still be pushed through with an audited PurchaseOrder.OverrideGate reason.
+        new PermissionSeed(Perm.AsnPost,                     "Post ASN",                  "Shipment",       "Post an ASN to the ERP (stamps the shipping date)"),
         new PermissionSeed(Perm.GoodsReceiptRead,            "View GRNs",                 "Shipment",       "View goods-receipt (GRN) data"),
         new PermissionSeed(Perm.InvoiceRead,                 "View invoices",             "Invoice",        "View invoices"),
         new PermissionSeed(Perm.InvoiceSubmit,               "Submit invoice",            "Invoice",        "Submit an invoice"),
@@ -119,6 +122,8 @@ public static class PermissionCatalog
         [Perm.AsnRead]                      = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer, RoleNames.Finance, RoleNames.Supplier, RoleNames.ReadOnly },
         [Perm.AsnWrite]                     = new[] { RoleNames.SuperAdmin, RoleNames.Supplier },
         [Perm.AsnApprove]                   = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer },
+        // R14 — Supplier posts its own shipments; Admin can post on their behalf to exercise the §6.5 gate override.
+        [Perm.AsnPost]                      = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Supplier },
         [Perm.GoodsReceiptRead]             = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer, RoleNames.Finance, RoleNames.Supplier, RoleNames.ReadOnly },
         [Perm.InvoiceRead]                  = new[] { RoleNames.SuperAdmin, RoleNames.Admin, RoleNames.Buyer, RoleNames.Finance, RoleNames.Supplier, RoleNames.ReadOnly },
         [Perm.InvoiceSubmit]                = new[] { RoleNames.SuperAdmin, RoleNames.Supplier },

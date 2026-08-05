@@ -233,6 +233,28 @@ Body: SetPoResponseModeRequest. Returns empty success; 404 if not found; 400 on 
         return Result.Ok(HttpContext.TraceIdentifier);
     }
 
+    // ---------------- ASN confirmation requirement (R14, admin) ----------------
+
+    [HttpPost("{id:guid}/asn-confirmation")]
+    [Authorize(Policy = Perm.SupplierApprove)]
+    [EndpointSummary("Set supplier ASN-confirmation requirement")]
+    [EndpointDescription(@"R14 — admin sets the Supplier Master's **ASN Confirmation Required** flag. Editable
+post-approval, and safe to flip while ASNs are in flight.
+
+true (the default for every supplier) — the buyer must confirm an ASN before the supplier can post it:
+Draft -> PendingApproval -> Approved -> (supplier posts) -> Submitted.
+false — no approval step at all: Draft -> (supplier posts) -> Submitted. Send-for-approval is rejected (400) for
+such a supplier, and no buyer sees the shipment until the post notification.
+
+Orthogonal to the PO confirmation mode: that decides whether a PO may be shipped at all, this decides whether the
+buyer confirms the shipment before it dispatches.
+Body: SetAsnConfirmationRequest. Returns empty success; 404 if not found. Requires **Supplier.Approve**.")]
+    public async Task<Result> SetAsnConfirmation(Guid id, [FromBody] SetAsnConfirmationRequest body, CancellationToken ct)
+    {
+        await _mediator.Send(new SetSupplierAsnConfirmationCommand(id, body), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
+
     // ---------------- Commercial terms (R4 #1, internal) ----------------
 
     [HttpPut("{id:guid}/commercial-terms")]

@@ -121,13 +121,17 @@ missing. Requires **Asn.Write**.")]
     [HttpPost("{id:guid}/send-for-approval")]
     [Authorize(Policy = Perm.AsnWrite)]
     [EndpointSummary("Send ASN for approval")]
-    [EndpointDescription(@"R5 §10.2/§10.3 — supplier sends a DRAFT ASN for buyer approval (Draft -> PendingApproval).
-Runs the attachment-requirement check HERE (moved from Submit): a missing MANDATORY attachment blocks (400, names
-the types); a missing WARNING attachment on the first call returns 200 with **confirmationRequired=true** +
-missingAttachments (nothing committed) — re-send with AcknowledgeMissingAttachments=true to proceed (the skip is
-audited). Creates an AsnApproval (Pending) routed to the ASN's distinct PO buyer(s).
-Returns: AsnDetailDto (PendingApproval) on success; 200 confirmationRequired on a Warning skip; 400 on
-mandatory-missing; 409 if not Draft. Requires **Asn.Write**.")]
+    [EndpointDescription(@"R5 §10.2, re-cut by R14 — supplier sends a DRAFT ASN for buyer confirmation
+(Draft -> PendingApproval). Creates an AsnApproval (Pending) routed to the ASN's mapped internal user(s).
+
+R14: this step is deliberately PERMISSIVE. Attachments are NOT checked here and the invoiceNo / billOfLading /
+packingList references are NOT required here — both moved to POST — because a supplier must be able to obtain
+buyer confirmation before the Packing List and Commercial Invoice exist. Only the PO ship gate applies.
+
+Rejected with 400 (asnConfirmation) for a supplier whose Supplier Master has ASN Confirmation Required = No:
+that supplier has no approval step and must call POST /post directly.
+Returns: AsnDetailDto (PendingApproval) on success; 400 if the supplier needs no confirmation or a covered PO is
+not shippable; 409 if not Draft. Requires **Asn.Write**.")]
     public async Task<Result<AsnDetailDto>> SendForApproval(Guid id, [FromBody] SendForApprovalRequest? body, CancellationToken ct)
     {
         var outcome = await _mediator.Send(
@@ -137,18 +141,51 @@ mandatory-missing; 409 if not Draft. Requires **Asn.Write**.")]
 
     [HttpPost("{id:guid}/approve")]
     [Authorize(Policy = Perm.AsnApprove)]
-    [EndpointSummary("Approve ASN (buyer)")]
-    [EndpointDescription(@"R5 §10.2/§10.4 — a mapped PO buyer approves a PendingApproval ASN. Any ONE of the ASN's PO
-buyers may approve (Phase 1). On approve the system runs the SUBMIT path: the over-ship atomic guard consumes
-balance, the ASN flips to Submitted, the draft Invoice + ERP outbox post are created — exactly as the R4 submit did.
-If the balance was lost after approval (UC-AP-05) the guard returns 0 rows and Submit fails (400, over-ship message)
-while the ASN stays PendingApproval.
-Returns: AsnDetailDto (Submitted, with DraftInvoiceId) on success; 400 on over-ship/serial-lot; 403 if not a mapped
-buyer; 409 if not PendingApproval. Requires **Asn.Approve**.")]
+    [EndpointSummary("Confirm ASN (buyer)")]
+    [EndpointDescription(@"R5 §10.2, re-cut by R14 — a mapped internal user confirms a PendingApproval ASN
+(PendingApproval -> **Approved**). Any ONE mapped user may confirm.
+
+R14: this NO LONGER submits anything to the ERP. It records the buyer's confirmation and stops. No balance is
+consumed, no draft invoice is created and nothing is enqueued to LN — all of that now happens when the SUPPLIER
+calls POST /post. The ASN becomes editable again so the supplier can upload the Packing List / Commercial Invoice
+and complete the shipment references.
+
+OverrideReason on the body is accepted but IGNORED (the PO gate override now belongs to the Post caller).
+Returns: AsnDetailDto (Approved) on success; 403 if not a mapped internal user; 409 if not PendingApproval.
+Requires **Asn.Approve**.")]
     public async Task<Result<AsnDetailDto>> Approve(Guid id, [FromBody] ApproveAsnRequest? body, CancellationToken ct)
     {
         var data = await _mediator.Send(new ApproveAsnCommand(id, body?.OverrideReason), ct);
         return Result<AsnDetailDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("{id:guid}/post")]
+    [Authorize(Policy = Perm.AsnPost)]
+    [EndpointSummary("Post ASN to the ERP")]
+    [EndpointDescription(@"R14 — the supplier's final action and the ONLY path that reaches the ERP.
+From-state: **Approved** (for a supplier with ASN Confirmation Required = Yes) or **Draft** (for one with No,
+which has no approval step at all). Approved is postable in both modes so flipping the flag never strands an ASN.
+
+Enforced here (both moved from send-for-approval): invoiceNo / billOfLading / packingList are MANDATORY (400,
+shipmentReferences); and the attachment policy — a missing MANDATORY attachment blocks (400, names the types),
+a missing WARNING attachment on the first call returns 200 with **confirmationRequired=true** + missingAttachments
+and commits nothing (re-send with AcknowledgeMissingAttachments=true to proceed; the skip is audited).
+
+On success: stamps postedAt/postedBy (**postedAt IS the shipping date**), notifies the mapped buyers, then runs
+the submit path — the over-ship atomic guard consumes balance, the ASN flips to Submitted, submittedAt is stamped
+with the same instant (so the LN payload's ShipmentDate is the post date), the grouped draft invoice(s) are
+created and the gated LN outbox message is enqueued. If balance was lost since confirmation the guard returns 0
+rows and the whole post fails (400) with the ASN left untouched.
+
+If a covered PO was reset to an unshippable status after confirmation, the PO confirmation gate blocks (400,
+poStatus); a caller holding **PurchaseOrder.OverrideGate** may supply OverrideReason to proceed (audited).
+Returns: AsnDetailDto (Submitted) on success; 200 confirmationRequired on a Warning skip; 400 on missing refs /
+mandatory attachments / over-ship / PO gate; 409 from an illegal state. Requires **Asn.Post**.")]
+    public async Task<Result<AsnDetailDto>> Post(Guid id, [FromBody] PostAsnRequest? body, CancellationToken ct)
+    {
+        var outcome = await _mediator.Send(
+            new PostAsnCommand(id, body?.AcknowledgeMissingAttachments ?? false, body?.OverrideReason), ct);
+        return outcome.ToResult(HttpContext.TraceIdentifier);
     }
 
     [HttpPost("{id:guid}/reject")]

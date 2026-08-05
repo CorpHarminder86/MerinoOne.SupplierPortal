@@ -71,13 +71,21 @@ public enum DeliveryScheduleStatus { Approved }
 
 /// <summary>
 /// ASN lifecycle. R5 (TSD R5 Addendum §4.6 / §10) adds PendingApproval (supplier sent for buyer review)
-/// and Rejected (buyer rejected; returned to supplier for edit). Full order:
-/// Draft → PendingApproval → Submitted → InTransit → Delivered.
-/// PendingApproval → Rejected → (supplier edits) → Draft.
+/// and Rejected (buyer rejected; returned to supplier for edit).
+///
+/// <para>R14 (2026-08-05) adds <b>Approved</b> — the dwell state between the buyer's confirmation and the
+/// supplier's Post. Approval no longer dispatches to the ERP; Post does. Which path an ASN takes is decided by
+/// <c>Supplier.AsnConfirmationRequired</c>:</para>
+/// <code>
+/// required:      Draft → PendingApproval → Approved → (Post) → Submitted → InTransit → Delivered
+///                            └─(Reject)─▶ Rejected → (supplier edits) → Draft
+/// not required:  Draft ─────────────────────────────(Post) → Submitted → …
 /// Any active state → Cancelled.
-/// Persisted as the enum name (string), no DB CHECK — the C# enum is the guard. APPEND-ONLY.
+/// </code>
+/// Persisted as the enum name (string), no DB CHECK — the C# enum is the guard. APPEND-ONLY (Approved is
+/// appended last for exactly that reason; the string value, not the ordinal, is what is stored).
 /// </summary>
-public enum AsnStatus { Draft, Submitted, InTransit, Delivered, Cancelled, PendingApproval, Rejected }
+public enum AsnStatus { Draft, Submitted, InTransit, Delivered, Cancelled, PendingApproval, Rejected, Approved }
 
 /// <summary>
 /// R5 (TSD R5 Addendum §4.6 / Component 6) — lifecycle of a single <c>proc.AsnApproval</c> session.

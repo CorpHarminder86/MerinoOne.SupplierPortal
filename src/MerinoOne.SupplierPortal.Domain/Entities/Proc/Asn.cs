@@ -58,12 +58,19 @@ public class Asn : BaseAggregateRoot
     public AsnStatus AsnStatus { get; set; } = AsnStatus.Draft;
     public string? Notes { get; set; }
 
-    // NOTE (R11): submittedAt is stamped ONLY at AsnSubmitExecutor:348, whose only caller is the buyer's
-    // ApproveAsnCommandHandler — it shares that handler's `now` with AsnApproval.DecisionOn. So it means
-    // "submitted TO ERP at buyer approval", not "submitted by the supplier", and it IS the LN payload's
-    // ShipmentDate (D11). The supplier's SendForApproval does not touch it.
+    // NOTE (R14, supersedes the R11 note): submittedAt is still stamped ONLY inside AsnSubmitExecutor, but that
+    // executor's caller MOVED from the buyer's ApproveAsnCommandHandler to the supplier's PostAsnCommandHandler.
+    // It now means "submitted TO ERP at POST time" and its actor is whoever posted (the supplier, normally).
+    // It remains the LN payload's ShipmentDate — which is exactly why "Shipping Date = Post Date" (R14 D9) needs
+    // no wire change. PostedAt below records the same instant explicitly for display/audit.
     public DateTime? SubmittedAt { get; set; }
     public string? SubmittedBy { get; set; }
+
+    // R14 (2026-08-05) — D9: the SHIPPING DATE. Stamped when the supplier clicks Post, i.e. the same `now` the
+    // executor writes to SubmittedAt. Held separately so the business date is explicit and so PostedBy can record
+    // the posting supplier distinctly from any approval actor. Null until posted.
+    public DateTime? PostedAt { get; set; }
+    public string? PostedBy { get; set; }
     public string? ErpSyncId { get; set; }
     public string? ErpCode { get; set; }
 

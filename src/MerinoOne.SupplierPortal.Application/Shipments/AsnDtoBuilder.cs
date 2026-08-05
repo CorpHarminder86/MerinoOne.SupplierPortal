@@ -16,11 +16,15 @@ namespace MerinoOne.SupplierPortal.Application.Shipments;
 public static class AsnDtoBuilder
 {
     /// <summary>
-    /// R5 — True once the ASN is locked against supplier edits / attachment-mutation. Editable states are Draft
-    /// and Rejected (a rejected ASN returns to the supplier for edit, §10.1); PendingApproval / Submitted /
-    /// InTransit / Delivered / Cancelled are locked.
+    /// R5 — True once the ASN is locked against supplier edits / attachment-mutation. Editable states are Draft,
+    /// Rejected (a rejected ASN returns to the supplier for edit, §10.1) and — R14 (D5) — Approved, so the
+    /// supplier can complete shipment references and upload the Packing List / Invoice after the buyer confirms.
+    /// PendingApproval (the buyer is reviewing a stable set) / Submitted / InTransit / Delivered / Cancelled are
+    /// locked. This is also the single source of truth for the attachment upload/delete lock in
+    /// <c>DocumentUploadsController</c>.
     /// </summary>
-    public static bool IsLocked(AsnStatus status) => status is not (AsnStatus.Draft or AsnStatus.Rejected);
+    public static bool IsLocked(AsnStatus status)
+        => status is not (AsnStatus.Draft or AsnStatus.Rejected or AsnStatus.Approved);
 
     public static async Task<AsnDetailDto> BuildAsync(IAppDbContext db, Guid asnId, CancellationToken ct,
         Policies.OverShipRoundingMode rounding = Policies.OverShipRoundingMode.None)
@@ -28,8 +32,13 @@ public static class AsnDtoBuilder
         var a = await db.Asns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == asnId, ct)
                 ?? throw new Common.Exceptions.NotFoundException("Asn", asnId);
 
-        var supplierName = await db.Suppliers.Where(s => s.Id == a.SupplierId)
-            .Select(s => s.LegalName).FirstOrDefaultAsync(ct) ?? string.Empty;
+        // R14 — the supplier's LegalName AND its AsnConfirmationRequired flag come from the same row; the flag
+        // decides which lifecycle the UI must render (Send-for-approval vs Post straight from Draft).
+        var supplier = await db.Suppliers.Where(s => s.Id == a.SupplierId)
+            .Select(s => new { s.LegalName, s.AsnConfirmationRequired })
+            .FirstOrDefaultAsync(ct);
+        var supplierName = supplier?.LegalName ?? string.Empty;
+        var asnConfirmationRequired = supplier?.AsnConfirmationRequired ?? true;
 
         // Covered POs: union of the junction rows and the legacy scalar header PO (single-PO back-compat).
         var junctionPoIds = await db.AsnPurchaseOrders
@@ -201,12 +210,18 @@ public static class AsnDtoBuilder
             .FirstOrDefaultAsync(ct);
 
         // R4 §6.2 — evaluate the ship gate so the UI can disable the gated actions with the reason:
-        //  - Draft/Rejected (supplier): Save Changes + Send-For-Approval;
-        //  - PendingApproval (buyer): Approve + Reject (the buyer Approve→Submit is also hard-blocked server-side).
+        //  - Draft/Rejected (supplier): Save Changes + Send-For-Approval (or Post, in No-mode);
+        //  - PendingApproval (buyer): Approve + Reject;
+        //  - Approved (supplier, R14): Save Changes + Post.
         // The same hard block is enforced server-side on each of those paths.
         string? shipBlockReason = null;
-        if (a.AsnStatus is AsnStatus.Draft or AsnStatus.Rejected or AsnStatus.PendingApproval)
+        if (a.AsnStatus is AsnStatus.Draft or AsnStatus.Rejected or AsnStatus.PendingApproval or AsnStatus.Approved)
             shipBlockReason = await Policies.AsnDraftGate.EvaluateAsync(db, a.SupplierId, a.Id, coveredPoIds.ToList(), ct);
+
+        // R14 — is Post the supplier's next action? Mirrors AsnLifecycle.AssertCanPost exactly (Approved in both
+        // modes; Draft only when confirmation is not required) so the button and the server guard cannot disagree.
+        var canPost = a.AsnStatus == AsnStatus.Approved
+                      || (!asnConfirmationRequired && a.AsnStatus == AsnStatus.Draft);
 
         return new AsnDetailDto(
             a.Id, a.Seq, a.AsnNumber,
@@ -226,7 +241,10 @@ public static class AsnDtoBuilder
             a.InvoiceGenerationStatus, a.InvoiceGenerationNote, draftInvoiceIds,
             // R11 — warehouse (derived, read-only) + the three supplier-entered shipment refs, and createdOn,
             // which the form renders read-only and the LN payload sends as CreateDate.
-            a.Warehouse, a.InvoiceNo, a.BillOfLading, a.PackingList, a.CreatedOn);
+            a.Warehouse, a.InvoiceNo, a.BillOfLading, a.PackingList, a.CreatedOn,
+            // R14 — the shipping date (= post date) + who posted, the supplier's confirmation mode, and whether
+            // Post is the next legal action.
+            a.PostedAt, a.PostedBy, asnConfirmationRequired, canPost);
     }
 
     public static async Task<IReadOnlyList<DocumentAttachmentDto>> BuildAttachmentsAsync(

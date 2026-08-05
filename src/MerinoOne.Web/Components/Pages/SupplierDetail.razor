@@ -403,6 +403,31 @@ else
                         </button>
                     }
                 </div>
+
+                @* R14 — ASN Confirmation Required. Its own block, not folded into the PO mode above: the two are
+                   orthogonal (PO shippability vs shipment confirmation) and are set independently. *@
+                <div style="border-top:1px solid var(--mer-line-soft);margin-top:14px;padding-top:14px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                        <div>
+                            <div style="font-size:12.5px;font-weight:600;color:var(--mer-ink-900);">ASN confirmation required</div>
+                            <div style="font-size:11.5px;color:var(--mer-ink-500);max-width:340px;">
+                                @(detail.AsnConfirmationRequired
+                                    ? "The buyer must confirm each ASN before the supplier can post it to the ERP."
+                                    : "No buyer confirmation. The supplier posts shipments straight to the ERP.")
+                            </div>
+                        </div>
+                        <span class="tlg-status @(detail.AsnConfirmationRequired ? "tlg-status--active" : "tlg-status--info")">
+                            <span class="material-symbols-outlined" style="font-size:13px;vertical-align:middle;">fact_check</span>
+                            @(detail.AsnConfirmationRequired ? "Required" : "Not required")
+                        </span>
+                    </div>
+                    @if (Token.HasPermission("Supplier.Approve"))
+                    {
+                        <button class="rz-button" style="margin-top:10px;padding:6px 12px;border-radius:6px;border:1px solid var(--mer-ink-300);background:var(--mer-surface);color:var(--mer-ink-700);cursor:pointer;font-size:12px;" @onclick="OpenAsnConfirmation" disabled="@busy">
+                            <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">swap_horiz</span> Change
+                        </button>
+                    }
+                </div>
             </div>
 
             <div class="rz-card" style="padding:20px;">
@@ -772,6 +797,49 @@ else
         </div>
     }
 
+    @* ---------------- R14 ASN-confirmation dialog ---------------- *@
+    @if (showAsnConfirmation)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="info" style="width:560px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">fact_check</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">Supplier</div>
+                        <h2 class="merino-dialog__title">ASN confirmation</h2>
+                        <p class="merino-dialog__subtitle">Whether the buyer must confirm this supplier's shipments before they reach the ERP.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showAsnConfirmation = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="display:flex;align-items:flex-start;gap:10px;font-size:13px;color:var(--mer-ink-700);cursor:pointer;">
+                        <input type="checkbox" checked="@asnConfirmationRequired" @onchange="e => asnConfirmationRequired = (bool)(e.Value ?? false)" style="margin-top:2px;" />
+                        <span><b>Require buyer confirmation</b> — the supplier creates the ASN and sends it for approval; a buyer confirms it; the supplier then uploads the shipping documents and posts it.</span>
+                    </label>
+                    <div style="margin-top:12px;border:1px solid var(--mer-line);border-radius:8px;padding:10px 12px;background:var(--mer-ink-50);font-size:12px;color:var(--mer-ink-600);">
+                        @if (asnConfirmationRequired)
+                        {
+                            <span>Draft → Pending approval → Approved → <b>Post</b> → Submitted. Documents and shipment references are required at Post, not before.</span>
+                        }
+                        else
+                        {
+                            <span><b>No buyer sees the shipment before it reaches the ERP.</b> Draft → <b>Post</b> → Submitted. Buyers are notified once it is posted. The PO confirmation gate is the only remaining control.</span>
+                        }
+                    </div>
+                    <div style="margin-top:10px;font-size:11.5px;color:var(--mer-ink-500);">Safe to change at any time — an ASN already confirmed stays postable either way.</div>
+                    @if (!string.IsNullOrEmpty(asnConfirmationError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@asnConfirmationError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showAsnConfirmation = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="SaveAsnConfirmation" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
     @* ---------------- Commercial-terms dialog (R4 #1, internal) ---------------- *@
     @if (showTerms)
     {
@@ -882,6 +950,11 @@ else
     private bool poAllowNegotiate = true;
     private bool poAllowReject = true;
     private string poModeError = string.Empty;
+
+    // R14 — ASN Confirmation Required. Default true (the strictest, matching the column default).
+    private bool showAsnConfirmation;
+    private bool asnConfirmationRequired = true;
+    private string asnConfirmationError = string.Empty;
 
     private static readonly (string Value, string Label, string Hint)[] PoModeOptions = new[]
     {
@@ -1177,6 +1250,25 @@ else
             new SetPoResponseModeRequest(poModeValue, poAllowNegotiate, poAllowReject));
         if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "PO confirmation mode updated" }); showPoMode = false; await Load(); }
         else { poModeError = resp?.Errors?.FirstOrDefault() ?? "Failed to update mode."; }
+        busy = false;
+    }
+
+    // ---- R14 ASN confirmation requirement ----
+    private void OpenAsnConfirmation()
+    {
+        asnConfirmationRequired = detail?.AsnConfirmationRequired ?? true;
+        asnConfirmationError = string.Empty;
+        showAsnConfirmation = true;
+    }
+
+    private async Task SaveAsnConfirmation()
+    {
+        busy = true; asnConfirmationError = string.Empty;
+        var resp = await Api.PostAsync<SetAsnConfirmationRequest>(
+            $"api/suppliers/{Id}/asn-confirmation",
+            new SetAsnConfirmationRequest(asnConfirmationRequired));
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN confirmation setting updated" }); showAsnConfirmation = false; await Load(); }
+        else { asnConfirmationError = resp?.Errors?.FirstOrDefault() ?? "Failed to update the setting."; }
         busy = false;
     }
 

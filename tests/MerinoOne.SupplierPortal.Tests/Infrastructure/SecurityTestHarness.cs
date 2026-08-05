@@ -207,7 +207,24 @@ public static class SecurityTestHarness
         AppDbContext db, Guid userId, string userCode, string fullName, string email, string role,
         Guid tenantId, Guid companyId, IReadOnlyDictionary<string, Guid> roleMap, DateTime now)
     {
-        if (!await db.AppUsers.IgnoreQueryFilters().AnyAsync(u => u.Id == userId))
+        // Re-assert the canonical e-mail on an existing row. Several tests overwrite a seeded user's Email to
+        // observe a notification, and the test DB PERSISTS between runs — so without this repair one run's
+        // mutation silently breaks a sibling test that asserts on the seeded address, on every later run.
+        var existing = await db.AppUsers.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId);
+        if (existing is not null)
+        {
+            if (!string.Equals(existing.Email, email, StringComparison.Ordinal))
+            {
+                existing.Email = email;
+                existing.UpdatedBy = "seed";
+                existing.UpdatedOn = now;
+                // Save HERE. Every other SaveChangesAsync in this seeder sits inside an `if (!exists)` block, so on
+                // an already-seeded DB — which is the only case this repair matters for — none of them ever runs
+                // and the tracked change would be discarded with the scope.
+                await db.SaveChangesAsync();
+            }
+        }
+        else
         {
             db.AppUsers.Add(new AppUser
             {

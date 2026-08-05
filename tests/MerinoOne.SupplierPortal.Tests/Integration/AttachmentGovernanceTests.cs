@@ -60,9 +60,12 @@ public class AttachmentGovernanceTests : IAsyncLifetime
     }
 
     // Create a Draft ASN (confirmed PO) for a fresh supplier; returns (asnId, supplierId, seccodeId).
+    // R14 — the buyer must be MAPPED to the supplier, because reaching the attachment guard now means going
+    // through the buyer's confirmation first (the guard moved to Post, which sits after it).
     private async Task<(Guid AsnId, Guid SupplierId, Guid SeccodeId, HttpClient Client)> NewDraftAsnAsync()
     {
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx);
+        await ProcureToPayFlow.AssignBuyerAsync(_fx, setup.PoId);
         var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
         var createResp = await client.PostAsJsonAsync("/api/asns", ProcureToPayFlow.SimpleAsn(setup));
         createResp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(createResp));
@@ -70,15 +73,38 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         return (asnId, setup.Supplier.SupplierId, setup.Supplier.SeccodeId, client);
     }
 
-    // R5 (§10.3) — the attachment-requirement check MOVED from Submit to Send-for-Approval. A successful pass now
-    // leaves the ASN PendingApproval (not Submitted). Mandatory-block / Warning-confirm / Optional-silent behaviour
-    // is UNCHANGED — only the firing site moves.
+    // R14 — the attachment-requirement check MOVED AGAIN, from Send-for-Approval to POST, so that a supplier can
+    // obtain buyer confirmation before the documents exist. Mandatory-block / Warning-confirm / Optional-silent
+    // behaviour is UNCHANGED — only the firing site moves, so every assertion below still reads the same way; a
+    // successful pass now leaves the ASN Submitted, and a blocked one leaves it Approved rather than Draft.
+    //
+    // Drives the ASN to the post step and returns the POST response. Idempotent about the earlier legs, because
+    // several tests call this repeatedly (blocked → fix → retry).
     private async Task<HttpResponseMessage> SubmitAsync(HttpClient client, Guid asnId, bool ack = false)
     {
-        // R11 (D6/D7) — Send-For-Approval also requires the three shipment refs. These tests are about attachment
-        // governance, so stamp them first and let the attachment rules be the only thing under test.
+        // R11 (D6/D7) — POST also requires the three shipment refs. These tests are about attachment governance,
+        // so stamp them first and let the attachment rules be the only thing under test.
         await ProcureToPayFlow.EnsureShipmentRefsAsync(_fx, asnId);
-        return await client.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest(ack));
+
+        if (await CurrentStatusAsync(asnId) is AsnStatus.Draft or AsnStatus.Rejected)
+        {
+            var send = await client.PostAsJsonAsync($"/api/asns/{asnId}/send-for-approval", new SendForApprovalRequest());
+            send.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(send));
+
+            var buyer = await SecurityTestHarness.ClientAsAsync(_fx, SecurityTestHarness.Users.Buyer, IntegrationTestFixture.CompanyId);
+            var approve = await buyer.PostAsJsonAsync($"/api/asns/{asnId}/approve", new ApproveAsnRequest());
+            approve.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(approve));
+        }
+
+        return await ProcureToPayFlow.PostAsync(client, asnId, ack);
+    }
+
+    private async Task<AsnStatus> CurrentStatusAsync(Guid asnId)
+    {
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Asns.IgnoreQueryFilters().Where(a => a.Id == asnId)
+            .Select(a => a.AsnStatus).FirstAsync();
     }
 
     // ── UC-ATT-01 — all mandatory present → proceeds ──────────────────────────────────────────────────
@@ -97,7 +123,7 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         var resp = await SubmitAsync(client, asnId);
         resp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(resp));
         var body = await Read<AsnDetailDto>(resp);
-        body.Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
+        body.Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
         body.ConfirmationRequired.Should().BeFalse();
     }
 
@@ -146,7 +172,7 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         // Re-submit WITH ack → proceeds; skip audited.
         var second = await SubmitAsync(client, asnId, ack: true);
         second.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(second));
-        (await Read<AsnDetailDto>(second)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
+        (await Read<AsnDetailDto>(second)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
 
         (await _fx.CountWarningSkipAuditAsync(AsnEntity, asnId))
             .Should().BeGreaterThanOrEqualTo(1, because: "the acknowledged warning skip is audited (§8.4)");
@@ -166,7 +192,7 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         resp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(resp));
         var body = await Read<AsnDetailDto>(resp);
         body.ConfirmationRequired.Should().BeFalse();
-        body.Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
+        body.Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
     }
 
     // ── UC-ATT-05 — mandatory + warning both missing → mandatory first (no warning prompt yet) ──────────
@@ -207,7 +233,7 @@ public class AttachmentGovernanceTests : IAsyncLifetime
 
         var resp = await SubmitAsync(client, asnId);
         resp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(resp));
-        (await Read<AsnDetailDto>(resp)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
+        (await Read<AsnDetailDto>(resp)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
     }
 
     // ── UC-ATT-07 — policy changed AFTER submit → submitted ASN unaffected ──────────────────────────────
@@ -220,11 +246,11 @@ public class AttachmentGovernanceTests : IAsyncLifetime
 
         var resp = await SubmitAsync(client, asnId);
         resp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(resp));
-        (await Read<AsnDetailDto>(resp)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
+        (await Read<AsnDetailDto>(resp)).Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
 
-        // Admin tightens the policy AFTER send-for-approval → the already-PendingApproval ASN is untouched (no retroactivity).
+        // Admin tightens the policy AFTER the post → the already-Submitted ASN is untouched (no retroactivity).
         await SeedWorkedExampleAsync();
-        await AssertStatus(asnId, AsnStatus.PendingApproval);
+        await AssertStatus(asnId, AsnStatus.Submitted);
     }
 
     // ── D5 — supplier override WINS (PackingSlip relaxed to Optional; TestCertificate still Mandatory) ──
@@ -253,13 +279,15 @@ public class AttachmentGovernanceTests : IAsyncLifetime
         ok.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(ok));
         var okBody = await Read<AsnDetailDto>(ok);
         okBody.ConfirmationRequired.Should().BeFalse(because: "PackingSlip is Optional for this supplier (override wins)");
-        okBody.Data!.AsnStatus.Should().Be(nameof(AsnStatus.PendingApproval));
+        okBody.Data!.AsnStatus.Should().Be(nameof(AsnStatus.Submitted));
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
     private const string DocumentOwnerTypeAsn = "Asn";
 
-    private async Task AssertStillDraft(Guid asnId) => await AssertStatus(asnId, AsnStatus.Draft);
+    // R14 — a blocked POST leaves the ASN confirmed-but-unposted (the send + confirm legs already succeeded),
+    // which is the R14 equivalent of "the transition did not happen and nothing was committed".
+    private async Task AssertStillDraft(Guid asnId) => await AssertStatus(asnId, AsnStatus.Approved);
 
     private async Task AssertStatus(Guid asnId, AsnStatus expected)
     {

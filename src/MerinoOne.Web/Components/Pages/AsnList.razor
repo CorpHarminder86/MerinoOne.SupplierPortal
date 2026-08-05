@@ -30,6 +30,8 @@
             <option value="Draft">Draft</option>
             @* R5 (§10.1) — the two new approval-flow states surfaced in the list filter. *@
             <option value="PendingApproval">Pending Approval</option>
+            @* R14 — confirmed by the buyer, awaiting the supplier's Post. *@
+            <option value="Approved">Approved — awaiting post</option>
             <option value="Rejected">Rejected</option>
             <option value="Submitted">Submitted</option>
             <option value="InTransit">In Transit</option>
@@ -106,7 +108,8 @@
 
     private string StatusClass(string status) => status switch
     {
-        "Delivered" => "tlg-status--active",
+        // R14 — Approved (buyer-confirmed, awaiting post) reads as a positive milestone, like Delivered.
+        "Delivered" or "Approved" => "tlg-status--active",
         // R5 (§10.1) — PendingApproval is in-flight like Submitted/InTransit; Rejected is a danger state like Cancelled.
         "Submitted" or "InTransit" or "PendingApproval" => "tlg-status--pending",
         "Cancelled" or "Rejected" => "tlg-status--danger",
