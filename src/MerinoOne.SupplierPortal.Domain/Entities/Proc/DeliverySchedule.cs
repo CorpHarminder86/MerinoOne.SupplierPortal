@@ -28,10 +28,11 @@ public class DeliverySchedule : BaseAggregateRoot
     public Guid PurchaseOrderLineId { get; set; }
     public PurchaseOrderLine? PurchaseOrderLine { get; set; }
 
-    /// <summary>FK → admin.CompanyAddress (= PO ship-to, copied at schedule creation). Used as the grouping key
-    /// for multi-line ASN creation (all selected lines must share this address — §9.1).</summary>
-    public Guid ShipToAddressId { get; set; }
-    public CompanyAddress? ShipToAddress { get; set; }
+    /// <summary>R13 — FK → admin.CompanyAddress (= the PO LINE's warehouse address, copied at schedule creation;
+    /// replaces the retired ship-to). The grouping key for multi-line ASN creation: all selected lines must share
+    /// this warehouse (§9.1, now one-warehouse-per-ASN). Nullable (existing schedules pre-R13 have none).</summary>
+    public Guid? WarehouseAddressId { get; set; }
+    public CompanyAddress? WarehouseAddress { get; set; }
 
     /// <summary>= line.orderQty at creation (Phase 1). Refreshed by material Modify upsert (§8.2).</summary>
     public decimal ScheduledQty { get; set; }

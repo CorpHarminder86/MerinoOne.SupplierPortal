@@ -13,20 +13,23 @@ using ValidationException = MerinoOne.SupplierPortal.Application.Common.Exceptio
 namespace MerinoOne.SupplierPortal.Application.Shipments.Commands;
 
 /// <summary>
-/// R5 (TSD R5 Addendum §9) — create a <b>Draft</b> ASN from selected Delivery Schedule lines. The supplier
-/// multi-selects schedule lines; this builds ONE ASN grouped by <c>(supplierId, shipToAddressId)</c>:
+/// R5 (TSD R5 Addendum §9), R13 (2026-08-05) — create a <b>Draft</b> ASN from selected Delivery Schedule lines.
+/// The supplier multi-selects schedule lines; this builds ONE ASN grouped by <c>(supplierId, warehouseAddressId)</c>
+/// (ship-to fully retired — warehouse is the grouping key now):
 /// <list type="bullet">
-///   <item>All selected schedules MUST share ONE <c>shipToAddressId</c> (cross-ship-to blocked — UC-AS-02) and
-///         ONE supplier; lines MAY span multiple POs (UC-AS-01).</item>
+///   <item>All selected schedules MUST share ONE warehouse (cross-warehouse blocked — UC-AS-02) and ONE supplier;
+///         lines MAY span multiple POs (UC-AS-01). The chosen warehouse arrives on the request
+///         (<see cref="CreateAsnFromScheduleRequest.WarehouseAddressId"/>).</item>
 ///   <item>Each schedule → one <see cref="AsnLine"/> referencing its <c>purchaseOrderLineId</c> +
 ///         <c>deliveryScheduleId</c>; ship qty defaults to the line's remaining balance (editable, §9.2).</item>
-///   <item>The header sets <see cref="Asn.ShipToAddressId"/>; the deprecated <see cref="Asn.PurchaseOrderId"/> is
-///         left NULL (PO linkage is at the line level). The junction is still populated from the distinct line POs
-///         so the downstream submit/invoice/uniqueness logic resolves covered POs uniformly.</item>
+///   <item>The header sets <see cref="Asn.WarehouseAddressId"/> + <see cref="Asn.WarehouseAddressSnapshot"/> +
+///         <see cref="Asn.Warehouse"/> (code); the deprecated <see cref="Asn.PurchaseOrderId"/> is left NULL (PO
+///         linkage is at the line level). The junction is still populated from the distinct line POs so the
+///         downstream submit/invoice/uniqueness logic resolves covered POs uniformly.</item>
 /// </list>
 /// <para><b>NO balance consumption at create (§10.4)</b> — the atomic over-ship guard runs only at final Submit.</para>
-/// <para><b>Persist-time invariant (§9.3):</b> every line's <c>PurchaseOrder.shipToAddressId == Asn.shipToAddressId</c>,
-/// single supplier — asserted as defence in depth behind the UI guard.</para>
+/// <para><b>Persist-time invariant (§9.3):</b> every covered PO line's <c>WarehouseAddressId == the chosen
+/// warehouse</c>, single supplier — asserted as defence in depth behind the UI guard.</para>
 /// </summary>
 public record CreateAsnFromScheduleCommand(CreateAsnFromScheduleRequest Body) : IRequest<AsnDetailDto>;
 
@@ -63,7 +66,9 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
                 ["scheduleIds"] = new[] { "At least one delivery schedule must be selected." }
             });
 
-        // Load the selected schedules joined to their PO line + PO (for ship-to, supplier, balance, position).
+        // Load the selected schedules joined to their PO line + PO (for warehouse, supplier, balance, position).
+        // R13 — warehouse is per PO LINE now (the header's ship-to + header warehouse are retired), so the grouping
+        // key comes off the line, not the PO header.
         var rows = await (from s in _db.DeliverySchedules
                           join pol in _db.PurchaseOrderLines on s.PurchaseOrderLineId equals pol.Id
                           join po in _db.PurchaseOrders on s.PurchaseOrderId equals po.Id
@@ -71,9 +76,8 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
                           select new
                           {
                               ScheduleId = s.Id,
-                              s.ShipToAddressId,
-                              PoShipToAddressId = po.ShipToAddressId,
-                              PoWarehouse = po.Warehouse,
+                              LineWarehouse = pol.Warehouse,
+                              LineWarehouseAddressId = pol.WarehouseAddressId,
                               s.PurchaseOrderId,
                               s.PurchaseOrderLineId,
                               po.SupplierId,
@@ -100,33 +104,32 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
             });
         var supplierId = supplierIds[0];
 
-        // ── Single ship-to (UC-AS-02) — reject cross-ship-to selection with a clear message ────────────────
-        var shipToIds = rows.Select(r => r.ShipToAddressId).Distinct().ToList();
-        if (shipToIds.Count != 1)
+        // ── Single warehouse (UC-AS-02, now one-warehouse-per-ASN) — replaces the retired single-ship-to + §9.3
+        // ship-to checks. LN's whinh.advanceShipmentNotices carries ONE receiving warehouse, so a mixed selection
+        // would be misrouted at the ERP. The grouping warehouse is DERIVED server-side from the covered PO lines
+        // (the client's grouping lock already enforces one warehouse; this is the authoritative defence in depth).
+        // Strict: every covered line must resolve to exactly ONE non-null warehouse address.
+        var warehouseAddressIds = rows.Select(r => r.LineWarehouseAddressId).Distinct().ToList();
+        if (warehouseAddressIds.Count != 1 || warehouseAddressIds[0] is null)
             throw new ValidationException(new Dictionary<string, string[]>
             {
-                ["shipToAddressId"] = new[]
+                [AsnWarehouseRules.ErrorKey] = new[]
                 {
-                    "An ASN cannot mix ship-to addresses; all selected delivery schedules must share one ship-to."
+                    "An ASN cannot mix warehouses; every selected delivery schedule's line must ship to a single resolved warehouse."
                 }
             });
-        var shipToAddressId = shipToIds[0];
+        var warehouseAddressId = warehouseAddressIds[0]!.Value;
 
-        // ── §9.3 invariant (defence in depth): every line's PO.shipToAddressId == Asn.shipToAddressId ──────
-        if (rows.Any(r => r.PoShipToAddressId != shipToAddressId))
-            throw new ValidationException(new Dictionary<string, string[]>
-            {
-                ["shipToAddressId"] = new[]
-                {
-                    "A selected schedule's purchase order ship-to does not match the ASN ship-to (invariant §9.3)."
-                }
-            });
+        // Resolve the single warehouse CODE (LN header) + address across the covered lines — also rejects a mixed code.
+        var warehouse = AsnWarehouseRules.Resolve(
+            rows.Select(r => new AsnWarehouseRules.WarehouseLine(r.LineWarehouse, r.LineWarehouseAddressId, null)));
 
-        // ── R11 (D4) — single warehouse. Same shape as the ship-to rule above: LN's whinh.advanceShipmentNotices
-        // carries ONE receiving warehouse, so an ASN that mixed them would be misrouted at the ERP. Pre-R11 POs
-        // have a null warehouse; nulls are treated as one value so legacy selections are not blocked, and the
-        // resulting ASN simply carries a null warehouse through to the payload.
-        var warehouse = AsnWarehouseRules.ResolveSingle(rows.Select(r => r.PoWarehouse));
+        // Snapshot the chosen warehouse's CompanyAddress so the read side renders it without a join. IgnoreQueryFilters
+        // — the address is company-scoped and this create runs under the supplier principal (which holds no company).
+        WarehouseSnapshot? warehouseSnapshot = null;
+        var warehouseAddress = await _db.CompanyAddresses.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(ca => ca.Id == warehouseAddressId, ct);
+        if (warehouseAddress is not null) warehouseSnapshot = WarehouseSnapshot.From(warehouseAddress);
 
         var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == supplierId, ct)
                        ?? throw new NotFoundException("Supplier", supplierId);
@@ -151,8 +154,11 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
             Id = asnId,
             AsnNumber = asnNumber,
             PurchaseOrderId = null,                 // R5 §9.2 — header PO deprecated; PO linkage is per line.
-            ShipToAddressId = shipToAddressId,       // R5 §9.2 — the grouping key.
-            Warehouse = warehouse,                   // R11 D4 — the second grouping key, snapshotted off the PO.
+            // R13 — warehouse is THE grouping key (ship-to retired): the chosen address FK, the resolved code that
+            // ships to LN on the header, and the snapshot the read side renders without a join.
+            Warehouse = warehouse.Code,
+            WarehouseAddressId = warehouseAddressId,
+            WarehouseAddressSnapshot = warehouseSnapshot,
             SupplierId = supplierId,
             ExpectedDeliveryDate = body.ExpectedDeliveryDate,
             TimeWindow = body.TimeWindow,

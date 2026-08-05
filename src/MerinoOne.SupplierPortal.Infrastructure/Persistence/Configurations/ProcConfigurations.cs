@@ -35,33 +35,15 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         b.Property(x => x.CurrencyId).HasColumnName("currencyId").HasColumnType("uniqueidentifier");
         b.Property(x => x.CurrencyCode).HasColumnName("currencyCode").HasMaxLength(10);
 
-        // R5 (TSD R5 Addendum §4.3 / §6) — ship-to FK (nullable this phase; backfill later) + §4.8 raw ERP status.
-        b.Property(x => x.ShipToAddressId).HasColumnName("shipToAddressId").HasColumnType("uniqueidentifier");
+        // §4.8 raw ERP status.
         b.Property(x => x.ErpStatus).HasColumnName("erpStatus").HasMaxLength(50);
 
         // Raw ERP-owned PO origin — stored verbatim from the inbound push (tracking/reference only).
         b.Property(x => x.PoOrigin).HasColumnName("poOrigin").HasMaxLength(50);
 
-        // R11 (2026-07-28, D1/D2) — receiving warehouse code, ERP-owned free text. REQUIRED on the inbound
-        // contract, NULLABLE here: existing POs keep null until LN re-pushes them (no backfill). No FK — there
-        // is no Warehouse master; the code is stored verbatim like poOrigin above.
-        b.Property(x => x.Warehouse).HasColumnName("warehouse").HasMaxLength(50);
-
-        // R5 (TSD R5 Addendum §4.3) — point-in-time ship-to snapshot as an OWNED VALUE OBJECT mapped onto the
-        // eight shipTo* columns ON THE PurchaseOrder table (one VO, one copy mapper, no separate table).
-        // IsRequired(false) keeps the owned columns nullable (no PO is forced to have a snapshot in this phase).
-        b.OwnsOne(x => x.ShipTo, s =>
-        {
-            s.Property(p => p.AddressName).HasColumnName("shipToAddressName").HasMaxLength(150);
-            s.Property(p => p.ErpCode).HasColumnName("shipToErpCode").HasMaxLength(50);
-            s.Property(p => p.Line1).HasColumnName("shipToLine1").HasMaxLength(300);
-            s.Property(p => p.Line2).HasColumnName("shipToLine2").HasMaxLength(300);
-            s.Property(p => p.City).HasColumnName("shipToCity").HasMaxLength(100);
-            s.Property(p => p.State).HasColumnName("shipToState").HasMaxLength(100);
-            s.Property(p => p.Pincode).HasColumnName("shipToPincode").HasMaxLength(20);
-            s.Property(p => p.Country).HasColumnName("shipToCountry").HasMaxLength(100);
-        });
-        b.Navigation(x => x.ShipTo).IsRequired(false);
+        // R13 (2026-08-05) — ship-to RETIRED from the PO header (FK + 8-col snapshot dropped) and the header
+        // warehouse dropped. Warehouse moved to PurchaseOrderLine (per-line receiving address); the customer base
+        // address is joined live on the PO screen. See migration 0058.
 
         b.ToTable(t => t.HasCheckConstraint("CK_PurchaseOrder_poType", "[poType] IN ('Material','Service')"));
 
@@ -74,18 +56,12 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
         b.HasOne(x => x.Currency).WithMany().HasForeignKey(x => x.CurrencyId)
             .HasConstraintName("FK_PurchaseOrder_Currency_CurrencyId").OnDelete(DeleteBehavior.Restrict);
 
-        // R5 (TSD R5 Addendum §4.3) — ship-to FK → admin.CompanyAddress, RESTRICT (a resolved ship-to must not
-        // be cascade-removed out from under historical POs). The snapshot above is what the header renders.
-        b.HasOne(x => x.ShipToAddress).WithMany().HasForeignKey(x => x.ShipToAddressId)
-            .HasConstraintName("FK_PurchaseOrder_CompanyAddress_shipToAddressId").OnDelete(DeleteBehavior.Restrict);
-
         b.HasIndex(x => x.PoNumber).HasDatabaseName("UQ_PurchaseOrder_poNumber").IsUnique();
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_PurchaseOrder_supplierId");
         b.HasIndex(x => x.PoStatus).HasDatabaseName("IX_PurchaseOrder_poStatus");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_PurchaseOrder_tenant_company");
         b.HasIndex(x => x.CurrencyId).HasDatabaseName("IX_PurchaseOrder_currencyId");
-        b.HasIndex(x => x.ShipToAddressId).HasDatabaseName("IX_PurchaseOrder_shipTo");
     }
 }
 
@@ -113,6 +89,24 @@ public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseO
         // R4 (2026-06-22) — Addendum A2: link taxCode to the proc.Tax master (keep the snapshot strings).
         b.Property(x => x.TaxId).HasColumnName("taxId").HasColumnType("uniqueidentifier");
 
+        // R13 (2026-08-05) — per-line receiving WAREHOUSE (replaces the retired PO-header ship-to). Raw ERP code +
+        // live FK → admin.CompanyAddress (RESTRICT) + a point-in-time snapshot the read/ASN side renders without a
+        // join. Nullable (existing lines stay null until LN re-pushes — clean break, no backfill).
+        b.Property(x => x.Warehouse).HasColumnName("warehouse").HasMaxLength(50);
+        b.Property(x => x.WarehouseAddressId).HasColumnName("warehouseAddressId").HasColumnType("uniqueidentifier");
+        b.OwnsOne(x => x.WarehouseAddressSnapshot, s =>
+        {
+            s.Property(p => p.AddressName).HasColumnName("whAddressName").HasMaxLength(150);
+            s.Property(p => p.ErpCode).HasColumnName("whErpCode").HasMaxLength(50);
+            s.Property(p => p.Line1).HasColumnName("whLine1").HasMaxLength(300);
+            s.Property(p => p.Line2).HasColumnName("whLine2").HasMaxLength(300);
+            s.Property(p => p.City).HasColumnName("whCity").HasMaxLength(100);
+            s.Property(p => p.State).HasColumnName("whState").HasMaxLength(100);
+            s.Property(p => p.Pincode).HasColumnName("whPincode").HasMaxLength(20);
+            s.Property(p => p.Country).HasColumnName("whCountry").HasMaxLength(100);
+        });
+        b.Navigation(x => x.WarehouseAddressSnapshot).IsRequired(false);
+
         // R4 (2026-06-26) — TSD R4 Addendum §3.1: CUMULATIVE shipped qty across non-cancelled ASN lines for
         // this PO line (= Σ AsnLine.shippedQty). DISTINCT from AsnLine.shippedQty (this ASN's qty) — never sum
         // the two. NOT NULL DEFAULT 0 (EF-auto-named default); backfilled in migration Up() so existing rows
@@ -138,8 +132,13 @@ public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseO
             .HasConstraintName("FK_PurchaseOrderLine_Item_ItemId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Tax).WithMany().HasForeignKey(x => x.TaxId)
             .HasConstraintName("FK_PurchaseOrderLine_Tax_TaxId").OnDelete(DeleteBehavior.Restrict);
+        // R13 — per-line warehouse address FK → admin.CompanyAddress RESTRICT (a resolved warehouse must not be
+        // cascade-removed out from under historical PO lines; the snapshot above is what the row renders).
+        b.HasOne(x => x.WarehouseAddress).WithMany().HasForeignKey(x => x.WarehouseAddressId)
+            .HasConstraintName("FK_PurchaseOrderLine_CompanyAddress_warehouseAddressId").OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => x.TaxId).HasDatabaseName("IX_PurchaseOrderLine_taxId");
+        b.HasIndex(x => x.WarehouseAddressId).HasDatabaseName("IX_PurchaseOrderLine_warehouse");
         // R4 (2026-06-24) — enforce the PO line natural key (PO, positionNo, sequenceNo). The inbound PO upsert
         // now keys lines on (positionNo, sequenceNo) — two lines may share positionNo with differing sequenceNo —
         // so this DB-level guard mirrors the app's effective uniqueness scope. Filtered on isDeleted=0 so a
@@ -242,7 +241,8 @@ public class DeliveryScheduleConfiguration : IEntityTypeConfiguration<DeliverySc
 
         b.Property(x => x.PurchaseOrderId).HasColumnName("purchaseOrderId");
         b.Property(x => x.PurchaseOrderLineId).HasColumnName("purchaseOrderLineId");
-        b.Property(x => x.ShipToAddressId).HasColumnName("shipToAddressId");
+        // R13 — warehouse address (= the PO line's warehouse, copied at schedule creation), replaces ship-to.
+        b.Property(x => x.WarehouseAddressId).HasColumnName("warehouseAddressId").HasColumnType("uniqueidentifier");
 
         b.Property(x => x.ScheduledQty).HasColumnName("scheduledQty").HasColumnType("decimal(18,4)");
         b.Property(x => x.DeliveryDate).HasColumnName("deliveryDate").HasColumnType("datetime2");
@@ -258,17 +258,17 @@ public class DeliveryScheduleConfiguration : IEntityTypeConfiguration<DeliverySc
         b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)
             .HasConstraintName("FK_DeliverySchedule_PurchaseOrderLine_PurchaseOrderLineId").OnDelete(DeleteBehavior.Restrict);
 
-        // FK → admin.CompanyAddress RESTRICT (= PO ship-to; used as ASN grouping key — §9.1)
-        b.HasOne(x => x.ShipToAddress).WithMany().HasForeignKey(x => x.ShipToAddressId)
-            .HasConstraintName("FK_DeliverySchedule_CompanyAddress_ShipToAddressId").OnDelete(DeleteBehavior.Restrict);
+        // R13 — FK → admin.CompanyAddress RESTRICT (= PO line warehouse; the ASN grouping key — §9.1)
+        b.HasOne(x => x.WarehouseAddress).WithMany().HasForeignKey(x => x.WarehouseAddressId)
+            .HasConstraintName("FK_DeliverySchedule_CompanyAddress_WarehouseAddressId").OnDelete(DeleteBehavior.Restrict);
 
         // Seccode RLS FK (tenant + owner) — every BaseAggregateRoot must register this.
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_DeliverySchedule_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
 
-        // IX_DeliverySchedule_shipTo_date — ASN creation filter + schedule grid sort path
-        b.HasIndex(x => new { x.ShipToAddressId, x.DeliveryDate })
-            .HasDatabaseName("IX_DeliverySchedule_shipTo_date");
+        // IX_DeliverySchedule_warehouse_date — ASN creation filter + schedule grid sort path (R13: was ship-to)
+        b.HasIndex(x => new { x.WarehouseAddressId, x.DeliveryDate })
+            .HasDatabaseName("IX_DeliverySchedule_warehouse_date");
 
         // UQ_DeliverySchedule_line — one active schedule per PO line (Phase 1).
         // FILTERED on isDeleted=0 so a soft-deleted schedule never blocks re-creating a fresh one.
@@ -319,28 +319,37 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.InvoiceGenerationStatus).HasColumnName("invoiceGenerationStatus").HasMaxLength(20);
         b.Property(x => x.InvoiceGenerationNote).HasColumnName("invoiceGenerationNote").HasMaxLength(500);
 
-        // R5 (TSD R5 Addendum §4.5 / §9) — ship-to grouping key. The ASN header is grouped by
-        // (supplierId, shipToAddressId) in the R5 creation flow; PurchaseOrderId is deprecated as
-        // the primary grouping key (kept nullable for back-compat — made nullable in migration 0019).
-        // Nullable here: backfill is deferred (§21 migration step 4). NOT NULL is enforced at the
-        // application layer for all R5 ASNs created from the Delivery Schedule grid.
-        b.Property(x => x.ShipToAddressId).HasColumnName("shipToAddressId").HasColumnType("uniqueidentifier");
+        // R13 (2026-08-05) — WAREHOUSE grouping key (replaces the retired ship-to). The ASN header is grouped by
+        // (supplierId, warehouseAddressId); resolved from the covered PO lines' single warehouse. Nullable
+        // (existing ASNs have none). NOT NULL is enforced at the application layer for R13 ASNs.
+        b.Property(x => x.WarehouseAddressId).HasColumnName("warehouseAddressId").HasColumnType("uniqueidentifier");
+        b.OwnsOne(x => x.WarehouseAddressSnapshot, s =>
+        {
+            s.Property(p => p.AddressName).HasColumnName("whAddressName").HasMaxLength(150);
+            s.Property(p => p.ErpCode).HasColumnName("whErpCode").HasMaxLength(50);
+            s.Property(p => p.Line1).HasColumnName("whLine1").HasMaxLength(300);
+            s.Property(p => p.Line2).HasColumnName("whLine2").HasMaxLength(300);
+            s.Property(p => p.City).HasColumnName("whCity").HasMaxLength(100);
+            s.Property(p => p.State).HasColumnName("whState").HasMaxLength(100);
+            s.Property(p => p.Pincode).HasColumnName("whPincode").HasMaxLength(20);
+            s.Property(p => p.Country).HasColumnName("whCountry").HasMaxLength(100);
+        });
+        b.Navigation(x => x.WarehouseAddressSnapshot).IsRequired(false);
 
         b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_Asn_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_Asn_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
-        // FK → admin.CompanyAddress RESTRICT (a resolved ship-to must not be removed from under historical ASNs).
-        b.HasOne(x => x.ShipToAddress).WithMany().HasForeignKey(x => x.ShipToAddressId)
-            .HasConstraintName("FK_Asn_CompanyAddress_shipToAddressId").OnDelete(DeleteBehavior.Restrict);
+        // R13 — FK → admin.CompanyAddress RESTRICT (a resolved warehouse must not be removed from under historical ASNs).
+        b.HasOne(x => x.WarehouseAddress).WithMany().HasForeignKey(x => x.WarehouseAddressId)
+            .HasConstraintName("FK_Asn_CompanyAddress_warehouseAddressId").OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => x.AsnNumber).HasDatabaseName("UQ_Asn_asnNumber").IsUnique();
         b.HasIndex(x => x.SupplierId).HasDatabaseName("IX_Asn_supplierId");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_Asn_tenant_company");
-        // R5 (TSD R5 Addendum §4.5) — ship-to look-up: supports ASN header queries filtered by ship-to
-        // address (the always-on ship-to filter in the ASN creation and review screens).
-        b.HasIndex(x => x.ShipToAddressId).HasDatabaseName("IX_Asn_shipTo");
+        // R13 — warehouse look-up: supports ASN header queries filtered by warehouse (the ASN creation/review screens).
+        b.HasIndex(x => x.WarehouseAddressId).HasDatabaseName("IX_Asn_warehouse");
     }
 }
 

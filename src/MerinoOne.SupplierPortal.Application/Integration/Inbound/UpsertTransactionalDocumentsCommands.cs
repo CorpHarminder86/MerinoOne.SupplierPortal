@@ -39,13 +39,6 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
             o.RuleFor(r => r)
                 .Must(r => !string.IsNullOrWhiteSpace(r.SupplierCode) || !string.IsNullOrWhiteSpace(r.ErpSupplierCode))
                 .WithMessage("Either supplierCode or erpSupplierCode is required.");
-            // R5 (§6.2/§6.3) — the ERP ship-to code is mandatory on the inbound PO. (Resolution to an active
-            // CompanyAddress.erpCode happens in the handler; an unresolvable code is hard-failed per-row there.)
-            o.RuleFor(r => r.ShipToAddress).NotEmpty().MaximumLength(50);
-            // R11 (D1) — warehouse is MANDATORY on the wire but nullable in the DB: existing POs keep null
-            // until LN re-pushes them. Unlike shipToAddress there is no master to resolve against, so an
-            // unknown code is accepted verbatim and never hard-fails the row.
-            o.RuleFor(r => r.Warehouse).NotEmpty().MaximumLength(50);
             // Length caps mirror the column sizes (erpStatus 50; term codes 20 — the PaymentTerm/DeliveryTerm
             // master Code cap). Master EXISTENCE is soft-checked in the handler (resolve-or-keep-snapshot +
             // an InforSyncLog diagnostic on a miss) — a hard reject here would lose POs to master-sync timing.
@@ -65,6 +58,9 @@ public class UpsertPurchaseOrdersCommandValidator : AbstractValidator<UpsertPurc
                 line.RuleFor(l => l.ItemCode).NotEmpty().MaximumLength(50).WithName("itemCode");
                 line.RuleFor(l => l.OrderUnit).MaximumLength(20).WithName("orderUnit");
                 line.RuleFor(l => l.TaxCode).MaximumLength(20).WithName("taxCode");
+                // R13 — the receiving warehouse code is mandatory on EVERY inbound PO line (resolution to an active,
+                // non-base CompanyAddress.erpCode happens in the handler; an unresolvable code hard-fails the whole PO row).
+                line.RuleFor(l => l.Warehouse).NotEmpty().MaximumLength(50).WithName("warehouse");
                 line.RuleFor(l => l.OrderQty).GreaterThanOrEqualTo(0).WithMessage("orderQty must be >= 0.");
                 line.RuleFor(l => l).Must(l => !(l.OrderQty > 0 && l.AdditionalQty != 0))
                     .WithMessage("orderQty and additionalQty are mutually exclusive on a line — send orderQty to set the absolute qty OR additionalQty to add to the current qty, not both.");
@@ -89,14 +85,15 @@ public class UpsertPurchaseOrdersCommandHandler(
         // NOTE: an identical repeated cumulative-add push hashes the SAME — the ERP must vary the Idempotency-Key /
         // erpSyncId per intentional add, else a deliberate second identical delta is deduped (an accidental retry is
         // correctly deduped).
-        // R5 — ShipToAddress + ErpStatus are part of the canonical digest so a ship-to re-point or a raw-status change
-        // hashes differently and is NOT short-circuited as a duplicate by the no-header idempotency fallback.
-        // R11 — Warehouse is in the digest for the same reason, and it matters most on the very first push that
-        // carries it: an otherwise-unchanged PO re-pushed only to deliver the new warehouse would otherwise be
-        // deduped away and the warehouse would never land. Silent data loss on exactly the backfill push.
+        // R5 — ErpStatus is part of the canonical digest so a raw-status change hashes differently and is NOT
+        // short-circuited as a duplicate by the no-header idempotency fallback.
+        // R13 — warehouse is now PER LINE and is in the per-line digest segment for the same reason, and it matters
+        // most on the very first push that carries it: an otherwise-unchanged PO re-pushed only to deliver the new
+        // warehouse would otherwise be deduped away and the warehouse would never land — silent data loss on exactly
+        // the backfill push. (The retired header ship-to / header warehouse are no longer in the digest.)
         var canonical = recs.Select(r =>
-            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.ShipToAddress?.Trim()}|{r.ErpStatus?.Trim()}|{r.PoOrigin?.Trim()}|{r.Warehouse?.Trim()}|" +
-            string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.ItemCode}/{l.OrderQty}/{l.AdditionalQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}")));
+            $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.ErpStatus?.Trim()}|{r.PoOrigin?.Trim()}|" +
+            string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.ItemCode}/{l.OrderQty}/{l.AdditionalQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}/{l.Warehouse?.Trim()}")));
         var codes = recs.Select(r => r.PoNumber.Trim());
         return exec.ExecuteAsync(TransactionalInboundEntity.Po, request.Body.CompanyCode, request.BoundCompanyIds,
             request.IdempotencyKey, recs.Count, canonical, codes, request.Body, Upsert, ct);
@@ -292,31 +289,44 @@ public class UpsertPurchaseOrdersCommandHandler(
                     .ToListAsync(token))
                 .ToDictionary(p => p.PoNumber, StringComparer.OrdinalIgnoreCase);
 
-            // R5 (§6.2/§6.3 / [[r5-consolidation]]) — ship-to resolution. All rows in a payload share the ONE
-            // resolved company (sourceId = PO.tenantEntityId = admin.TenantEntity.Id); CompanyAddress hangs directly
-            // off the TenantEntity now, so batch-load that entity's ACTIVE, non-deleted ship-to addresses up front
-            // (no per-row DB round-trip — mirrors the supplier/item/tax batch-loads). The inbound code resolves to
-            // CompanyAddress.erpCode case-insensitively (§6.2). On a resolution MISS the PO row is hard-failed below.
-            var shipToAddresses = await db.CompanyAddresses.IgnoreQueryFilters()
-                .Where(a => !a.IsDeleted && a.IsActive && a.TenantEntityId == sourceId && a.ErpCode != null)
+            // R13 — per-LINE warehouse resolution pool. All rows in a payload share the ONE resolved company
+            // (sourceId = PO.tenantEntityId = admin.TenantEntity.Id); CompanyAddress hangs directly off the
+            // TenantEntity, so batch-load that entity's ACTIVE, non-deleted, NON-BASE addresses up front (no per-row
+            // DB round-trip — mirrors the supplier/item/tax batch-loads). Base rows carry no ErpCode and are never
+            // warehouse targets, so they are excluded. Each inbound line's warehouse code resolves to
+            // CompanyAddress.erpCode case-insensitively; on a resolution MISS the whole PO row is hard-failed below.
+            var warehouseAddresses = await db.CompanyAddresses.IgnoreQueryFilters()
+                .Where(a => !a.IsDeleted && a.IsActive && !a.IsBaseAddress && a.TenantEntityId == sourceId && a.ErpCode != null)
                 .ToListAsync(token);
             var addressByErpCode = new Dictionary<string, CompanyAddress>(StringComparer.OrdinalIgnoreCase);
-            foreach (var a in shipToAddresses)
+            foreach (var a in warehouseAddresses)
                 addressByErpCode[a.ErpCode!.Trim()] = a;   // last-wins (the filtered UQ makes erpCode unique anyway).
 
             foreach (var rec in recs)
             {
                 var poNum = rec.PoNumber.Trim();
 
-                // R5 (§6.2) — resolve the ship-to BEFORE any supplier/qty/persist work so a miss leaves the PO
-                // untouched (mirrors the supplier-not-found / qty-reject early-outs). HARD-FAIL on a miss: no
-                // matching ACTIVE address erpCode for the tenant entity → the PO is NOT created/updated. The Failed
-                // RowResult carries the error into the batch InforSyncLog + linked IntegrationError (§12).
-                var shipToCode = rec.ShipToAddress.Trim();
-                if (!addressByErpCode.TryGetValue(shipToCode, out var shipToAddress))
+                // R13 — resolve EACH line's warehouse BEFORE any supplier/qty/persist work so a miss leaves the PO
+                // untouched (mirrors the retired header ship-to early-out / supplier-not-found / qty-reject early-outs).
+                // A PO folds its lines by positionNo, so resolve per folded position. HARD-FAIL on ANY unresolved code:
+                // no matching ACTIVE, non-base CompanyAddress.erpCode for the tenant entity → the WHOLE PO is NOT
+                // created/updated. The Failed RowResult carries the error into the batch InforSyncLog + linked
+                // IntegrationError (§12). Resolved here (before persist) and threaded into the line write paths below.
+                var warehouseByPosition = new Dictionary<int, CompanyAddress>();
+                string? warehouseError = null;
+                foreach (var (pos, last) in FoldByPosition(rec))
                 {
-                    var shipErr = $"Ship-to code '{shipToCode}' not found for tenant entity {sourceId}";
-                    results.Add(new RowResult(poNum, RowOutcome.Failed, shipErr));
+                    var whCode = last.Warehouse?.Trim();
+                    if (string.IsNullOrWhiteSpace(whCode) || !addressByErpCode.TryGetValue(whCode, out var whAddr))
+                    {
+                        warehouseError = $"Warehouse code '{whCode}' not found for tenant entity {sourceId} (line {pos})";
+                        break;
+                    }
+                    warehouseByPosition[pos] = whAddr;
+                }
+                if (warehouseError != null)
+                {
+                    results.Add(new RowResult(poNum, RowOutcome.Failed, warehouseError));
                     continue;
                 }
 
@@ -400,15 +410,13 @@ public class UpsertPurchaseOrdersCommandHandler(
                             po.PoStatus = ns;
                         // else: leave PoStatus unchanged (no-clobber / Draft-on-re-receipt).
                     }
-                    // R5 (§6.2/§6.3) — re-snapshot the ship-to (it may have been re-pointed) + record the RAW erpStatus
-                    // (tracking/audit only — the DISPLAYED PoStatus is the resolver's output above).
-                    po.ShipToAddressId = shipToAddress.Id;
-                    po.ShipTo = ShipToSnapshot.From(shipToAddress);
+                    // R13 — the header ship-to / header warehouse are retired; warehouse is re-snapshotted PER LINE in
+                    // SyncLines. Here we only record the RAW erpStatus (tracking/audit only — the DISPLAYED PoStatus
+                    // is the resolver's output above) and the raw PO origin.
                     po.ErpStatus = rec.ErpStatus;
                     po.PoOrigin = rec.PoOrigin?.Trim();
-                    po.Warehouse = rec.Warehouse?.Trim();
                     po.Version += 1; po.UpdatedBy = "infor:inbound"; po.UpdatedOn = now;
-                    SyncLines(db, po, rec, resolvedQty, itemMap, taxMap, now);
+                    SyncLines(db, po, rec, resolvedQty, warehouseByPosition, itemMap, taxMap, now);
 
                     if (isMaterial)
                     {
@@ -462,18 +470,16 @@ public class UpsertPurchaseOrdersCommandHandler(
                         DeliveryTermId = newDelId, DeliveryTerms = newDelSnap,
                         CurrencyId = curId, CurrencyCode = rec.CurrencyCode?.Trim(),
                         Notes = rec.Notes, ErpSyncId = rec.ErpSyncId, Version = 1,
-                        // R5 (§6.2/§6.3) — resolved ship-to FK + point-in-time snapshot (single copy point) + raw erpStatus.
-                        ShipToAddressId = shipToAddress.Id,
-                        ShipTo = ShipToSnapshot.From(shipToAddress),
+                        // R13 — no header ship-to / header warehouse (retired); warehouse is per LINE below. Raw erpStatus.
                         ErpStatus = rec.ErpStatus,
                         PoOrigin = rec.PoOrigin?.Trim(),
-                        Warehouse = rec.Warehouse?.Trim(),
                         CreatedBy = "infor:inbound", CreatedOn = now
                     };
                     // One stored line per positionNo (seq forced to 1 in Apply); the resolved qty is the absolute total.
+                    // The per-position resolved warehouse (FK + snapshot) is threaded into NewLine.
                     foreach (var (pos, last) in FoldByPosition(rec))
                     {
-                        var nl = NewLine(last, itemMap, taxMap, now);
+                        var nl = NewLine(last, warehouseByPosition[pos], itemMap, taxMap, now);
                         var rv = resolvedQty[pos];
                         nl.OrderQty = rv.Qty; nl.Price = rv.Price; nl.DiscountAmount = rv.Discount;
                         po2.Lines.Add(nl);
@@ -568,6 +574,7 @@ public class UpsertPurchaseOrdersCommandHandler(
     // navigation in the handler — that aggregate is all-Added.)
     private static void SyncLines(IAppDbContext db, PurchaseOrder po, PoRecord rec,
         IReadOnlyDictionary<int, ResolvedPoLine> resolvedByPosition,
+        IReadOnlyDictionary<int, CompanyAddress> warehouseByPosition,
         IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
     {
         // Existing stored lines keyed by positionNo (seq is always 1 in our store; last-wins guards any legacy dup).
@@ -578,15 +585,16 @@ public class UpsertPurchaseOrdersCommandHandler(
         foreach (var (pos, last) in FoldByPosition(rec))
         {
             var rv = resolvedByPosition[pos];
+            var whAddr = warehouseByPosition[pos];   // R13 — per-position resolved warehouse (hard-resolved upstream).
             if (byPosition.TryGetValue(pos, out var line))
             {
-                Apply(line, last, itemMap, taxMap);
+                Apply(line, last, whAddr, itemMap, taxMap);
                 line.OrderQty = rv.Qty; line.Price = rv.Price; line.DiscountAmount = rv.Discount;
                 line.UpdatedBy = "infor:inbound"; line.UpdatedOn = now;
             }
             else
             {
-                var newLine = NewLine(last, itemMap, taxMap, now);
+                var newLine = NewLine(last, whAddr, itemMap, taxMap, now);
                 newLine.OrderQty = rv.Qty; newLine.Price = rv.Price; newLine.DiscountAmount = rv.Discount;
                 newLine.PurchaseOrderId = po.Id;
                 db.PurchaseOrderLines.Add(newLine);
@@ -639,20 +647,25 @@ public class UpsertPurchaseOrdersCommandHandler(
         return (resolved, null);
     }
 
-    private static PurchaseOrderLine NewLine(PoLineRecord l, IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
+    private static PurchaseOrderLine NewLine(PoLineRecord l, CompanyAddress warehouseAddr, IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap, DateTime now)
     {
         var line = new PurchaseOrderLine { Id = Guid.NewGuid(), CreatedBy = "infor:inbound", CreatedOn = now };
-        Apply(line, l, itemMap, taxMap);
+        Apply(line, l, warehouseAddr, itemMap, taxMap);
         return line;
     }
 
     // Applies an inbound line's attributes onto a stored line. sequenceNo is FORCED to 1 (storage key is positionNo);
     // additionalQty is echoed for audit. OrderQty, Price and DiscountAmount are NOT set here — the caller sets the
     // RESOLVED folded values (replace on orderQty>0, signed-add on additionalQty≠0) from ResolvePoLineQuantities.
-    private static void Apply(PurchaseOrderLine line, PoLineRecord l, IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap)
+    // R13 — warehouseAddr is the per-line resolved (active, non-base) CompanyAddress; store the raw pushed code, the
+    // live FK and a point-in-time snapshot (replaces the retired PO-header ship-to snapshot-on-write).
+    private static void Apply(PurchaseOrderLine line, PoLineRecord l, CompanyAddress warehouseAddr, IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap)
     {
         line.PositionNo = l.PositionNo; line.SequenceNo = 1;   // ALWAYS 1 — index unchanged; seq is not a storage key.
         line.AdditionalQty = l.AdditionalQty;                  // echo of the last received delta (signed; audit only).
+        line.Warehouse = l.Warehouse?.Trim();                  // raw pushed warehouse code (validated non-empty).
+        line.WarehouseAddressId = warehouseAddr.Id;
+        line.WarehouseAddressSnapshot = WarehouseSnapshot.From(warehouseAddr);
         line.ItemCode = l.ItemCode.Trim();
         // Item snapshot-on-write (mirrors the tax / payment / delivery-term snapshot): resolve the code to the master
         // (id + description) and store the pushed description when the ERP sent one, else snapshot the master's — so the

@@ -43,17 +43,10 @@ public class PurchaseOrder : BaseAggregateRoot
     public string? ErpSyncId { get; set; }
     public string? Notes { get; set; }
 
-    // R5 (TSD R5 Addendum §4.3 / §6) — mandatory ship-to routing. NULLABLE in this phase (backfill is a later
-    // phase); the FK gives live linkage back to the resolved admin.CompanyAddress. The DISPLAYED ship-to is the
-    // point-in-time snapshot below, not this live address — so later edits to the company address do not change
-    // what a historical PO renders. Customer NAME is derived live (tenantEntityId → Company.name), never stored.
-    public Guid? ShipToAddressId { get; set; }
-    public CompanyAddress? ShipToAddress { get; set; }
-
-    // R5 (TSD R5 Addendum §4.3) — point-in-time ship-to snapshot. Mapped as an OWNED VALUE OBJECT onto the eight
-    // shipTo* columns (one VO instead of eight loose properties); written once at inbound resolution. The header
-    // renders/reports against this. IsRequired(false) — null until a PO is resolved/backfilled.
-    public ShipToSnapshot? ShipTo { get; set; }
+    // R13 (2026-08-05) — ship-to RETIRED. The PO header no longer carries a ship-to FK / 8-col snapshot / a
+    // header warehouse. Warehouse is now a PER-LINE receiving address (PurchaseOrderLine.WarehouseAddressId +
+    // snapshot); the customer's own BASE address is shown on the PO screen via a LIVE join on tenantEntityId →
+    // the company's single base CompanyAddress (never stored on the PO). Customer NAME is likewise derived live.
 
     // R5 (TSD R5 Addendum §4.8) — last raw ERP status received (e.g. 'Released', 'modified'). Tracking/audit
     // only; NEVER shown on supplier-facing screens. PoStatus remains the authoritative, displayed status
@@ -63,13 +56,6 @@ public class PurchaseOrder : BaseAggregateRoot
     // Raw ERP-owned PO origin (e.g. the LN order origin / originating document indicator). Stored verbatim from
     // the inbound push for tracking/reference; ERP-owned (overwritten on the next PO inbound sync).
     public string? PoOrigin { get; set; }
-
-    // R11 (2026-07-28, D1/D2) — receiving warehouse code, ERP-owned. Free-text code stored verbatim from the
-    // inbound push (no Warehouse master, no FK, no description snapshot); overwritten on the next PO inbound
-    // sync. REQUIRED on the inbound contract but NULLABLE here: existing POs keep null until LN re-pushes them
-    // (the R5 ShipToAddress precedent — mandatory on the wire, nullable in the DB, no backfill). Flows onto the
-    // ASN as the §D4 single-warehouse grouping key and out to LN as the ASN payload's Warehouse.
-    public string? Warehouse { get; set; }
 
     public ICollection<PurchaseOrderLine> Lines { get; set; } = new List<PurchaseOrderLine>();
 }

@@ -17,14 +17,15 @@ public class Asn : BaseAggregateRoot
     public Guid? PurchaseOrderId { get; set; }
     public PurchaseOrder? PurchaseOrder { get; set; }
 
-    // R5 (TSD R5 Addendum §4.5 / §9) — ship-to grouping key. Every AsnLine under this ASN references a
-    // PO line whose PurchaseOrder.shipToAddressId == this value; cross-ship-to lines are rejected at
-    // selection time and at persist-time (the invariant in §9.3). Nullable while backfill is in progress
-    // (existing ASNs have no ship-to); NOT NULL once backfill is complete and enforced via the application
-    // layer for all new ASNs. FK → admin.CompanyAddress RESTRICT (a resolved ship-to must not be removed
-    // out from under a historical ASN).
-    public Guid? ShipToAddressId { get; set; }
-    public CompanyAddress? ShipToAddress { get; set; }
+    // R13 (2026-08-05) — WAREHOUSE grouping key (replaces the retired ship-to). Every AsnLine under this ASN
+    // references a PO line whose WarehouseAddressId == this value; cross-warehouse lines are rejected at selection
+    // time and persist-time (the §9.3 invariant, now one-warehouse-per-ASN). Resolved from the covered PO lines'
+    // single warehouse. FK → admin.CompanyAddress RESTRICT; the WarehouseAddress snapshot renders the receiving
+    // address without a join. Nullable (existing ASNs have no warehouse address). The raw Warehouse code below is
+    // the value that ships to LN on the ASN post.
+    public Guid? WarehouseAddressId { get; set; }
+    public CompanyAddress? WarehouseAddress { get; set; }
+    public WarehouseSnapshot? WarehouseAddressSnapshot { get; set; }
 
     public Guid SupplierId { get; set; }
     public DateTime ExpectedDeliveryDate { get; set; }

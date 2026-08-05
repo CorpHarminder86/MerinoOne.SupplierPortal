@@ -64,7 +64,7 @@ public class DeliveryScheduleTests
         sch.PurchaseOrderLineId.Should().Be(setup.PoLineId);
         sch.Status.Should().Be(DeliveryScheduleStatus.Approved);
         sch.ScheduledQty.Should().Be(setup.OrderQty, because: "scheduledQty = line.orderQty at creation");
-        sch.ShipToAddressId.Should().Be(IntegrationTestFixture.ShipToAddressId, because: "shipToAddressId = PO.shipToAddressId");
+        sch.WarehouseAddressId.Should().Be(IntegrationTestFixture.ShipToAddressId, because: "warehouseAddressId = PO line's resolved warehouse (R13; ShipToErpCode resolves there)");
         sch.SeccodeId.Should().Be(setup.Supplier.SeccodeId, because: "the schedule inherits the owning PO's G-seccode for RLS");
     }
 
@@ -86,11 +86,10 @@ public class DeliveryScheduleTests
             new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
                 new[]
                 {
-                    new PoLineRecord(10, 1, $"ITM-A-{tag}", OrderUnit: "EA", OrderQty: 30, PriceUnit: 1, Price: 30),
-                    new PoLineRecord(20, 2, $"ITM-B-{tag}", OrderUnit: "EA", OrderQty: 40, PriceUnit: 1, Price: 40),
+                    // R13 — warehouse per line (both resolve to the fixture ship-to address via ShipToErpCode).
+                    new PoLineRecord(10, 1, $"ITM-A-{tag}", OrderUnit: "EA", OrderQty: 30, PriceUnit: 1, Price: 30, Warehouse: IntegrationTestFixture.ShipToErpCode),
+                    new PoLineRecord(20, 2, $"ITM-B-{tag}", OrderUnit: "EA", OrderQty: 40, PriceUnit: 1, Price: 40, Warehouse: IntegrationTestFixture.ShipToErpCode),
                 },
-                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
-                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
 
@@ -102,7 +101,7 @@ public class DeliveryScheduleTests
             .Where(s => s.PurchaseOrderId == po.Id && !s.IsDeleted).ToListAsync();
         schedules.Should().HaveCount(2, because: "one schedule per PO line is created immediately for AutoAccept at Released (UC-DS-02)");
         schedules.Select(s => s.ScheduledQty).Should().BeEquivalentTo(new[] { 30m, 40m });
-        schedules.Should().OnlyContain(s => s.ShipToAddressId == IntegrationTestFixture.ShipToAddressId);
+        schedules.Should().OnlyContain(s => s.WarehouseAddressId == IntegrationTestFixture.ShipToAddressId);
         schedules.Should().OnlyContain(s => s.Status == DeliveryScheduleStatus.Approved);
     }
 
@@ -132,9 +131,7 @@ public class DeliveryScheduleTests
         await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
         {
             new PoRecord(setup.PoNumber, setup.Supplier.SupplierCode, DateTime.UtcNow.Date,
-                new[] { new PoLineRecord(setup.PoPositionNo, 1, setup.ItemCode, OrderUnit: "EA", OrderQty: 25, PriceUnit: setup.PriceUnit, Price: setup.PriceUnit * 25) },
-                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
-                Warehouse: IntegrationTestFixture.WarehouseCode,
+                new[] { new PoLineRecord(setup.PoPositionNo, 1, setup.ItemCode, OrderUnit: "EA", OrderQty: 25, PriceUnit: setup.PriceUnit, Price: setup.PriceUnit * 25, Warehouse: IntegrationTestFixture.ShipToErpCode) },
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         }));
         await AssertPoStatus(setup.PoId, PoStatus.Released);   // material modify re-armed the gate
@@ -195,7 +192,7 @@ public class DeliveryScheduleTests
         first.ItemCode.Should().Be($"ITM-{tag}-10");
         first.OrderQty.Should().Be(3m);
         first.RemainingToShip.Should().Be(3m, because: "remaining = MAX(0, orderQty − shippedQtyToDate) with nothing shipped");
-        first.ShipToAddressName.Should().Be("IntTest DC");
+        first.WarehouseAddressName.Should().Be("IntTest DC");
         first.DeliveryDate.Date.Should().Be(d1);
     }
 
@@ -237,17 +234,17 @@ public class DeliveryScheduleTests
             await supplierClient.GetAsync($"/api/delivery-schedules?supplierId={supplier.SupplierId}&status=Approved&pageSize=200"))).Data!;
         byStatus.Page.Items.Should().HaveCount(2, because: "both schedules are Approved");
 
-        // (d) Ship-to auto-hide: this supplier's schedules all share ONE ship-to → the filter is hidden.
+        // (d) Warehouse auto-hide: this supplier's schedules all share ONE warehouse → the filter is hidden.
         var grid = (await Read<DeliveryScheduleGridDto>(
             await supplierClient.GetAsync($"/api/delivery-schedules?supplierId={supplier.SupplierId}&pageSize=200"))).Data!;
-        grid.DistinctShipToCount.Should().Be(1, because: "all of this supplier's schedules share one ship-to");
-        grid.ShowShipToFilter.Should().BeFalse(because: "the Ship-To filter auto-hides when only one ship-to is present (§7, UC-DS-05)");
+        grid.DistinctWarehouseCount.Should().Be(1, because: "all of this supplier's schedules share one warehouse");
+        grid.ShowWarehouseFilter.Should().BeFalse(because: "the Warehouse filter auto-hides when only one warehouse is present (§7, UC-DS-05)");
 
-        // (e) Ship-to filter still selects the matching rows when supplied explicitly.
-        var byShipTo = (await Read<DeliveryScheduleGridDto>(
+        // (e) Warehouse filter still selects the matching rows when supplied explicitly.
+        var byWarehouse = (await Read<DeliveryScheduleGridDto>(
             await supplierClient.GetAsync(
-                $"/api/delivery-schedules?supplierId={supplier.SupplierId}&shipToAddressId={IntegrationTestFixture.ShipToAddressId}&pageSize=200"))).Data!;
-        byShipTo.Page.Items.Should().HaveCount(2, because: "both schedules carry the one seeded ship-to");
+                $"/api/delivery-schedules?supplierId={supplier.SupplierId}&warehouseAddressId={IntegrationTestFixture.ShipToAddressId}&pageSize=200"))).Data!;
+        byWarehouse.Page.Items.Should().HaveCount(2, because: "both schedules carry the one seeded warehouse address");
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────
@@ -258,9 +255,9 @@ public class DeliveryScheduleTests
             new PoRecord(poNumber, supplierCode, DateTime.UtcNow.Date,
                 lines.Select(l => new PoLineRecord(
                     PositionNo: l.Position, SequenceNo: 1, ItemCode: $"ITM-{tag}-{l.Position}",
-                    OrderUnit: "EA", OrderQty: l.Qty, PriceUnit: 1, Price: l.Qty, DeliveryDate: l.DeliveryDate)).ToArray(),
-                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
-                Warehouse: IntegrationTestFixture.WarehouseCode,
+                    OrderUnit: "EA", OrderQty: l.Qty, PriceUnit: 1, Price: l.Qty, DeliveryDate: l.DeliveryDate,
+                    // R13 — warehouse per line, resolving to the fixture ship-to address (ShipToErpCode → "IntTest DC").
+                    Warehouse: IntegrationTestFixture.ShipToErpCode)).ToArray(),
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         });
 

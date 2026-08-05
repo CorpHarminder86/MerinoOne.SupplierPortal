@@ -186,19 +186,23 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
         // for back-compat; multi-PO → leave scalar null, the junction is the source of truth.
         var shippedPoIds = poLines.Values.Select(l => l.PurchaseOrderId).Distinct().ToList();
 
-        // R11 (D4) — single warehouse, resolved from the POs actually shipped on (NOT the requested PO set, which
-        // may be wider than the chosen lines). Mirrors the R5 single-ship-to rule; nulls from pre-R11 POs are not
-        // treated as a distinct value, so legacy selections are never blocked. This legacy path never set
-        // ShipToAddressId either, but warehouse IS set here — the LN payload needs it on every ASN.
-        var warehouse = AsnWarehouseRules.ResolveSingle(
-            pos.Where(p => shippedPoIds.Contains(p.Id)).Select(p => p.Warehouse));
+        // R13 (D4) — single warehouse, resolved from the covered PO LINES actually shipped on (warehouse moved to
+        // the PO line; the PO header no longer carries it). Mirrors the retired single-ship-to rule; nulls from
+        // pre-R13 lines are not treated as a distinct value, so legacy selections are never blocked. Resolves the
+        // code (ships to LN on the header), the address FK, and the snapshot the read side renders without a join.
+        var warehouse = AsnWarehouseRules.Resolve(
+            poLines.Values.Select(l => new AsnWarehouseRules.WarehouseLine(
+                l.Warehouse, l.WarehouseAddressId, l.WarehouseAddressSnapshot)));
 
         var asn = new Asn
         {
             Id = asnId,
             AsnNumber = asnNumber,
             PurchaseOrderId = shippedPoIds.Count == 1 ? shippedPoIds[0] : null,
-            Warehouse = warehouse,
+            // R13 (D4) — the resolved warehouse: the raw code (LN header), the live address FK, and the frozen snapshot.
+            Warehouse = warehouse.Code,
+            WarehouseAddressId = warehouse.AddressId,
+            WarehouseAddressSnapshot = warehouse.Snapshot,
             // R11 (D6/D7) — optional at create; SendForApproval is the gate that requires them.
             InvoiceNo = AsnHeaderRules.NullIfBlank(body.InvoiceNo),
             BillOfLading = AsnHeaderRules.NullIfBlank(body.BillOfLading),

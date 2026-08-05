@@ -187,13 +187,10 @@ public static class AsnDtoBuilder
 
         var attachments = await BuildAttachmentsAsync(db, asnId, ct);
 
-        // R5 — the ship-to grouping key label (set on schedule-built ASNs) + the latest approval session.
-        string? shipToName = null;
-        if (a.ShipToAddressId is { } shipToId)
-            shipToName = await db.CompanyAddresses.AsNoTracking()
-                .Where(ca => ca.Id == shipToId)
-                .Select(ca => ca.AddressName)
-                .FirstOrDefaultAsync(ct);
+        // R13 — the warehouse grouping key label (replaces ship-to), read off the frozen snapshot the ASN carries —
+        // no CompanyAddress join needed. The owned snapshot is auto-materialised with the ASN above; a null
+        // WarehouseAddressId yields a null label. The latest approval session is loaded next.
+        string? warehouseAddressName = a.WarehouseAddressSnapshot?.AddressName;
 
         var approval = await db.AsnApprovals.AsNoTracking()
             .Where(ap => ap.AsnId == asnId && !ap.IsDeleted)
@@ -223,7 +220,8 @@ public static class AsnDtoBuilder
             a.SubmittedAt, a.SubmittedBy, a.ErpSyncId, a.ErpCode,
             draftInvoiceId, IsLocked(a.AsnStatus),
             lines, attachments,
-            a.ShipToAddressId, shipToName, approval,
+            // R13 — warehouse address FK + its snapshot label map to the (renamed) DTO WarehouseAddressId/Name slots.
+            a.WarehouseAddressId, warehouseAddressName, approval,
             shipBlockReason is not null, shipBlockReason,
             a.InvoiceGenerationStatus, a.InvoiceGenerationNote, draftInvoiceIds,
             // R11 — warehouse (derived, read-only) + the three supplier-entered shipment refs, and createdOn,

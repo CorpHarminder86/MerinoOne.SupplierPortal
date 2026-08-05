@@ -85,7 +85,19 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
                 r.IsLotControlled,
                 l.Price - l.DiscountAmount,
                 l.ShippedQtyToDate, balance, overShipAllowance,
-                isOverShippedQtyReduced);
+                isOverShippedQtyReduced,
+                // R13 — per-line warehouse: the raw code + the owned point-in-time snapshot VO. LOAD-THEN-READ: the
+                // line entity is materialised above (ToListAsync), so its owned WarehouseAddressSnapshot reads here
+                // in-memory — no SQL projection of the owned type (the same pattern the header used for po.ShipTo).
+                l.Warehouse,
+                l.WarehouseAddressSnapshot?.ErpCode,
+                l.WarehouseAddressSnapshot?.AddressName,
+                l.WarehouseAddressSnapshot?.Line1,
+                l.WarehouseAddressSnapshot?.Line2,
+                l.WarehouseAddressSnapshot?.City,
+                l.WarehouseAddressSnapshot?.State,
+                l.WarehouseAddressSnapshot?.Pincode,
+                l.WarehouseAddressSnapshot?.Country);
         }).ToList();
 
         // PO header total = sum of line net amounts (Price − DiscountAmount). Derived, not persisted.
@@ -94,12 +106,20 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
         // R5 (§6.1 / [[r5-consolidation]]) — CustomerName is DERIVED live from the TenantEntity (the company) by the
         // PO's tenantEntityId (reflects company renames live; never stored on the PO). IgnoreQueryFilters because the
         // read may run under a supplier principal with no config-seccode context; scoped by (tenantId, tenantEntityId).
-        // The ship-to displayed below is the POINT-IN-TIME snapshot off po.ShipTo (the owned VO), not the live address.
+        // R13: the header ship-to snapshot is retired — the customer BASE address is joined LIVE just below instead.
         var customerName = await _db.TenantEntities.IgnoreQueryFilters()
             .Where(c => !c.IsDeleted && c.TenantId == row.po.TenantId && c.Id == row.po.TenantEntityId)
             .Select(c => c.Name)
             .FirstOrDefaultAsync(ct);
-        var shipTo = row.po.ShipTo;
+
+        // R13 (§6.1) — the customer BASE address, joined LIVE for the PO's company: its single IsBaseAddress
+        // CompanyAddress (base rows carry no ErpCode and are never a warehouse-resolution target). IgnoreQueryFilters
+        // mirrors the customerName resolve (a supplier principal has no config-seccode context); scoped by the PO's
+        // company. Null (all fields left null) when the company has no base address yet — the header simply shows none.
+        var baseAddr = await _db.CompanyAddresses.IgnoreQueryFilters()
+            .Where(a => !a.IsDeleted && a.IsActive && a.IsBaseAddress && a.TenantEntityId == row.po.TenantEntityId)
+            .Select(a => new { a.AddressName, a.AddressLine1, a.AddressLine2, a.City, a.State, a.Pincode, a.Country })
+            .FirstOrDefaultAsync(ct);
 
         return new PurchaseOrderDetailDto(
             row.po.Id, row.po.Seq, row.po.PoNumber,
@@ -119,17 +139,15 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
             // R4 (2026-06-26) — Phase 5b / D1, D2: the action toggles drive the PO-detail Reject / Negotiation gating.
             row.s.AllowNegotiate,
             row.s.AllowReject,
-            // R5 (§6.1) — derived customer name + the point-in-time ship-to snapshot (display-only).
+            // R5/R13 (§6.1) — derived customer name + the LIVE customer base address (display-only). The per-line
+            // warehouse now rides on each PurchaseOrderLineDto above, not on the header.
             customerName,
-            shipTo?.AddressName,
-            shipTo?.ErpCode,
-            shipTo?.Line1,
-            shipTo?.Line2,
-            shipTo?.City,
-            shipTo?.State,
-            shipTo?.Pincode,
-            shipTo?.Country,
-            // R11 (D3) — receiving warehouse code, read straight off the header (no master, no snapshot VO).
-            row.po.Warehouse);
+            baseAddr?.AddressName,
+            baseAddr?.AddressLine1,
+            baseAddr?.AddressLine2,
+            baseAddr?.City,
+            baseAddr?.State,
+            baseAddr?.Pincode,
+            baseAddr?.Country);
     }
 }

@@ -104,12 +104,12 @@ public class FulfilmentStatusDerivationTests : IAsyncLifetime
                 PoNumber: setup.PoNumber, SupplierCode: setup.Supplier.SupplierCode, PoDate: DateTime.UtcNow.Date,
                 Lines: new[]
                 {
+                    // R13 — warehouse is per line; match the seeded PO's line warehouse (ShipToErpCode) so the
+                    // re-push stays non-material (warehouse is not a material field, but keep it identical anyway).
                     new PoLineRecord(PositionNo: setup.PoPositionNo, SequenceNo: 1, ItemCode: setup.ItemCode,
                         OrderUnit: "EA", OrderQty: setup.OrderQty, PriceUnit: setup.PriceUnit,
-                        Price: setup.PriceUnit * setup.OrderQty),
+                        Price: setup.PriceUnit * setup.OrderQty, Warehouse: IntegrationTestFixture.ShipToErpCode),
                 },
-                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
-                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR", ErpStatus: erpStatus),
         });
         var resp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", body);

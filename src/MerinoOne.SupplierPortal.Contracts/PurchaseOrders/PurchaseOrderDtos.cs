@@ -22,17 +22,11 @@ public record PurchaseOrderListItemDto(
     string? CurrencyCode = null,
     string? PaymentTerms = null,
     string? DeliveryTerms = null,
-    // R5 (§6.2) — the PO's resolved ship-to (from the owned ShipTo snapshot). The ASN wizard groups/filters open
-    // POs by ship-to so an ASN never spans two ship-to addresses. Null on a PO with no resolved ship-to.
-    Guid? ShipToAddressId = null,
-    string? ShipToAddressName = null,
     // R4 §6.2 — whether the PO is shippable for its supplier's confirmation mode (PoConfirmationPolicy). The ASN
     // PO-picker offers ONLY shippable POs. Computed server-side (the policy is not reachable from the Web layer).
-    bool IsShippable = true,
-    // R11 (D3/D4) — the PO's receiving warehouse. On the LIST DTO specifically because the ASN wizard groups and
-    // filters open POs by warehouse the same way it does by ship-to, so an ASN never spans two warehouses.
-    // Null on POs ingested before R11 (no backfill).
-    string? Warehouse = null);
+    // R13 — ship-to and the PO-header warehouse are GONE from the list DTO: the warehouse is now per PO LINE (a PO
+    // may span warehouses), so the list carries no single header-level ship-to/warehouse grouping key any more.
+    bool IsShippable = true);
 
 public record PagedResult<T>(
     List<T> Items,
@@ -75,22 +69,18 @@ public record PurchaseOrderDetailDto(
     // positional callers stay valid and a missing value never hides an action it shouldn't.
     bool AllowNegotiate = true,
     bool AllowReject = true,
-    // R5 (TSD R5 Addendum §6.1 — Component 2) — display-only. CustomerName is DERIVED live (PO.tenantEntityId →
-    // Company.name); it reflects company renames live and is NOT stored on the PO. The ShipTo* fields are the
-    // POINT-IN-TIME snapshot read from the owned po.ShipTo value object (what the header renders), NOT the live
-    // address — so later edits to the company address do not change historical POs. All null until a PO is resolved.
+    // R5/R13 (TSD R5 Addendum §6.1 — Component 2) — display-only. CustomerName is DERIVED live (PO.tenantEntityId →
+    // Company.name); it reflects company renames live and is NOT stored on the PO. R13: the retired ship-to snapshot
+    // is replaced by the customer's BASE address, joined LIVE for the PO's company (its single IsBaseAddress
+    // CompanyAddress) and shown beside the customer name on the header. All null until resolvable.
     string? CustomerName = null,
-    string? ShipToAddressName = null,
-    string? ShipToErpCode = null,
-    string? ShipToLine1 = null,
-    string? ShipToLine2 = null,
-    string? ShipToCity = null,
-    string? ShipToState = null,
-    string? ShipToPincode = null,
-    string? ShipToCountry = null,
-    // R11 (D3) — receiving warehouse code, ERP-owned free text (no master, so there is no description to pair
-    // with it — unlike ship-to this is the code itself, rendered as-is). Null on pre-R11 POs.
-    string? Warehouse = null);
+    string? CustomerAddressName = null,
+    string? CustomerAddressLine1 = null,
+    string? CustomerAddressLine2 = null,
+    string? CustomerAddressCity = null,
+    string? CustomerAddressState = null,
+    string? CustomerAddressPincode = null,
+    string? CustomerAddressCountry = null);
 
 public record PurchaseOrderLineDto(
     Guid Id,
@@ -129,7 +119,20 @@ public record PurchaseOrderLineDto(
     // "over-shipped / qty reduced below shipped". Balance is already MAX(0,…) so it reads 0; this flag tells the
     // buyer/supplier the order shrank under the shipped cumulative. The atomic ASN guard auto-blocks further ASNs
     // on such a line (it reads orderQty live, revision-safe), so this is a display/exception signal, not a gate.
-    bool IsOverShippedQtyReduced = false);
+    bool IsOverShippedQtyReduced = false,
+    // R13 — receiving WAREHOUSE, now per LINE (a PO may span warehouses; the retired PO-header ship-to is gone).
+    // Warehouse is the raw ERP code; the remaining Warehouse* fields are the POINT-IN-TIME snapshot read from the
+    // line's owned WarehouseAddressSnapshot VO (rendered without a join), mirroring how ship-to used to render.
+    // All null on lines pushed before R13 (clean break, no backfill).
+    string? Warehouse = null,
+    string? WarehouseErpCode = null,
+    string? WarehouseAddressName = null,
+    string? WarehouseLine1 = null,
+    string? WarehouseLine2 = null,
+    string? WarehouseCity = null,
+    string? WarehouseState = null,
+    string? WarehousePincode = null,
+    string? WarehouseCountry = null);
 
 public record AcknowledgePoRequest(string? Notes = null);
 // R4 (2026-06-26) — D2: accept is accept-only (the ProposedDate field is removed — counter-proposals go through

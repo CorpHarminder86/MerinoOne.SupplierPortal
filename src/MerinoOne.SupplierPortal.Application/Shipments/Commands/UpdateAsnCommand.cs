@@ -93,12 +93,13 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         var targetPoIds = poLines.Values.Select(l => l.PurchaseOrderId).Distinct().ToList();
         await AsnDraftGate.EnsureEditableAsync(_db, asn, targetPoIds, ct);
 
-        // R11 (D4) — RE-derive the warehouse from the NEW line set: an update replaces the lines wholesale, so a
-        // supplier can swap in a line from a PO in another warehouse. Re-resolving here rejects that, and keeps
-        // the stored warehouse in step when the line set narrows to a different (single) warehouse.
-        var newWarehouse = AsnWarehouseRules.ResolveSingle(
-            await _db.PurchaseOrders.Where(p => targetPoIds.Contains(p.Id))
-                .Select(p => p.Warehouse).ToListAsync(ct));
+        // R13 (D4) — RE-derive the warehouse from the NEW line set: an update replaces the lines wholesale, so a
+        // supplier can swap in a line from another warehouse. Re-resolving here rejects that, and keeps the stored
+        // warehouse (code + address + snapshot) in step when the line set narrows to a different (single) warehouse.
+        // Warehouse is per PO LINE now (the header no longer carries it), so resolve straight off the chosen lines.
+        var newWarehouse = AsnWarehouseRules.Resolve(
+            poLines.Values.Select(l => new AsnWarehouseRules.WarehouseLine(
+                l.Warehouse, l.WarehouseAddressId, l.WarehouseAddressSnapshot)));
 
         // R4 (2026-06-23) — Serial/Lot capture: the Item control flags (serialized XOR lot-controlled) decide which
         // child rows to persist per replaced line. Resolve by **ItemCode within the ASN's company** (NOT ItemId —
@@ -133,7 +134,10 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         asn.DriverName = body.DriverName;
         asn.DriverPhone = body.DriverPhone;
         asn.Notes = body.Notes;
-        asn.Warehouse = newWarehouse;   // R11 D4 — derived, never supplier-supplied.
+        // R13 D4 — warehouse (code + address FK + snapshot) is derived from the covered PO lines, never supplier-supplied.
+        asn.Warehouse = newWarehouse.Code;
+        asn.WarehouseAddressId = newWarehouse.AddressId;
+        asn.WarehouseAddressSnapshot = newWarehouse.Snapshot;
         // R11 (D6) — full-overwrite like the rest of the header: assigned unconditionally, so a caller that omits
         // one clears it. Trimmed to empty-as-null so a whitespace-only value cannot satisfy the SendForApproval gate.
         asn.InvoiceNo = AsnHeaderRules.NullIfBlank(body.InvoiceNo);

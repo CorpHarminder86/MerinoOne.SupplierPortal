@@ -27,24 +27,33 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
         var supplier = await _db.Suppliers.Where(s => s.Id == inv.SupplierId)
             .Select(s => new { s.LegalName, s.SupplierCode }).FirstOrDefaultAsync(ct);
 
-        // Ship-to for the PDF: the ASN's live ship-to (regular entity, loaded whole per GetPurchaseOrderByIdQuery
-        // precedent) preferred over the header PO's point-in-time ShipTo snapshot (owned VO — same load-then-read
-        // pattern as GetPurchaseOrderByIdQuery.cs, which avoids projecting owned types inside an anonymous Select).
+        // R13 (2026-08-05) — ship-to SOURCE swapped to the WAREHOUSE (the R5 ship-to VO/nav is retired). The invoice's
+        // printed "Ship To" block still fills the SAME InvoiceDetailDto.ShipTo* fields; only the source moves. Preferred:
+        // the ASN's resolved WarehouseAddress (a CompanyAddress, loaded whole per the GetPurchaseOrderByIdQuery
+        // precedent). Fallback: the header PO's first non-deleted line WarehouseAddressSnapshot (owned VO — same
+        // load-then-read pattern, avoids projecting owned types inside an anonymous Select). Invoices are ASN-derived
+        // in practice, so the ASN branch dominates; the PO branch is a rarely-hit fallback.
         string? asnNumber = null;
         (string? Name, string? Line1, string? Line2, string? City, string? State, string? Pincode, string? Country)? shipTo = null;
         if (inv.AsnId.HasValue)
         {
-            var asn = await _db.Asns.Include(a => a.ShipToAddress)
+            var asn = await _db.Asns.Include(a => a.WarehouseAddress)
                 .FirstOrDefaultAsync(a => a.Id == inv.AsnId.Value, ct);
             asnNumber = asn?.AsnNumber;
-            if (asn?.ShipToAddress is { } sa)
+            if (asn?.WarehouseAddress is { } sa)
                 shipTo = (sa.AddressName, sa.AddressLine1, sa.AddressLine2, sa.City, sa.State, sa.Pincode, sa.Country);
         }
         if (shipTo is null && inv.PurchaseOrderId.HasValue)
         {
-            var po = await _db.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == inv.PurchaseOrderId.Value, ct);
-            if (po?.ShipTo is { } st)
-                shipTo = (st.AddressName, st.Line1, st.Line2, st.City, st.State, st.Pincode, st.Country);
+            var po = await _db.PurchaseOrders.Include(p => p.Lines)
+                .FirstOrDefaultAsync(p => p.Id == inv.PurchaseOrderId.Value, ct);
+            var ws = po?.Lines
+                .Where(l => !l.IsDeleted)
+                .OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo)
+                .Select(l => l.WarehouseAddressSnapshot)
+                .FirstOrDefault(s => s is not null);
+            if (ws is not null)
+                shipTo = (ws.AddressName, ws.Line1, ws.Line2, ws.City, ws.State, ws.Pincode, ws.Country);
         }
 
         var isLocked = inv.InvoiceStatus != InvoiceStatus.Draft;

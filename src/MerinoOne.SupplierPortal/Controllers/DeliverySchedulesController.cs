@@ -29,16 +29,16 @@ Filters / params (all optional):
 - **page**: 1-based page index (default 1).
 - **pageSize**: rows per page (default 50, max 500).
 - **supplierId**: restrict to one supplier.
-- **shipToAddressId**: restrict to one ship-to address.
+- **warehouseAddressId**: restrict to one receiving warehouse (R13; was shipToAddressId).
 - **purchaseOrderId**: restrict to one PO.
 - **deliveryDateFrom / deliveryDateTo**: inclusive delivery-date day range.
 - **status**: schedule status (Approved).
-Returns: DeliveryScheduleGridDto — the paged rows plus the auto-hide ship-to signal (DistinctShipToCount + ShowShipToFilter; the Ship-To filter is hidden when only one ship-to is present). Requires permission **DeliverySchedule.Read**.")]
+Returns: DeliveryScheduleGridDto — the paged rows plus the auto-hide warehouse signal (DistinctWarehouseCount + ShowWarehouseFilter; the Warehouse filter is hidden when only one warehouse is present). Requires permission **DeliverySchedule.Read**.")]
     public async Task<Result<DeliveryScheduleGridDto>> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         [FromQuery] Guid? supplierId = null,
-        [FromQuery] Guid? shipToAddressId = null,
+        [FromQuery] Guid? warehouseAddressId = null,
         [FromQuery] Guid? purchaseOrderId = null,
         [FromQuery] DateTime? deliveryDateFrom = null,
         [FromQuery] DateTime? deliveryDateTo = null,
@@ -46,7 +46,7 @@ Returns: DeliveryScheduleGridDto — the paged rows plus the auto-hide ship-to s
         CancellationToken ct = default)
     {
         var filter = new DeliveryScheduleFilterRequest(
-            page, pageSize, supplierId, shipToAddressId, purchaseOrderId, deliveryDateFrom, deliveryDateTo, status);
+            page, pageSize, supplierId, warehouseAddressId, purchaseOrderId, deliveryDateFrom, deliveryDateTo, status);
         var data = await _mediator.Send(new GetDeliveryScheduleListQuery(filter), ct);
         return Result<DeliveryScheduleGridDto>.Ok(data, HttpContext.TraceIdentifier);
     }

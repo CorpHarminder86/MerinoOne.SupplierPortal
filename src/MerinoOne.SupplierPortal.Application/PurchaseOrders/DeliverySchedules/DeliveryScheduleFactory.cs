@@ -6,12 +6,12 @@ using Microsoft.EntityFrameworkCore;
 namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.DeliverySchedules;
 
 /// <summary>
-/// R5 (TSD R5 Addendum §8.1 / §8.2 / §4.4) — the SINGLE shared point that materialises a PO's delivery schedule
-/// set. Given a PO (with its lines + resolved ship-to), it UPSERTS one <see cref="DeliverySchedule"/> per
-/// non-deleted PO line keyed on <c>PurchaseOrderLineId</c>:
+/// R5 (TSD R5 Addendum §8.1 / §8.2 / §4.4), R13 (2026-08-05) — the SINGLE shared point that materialises a PO's
+/// delivery schedule set. Given a PO (with its lines, each carrying its own warehouse), it UPSERTS one
+/// <see cref="DeliverySchedule"/> per non-deleted PO line keyed on <c>PurchaseOrderLineId</c>:
 /// <list type="bullet">
 ///   <item><b>Create</b> when no active schedule exists for the line.</item>
-///   <item><b>Refresh in place</b> (date / qty / ship-to) when one already exists — never duplicated. The
+///   <item><b>Refresh in place</b> (date / qty / warehouse) when one already exists — never duplicated. The
 ///         filtered unique index <c>UQ_DeliverySchedule_line</c> is the DB backstop.</item>
 /// </list>
 ///
@@ -29,8 +29,9 @@ namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.DeliverySchedules;
 /// the helper runs under BOTH a supplier principal (Accept/Acknowledge) and the inbound system principal
 /// (AutoAccept ingest), and the SeccodeId is never auto-stamped, so it must be set explicitly here.</para>
 ///
-/// <para><b>Ship-to gate (§8.1):</b> a PO with no resolved <c>ShipToAddressId</c> (a legacy/pre-R5 PO) is skipped
-/// gracefully — no schedule is created (the FK is mandatory and there is nothing valid to point at).</para>
+/// <para><b>Warehouse gate (§8.1, R13):</b> a PO LINE with no resolved <c>WarehouseAddressId</c> (a legacy/pre-R13
+/// line) is skipped gracefully — no schedule is created for it (the warehouse is the schedule's ASN grouping key,
+/// and there is nothing valid to point at). Warehouse is per line now — the PO header no longer carries ship-to.</para>
 ///
 /// <para>The caller is responsible for the surrounding <c>SaveChangesAsync</c> — the helper only stages the
 /// Add / in-place mutation onto the tracked context so it commits in the same transaction as the PO transition.</para>
@@ -43,8 +44,8 @@ public sealed class DeliveryScheduleFactory
 
     /// <summary>
     /// Query-by-id entry point — used by the supplier confirmation commands (Accept / Acknowledge) and the
-    /// AutoRelease command, where the PO + its lines are already persisted. Loads the PO scope/ship-to + its
-    /// non-deleted lines, then upserts. No-op (returns 0) when the PO is gone or has no resolved ship-to.
+    /// AutoRelease command, where the PO + its lines are already persisted. Loads the PO scope + its non-deleted
+    /// lines (each with its warehouse), then upserts. No-op (returns 0) when the PO is gone or has no lines.
     ///
     /// <para><paramref name="refreshOnly"/> = <c>true</c> (the §8.2 material-Modify path) REFRESHES existing
     /// schedules in place but does NOT create new ones — a material Modify resets an AcceptToShip /
@@ -55,13 +56,13 @@ public sealed class DeliveryScheduleFactory
     {
         // Service-principal-safe read: the inbound path has no seccode/company context (IgnoreQueryFilters), and
         // the supplier path already sees its own PO under RLS — IgnoreQueryFilters is harmless there (we re-scope
-        // by id). One projection: PO scope/ship-to + its non-deleted lines (id/date/qty).
+        // by id). One projection: PO scope + its non-deleted lines (id/qty/date/warehouse — R13: per-line warehouse).
         var po = await _db.PurchaseOrders.IgnoreQueryFilters()
             .Where(p => p.Id == purchaseOrderId && !p.IsDeleted)
             .Select(p => new PoScheduleContext(
-                p.Id, p.ShipToAddressId, p.SeccodeId, p.TenantId, p.TenantEntityId,
+                p.Id, p.SeccodeId, p.TenantId, p.TenantEntityId,
                 p.Lines.Where(l => !l.IsDeleted)
-                    .Select(l => new PoScheduleLine(l.Id, l.OrderQty, l.DeliveryDate))
+                    .Select(l => new PoScheduleLine(l.Id, l.OrderQty, l.DeliveryDate, l.WarehouseAddressId))
                     .ToList()))
             .FirstOrDefaultAsync(ct);
 
@@ -71,22 +72,22 @@ public sealed class DeliveryScheduleFactory
 
     /// <summary>
     /// Entity entry point — used by the INBOUND AutoAccept ingest auto-stamp, where a BRAND-NEW PO + its lines are
-    /// tracked-but-NOT-yet-flushed (a query would not see them). Reads the scope/ship-to + lines straight off the
-    /// in-memory aggregate. Same create-or-refresh semantics as the by-id path.
+    /// tracked-but-NOT-yet-flushed (a query would not see them). Reads the scope + lines (each with its warehouse)
+    /// straight off the in-memory aggregate. Same create-or-refresh semantics as the by-id path.
     /// </summary>
     public async Task<int> EnsureDeliverySchedulesAsync(PurchaseOrder po, CancellationToken ct, bool refreshOnly = false)
     {
         var lines = po.Lines.Where(l => !l.IsDeleted)
-            .Select(l => new PoScheduleLine(l.Id, l.OrderQty, l.DeliveryDate))
+            .Select(l => new PoScheduleLine(l.Id, l.OrderQty, l.DeliveryDate, l.WarehouseAddressId))
             .ToList();
-        var ctx = new PoScheduleContext(po.Id, po.ShipToAddressId, po.SeccodeId, po.TenantId, po.TenantEntityId, lines);
+        var ctx = new PoScheduleContext(po.Id, po.SeccodeId, po.TenantId, po.TenantEntityId, lines);
         return await UpsertCoreAsync(ctx, refreshOnly, ct);
     }
 
     private async Task<int> UpsertCoreAsync(PoScheduleContext po, bool refreshOnly, CancellationToken ct)
     {
-        // Legacy PO with no resolved ship-to (§8.1) or a PO with no lines → skip gracefully.
-        if (po.ShipToAddressId is not Guid shipToAddressId || shipToAddressId == Guid.Empty) return 0;
+        // A PO with no lines → skip gracefully. (R13: the per-PO ship-to gate is gone — warehouse is per line now,
+        // so the skip is applied per line below rather than for the whole PO.)
         if (po.Lines.Count == 0) return 0;
 
         var lineIds = po.Lines.Select(l => l.Id).ToList();
@@ -105,12 +106,19 @@ public sealed class DeliveryScheduleFactory
 
         foreach (var line in po.Lines)
         {
+            // R13 (§8.1) — the warehouse (copied from the PO LINE) is the schedule's ASN grouping key. A line with
+            // no resolved warehouse (legacy/pre-R13) is skipped gracefully — nothing valid to point at, and a
+            // null-warehouse schedule could never be selected into a warehouse-grouped ASN. Mirrors the old per-PO
+            // ship-to skip, now applied per line.
+            if (line.WarehouseAddressId is not Guid warehouseAddressId || warehouseAddressId == Guid.Empty)
+                continue;
+
             if (byLine.TryGetValue(line.Id, out var sched))
             {
-                // Refresh in place (§8.2) — date / qty / ship-to. Status stays Approved (Phase 1). No duplicate row.
+                // Refresh in place (§8.2) — date / qty / warehouse. Status stays Approved (Phase 1). No duplicate row.
                 sched.ScheduledQty = line.OrderQty;
                 sched.DeliveryDate = line.DeliveryDate ?? now;
-                sched.ShipToAddressId = shipToAddressId;
+                sched.WarehouseAddressId = warehouseAddressId;
                 sched.Status = DeliveryScheduleStatus.Approved;
                 sched.UpdatedBy = "system:delivery-schedule";
                 sched.UpdatedOn = now;
@@ -130,7 +138,7 @@ public sealed class DeliveryScheduleFactory
                     Id = Guid.NewGuid(),
                     PurchaseOrderId = po.Id,
                     PurchaseOrderLineId = line.Id,
-                    ShipToAddressId = shipToAddressId,
+                    WarehouseAddressId = warehouseAddressId,
                     ScheduledQty = line.OrderQty,
                     DeliveryDate = line.DeliveryDate ?? now,
                     Status = DeliveryScheduleStatus.Approved,
@@ -148,8 +156,9 @@ public sealed class DeliveryScheduleFactory
     }
 
     private sealed record PoScheduleContext(
-        Guid Id, Guid? ShipToAddressId, Guid SeccodeId, Guid? TenantId, Guid? TenantEntityId,
+        Guid Id, Guid SeccodeId, Guid? TenantId, Guid? TenantEntityId,
         IReadOnlyList<PoScheduleLine> Lines);
 
-    private sealed record PoScheduleLine(Guid Id, decimal OrderQty, DateTime? DeliveryDate);
+    // R13 — warehouse moved onto the line (the PO header no longer carries ship-to/warehouse).
+    private sealed record PoScheduleLine(Guid Id, decimal OrderQty, DateTime? DeliveryDate, Guid? WarehouseAddressId);
 }

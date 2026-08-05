@@ -45,7 +45,7 @@ public class GetCompanyAddressesQueryHandler : IRequestHandler<GetCompanyAddress
         return await q.OrderBy(a => a.AddressName)
             .Select(a => new CompanyAddressDto(
                 a.Id, a.Seq, a.TenantEntityId, a.AddressName, a.ErpCode, a.AddressType,
-                a.AddressLine1, a.AddressLine2, a.City, a.State, a.Pincode, a.Country, a.IsActive, a.CreatedOn))
+                a.AddressLine1, a.AddressLine2, a.City, a.State, a.Pincode, a.Country, a.IsActive, a.IsBaseAddress, a.CreatedOn))
             .ToListAsync(ct);
     }
 }
@@ -83,8 +83,15 @@ public class CreateCompanyAddressCommandHandler : IRequestHandler<CreateCompanyA
                 .FirstOrDefaultAsync(c => c.Id == request.Body.CompanyId && !c.IsDeleted && (tid == null || c.TenantId == tid), ct)
             ?? throw new NotFoundException("Company", request.Body.CompanyId);
 
-        var erpCode = string.IsNullOrWhiteSpace(request.Body.ErpCode) ? null : request.Body.ErpCode.Trim();
-        await GuardErpCodeUniqueAsync(erpCode, request.Body.CompanyId, excludeId: null, ct);
+        // R13 — a BASE address is the company's own identity address: it carries NO ErpCode (never a warehouse
+        // resolution target), forces AddressType "Base", and is a singleton per company. A non-base row is a
+        // warehouse-pool row: forced to AddressType "Warehouse" with its ErpCode still unique per company.
+        var isBase = request.Body.IsBase;
+        var erpCode = isBase ? null : (string.IsNullOrWhiteSpace(request.Body.ErpCode) ? null : request.Body.ErpCode.Trim());
+        if (isBase)
+            await GuardSingleBaseAsync(_db, request.Body.CompanyId, excludeId: null, ct);
+        else
+            await GuardErpCodeUniqueAsync(erpCode, request.Body.CompanyId, excludeId: null, ct);
 
         var entity = new CompanyAddress
         {
@@ -92,7 +99,7 @@ public class CreateCompanyAddressCommandHandler : IRequestHandler<CreateCompanyA
             TenantEntityId = request.Body.CompanyId,
             AddressName = request.Body.AddressName.Trim(),
             ErpCode = erpCode,
-            AddressType = request.Body.AddressType.Trim(),
+            AddressType = isBase ? "Base" : "Warehouse",
             AddressLine1 = request.Body.AddressLine1.Trim(),
             AddressLine2 = request.Body.AddressLine2?.Trim(),
             City = request.Body.City.Trim(),
@@ -100,6 +107,7 @@ public class CreateCompanyAddressCommandHandler : IRequestHandler<CreateCompanyA
             Pincode = request.Body.Pincode?.Trim(),
             Country = string.IsNullOrWhiteSpace(request.Body.Country) ? "India" : request.Body.Country.Trim(),
             IsActive = true,
+            IsBaseAddress = isBase,
             CreatedBy = _user.UserCode,
             CreatedOn = DateTime.UtcNow,
         };
@@ -120,9 +128,20 @@ public class CreateCompanyAddressCommandHandler : IRequestHandler<CreateCompanyA
         if (clash) throw new ConflictException($"ERP code '{erpCode}' is already used by another address in this company.");
     }
 
+    // R13 — enforce the base-address SINGLETON. Mirrors GuardErpCodeUniqueAsync (and the filtered-unique DB index
+    // UQ_CompanyAddress_tenantEntity_base) so a clear 409 precedes the index throw. Static so both create
+    // (excludeId null) and update (excludeId = the edited row) call the SAME guard.
+    internal static async Task GuardSingleBaseAsync(IAppDbContext db, Guid tenantEntityId, Guid? excludeId, CancellationToken ct)
+    {
+        var clash = await db.CompanyAddresses.IgnoreQueryFilters()
+            .AnyAsync(a => a.TenantEntityId == tenantEntityId && !a.IsDeleted && a.IsBaseAddress
+                && (excludeId == null || a.Id != excludeId), ct);
+        if (clash) throw new ConflictException("This company already has a base address; only one base address is allowed per company.");
+    }
+
     internal static CompanyAddressDto Map(CompanyAddress a) => new(
         a.Id, a.Seq, a.TenantEntityId, a.AddressName, a.ErpCode, a.AddressType,
-        a.AddressLine1, a.AddressLine2, a.City, a.State, a.Pincode, a.Country, a.IsActive, a.CreatedOn);
+        a.AddressLine1, a.AddressLine2, a.City, a.State, a.Pincode, a.Country, a.IsActive, a.IsBaseAddress, a.CreatedOn);
 }
 
 public record UpdateCompanyAddressCommand(Guid Id, UpdateCompanyAddressRequest Body) : IRequest<CompanyAddressDto>;
@@ -159,8 +178,15 @@ public class UpdateCompanyAddressCommandHandler : IRequestHandler<UpdateCompanyA
                        select addr).FirstOrDefaultAsync(ct)
                 ?? throw new NotFoundException("CompanyAddress", request.Id);
 
-        var erpCode = string.IsNullOrWhiteSpace(request.Body.ErpCode) ? null : request.Body.ErpCode.Trim();
-        if (erpCode is not null)
+        // R13 — same base/warehouse split as create: a base forces ErpCode null + type "Base" + the per-company
+        // singleton (excluding this row); a warehouse-pool row forces type "Warehouse" and keeps its ErpCode unique.
+        var isBase = request.Body.IsBase;
+        var erpCode = isBase ? null : (string.IsNullOrWhiteSpace(request.Body.ErpCode) ? null : request.Body.ErpCode.Trim());
+        if (isBase)
+        {
+            await CreateCompanyAddressCommandHandler.GuardSingleBaseAsync(_db, a.TenantEntityId, excludeId: a.Id, ct);
+        }
+        else if (erpCode is not null)
         {
             var clash = await _db.CompanyAddresses.IgnoreQueryFilters()
                 .AnyAsync(x => x.TenantEntityId == a.TenantEntityId && !x.IsDeleted && x.Id != a.Id
@@ -170,7 +196,7 @@ public class UpdateCompanyAddressCommandHandler : IRequestHandler<UpdateCompanyA
 
         a.AddressName = request.Body.AddressName.Trim();
         a.ErpCode = erpCode;
-        a.AddressType = request.Body.AddressType.Trim();
+        a.AddressType = isBase ? "Base" : "Warehouse";
         a.AddressLine1 = request.Body.AddressLine1.Trim();
         a.AddressLine2 = request.Body.AddressLine2?.Trim();
         a.City = request.Body.City.Trim();
@@ -178,6 +204,7 @@ public class UpdateCompanyAddressCommandHandler : IRequestHandler<UpdateCompanyA
         a.Pincode = request.Body.Pincode?.Trim();
         a.Country = string.IsNullOrWhiteSpace(request.Body.Country) ? "India" : request.Body.Country.Trim();
         a.IsActive = request.Body.IsActive;
+        a.IsBaseAddress = isBase;
         a.UpdatedBy = _user.UserCode;
         a.UpdatedOn = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);

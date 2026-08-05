@@ -4,13 +4,14 @@
 @inject NavigationManager Nav
 
 @* R5 (TSD R5 Addendum §7 / §8.3 — Component 4, Delivery Schedule grid). The supplier's ASN-creation surface:
-   one row per open PO line, showing PO number + position + item + order qty + ship-to + remaining-to-ship,
+   one row per open PO line, showing PO number + position + item + order qty + warehouse + remaining-to-ship,
    sorted PO → Line → Delivery date ASC. Read-only in this phase; Phase 4 layers multi-select → Create ASN on top.
    Permission: DeliverySchedule.Read (supplier-facing). All hex via var(--mer-*) tokens; Merino .tl-page shell.
 
-   Filters (§7): supplier, ship-to, PO, delivery-date range, status. The Ship-To filter AUTO-HIDES when only one
-   ship-to is present — the backend computes DistinctShipToCount + ShowShipToFilter across the supplier's visible
-   schedules (BEFORE the ship-to filter), exactly mirroring the single-supplier filter auto-hide on PurchaseOrderList. *@
+   R13 — ship-to is retired; the PO line's warehouse (resolving to a CompanyAddress) is the receiving address AND the
+   ASN grouping key. Filters (§7): supplier, warehouse, PO, delivery-date range, status. The Warehouse filter AUTO-HIDES
+   when only one warehouse is present — the backend computes DistinctWarehouseCount + ShowWarehouseFilter across the
+   supplier's visible schedules (BEFORE the warehouse filter), mirroring the single-supplier filter auto-hide. *@
 
 <PageTitle>Delivery Schedules</PageTitle>
 
@@ -25,13 +26,13 @@
         </div>
         <div class="tl-header__actions">
             @* R5 Phase 4 (§9.1) — multi-select → Create ASN. Enabled once ≥1 line is selected. Selection is constrained
-               to a SINGLE ship-to in the UI (§9.1 / UC-AS-02): the first selected line fixes the ship-to and rows for
-               other ship-tos are disabled; the server invariant (§9.3) is the authoritative fallback. *@
+               to a SINGLE warehouse in the UI (§9.1 / UC-AS-02): the first selected line fixes the warehouse and rows for
+               other warehouses are disabled; the server invariant (§9.3) is the authoritative fallback. *@
             @if (CanCreateAsn)
             {
                 <button class="mbtn mbtn--primary"
                         disabled="@(selected.Count == 0)"
-                        title="@(selected.Count == 0 ? "Select one or more lines sharing a single ship-to" : $"Create an ASN from {selected.Count} selected line(s)")"
+                        title="@(selected.Count == 0 ? "Select one or more lines sharing a single warehouse" : $"Create an ASN from {selected.Count} selected line(s)")"
                         @onclick="OpenCreateAsn">
                     <span class="material-symbols-outlined">local_shipping</span> Create ASN@(selected.Count > 0 ? $" ({selected.Count})" : "")
                 </button>
@@ -53,21 +54,21 @@
             </select>
         }
 
-        @* Ship-To filter — AUTO-HIDDEN when only one ship-to is present (backend ShowShipToFilter / DistinctShipToCount
-           ≤ 1). Mirrors the single-supplier auto-hide above: render only when there is more than one to pick. *@
-        @if (showShipToFilter && shipToOptions.Count > 1)
+        @* Warehouse filter — AUTO-HIDDEN when only one warehouse is present (backend ShowWarehouseFilter /
+           DistinctWarehouseCount ≤ 1). Mirrors the single-supplier auto-hide above: render only when >1 to pick. *@
+        @if (showWarehouseFilter && warehouseOptions.Count > 1)
         {
-            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:200px;" @bind="shipToFilter" @bind:after="OnFilterChanged">
-                <option value="">All ship-to</option>
-                @foreach (var st in shipToOptions)
+            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:200px;" @bind="warehouseFilter" @bind:after="OnFilterChanged">
+                <option value="">All warehouses</option>
+                @foreach (var wh in warehouseOptions)
                 {
-                    <option value="@st.Id">@st.Name</option>
+                    <option value="@wh.Id">@wh.Name</option>
                 }
             </select>
         }
 
         @* PO filter — the backend accepts a PO id (purchaseOrderId), not free text, so this is a dropdown built
-           from the visible POs (collected in the same unfiltered sweep as the ship-to options). *@
+           from the visible POs (collected in the same unfiltered sweep as the warehouse options). *@
         @if (poOptions.Count > 1)
         {
             <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:160px;" @bind="poFilter" @bind:after="OnFilterChanged">
@@ -102,16 +103,16 @@
         }
     </div>
 
-    @* R5 Phase 4 (§9.1) — single-ship-to selection banner. Once a line is selected the ship-to is locked and rows
-       for other ship-tos are disabled, so the supplier can only build a single-ship-to ASN. The banner names the
-       locked ship-to + the selection count, and offers a quick Clear. *@
+    @* R5 Phase 4 (§9.1) — single-warehouse selection banner. Once a line is selected the warehouse is locked and rows
+       for other warehouses are disabled, so the supplier can only build a single-warehouse ASN. The banner names the
+       locked warehouse + the selection count, and offers a quick Clear. *@
     @if (CanCreateAsn && selected.Count > 0)
     {
         <div class="rz-card" style="padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;background:var(--mer-blue-50);border:1px solid var(--mer-blue);">
             <span class="material-symbols-outlined" style="font-size:20px;color:var(--mer-blue);">checklist</span>
             <div style="flex:1;font-size:12.5px;color:var(--mer-blue-darker);">
-                <b>@selected.Count</b> line(s) selected · ship-to <b>@(selectedShipToName ?? "—")</b>
-                <span style="color:var(--mer-ink-500);"> — rows with a different ship-to are locked until you clear the selection.</span>
+                <b>@selected.Count</b> line(s) selected · warehouse <b>@(selectedWarehouseName ?? "—")</b>
+                <span style="color:var(--mer-ink-500);"> — rows with a different warehouse are locked until you clear the selection.</span>
             </div>
             <button type="button" @onclick="ClearSelection"
                     style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--mer-blue);border-radius:6px;padding:6px 10px;color:var(--mer-blue);cursor:pointer;font-size:12px;">
@@ -133,7 +134,7 @@
     }
     else
     {
-        var gridStyle = $"--tl-cols: {(CanCreateAsn ? "44px " : "")}140px 70px 1.4fr 130px 100px 110px 110px 120px 1fr 130px 110px; --tl-min-width: {(CanCreateAsn ? "1484px" : "1440px")};";
+        var gridStyle = $"--tl-cols: {(CanCreateAsn ? "44px " : "")}140px 70px 1.4fr 130px 100px 110px 110px 1fr 130px 110px; --tl-min-width: {(CanCreateAsn ? "1324px" : "1280px")};";
         <div class="tl-grid-wrapper" style="@gridStyle">
             <div class="tlg-header">
                 @if (CanCreateAsn)
@@ -150,9 +151,8 @@
                 <div class="tlg-col tlg-col--num">Order qty</div>
                 <div class="tlg-col tlg-col--num">Shipped</div>
                 <div class="tlg-col tlg-col--num">Remaining</div>
-                @* R11 (D4) — warehouse sits BEFORE ship-to: both are ASN grouping keys, warehouse the coarser. *@
+                @* R13 — warehouse is now the sole receiving-address + ASN grouping key (ship-to retired). *@
                 <div class="tlg-col">Warehouse</div>
-                <div class="tlg-col">Ship-to</div>
                 <div class="tlg-col">Delivery date</div>
                 <div class="tlg-col">Status</div>
             </div>
@@ -161,12 +161,12 @@
                 var row = r;
                 var isSelected = selected.ContainsKey(row.Id);
                 // Row is selectable when it has remaining balance to ship AND (no selection yet OR it matches the
-                // locked ship-to). §9.1: cross-ship-to rows are disabled, not silently dropped.
-                var shipToBlocked = selectedShipToId.HasValue && row.ShipToAddressId != selectedShipToId.Value;
+                // locked warehouse). §9.1: cross-warehouse rows are disabled, not silently dropped.
+                var warehouseBlocked = selectedWarehouseId.HasValue && row.WarehouseAddressId != selectedWarehouseId.Value;
                 var noBalance = row.RemainingToShip <= 0;
                 // §6.2 — a schedule whose PO is no longer shippable (e.g. reset to Released by an ERP Modify) is not
                 // selectable for an ASN; the checkbox is hidden for it (see below).
-                var selectable = CanCreateAsn && !noBalance && !shipToBlocked && row.IsShippable;
+                var selectable = CanCreateAsn && !noBalance && !warehouseBlocked && row.IsShippable;
                 var rowStyle = (isSelected ? "background:var(--mer-blue-50);" : "")
                     + (CanCreateAsn && !selectable && !isSelected ? "opacity:.55;" : "");
                 <div class="tlg-row" style="@rowStyle">
@@ -176,7 +176,7 @@
                             @if (row.IsShippable)
                             {
                                 <input type="checkbox" checked="@isSelected" disabled="@(!selectable && !isSelected)"
-                                       title="@(noBalance ? "Nothing left to ship on this line" : shipToBlocked ? "Different ship-to — clear the selection to pick this one" : null)"
+                                       title="@(noBalance ? "Nothing left to ship on this line" : warehouseBlocked ? "Different warehouse — clear the selection to pick this one" : null)"
                                        @onchange="() => ToggleRow(row)" />
                             }
                             else
@@ -200,8 +200,7 @@
                     <div class="tlg-col tlg-col--num tlg-code">@row.OrderQty.ToString("N2") <span style="color:var(--mer-ink-500);">@row.OrderUnit</span></div>
                     <div class="tlg-col tlg-col--num tlg-code">@row.ShippedQtyToDate.ToString("N2")</div>
                     <div class="tlg-col tlg-col--num tlg-code" style="font-weight:600;color:@(row.RemainingToShip > 0 ? "var(--mer-blue-darker)" : "var(--mer-ink-400)");">@row.RemainingToShip.ToString("N2")</div>
-                    <div class="tlg-col tlg-code">@(string.IsNullOrWhiteSpace(row.Warehouse) ? "—" : row.Warehouse)</div>
-                    <div class="tlg-col">@(string.IsNullOrEmpty(row.ShipToAddressName) ? "—" : row.ShipToAddressName)</div>
+                    <div class="tlg-col tlg-code" title="@row.WarehouseAddressName">@(string.IsNullOrWhiteSpace(row.Warehouse) ? "—" : row.Warehouse)</div>
                     <div class="tlg-col tlg-code">@row.DeliveryDate.ToString("yyyy-MM-dd")</div>
                     <div class="tlg-col"><span class="tlg-status @StatusClass(row.Status)">@row.Status</span></div>
                 </div>
@@ -223,7 +222,7 @@
                 <div class="merino-dialog__head-text">
                     <div class="merino-dialog__eyebrow">Delivery schedules</div>
                     <h2 class="merino-dialog__title">Create ASN from @selected.Count line(s)</h2>
-                    <p class="merino-dialog__subtitle">Ship-to <b>@(selectedShipToName ?? "—")</b>. A Draft ASN is raised; you set ship quantities, capture, and attachments on the ASN, then send it for approval.</p>
+                    <p class="merino-dialog__subtitle">Warehouse <b>@(selectedWarehouseName ?? "—")</b>. A Draft ASN is raised; you set ship quantities, capture, and attachments on the ASN, then send it for approval.</p>
                 </div>
                 <button class="merino-dialog__close" @onclick="() => showCreateAsn = false"><span class="material-symbols-outlined">close</span></button>
             </header>
@@ -254,7 +253,7 @@
 
     // Filters (§7).
     private string supplierFilter = string.Empty;
-    private string shipToFilter = string.Empty;
+    private string warehouseFilter = string.Empty;
     private string poFilter = string.Empty;
     private DateTime? dateFrom;
     private DateTime? dateTo;
@@ -263,19 +262,19 @@
     private int page = 1;
     private const int PageSize = 50;
 
-    // Ship-to auto-hide state. The backend's ShowShipToFilter / DistinctShipToCount is the authoritative signal
-    // (it counts distinct ship-tos across the supplier's visible schedules BEFORE the ship-to filter). We still
+    // Warehouse auto-hide state. The backend's ShowWarehouseFilter / DistinctWarehouseCount is the authoritative signal
+    // (it counts distinct warehouses across the supplier's visible schedules BEFORE the warehouse filter). We still
     // need the option list to populate the dropdown; we collect it from an unfiltered sweep on init/supplier-change.
-    private bool showShipToFilter;
-    private readonly List<ShipToOption> shipToOptions = new();
-    private sealed record ShipToOption(Guid Id, string Name);
+    private bool showWarehouseFilter;
+    private readonly List<WarehouseOption> warehouseOptions = new();
+    private sealed record WarehouseOption(Guid Id, string Name);
 
     // PO option set (the backend filters by PO id, not free text). Built in the same unfiltered sweep.
     private readonly List<PoOption> poOptions = new();
     private sealed record PoOption(Guid Id, string Number);
 
     private bool HasActiveFilter =>
-        !string.IsNullOrEmpty(supplierFilter) || !string.IsNullOrEmpty(shipToFilter)
+        !string.IsNullOrEmpty(supplierFilter) || !string.IsNullOrEmpty(warehouseFilter)
         || !string.IsNullOrWhiteSpace(poFilter) || dateFrom.HasValue || dateTo.HasValue
         || !string.IsNullOrEmpty(statusFilter);
 
@@ -291,32 +290,32 @@
     }
 
     /// <summary>
-    /// Build the Ship-To + PO dropdown option sets. The grid query returns ShipToAddressName / PoNumber per row but
+    /// Build the Warehouse + PO dropdown option sets. The grid query returns WarehouseAddressName / PoNumber per row but
     /// pages the data, so a single page may not surface every distinct value. We sweep one unfiltered (apart from the
-    /// supplier filter) large page to collect the distinct pairs, then let the backend's ShowShipToFilter flag drive
-    /// the ship-to auto-hide. Re-run whenever the supplier filter changes (a different supplier may ship elsewhere).
+    /// supplier filter) large page to collect the distinct pairs, then let the backend's ShowWarehouseFilter flag drive
+    /// the warehouse auto-hide. Re-run whenever the supplier filter changes (a different supplier may ship elsewhere).
     /// </summary>
     private async Task LoadFilterOptions()
     {
-        shipToOptions.Clear();
+        warehouseOptions.Clear();
         poOptions.Clear();
         var url = $"api/delivery-schedules?page=1&pageSize=500";
         if (!string.IsNullOrEmpty(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
         var resp = await Api.GetAsync<DeliveryScheduleGridDto>(url);
         var data = resp?.Data;
 
-        // Authoritative auto-hide signal from the backend (§7): hide the Ship-To filter when ≤ 1 ship-to exists.
-        showShipToFilter = data?.ShowShipToFilter ?? false;
+        // Authoritative auto-hide signal from the backend (§7): hide the Warehouse filter when ≤ 1 warehouse exists.
+        showWarehouseFilter = data?.ShowWarehouseFilter ?? false;
 
         if (data is not null)
         {
             foreach (var pair in data.Page.Items
-                         .Where(i => !string.IsNullOrEmpty(i.ShipToAddressName))
-                         .Select(i => new ShipToOption(i.ShipToAddressId, i.ShipToAddressName!))
+                         .Where(i => i.WarehouseAddressId.HasValue && !string.IsNullOrEmpty(i.WarehouseAddressName))
+                         .Select(i => new WarehouseOption(i.WarehouseAddressId!.Value, i.WarehouseAddressName!))
                          .DistinctBy(o => o.Id)
                          .OrderBy(o => o.Name))
             {
-                shipToOptions.Add(pair);
+                warehouseOptions.Add(pair);
             }
 
             foreach (var po in data.Page.Items
@@ -334,7 +333,7 @@
         loading = true;
         var url = $"api/delivery-schedules?page={page}&pageSize={PageSize}";
         if (!string.IsNullOrEmpty(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
-        if (!string.IsNullOrEmpty(shipToFilter)) url += $"&shipToAddressId={Uri.EscapeDataString(shipToFilter)}";
+        if (!string.IsNullOrEmpty(warehouseFilter)) url += $"&warehouseAddressId={Uri.EscapeDataString(warehouseFilter)}";
         if (!string.IsNullOrEmpty(poFilter)) url += $"&purchaseOrderId={Uri.EscapeDataString(poFilter)}";
         if (dateFrom.HasValue) url += $"&deliveryDateFrom={dateFrom.Value:yyyy-MM-dd}";
         if (dateTo.HasValue) url += $"&deliveryDateTo={dateTo.Value:yyyy-MM-dd}";
@@ -350,12 +349,12 @@
         await Reload();
     }
 
-    // Supplier change can change the ship-to universe → refresh the option set + re-evaluate the auto-hide,
-    // and reset a now-irrelevant ship-to selection before reloading.
+    // Supplier change can change the warehouse universe → refresh the option set + re-evaluate the auto-hide,
+    // and reset a now-irrelevant warehouse selection before reloading.
     private async Task OnSupplierChanged()
     {
         page = 1;
-        shipToFilter = string.Empty;
+        warehouseFilter = string.Empty;
         poFilter = string.Empty;
         await LoadFilterOptions();
         await Reload();
@@ -364,7 +363,7 @@
     private async Task ClearFilters()
     {
         supplierFilter = string.Empty;
-        shipToFilter = string.Empty;
+        warehouseFilter = string.Empty;
         poFilter = string.Empty;
         dateFrom = null;
         dateTo = null;
@@ -384,20 +383,20 @@
     private bool CanCreateAsn => Token.IsSupplier || Token.HasPermission("Asn.Write");
 
     // Selected schedule rows, keyed by DeliverySchedule.Id (the id CreateAsnFromScheduleCommand consumes). We keep the
-    // whole DTO so the dialog can show the ship-to label + count without a re-fetch, and so a selection survives
+    // whole DTO so the dialog can show the warehouse label + count without a re-fetch, and so a selection survives
     // paging (the checkbox reflects membership in this map, not a per-page list).
     private readonly Dictionary<Guid, DeliveryScheduleDto> selected = new();
 
-    // §9.1 single-ship-to lock: the first selected line fixes the ship-to; every other row for a different ship-to is
-    // disabled until the selection is cleared. Null when nothing is selected.
-    private Guid? selectedShipToId => selected.Values.Select(s => (Guid?)s.ShipToAddressId).FirstOrDefault();
-    private string? selectedShipToName => selected.Values.Select(s => s.ShipToAddressName).FirstOrDefault();
+    // §9.1 single-warehouse lock: the first selected line fixes the warehouse; every other row for a different
+    // warehouse is disabled until the selection is cleared. Null when nothing is selected.
+    private Guid? selectedWarehouseId => selected.Values.Select(s => s.WarehouseAddressId).FirstOrDefault();
+    private string? selectedWarehouseName => selected.Values.Select(s => s.WarehouseAddressName).FirstOrDefault();
 
     // "Select all" reflects only the rows on THIS page that are currently selectable (have balance + match the locked
-    // ship-to) plus those already selected — so the header box never claims to cover disabled rows.
+    // warehouse) plus those already selected — so the header box never claims to cover disabled rows.
     private IEnumerable<DeliveryScheduleDto> SelectablePageRows =>
         grid?.Page.Items.Where(r => r.RemainingToShip > 0
-            && (!selectedShipToId.HasValue || r.ShipToAddressId == selectedShipToId.Value)) ?? Enumerable.Empty<DeliveryScheduleDto>();
+            && (!selectedWarehouseId.HasValue || r.WarehouseAddressId == selectedWarehouseId.Value)) ?? Enumerable.Empty<DeliveryScheduleDto>();
 
     private bool AllSelectableSelected =>
         SelectablePageRows.Any() && SelectablePageRows.All(r => selected.ContainsKey(r.Id));
@@ -406,7 +405,7 @@
     {
         if (selected.Remove(row.Id)) return;                 // deselect
         if (row.RemainingToShip <= 0) return;                // nothing to ship
-        if (selectedShipToId.HasValue && row.ShipToAddressId != selectedShipToId.Value) return; // cross-ship-to guard
+        if (selectedWarehouseId.HasValue && row.WarehouseAddressId != selectedWarehouseId.Value) return; // cross-warehouse guard
         selected[row.Id] = row;
     }
 
@@ -441,11 +440,12 @@
         if (selected.Count == 0 || !createExpectedDate.HasValue) return;
         creating = true; createAsnError = string.Empty;
 
-        // §9.1 client-side single-ship-to assertion (defence: the lock should already guarantee this). The server
-        // §9.3 invariant is the authoritative fallback and its reject message is surfaced verbatim below.
-        if (selected.Values.Select(s => s.ShipToAddressId).Distinct().Count() > 1)
+        // §9.1 client-side single-warehouse assertion (defence in depth: the lock should already guarantee this, and the
+        // server derives the single warehouse from the selected schedules). The server §9.3 invariant is the authoritative
+        // fallback and its reject message is surfaced verbatim below.
+        if (selected.Values.Select(s => s.WarehouseAddressId).Distinct().Count() > 1)
         {
-            createAsnError = "All selected lines must share a single ship-to. Clear the selection and pick lines for one ship-to.";
+            createAsnError = "All selected lines must share a single warehouse. Clear the selection and pick lines for one warehouse.";
             creating = false; return;
         }
 
@@ -464,7 +464,7 @@
             Nav.NavigateToRoute($"/asns/{resp.Data.Id}?step=2");
             return;
         }
-        // Surface the server's reject (cross-ship-to / multi-supplier / invariant) verbatim — the UI guard's fallback.
+        // Surface the server's reject (cross-warehouse / multi-supplier / invariant) verbatim — the UI guard's fallback.
         createAsnError = resp?.Errors?.FirstOrDefault() ?? "Could not create the ASN from the selected schedules.";
         creating = false;
     }

@@ -375,100 +375,62 @@
                     }
                     else
                     {
-                        @* ------ Ship-to gate (§6.2): an ASN never spans two ship-to addresses ------ *@
-                        @* Existing-ASN edit locks the ship-to (derived from the covered POs); a new ASN with 2+ ship-tos
-                           shows the selector; exactly 1 ship-to auto-selects and shows a small read-only label. *@
-                        @if (!IsNew || shipToOptions.Count == 1)
+                        @* R13 — ship-to retired; warehouse moved to the PO LINE, so neither is a PO-header field the
+                           picker can group/filter on. The picker now offers ALL of this supplier's eligible open POs.
+                           An ASN is still single-warehouse, but that is enforced SERVER-SIDE over the covered PO lines
+                           (AsnWarehouseRules), which rejects a cross-warehouse selection at save/submit. *@
+                        <div style="font-size:12px;color:var(--mer-ink-500);margin-bottom:12px;display:flex;align-items:flex-start;gap:6px;">
+                            <span class="material-symbols-outlined" style="font-size:16px;color:var(--mer-ink-400);">info</span>
+                            <span>All added POs must share one receiving warehouse — the server rejects the ASN on send if they don't.</span>
+                        </div>
+
+                        <div style="margin-bottom:10px;">
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:4px;">Find PO</label>
+                            <div style="display:flex;gap:8px;">
+                                <input class="rz-textbox" placeholder="Filter PO number…" style="flex:1;max-width:340px;padding:8px 10px;" @bind="poSearch" @bind:event="oninput" />
+                            </div>
+                        </div>
+
+                        @if (AddablePos.Count > 0)
                         {
-                            <div style="font-size:12.5px;color:var(--mer-ink-700);margin-bottom:12px;">
-                                Ship-to: <b>@SelectedShipToName</b>
-                                @if (!IsNew) { <span style="color:var(--mer-ink-500);font-weight:400;"> · locked for this ASN</span> }
+                            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;max-height:260px;overflow:auto;">
+                                @foreach (var po in AddablePos)
+                                {
+                                    var p = po;
+                                    <button @onclick="() => AddPo(p)" style="display:flex;align-items:center;gap:10px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 12px;cursor:pointer;background:var(--mer-surface);text-align:left;">
+                                        <span style="font-family:Inter,monospace;font-weight:600;font-size:13px;color:var(--mer-blue-darker);">@p.PoNumber</span>
+                                        <span style="font-size:12px;color:var(--mer-ink-500);">@p.PoDate.ToString("yyyy-MM-dd")</span>
+                                        <span class="tlg-status tlg-status--info">@p.PoStatus</span>
+                                        <span style="margin-left:auto;color:var(--mer-blue);font-size:12px;font-weight:600;"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">add</span> Add</span>
+                                    </button>
+                                }
                             </div>
                         }
-                        else if (shipToOptions.Count > 1)
+                        else
                         {
-                            <div style="margin-bottom:14px;">
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:4px;">Ship-to *</label>
-                                <select class="rz-dropdown" style="width:100%;max-width:420px;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" value="@ShipToSelectValue" @onchange="OnShipToSelect">
-                                    <option value="">— Select ship-to —</option>
-                                    @foreach (var opt in shipToOptions)
-                                    {
-                                        var val = opt.Id?.ToString() ?? NoShipToSentinel.ToString();
-                                        <option value="@val" selected="@(shipToChosen && ShipToSelectValue == val)">@opt.Name</option>
-                                    }
-                                </select>
-                            </div>
+                            <p style="color:var(--mer-ink-500);font-size:13px;margin-bottom:14px;">No matching open POs for this supplier@(string.IsNullOrWhiteSpace(poSearch) ? "" : $" for \"{poSearch}\"").</p>
                         }
 
-                        @* ------ Warehouse gate (R11 D4): an ASN never spans two warehouses either ------ *@
-                        @* Not a selector: the warehouse is DERIVED from the first PO added, then pins the picker so
-                           POs from other warehouses stop being offered. Hidden until something is actually pinned. *@
-                        @if (!string.IsNullOrEmpty(PinnedWarehouse))
-                        {
-                            <div style="font-size:12.5px;color:var(--mer-ink-700);margin-bottom:12px;">
-                                Warehouse:
-                                <span class="tlg-status tlg-status--info" style="font-family:Inter,monospace;">@PinnedWarehouse</span>
-                                <span style="color:var(--mer-ink-500);"> · only POs from this warehouse can be added</span>
-                            </div>
-                        }
-
-                        @* The PO search + add list stays HIDDEN until a ship-to is chosen. *@
-                        @if (shipToChosen)
-                        {
-                            <div style="margin-bottom:10px;">
-                                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:4px;">Find PO</label>
-                                <div style="display:flex;gap:8px;">
-                                    <input class="rz-textbox" placeholder="Filter PO number…" style="flex:1;max-width:340px;padding:8px 10px;" @bind="poSearch" @bind:event="oninput" />
-                                </div>
-                            </div>
-
-                            @if (AddablePos.Count > 0)
+                        <div style="border-top:1px solid var(--mer-line-soft);padding-top:12px;">
+                            <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:8px;">Selected POs (@selectedPoMap.Count) · <span style="font-weight:400;color:var(--mer-ink-500);">@selectedSupplierName</span></div>
+                            @if (selectedPoMap.Count == 0)
                             {
-                                <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;max-height:260px;overflow:auto;">
-                                    @foreach (var po in AddablePos)
-                                    {
-                                        var p = po;
-                                        <button @onclick="() => AddPo(p)" style="display:flex;align-items:center;gap:10px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 12px;cursor:pointer;background:var(--mer-surface);text-align:left;">
-                                            <span style="font-family:Inter,monospace;font-weight:600;font-size:13px;color:var(--mer-blue-darker);">@p.PoNumber</span>
-                                            <span style="font-size:12px;color:var(--mer-ink-500);">@p.PoDate.ToString("yyyy-MM-dd")</span>
-                                            <span class="tlg-status tlg-status--info">@p.PoStatus</span>
-                                            @* R11 (D4) — the PO's warehouse, so the supplier can see WHY the list
-                                               narrows after the first pick (an ASN never spans two warehouses). *@
-                                            @if (!string.IsNullOrWhiteSpace(p.Warehouse))
-                                            {
-                                                <span style="font-family:Inter,monospace;font-size:12px;color:var(--mer-ink-600);" title="Receiving warehouse">@p.Warehouse</span>
-                                            }
-                                            <span style="margin-left:auto;color:var(--mer-blue);font-size:12px;font-weight:600;"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">add</span> Add</span>
-                                        </button>
-                                    }
-                                </div>
+                                <p style="font-size:12px;color:var(--mer-ink-500);">None yet — add POs above.</p>
                             }
                             else
                             {
-                                <p style="color:var(--mer-ink-500);font-size:13px;margin-bottom:14px;">No matching open POs for this ship-to@(string.IsNullOrWhiteSpace(poSearch) ? "" : $" for \"{poSearch}\"").</p>
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                    @foreach (var p in selectedPoMap.Values.OrderBy(x => x.PoNumber))
+                                    {
+                                        var pid = p.Id;
+                                        <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--mer-blue);background:var(--mer-blue-50);border-radius:16px;padding:4px 6px 4px 12px;font-size:12.5px;font-family:Inter,monospace;color:var(--mer-blue-darker);">
+                                            @p.PoNumber
+                                            <button @onclick="() => RemovePo(pid)" title="Remove" style="background:transparent;border:0;color:var(--mer-ink-500);cursor:pointer;line-height:1;display:flex;"><span class="material-symbols-outlined" style="font-size:16px;">close</span></button>
+                                        </span>
+                                    }
+                                </div>
                             }
-
-                            <div style="border-top:1px solid var(--mer-line-soft);padding-top:12px;">
-                                <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:8px;">Selected POs (@selectedPoMap.Count) · <span style="font-weight:400;color:var(--mer-ink-500);">@selectedSupplierName</span></div>
-                                @if (selectedPoMap.Count == 0)
-                                {
-                                    <p style="font-size:12px;color:var(--mer-ink-500);">None yet — add POs above.</p>
-                                }
-                                else
-                                {
-                                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                                        @foreach (var p in selectedPoMap.Values.OrderBy(x => x.PoNumber))
-                                        {
-                                            var pid = p.Id;
-                                            <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--mer-blue);background:var(--mer-blue-50);border-radius:16px;padding:4px 6px 4px 12px;font-size:12.5px;font-family:Inter,monospace;color:var(--mer-blue-darker);">
-                                                @p.PoNumber
-                                                <button @onclick="() => RemovePo(pid)" title="Remove" style="background:transparent;border:0;color:var(--mer-ink-500);cursor:pointer;line-height:1;display:flex;"><span class="material-symbols-outlined" style="font-size:16px;">close</span></button>
-                                            </span>
-                                        }
-                                    </div>
-                                }
-                            </div>
-                        }
+                        </div>
                     }
                 }
             }
@@ -1033,16 +995,11 @@
     private bool searching = false;
     private readonly HashSet<Guid> selectedPoIds = new();
 
-    // R5 (§9.2 / §6.2) — ship-to gate. An ASN must not span two ship-to addresses, so the wizard picks the ship-to
-    // BEFORE the POs and filters the addable POs to it. openPos caches ALL the supplier's open POs (one load per
-    // supplier); shipToOptions is the DISTINCT (ShipToAddressId, Name) over them (a null id collapses to a single
-    // "(no ship-to)" option so those POs are still selectable but never mix with a real ship-to). selectedShipToId
-    // is nullable-but-set: the "(no ship-to)" group is represented by _noShipToChosen=true with selectedShipToId=null.
-    private static readonly Guid NoShipToSentinel = Guid.Empty; // maps the "(no ship-to)" group to a stable <select> value
+    // R13 — the wizard groups POs by SUPPLIER only (ship-to retired; warehouse moved to the PO LINE). openPos caches
+    // ALL this supplier's open POs (one load per supplier); the picker filters that cache client-side by PO number.
+    // An ASN is still single-warehouse, but that is enforced SERVER-SIDE over the covered PO lines (AsnWarehouseRules),
+    // not in the UI, since the warehouse is no longer a PO-header field the list can pre-filter on.
     private List<PurchaseOrderListItemDto> openPos = new();
-    private List<(Guid? Id, string Name)> shipToOptions = new();
-    private Guid? selectedShipToId;      // the real ship-to id when a real address is chosen
-    private bool shipToChosen;           // true once a ship-to (real or "(no ship-to)") is selected — gates the PO list
     private readonly Dictionary<Guid, PurchaseOrderListItemDto> selectedPoMap = new();
 
     private List<LineRow> lines = new();
@@ -1176,24 +1133,13 @@
         : detail == null ? ""
         : $"ASN for PO {PoSummaryText}";
 
-    // R5 (§6.2) — step-1 helper reflects the supplier → ship-to → POs sequence (each step shown only when it has a
-    // choice: the supplier chooser hides at 1 supplier, the ship-to chooser hides at 1 ship-to).
+    // R13 — step-1 helper: pick the supplier (chooser hidden at 1 supplier), then add POs. Single-warehouse is
+    // enforced server-side over the covered PO lines, so there is no ship-to/warehouse step in the wizard anymore.
     private string Step1HelperText =>
         suppliers.Count > 1
-            ? "Choose the supplier and ship-to address, then add one or more of its open POs for that ship-to."
-            : "Choose the ship-to address, then add one or more of the supplier's open POs for that ship-to.";
+            ? "Choose the supplier, then add one or more of its open POs. All POs on an ASN must share one receiving warehouse."
+            : "Add one or more of the supplier's open POs. All POs on an ASN must share one receiving warehouse.";
 
-    // The value the ship-to <select> binds to: the real id, or the "(no ship-to)" sentinel when that group is chosen.
-    private string ShipToSelectValue => !shipToChosen ? "" : (selectedShipToId?.ToString() ?? NoShipToSentinel.ToString());
-
-    // Display name for the currently chosen ship-to (used by the read-only/locked labels).
-    private string SelectedShipToName =>
-        shipToOptions.FirstOrDefault(o => o.Id == selectedShipToId).Name ?? "(no ship-to)";
-
-    // R11 (D4) — the warehouse pinned by the CURRENT selection: the single distinct non-null warehouse across the
-    // already-selected POs, or null when nothing is selected yet / every selected PO is a pre-R11 null. Once
-    // pinned, the picker offers only POs that match it, so the supplier never builds a selection the server would
-    // reject. Nulls are not a distinct group here either — same rule as AsnWarehouseRules.ResolveSingle.
     // R11 (D6/D7) — true while any of the three shipment refs is blank. The SERVER is the authority (it hard-
     // blocks Send-For-Approval); this only lets the UI say so before the round-trip. Deliberately NOT wired into
     // CanProceed — a draft with blanks is still saveable, which is the whole point of D7.
@@ -1202,24 +1148,12 @@
         || string.IsNullOrWhiteSpace(billOfLading)
         || string.IsNullOrWhiteSpace(packingList);
 
-    private string? PinnedWarehouse =>
-        openPos.Where(p => selectedPoIds.Contains(p.Id))
-               .Select(p => p.Warehouse)
-               .Where(w => !string.IsNullOrWhiteSpace(w))
-               .Distinct(StringComparer.OrdinalIgnoreCase)
-               .FirstOrDefault();
-
-    // The POs offered to add: cached open POs for the chosen ship-to, minus already-selected ones, filtered by the
-    // (client-side) PO-number contains text. A PO from another ship-to can never appear here → never be added.
+    // R13 — the POs offered to add: this supplier's cached open POs, minus already-selected ones, IsShippable, and
+    // matching the (client-side) PO-number contains text. No ship-to/warehouse pre-filter (neither is a PO-header
+    // field); the single-warehouse rule is enforced server-side over the covered PO lines at save/submit.
     private List<PurchaseOrderListItemDto> AddablePos =>
-        !shipToChosen ? new()
-        : openPos
-            .Where(p => p.ShipToAddressId == selectedShipToId)
+        openPos
             .Where(p => !selectedPoIds.Contains(p.Id))
-            // R11 (D4) — never offer a PO from a second warehouse; the server rejects such a selection outright.
-            .Where(p => PinnedWarehouse is null
-                        || string.IsNullOrWhiteSpace(p.Warehouse)
-                        || string.Equals(p.Warehouse, PinnedWarehouse, StringComparison.OrdinalIgnoreCase))
             // R4 §6.2 — offer ONLY POs whose confirmation gate is open (not shippable → hidden from the picker).
             .Where(p => p.IsShippable)
             .Where(p => string.IsNullOrWhiteSpace(poSearch) || p.PoNumber.Contains(poSearch.Trim(), StringComparison.OrdinalIgnoreCase))
@@ -1228,9 +1162,8 @@
 
     private bool CanProceed => currentStep switch
     {
-        // Step 1 (§6.2) — a ship-to must be chosen AND ≥1 PO added. The "(no ship-to)" group counts as chosen
-        // (shipToChosen), so Next unblocks for those POs too. Existing-ASN edit derives the ship-to as locked.
-        1 => shipToChosen && selectedPoIds.Count > 0,
+        // Step 1 (R13) — ≥1 PO added. Single-warehouse is enforced server-side over the covered PO lines.
+        1 => selectedPoIds.Count > 0,
         // Step 2 also gates on serial/lot capture: every serialized line must have N serials and every lot line
         // must have Σqty == ShippedQty (no dupes). The backend SubmitAsnCommand re-enforces; this blocks early.
         2 => lines.Any(l => l.ShippedQty > 0) && SerialLotCaptureValid,
@@ -1356,14 +1289,13 @@
                 }).ToList();
 
                 // For an editable (Draft/Rejected) ASN cache the supplier's open POs so the picker can add/remove POs
-                // (same supplier), and DERIVE + LOCK the ship-to from the covered POs (§6.2 — an ASN never spans two
-                // ship-to addresses). ReloadLines re-fetches the PO lines and merges authoritative Item flags onto
-                // these rows (so a serialized/lot line with NOTHING captured yet still gets its capture section),
-                // preserving the serials/lots just read back from the ASN.
+                // (same supplier), and upgrade the covered-PO map to the richer list items. ReloadLines re-fetches the
+                // PO lines and merges authoritative Item flags onto these rows (so a serialized/lot line with NOTHING
+                // captured yet still gets its capture section), preserving the serials/lots just read back from the ASN.
                 if (!IsLocked)
                 {
                     await LoadOpenPos();
-                    LockShipToFromCoveredPos();
+                    UpgradeCoveredPoMap();
                     await ReloadLines();
                 }
 
@@ -1387,9 +1319,9 @@
         else
         {
             selectedSupplierId = null; selectedSupplierName = null;
-            // Clearing the supplier also clears the ship-to gate + PO cache/selection.
+            // Clearing the supplier also clears the PO cache/selection.
             selectedPoIds.Clear(); selectedPoMap.Clear(); lines.Clear();
-            openPos = new(); shipToOptions = new(); selectedShipToId = null; shipToChosen = false;
+            openPos = new();
         }
     }
 
@@ -1398,96 +1330,37 @@
         selectedSupplierId = supplierId;
         attachSupplierId = supplierId;   // create-mode staging uploads stamp this supplier's seccode
         selectedSupplierName = suppliers.FirstOrDefault(s => s.Id == supplierId)?.LegalName;
-        // Switching supplier resets the PO picker AND the ship-to gate (an ASN ships from a single supplier).
+        // Switching supplier resets the PO picker (an ASN ships from a single supplier).
         selectedPoIds.Clear(); selectedPoMap.Clear(); lines.Clear();
         poSearch = string.Empty;
-        selectedShipToId = null; shipToChosen = false;
         await LoadOpenPos();
     }
 
-    // R5 (§6.2) — user picked a ship-to (or the "(no ship-to)" group). Changing it CLEARS the current PO selection
-    // (mirrors changing supplier) so the two never mix; the ship-to itself stays so the user can add another PO.
-    private async Task OnShipToSelect(ChangeEventArgs e)
-    {
-        var raw = e.Value?.ToString();
-        if (string.IsNullOrEmpty(raw))
-        {
-            selectedShipToId = null; shipToChosen = false;
-        }
-        else if (Guid.TryParse(raw, out var g))
-        {
-            // The sentinel (Guid.Empty) is the "(no ship-to)" group → selectedShipToId stays null but chosen=true.
-            selectedShipToId = g == NoShipToSentinel ? (Guid?)null : g;
-            shipToChosen = true;
-        }
-        // Clear any PO selection carried over from a previously chosen ship-to.
-        selectedPoIds.Clear(); selectedPoMap.Clear(); lines.Clear();
-        poSearch = string.Empty;
-        await ReloadLines();
-    }
-
-    // R5 (§6.2) — load ALL the supplier's open POs ONCE (pageSize 200) and derive the DISTINCT ship-to options. The
-    // list-item DTO carries ShipToAddressId/Name; a null id collapses into a single "(no ship-to)" option. When only
-    // one ship-to exists, auto-select it (no selector). The PO list then filters this cache client-side.
+    // R13 — load this supplier's open POs ONCE (pageSize 200). The picker filters this cache client-side by PO
+    // number; no ship-to/warehouse grouping (both retired from the PO header). Single-warehouse is server-enforced.
     private async Task LoadOpenPos()
     {
-        if (!selectedSupplierId.HasValue) { openPos = new(); shipToOptions = new(); return; }
+        if (!selectedSupplierId.HasValue) { openPos = new(); return; }
         searching = true; StateHasChanged();
         var url = $"api/purchase-orders?page=1&pageSize=200&supplierId={selectedSupplierId}&status=Released,Acknowledged,Accepted,PartiallyDelivered";
         var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>(url);
         openPos = resp?.Data?.Items ?? new();
-        RebuildShipToOptions();
-        // Exactly one ship-to → auto-select (skip the selector). Zero POs leaves options empty (no selector shown).
-        if (shipToOptions.Count == 1)
-        {
-            selectedShipToId = shipToOptions[0].Id;
-            shipToChosen = true;
-        }
         searching = false;
     }
 
-    // DISTINCT (ShipToAddressId, Name) over the cached open POs. Real addresses first (by name); the null-id group,
-    // if any PO has no ship-to, appended once as "(no ship-to)".
-    private void RebuildShipToOptions()
+    // Existing-ASN edit (R13) — upgrade the synthetic selectedPoMap entries (built from the ASN header) to the
+    // richer open-PO list items where available, so the picker chips and the IsShippable filter stay consistent.
+    // The single-warehouse constraint is enforced server-side over the covered PO lines, not in the picker.
+    private void UpgradeCoveredPoMap()
     {
-        var real = openPos
-            .Where(p => p.ShipToAddressId.HasValue)
-            .GroupBy(p => p.ShipToAddressId!.Value)
-            .Select(g => ((Guid?)g.Key, g.First().ShipToAddressName ?? g.Key.ToString()))
-            .OrderBy(x => x.Item2, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        shipToOptions = real;
-        if (openPos.Any(p => !p.ShipToAddressId.HasValue))
-            shipToOptions.Add(((Guid?)null, "(no ship-to)"));
-    }
-
-    // Existing-ASN edit (§6.2) — the ship-to is fixed by the ASN's covered POs, so lock it rather than re-select.
-    // Derive it from the first covered PO that appears in the loaded open-PO cache (the list DTO carries ShipTo*);
-    // if none of the covered POs are still in the open set, fall back to whatever LoadOpenPos auto-selected (or
-    // leave chosen so the locked label renders). Also upgrade the synthetic selectedPoMap entries (built from the
-    // ASN header, ship-to null) to the richer open-PO list items where available so filters stay consistent.
-    private void LockShipToFromCoveredPos()
-    {
-        var covered = openPos.Where(p => selectedPoIds.Contains(p.Id)).ToList();
-        foreach (var p in covered) selectedPoMap[p.Id] = p;   // richer list item (with ship-to) over the header stub
-        if (covered.Count > 0)
-        {
-            selectedShipToId = covered[0].ShipToAddressId;
-            shipToChosen = true;
-        }
-        else
-        {
-            // No covered PO is in the open set (they moved out of the open statuses). Keep the gate satisfied so the
-            // editor is not blocked — the user can still edit the existing lines; adding a new PO needs an open one.
-            shipToChosen = true;
-        }
+        foreach (var p in openPos.Where(p => selectedPoIds.Contains(p.Id)))
+            selectedPoMap[p.Id] = p;   // richer list item over the header stub
     }
 
     private async Task AddPo(PurchaseOrderListItemDto po)
     {
-        // Defence-in-depth: never add a PO from a ship-to other than the chosen one (the AddablePos filter already
-        // excludes them, but a stale reference must not slip a cross-ship-to PO onto the ASN).
-        if (po.ShipToAddressId != selectedShipToId) return;
+        // R13 — no client-side warehouse guard (warehouse is per-line, not on this DTO). A cross-warehouse selection
+        // is caught server-side (AsnWarehouseRules) at save/submit.
         if (selectedPoIds.Add(po.Id))
         {
             selectedPoMap[po.Id] = po;
@@ -1495,8 +1368,7 @@
         }
     }
 
-    // Removing the LAST selected PO keeps the ship-to (so the user can add another PO under it) — only supplier/
-    // ship-to changes reset the gate.
+    // Removing a selected PO just drops it from the set; the supplier can add another. Switching supplier resets all.
     private async Task RemovePo(Guid poId)
     {
         if (selectedPoIds.Remove(poId))
@@ -1509,8 +1381,7 @@
     // ?pos=id1,id2 from the PO list "Create ASN from selected". Resolve the supplier from the first PO, then add
     // every preselected PO that belongs to that supplier (cross-supplier ids are skipped — one ASN, one supplier).
     // NOTE: the checkbox that produced ?pos= was removed (PreselectPos is effectively dead), but the path is kept
-    // coherent — after loading the supplier's open POs it derives + locks the ship-to from the added POs so the
-    // §6.2 gate holds even on a deep link.
+    // coherent. R13 — no ship-to gate; single-warehouse is enforced server-side over the covered PO lines.
     private async Task ApplyPreselectAsync()
     {
         var ids = (PreselectPos ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -1523,14 +1394,12 @@
             if (!selectedSupplierId.HasValue)
             {
                 selectedSupplierId = po.SupplierId; selectedSupplierName = po.SupplierName; attachSupplierId = po.SupplierId;
-                await LoadOpenPos();   // cache the supplier's open POs (with ship-to) so the gate can lock a ship-to
+                await LoadOpenPos();   // cache the supplier's open POs so the picker can offer them
             }
             if (po.SupplierId != selectedSupplierId) continue;
-            // Only add a preselected PO that is in the open set AND (once a ship-to is locked) matches it.
+            // Only add a preselected PO that is in this supplier's open set.
             var listItem = openPos.FirstOrDefault(x => x.Id == po.Id);
             if (listItem == null) continue;
-            if (shipToChosen && listItem.ShipToAddressId != selectedShipToId) continue;
-            if (!shipToChosen) { selectedShipToId = listItem.ShipToAddressId; shipToChosen = true; }
             selectedPoIds.Add(listItem.Id);
             selectedPoMap[listItem.Id] = listItem;
         }

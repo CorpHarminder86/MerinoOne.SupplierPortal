@@ -225,6 +225,8 @@ public class CompanyAddressConfiguration : IEntityTypeConfiguration<CompanyAddre
         b.Property(x => x.Pincode).HasColumnName("pincode").HasMaxLength(20);
         b.Property(x => x.Country).HasColumnName("country").HasMaxLength(100).HasDefaultValue("India");
         b.Property(x => x.IsActive).HasColumnName("isActive").HasColumnType("bit").HasDefaultValue(true);
+        // R13 (2026-08-05) — the company's single BASE (own/customer) address. No erpCode; never a warehouse target.
+        b.Property(x => x.IsBaseAddress).HasColumnName("isBaseAddress").HasColumnType("bit").HasDefaultValue(false);
 
         // Ship-to hangs off the TenantEntity (no inverse nav collection). Restrict: a hub TenantEntity is not
         // hard-deleted out from under its addresses (they soft-delete); also avoids a multiple-cascade-path conflict.
@@ -233,10 +235,19 @@ public class CompanyAddressConfiguration : IEntityTypeConfiguration<CompanyAddre
 
         b.HasIndex(x => x.TenantEntityId).HasDatabaseName("IX_CompanyAddress_tenantEntity");
 
-        // §4.2 — deterministic inbound ship-to resolution: erpCode unique per tenant entity WHEN PRESENT and not
+        // §4.2 — deterministic inbound WAREHOUSE resolution: erpCode unique per tenant entity WHEN PRESENT and not
         // soft-deleted. Filtered so NULL erpCodes never collide and a soft-deleted row never blocks re-use.
         b.HasIndex(x => new { x.TenantEntityId, x.ErpCode })
             .HasDatabaseName("UQ_CompanyAddress_tenantEntity_erp").IsUnique()
             .HasFilter("[erpCode] IS NOT NULL AND [isDeleted] = 0");
+
+        // R13 — exactly ONE base address per company: filtered-unique WHERE isBaseAddress=1 and not soft-deleted.
+        // Keyed on (tenantEntityId, isBaseAddress) — NOT tenantEntityId alone — so EF's migration differ does not
+        // pair/replace the plain IX_CompanyAddress_tenantEntity single-column index above (two indexes on the same
+        // single column collide in the differ). isBaseAddress is constant (1) inside the filter, so uniqueness
+        // still reduces to "one base row per company". The DB backstop behind the app-layer singleton guard.
+        b.HasIndex(x => new { x.TenantEntityId, x.IsBaseAddress })
+            .HasDatabaseName("UQ_CompanyAddress_tenantEntity_base").IsUnique()
+            .HasFilter("[isBaseAddress] = 1 AND [isDeleted] = 0");
     }
 }

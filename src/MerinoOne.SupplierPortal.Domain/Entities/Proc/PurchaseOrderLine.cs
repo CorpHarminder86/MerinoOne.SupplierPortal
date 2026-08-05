@@ -1,4 +1,5 @@
 using MerinoOne.SupplierPortal.Domain.Common;
+using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Inv;
 
 namespace MerinoOne.SupplierPortal.Domain.Entities.Proc;
@@ -22,6 +23,16 @@ public class PurchaseOrderLine : AuditableEntity
     public DateTime? DeliveryDate { get; set; }
     public string? TaxCode { get; set; }
     public string? TaxDescription { get; set; }
+
+    // R13 (2026-08-05) — receiving WAREHOUSE, now per LINE (a PO may span warehouses). Replaces the retired PO
+    // header ship-to. The inbound push sends a warehouse CODE which HARD-RESOLVES to an active, non-base
+    // admin.CompanyAddress by ErpCode within the PO's company (unresolved → the whole PO row fails). We store the
+    // raw code, the live FK, and a point-in-time snapshot the read/ASN side renders without a join.
+    // REQUIRED on the wire; nullable here (existing lines stay null until LN re-pushes — clean break, no backfill).
+    public string? Warehouse { get; set; }
+    public Guid? WarehouseAddressId { get; set; }
+    public CompanyAddress? WarehouseAddress { get; set; }
+    public WarehouseSnapshot? WarehouseAddressSnapshot { get; set; }
 
     // R4 (2026-06-22) — Addendum A2: link the free-string taxCode to the proc.Tax master. Keep taxCode /
     // taxDescription as the denormalized snapshot (PO-line is ERP-fed; the FK may point at a Tax row from an

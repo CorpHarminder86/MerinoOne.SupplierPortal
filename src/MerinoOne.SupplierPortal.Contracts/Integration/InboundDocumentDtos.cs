@@ -39,7 +39,10 @@ public record PoLineRecord(
     /// <summary>R4 (2026-06-30) — signed additive qty delta (may be negative to reduce). Mutually exclusive with a
     /// non-zero <see cref="OrderQty"/>: set OrderQty to REPLACE the absolute qty, or AdditionalQty to ADD to the
     /// current qty — not both. Default 0.</summary>
-    decimal AdditionalQty = 0);
+    decimal AdditionalQty = 0,
+    /// <summary>R13 — REQUIRED receiving warehouse ERP code (max 50). Resolves to an active, non-base CompanyAddress
+    /// by ErpCode within the PO's company; an unresolved code hard-fails the whole PO row.</summary>
+    string? Warehouse = null);
 
 /// <summary>
 /// One inbound Purchase Order pushed by Infor LN. <see cref="PoNumber"/> is the natural key within the
@@ -49,28 +52,18 @@ public record PoLineRecord(
 /// (it is the ERP's authoritative identity); when NEITHER is supplied the row is rejected — at least one is
 /// required. PoType / PoStatus are enum NAMEs (default Material / Released). Currency / payment-term /
 /// delivery-term resolve by code against the resolved company (FK + snapshot).
-/// <para>R5 (TSD R5 Addendum §6.2/§6.3) — <see cref="ShipToAddress"/> is the ERP ship-to CODE and is
-/// <b>REQUIRED</b>: it resolves to the <c>CompanyAddress.erpCode</c> of the PO's company (by
-/// <c>tenantEntityId</c>). If it does not resolve to an active address, the PO row is HARD-FAILED (not
-/// created/updated). <see cref="ErpStatus"/> is the RAW ERP status, stored on the PO for tracking only — the
-/// portal PoStatus resolution via the PoStatusMapping master is Phase 2; this phase only records the raw value
-/// (the existing material-change PoStatus logic is unchanged).</para>
+/// <para>R13 — the header ship-to is RETIRED and warehouse is now PER LINE (<see cref="PoLineRecord.Warehouse"/>).
+/// Each line's warehouse CODE resolves to an active, non-base <c>CompanyAddress.erpCode</c> of the PO's company
+/// (by <c>tenantEntityId</c>); an unresolved code HARD-FAILS the whole PO row (not created/updated).
+/// <see cref="ErpStatus"/> is the RAW ERP status, stored on the PO for tracking only — the portal PoStatus
+/// resolution via the PoStatusMapping master is Phase 2; this phase only records the raw value (the existing
+/// material-change PoStatus logic is unchanged).</para>
 /// </summary>
 public record PoRecord(
     string PoNumber,
     string? SupplierCode,
     DateTime PoDate,
     IReadOnlyList<PoLineRecord> Lines,
-    /// <summary>R5 (§6.2/§6.3) — REQUIRED ERP ship-to CODE; resolves to <c>CompanyAddress.erpCode</c> within the PO's
-    /// company. Unresolvable (no company / no matching active address) → the PO row is hard-failed.</summary>
-    string ShipToAddress,
-    /// <summary>R11 (D1/D2) — REQUIRED receiving warehouse CODE, max 50. Free text, stored verbatim on the PO
-    /// header (no Warehouse master, no FK, no resolution step — unlike <see cref="ShipToAddress"/> an unknown
-    /// code does NOT fail the row). ERP-owned: overwritten on the next inbound sync. Flows onto every ASN
-    /// raised against the PO as the single-warehouse grouping key, and out to LN in the ASN payload.
-    /// <para>Declared non-defaulted (like <see cref="ShipToAddress"/>) so every C# construction site is
-    /// compile-enforced. JSON binding is name-based and unaffected by the parameter position.</para></summary>
-    string Warehouse,
     string? PoType = null,
     string? PoStatus = null,
     string? PaymentTerms = null,

@@ -58,6 +58,12 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     // R5 ([[r5-consolidation]]) — a named ship-to address hung off the fixture company (TenantEntity CompanyId);
     // its erpCode (ShipToErpCode) is what the inbound PO push resolves against.
     public static readonly Guid ShipToAddressId = Guid.Parse("2c000000-0000-0000-0000-000000000002");
+    // R13 — the fixture company's single BASE address (no erpCode; shown on the PO screen beside the customer).
+    public static readonly Guid BaseAddressId = Guid.Parse("2c000000-0000-0000-0000-0000000000ba");
+    // R13 — two warehouse addresses whose erpCodes are WarehouseCode / WarehouseCodeAlt, so an inbound PO line's
+    // warehouse code resolves to a real CompanyAddress and the cross-warehouse ASN guard has two distinct targets.
+    public static readonly Guid WarehouseAddressId    = Guid.Parse("2c000000-0000-0000-0000-0000000000c1");
+    public static readonly Guid WarehouseAddressIdAlt = Guid.Parse("2c000000-0000-0000-0000-0000000000c2");
     public static readonly Guid SupplierId    = Guid.Parse("33333333-3333-3333-3333-333333333333");
     public static readonly Guid SeccodeId     = Guid.Parse("44444444-4444-4444-4444-444444444444");
     public static readonly Guid ApiKeyId      = Guid.Parse("55555555-5555-5555-5555-555555555555");
@@ -221,18 +227,50 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        // --- Ship-to address (R5 §4.2 / [[r5-consolidation]]) ----------------------------------------------
-        // A named ship-to address hung directly off the fixture company (TenantEntity CompanyId), whose erpCode
-        // (ShipToErpCode) the inbound PO push resolves against. CompanyAddress is an AuditableEntity with no
-        // tenant/seccode column of its own; the always-on filters are bypassed at read time anyway.
+        // --- Warehouse address (R13; was the R5 ship-to) ---------------------------------------------------
+        // A named WAREHOUSE address hung directly off the fixture company (TenantEntity CompanyId), whose erpCode
+        // (ShipToErpCode) an inbound PO LINE's warehouse code resolves against. CompanyAddress is an
+        // AuditableEntity with no tenant/seccode column of its own; the always-on filters are bypassed at read.
         if (!await db.CompanyAddresses.IgnoreQueryFilters().AnyAsync(a => a.Id == ShipToAddressId))
         {
             db.CompanyAddresses.Add(new CompanyAddress
             {
                 Id = ShipToAddressId, TenantEntityId = CompanyId, AddressName = "IntTest DC",
-                ErpCode = ShipToErpCode, AddressType = "Shipping", AddressLine1 = "1 Test Estate",
+                ErpCode = ShipToErpCode, AddressType = "Warehouse", AddressLine1 = "1 Test Estate",
                 City = "Mumbai", State = "Maharashtra", Pincode = "400001", Country = "India",
-                IsActive = true, CreatedBy = "seed", CreatedOn = now
+                IsActive = true, IsBaseAddress = false, CreatedBy = "seed", CreatedOn = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // --- Base address (R13) — the company's own identity address (no erpCode), shown on the PO screen. ---
+        if (!await db.CompanyAddresses.IgnoreQueryFilters().AnyAsync(a => a.Id == BaseAddressId))
+        {
+            db.CompanyAddresses.Add(new CompanyAddress
+            {
+                Id = BaseAddressId, TenantEntityId = CompanyId, AddressName = "IntTest Head Office",
+                ErpCode = null, AddressType = "Base", AddressLine1 = "Plot 5, Sector 62",
+                City = "Noida", State = "Uttar Pradesh", Pincode = "201301", Country = "India",
+                IsActive = true, IsBaseAddress = true, CreatedBy = "seed", CreatedOn = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // --- Two warehouse addresses (R13) resolving WarehouseCode / WarehouseCodeAlt, for the cross-warehouse
+        //     ASN guard tests. IsBaseAddress = false; each carries a distinct erpCode a PO line resolves against. ---
+        foreach (var (whId, whCode, whName) in new[]
+                 {
+                     (WarehouseAddressId, WarehouseCode, "IntTest WH-01"),
+                     (WarehouseAddressIdAlt, WarehouseCodeAlt, "IntTest WH-02"),
+                 })
+        {
+            if (await db.CompanyAddresses.IgnoreQueryFilters().AnyAsync(a => a.Id == whId)) continue;
+            db.CompanyAddresses.Add(new CompanyAddress
+            {
+                Id = whId, TenantEntityId = CompanyId, AddressName = whName,
+                ErpCode = whCode, AddressType = "Warehouse", AddressLine1 = "2 Test Estate",
+                City = "Pune", State = "Maharashtra", Pincode = "411001", Country = "India",
+                IsActive = true, IsBaseAddress = false, CreatedBy = "seed", CreatedOn = now
             });
             await db.SaveChangesAsync();
         }

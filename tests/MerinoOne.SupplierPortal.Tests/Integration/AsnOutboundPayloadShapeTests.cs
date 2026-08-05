@@ -79,8 +79,8 @@ public class AsnOutboundPayloadShapeTests
             because: "CompanyCode is the ERP company code, the same value LN sends inbound");
         root.GetProperty("SupplierBp").GetString().Should().Be("ERP-BP-001",
             because: "SupplierBp is the supplier's LN business-partner code (Supplier.ErpCode)");
-        root.GetProperty("Warehouse").GetString().Should().Be(IntegrationTestFixture.WarehouseCode,
-            because: "the ASN snapshots its PO's warehouse");
+        root.GetProperty("Warehouse").GetString().Should().Be(IntegrationTestFixture.ShipToErpCode,
+            because: "the ASN snapshots the warehouse off the PO LINE it ships against (SeedPoAsync uses ShipToErpCode)");
         root.GetProperty("AsnNumber").GetString().Should().Be(asn.AsnNumber);
 
         // CreateDate = audit creation instant; ShipmentDate = SubmittedAt, stamped at buyer approval.

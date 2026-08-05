@@ -68,7 +68,7 @@ public class AsnApprovalFlowTests : IAsyncLifetime
         var asn = (await Read<AsnDetailDto>(resp)).Data!;
         asn.AsnStatus.Should().Be(nameof(AsnStatus.Draft));
         asn.PurchaseOrderId.Should().BeNull(because: "the deprecated header PO is unused on a schedule-built ASN (UC-AS-03)");
-        asn.ShipToAddressId.Should().Be(IntegrationTestFixture.ShipToAddressId, because: "header grouped by ship-to (UC-AS-03)");
+        asn.WarehouseAddressId.Should().Be(IntegrationTestFixture.ShipToAddressId, because: "header grouped by warehouse (R13; ShipToErpCode resolves there)");
         asn.Lines.Should().HaveCount(2);
         asn.Lines.Select(l => l.PurchaseOrderId).Should().BeEquivalentTo(new[] { poA.PoId, poB.PoId },
             because: "lines reference different POs sharing one ship-to (UC-AS-01)");
@@ -105,8 +105,8 @@ public class AsnApprovalFlowTests : IAsyncLifetime
         var resp = await supplierClient.PostAsJsonAsync("/api/asns/from-schedule", req);
         resp.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await Body(resp));
         (await Read<AsnDetailDto>(resp)).Errors.Should()
-            .Contain(e => e.Contains("ship-to", StringComparison.OrdinalIgnoreCase),
-                because: "an ASN cannot mix ship-to addresses (UC-AS-02)");
+            .Contain(e => e.Contains("warehouse", StringComparison.OrdinalIgnoreCase),
+                because: "an ASN cannot mix receiving warehouses (UC-AS-02, R13)");
     }
 
     // ════════════════════════════ §10 — approval lifecycle ════════════════════════════

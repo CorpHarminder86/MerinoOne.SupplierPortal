@@ -99,9 +99,33 @@ else
             <div class="rz-card" style="padding:20px;">
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Order details</h3>
                 <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
-                    @* R5 (TSD R5 Addendum §6.1 — Component 2): CustomerName is DERIVED live (PO.tenantEntityId →
-                       Company.name), display-only and reflects company renames. *@
-                    <dt style="color:var(--mer-ink-500);">Customer</dt><dd>@(string.IsNullOrEmpty(detail.CustomerName) ? "—" : detail.CustomerName)</dd>
+                    @* R5/R13 — CustomerName + the customer BASE address are DERIVED live (PO.tenantEntityId → the
+                       company + its single base CompanyAddress), display-only and reflect later edits. *@
+                    <dt style="color:var(--mer-ink-500);">Customer</dt>
+                    <dd>
+                        <div style="font-weight:600;color:var(--mer-blue-darker);">@(string.IsNullOrEmpty(detail.CustomerName) ? "—" : detail.CustomerName)</div>
+                        @if (HasCustomerAddress)
+                        {
+                            <div style="margin-top:4px;display:flex;flex-direction:column;gap:2px;color:var(--mer-ink-700);font-size:12.5px;">
+                                @if (!string.IsNullOrEmpty(detail.CustomerAddressName))
+                                {
+                                    <div>@detail.CustomerAddressName</div>
+                                }
+                                @if (!string.IsNullOrEmpty(detail.CustomerAddressLine1))
+                                {
+                                    <div>@detail.CustomerAddressLine1@(string.IsNullOrEmpty(detail.CustomerAddressLine2) ? "" : $", {detail.CustomerAddressLine2}")</div>
+                                }
+                                @if (!string.IsNullOrEmpty(CustomerCityLine))
+                                {
+                                    <div>@CustomerCityLine</div>
+                                }
+                                @if (!string.IsNullOrEmpty(detail.CustomerAddressCountry))
+                                {
+                                    <div>@detail.CustomerAddressCountry</div>
+                                }
+                            </div>
+                        }
+                    </dd>
                     <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
                     <dt style="color:var(--mer-ink-500);">PO Date</dt><dd style="font-family:Inter,monospace;">@detail.PoDate.ToString("yyyy-MM-dd")</dd>
                     <dt style="color:var(--mer-ink-500);">Currency</dt><dd>@(string.IsNullOrEmpty(detail.CurrencyCode) ? "—" : detail.CurrencyCode)</dd>
@@ -124,55 +148,9 @@ else
             </div>
 
             <div style="display:flex;flex-direction:column;gap:16px;">
-                @* R5 (TSD R5 Addendum §6.1 — Component 2): the ship-to is the POINT-IN-TIME snapshot copied onto the
-                   PO at inbound resolution (the ShipTo* fields), NOT the live company address — so later edits to the
-                   company address do not change historical POs. Display-only. Legacy POs with no resolved ship-to
-                   render a subtle "no ship-to" placeholder rather than an empty card. *@
-                <div class="rz-card" style="padding:20px;">
-                    <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Ship-to</h3>
-                    @if (HasShipTo)
-                    {
-                        <div style="display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--mer-ink-900);">
-                            <div style="font-weight:600;color:var(--mer-blue-darker);">
-                                @detail.ShipToAddressName
-                                @if (!string.IsNullOrEmpty(detail.ShipToErpCode))
-                                {
-                                    <span class="tlg-status tlg-status--info" style="margin-left:6px;font-family:Inter,monospace;">@detail.ShipToErpCode</span>
-                                }
-                            </div>
-                            @if (!string.IsNullOrEmpty(detail.ShipToLine1))
-                            {
-                                <div>@detail.ShipToLine1@(string.IsNullOrEmpty(detail.ShipToLine2) ? "" : $", {detail.ShipToLine2}")</div>
-                            }
-                            <div style="color:var(--mer-ink-700);">@ShipToCityLine</div>
-                            @if (!string.IsNullOrEmpty(detail.ShipToCountry))
-                            {
-                                <div style="color:var(--mer-ink-700);">@detail.ShipToCountry</div>
-                            }
-                        </div>
-                    }
-                    else
-                    {
-                        <p style="font-size:13px;color:var(--mer-ink-500);">— no ship-to</p>
-                    }
-
-                    @* R11 (D3) — the receiving warehouse, ERP-owned and carried on the PO header. Shown beside
-                       ship-to because the two together are what an ASN is grouped by: an ASN may span neither a
-                       second ship-to nor a second warehouse. Free-text code with no master, so the code renders
-                       as-is with no description. Null on POs ingested before R11 (no backfill). *@
-                    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--mer-line);">
-                        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mer-ink-500);margin-bottom:4px;">Warehouse</div>
-                        @if (!string.IsNullOrEmpty(detail.Warehouse))
-                        {
-                            <span class="tlg-status tlg-status--info" style="font-family:Inter,monospace;">@detail.Warehouse</span>
-                        }
-                        else
-                        {
-                            <p style="font-size:13px;color:var(--mer-ink-500);margin:0;">— not set</p>
-                        }
-                    </div>
-                </div>
-
+                @* R13 — ship-to is RETIRED. The receiving warehouse now lives per PO LINE (see the Lines grid's
+                   Warehouse column). The right rail is Notes-only; the customer's own BASE address is shown beside
+                   the customer name in the Order-details card (live from the company). *@
                 <div class="rz-card" style="padding:20px;">
                     <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Notes</h3>
                     <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@(string.IsNullOrEmpty(detail.Notes) ? "No notes." : detail.Notes)</p>
@@ -231,6 +209,7 @@ else
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Delivery</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Shipped</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Balance / allowance</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Warehouse</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -262,6 +241,7 @@ else
                                 </td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQtyToDate.ToString("0.###")</td>
                                 <td style="padding:6px 4px;">@BalanceCell(line)</td>
+                                <td style="padding:6px 4px;">@WarehouseCell(line)</td>
                             }
                             else
                             {
@@ -275,6 +255,7 @@ else
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@(line.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQtyToDate.ToString("0.###")</td>
                                 <td style="padding:6px 4px;">@BalanceCell(line)</td>
+                                <td style="padding:6px 4px;">@WarehouseCell(line)</td>
                             }
                         </tr>
                     }
@@ -283,7 +264,7 @@ else
                         <tr style="border-top:2px solid var(--mer-line);font-weight:700;">
                             <td colspan="7" style="padding:8px 4px;text-align:right;color:var(--mer-ink-700);">Total@(string.IsNullOrEmpty(detail.CurrencyCode) ? "" : " (" + detail.CurrencyCode + ")")</td>
                             <td style="padding:8px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-blue-darker);">@detail.TotalAmount.ToString("0.00")</td>
-                            <td colspan="6"></td>
+                            <td colspan="7"></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -403,24 +384,42 @@ else
     // the non-AutoAccept branch so a missing/empty value never hides the manual actions.
     private bool ManualResponse => !string.Equals(detail?.PoResponseMode, "AutoAccept", StringComparison.OrdinalIgnoreCase);
 
-    // R5 (TSD R5 Addendum §6.1 — Component 2): the ship-to snapshot is considered present when any snapshot field is
-    // populated. Legacy POs (resolved before R5, or never resolved) carry all-null ShipTo* and render "no ship-to".
-    private bool HasShipTo => detail != null && (
-        !string.IsNullOrEmpty(detail.ShipToAddressName) ||
-        !string.IsNullOrEmpty(detail.ShipToLine1) ||
-        !string.IsNullOrEmpty(detail.ShipToCity) ||
-        !string.IsNullOrEmpty(detail.ShipToErpCode));
+    // R13 — the customer base address (live from the company) is present when any base-address field is populated.
+    private bool HasCustomerAddress => detail != null && (
+        !string.IsNullOrEmpty(detail.CustomerAddressName) ||
+        !string.IsNullOrEmpty(detail.CustomerAddressLine1) ||
+        !string.IsNullOrEmpty(detail.CustomerAddressCity));
 
-    // "City, State Pincode" — each segment dropped when blank so a sparse snapshot does not read with stray commas.
-    private string ShipToCityLine
+    // "City, State Pincode" — each segment dropped when blank so a sparse address does not read with stray commas.
+    private string CustomerCityLine
     {
         get
         {
             if (detail == null) return string.Empty;
-            var cityState = string.Join(", ", new[] { detail.ShipToCity, detail.ShipToState }.Where(s => !string.IsNullOrWhiteSpace(s)));
-            return string.IsNullOrEmpty(detail.ShipToPincode) ? cityState : $"{cityState} {detail.ShipToPincode}".Trim();
+            var cityState = string.Join(", ", new[] { detail.CustomerAddressCity, detail.CustomerAddressState }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            return string.IsNullOrEmpty(detail.CustomerAddressPincode) ? cityState : $"{cityState} {detail.CustomerAddressPincode}".Trim();
         }
     }
+
+    // R13 — per-line warehouse: code chip + the resolved address name as a hover title.
+    private RenderFragment WarehouseCell(PurchaseOrderLineDto line) => builder =>
+    {
+        if (string.IsNullOrEmpty(line.Warehouse))
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "style", "color:var(--mer-ink-500);");
+            builder.AddContent(2, "—");
+            builder.CloseElement();
+            return;
+        }
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "tlg-status tlg-status--info");
+        builder.AddAttribute(2, "style", "font-family:Inter,monospace;");
+        var name = line.WarehouseAddressName;
+        if (!string.IsNullOrEmpty(name)) builder.AddAttribute(3, "title", name);
+        builder.AddContent(4, line.Warehouse);
+        builder.CloseElement();
+    };
 
     private void TabOverview() => tab = "overview";
     private void TabHistory() => tab = "history";

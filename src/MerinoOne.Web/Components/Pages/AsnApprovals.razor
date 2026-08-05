@@ -40,8 +40,8 @@
             <div class="tlg-header">
                 <div class="tlg-col">ASN Number</div>
                 <div class="tlg-col">Supplier</div>
-                <div class="tlg-col">Ship-to</div>
                 <div class="tlg-col">Warehouse</div>
+                <div class="tlg-col">Warehouse code</div>
                 <div class="tlg-col">#POs</div>
                 <div class="tlg-col">Submitted by</div>
                 <div class="tlg-col">Submitted on</div>
@@ -52,7 +52,7 @@
                 <div class="tlg-row" @onclick="() => Open(row.AsnId)" style="cursor:pointer">
                     <div class="tlg-col tlg-code">@row.AsnNumber</div>
                     <div class="tlg-col tlg-name">@row.SupplierName</div>
-                    <div class="tlg-col tlg-name">@(string.IsNullOrWhiteSpace(row.ShipToAddressName) ? "—" : row.ShipToAddressName)</div>
+                    <div class="tlg-col tlg-name">@(string.IsNullOrWhiteSpace(row.WarehouseAddressName) ? "—" : row.WarehouseAddressName)</div>
                     @* R11 (D4) — which dock this shipment is bound for, at a glance in the approval queue. *@
                     <div class="tlg-col tlg-code">@(string.IsNullOrWhiteSpace(row.Warehouse) ? "—" : row.Warehouse)</div>
                     <div class="tlg-col">@row.PoCount</div>

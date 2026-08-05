@@ -8,11 +8,15 @@
    consolidation the duplicate admin.Company entity was DROPPED — the "company" is now the pre-existing
    admin.TenantEntity, served READ-ONLY by Contracts.Companies.CompanyDto over api/companies/accessible.
    Companies are ERP-synced TenantEntities, so this screen no longer creates / edits / deactivates them; it
-   only LISTS them (Settings.Read) and manages each company's named, ERP-mappable ship-to addresses
-   (admin.CompanyAddress, which now hangs directly off the TenantEntity). The address CompanyId field carries
-   a TenantEntity id. The address dialog uses the shared GeoAutocomplete (mirroring supplier onboarding):
-   Country / PIN / State / City are typeaheads; picking a PIN reverse-fills City/State/Country. Only STRING
-   names/code are persisted — the geo ids are transient cascade drivers. Settings.Write to manage addresses. *@
+   only LISTS them (Settings.Read) and manages each company's addresses (admin.CompanyAddress, which hangs
+   directly off the TenantEntity). R13 splits those addresses in two: exactly ONE Base address (the company's
+   own identity / customer address — no ErpCode, server type "Base") plus the Warehouse pool (ErpCode-bearing
+   rows, server type "Warehouse") that inbound PO-line warehouse codes resolve against. The CompanyAddressDto
+   IsBase flag partitions the loaded list; the request DTOs carry IsBase and the server forces type + ErpCode
+   accordingly. The address CompanyId field carries a TenantEntity id. The add/edit dialog uses the shared
+   GeoAutocomplete (mirroring supplier onboarding): Country / PIN / State / City are typeaheads; picking a PIN
+   reverse-fills City/State/Country. Only STRING names/code are persisted — the geo ids are transient cascade
+   drivers. Settings.Write to manage addresses. *@
 
 <PageTitle>Companies</PageTitle>
 
@@ -23,7 +27,7 @@
                 <h1 class="tl-title">Companies</h1>
                 <span class="tl-count-chip">@(companies?.Count ?? 0)</span>
             </div>
-            <p class="tl-sub">Companies (buying entities) synced from the ERP · pick one to manage its named ship-to addresses</p>
+            <p class="tl-sub">Companies (buying entities) synced from the ERP · pick one to manage its base identity address + warehouse pool</p>
         </div>
     </header>
 
@@ -60,21 +64,71 @@
             }
         </div>
 
-        @* ---------------- Addresses for the selected company ---------------- *@
+        @* ---------------- Addresses for the selected company (R13: base identity address + warehouse pool) ---------------- *@
         @if (selectedCompany != null)
         {
+            @* ----- Base address: the company's own identity / customer address — exactly one, no ERP code ----- *@
             <div class="rz-card" style="padding:20px;margin-top:18px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
                     <div>
                         <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">
-                            Ship-to addresses · @selectedCompany.Name (@(addresses?.Count ?? 0))
+                            Base address · @selectedCompany.Name
                         </h3>
-                        <p style="color:var(--mer-ink-500);font-size:12px;">Each address has a mandatory name (the ship-to label) and an optional ERP ship-to code, unique within the company.</p>
+                        <p style="color:var(--mer-ink-500);font-size:12px;">The company's own identity / customer address — exactly one, no ERP code.</p>
+                    </div>
+                </div>
+
+                @if (addressesLoading)
+                {
+                    <div class="tl-empty">Loading…</div>
+                }
+                else if (baseAddress is null)
+                {
+                    @if (CanWrite)
+                    {
+                        <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewBaseAddress">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add_home_work</span> Add base address
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="tl-empty">
+                            <span class="material-symbols-outlined" style="font-size:32px;">location_off</span>
+                            <div>No base address for this company yet.</div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    var b = baseAddress!;
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+                        <div>
+                            <div style="font-weight:600;color:var(--mer-blue-darker);">@b.AddressName</div>
+                            <div style="font-size:12px;color:var(--mer-ink-700);margin-top:3px;">@FormatLine(b)</div>
+                        </div>
+                        @if (CanWrite)
+                        {
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEditBaseAddress(b)" title="Edit">
+                                <span class="material-symbols-outlined">edit</span> Edit
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+
+            @* ----- Warehouses: the ERP-mappable pool inbound PO-line warehouse codes resolve against ----- *@
+            <div class="rz-card" style="padding:20px;margin-top:18px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <div>
+                        <h3 style="font-size:14px;font-weight:700;margin-bottom:2px;color:var(--mer-blue-darker);">
+                            Warehouses · @selectedCompany.Name (@(warehouses.Count))
+                        </h3>
+                        <p style="color:var(--mer-ink-500);font-size:12px;">ERP-mappable warehouse addresses — inbound PO-line warehouse codes resolve against these. Each has a mandatory name and an ERP code unique within the company.</p>
                     </div>
                     @if (CanWrite)
                     {
                         <button class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;cursor:pointer;" @onclick="OpenNewAddress">
-                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add_location_alt</span> Add address
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">add_location_alt</span> Add warehouse
                         </button>
                     }
                 </div>
@@ -83,31 +137,29 @@
                 {
                     <div class="tl-empty">Loading…</div>
                 }
-                else if (addresses == null || addresses.Count == 0)
+                else if (warehouses.Count == 0)
                 {
                     <div class="tl-empty">
                         <span class="material-symbols-outlined" style="font-size:32px;">location_off</span>
-                        <div>No addresses for this company yet.</div>
+                        <div>No warehouses for this company yet.</div>
                     </div>
                 }
                 else
                 {
-                    <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 110px 1.6fr 90px 150px; --tl-min-width: 960px;">
+                    <div class="tl-grid-wrapper" style="--tl-cols: 1.6fr 170px 1.8fr 90px 150px; --tl-min-width: 900px;">
                         <div class="tlg-header">
-                            <div class="tlg-col">Address name</div>
+                            <div class="tlg-col">Warehouse name</div>
                             <div class="tlg-col">ERP code</div>
-                            <div class="tlg-col">Type</div>
                             <div class="tlg-col">Address</div>
                             <div class="tlg-col">Active</div>
                             <div class="tlg-col tlg-col--actions">Actions</div>
                         </div>
-                        @foreach (var a in addresses)
+                        @foreach (var a in warehouses)
                         {
                             var addr = a;
                             <div class="tlg-row">
                                 <div class="tlg-col tlg-desc" style="font-weight:600;color:var(--mer-blue-darker);">@addr.AddressName</div>
                                 <div class="tlg-col tlg-code">@(string.IsNullOrEmpty(addr.ErpCode) ? "—" : addr.ErpCode)</div>
-                                <div class="tlg-col">@addr.AddressType</div>
                                 <div class="tlg-col" style="font-size:12px;color:var(--mer-ink-700);">@FormatLine(addr)</div>
                                 <div class="tlg-col"><span class="tlg-status @(addr.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(addr.IsActive ? "Yes" : "No")</span></div>
                                 <div class="tlg-col tlg-col--actions">
@@ -146,30 +198,24 @@
             <header class="merino-dialog__header">
                 <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">location_on</span></div>
                 <div class="merino-dialog__head-text">
-                    <div class="merino-dialog__eyebrow">Ship-to address · @selectedCompany?.Name</div>
-                    <h2 class="merino-dialog__title">@(editingAddressId.HasValue ? "Edit address" : "New address")</h2>
+                    <div class="merino-dialog__eyebrow">@(isBaseDialog ? "Base address" : "Warehouse") · @selectedCompany?.Name</div>
+                    <h2 class="merino-dialog__title">@(editingAddressId.HasValue ? "Edit " : "New ")@(isBaseDialog ? "base address" : "warehouse")</h2>
                 </div>
                 <button class="merino-dialog__close" @onclick="() => showAddressDialog = false"><span class="material-symbols-outlined">close</span></button>
             </header>
             <div class="merino-dialog__body">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Address name / ship-to label *</label>
-                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.AddressName" placeholder="e.g. Bhiwandi DC" />
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">@(isBaseDialog ? "Address name" : "Warehouse name") *</label>
+                        <input class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="af.AddressName" placeholder="@(isBaseDialog ? "e.g. Merino Industries — Head Office" : "e.g. Bhiwandi DC")" />
                     </div>
-                    <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">ERP ship-to code</label>
-                        <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="af.ErpCode" placeholder="e.g. DC-BHIWANDI-01" />
-                    </div>
-                    <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Address type *</label>
-                        <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="af.AddressType">
-                            @foreach (var t in AddressTypes)
-                            {
-                                <option value="@t">@t</option>
-                            }
-                        </select>
-                    </div>
+                    @if (!isBaseDialog)
+                    {
+                        <div>
+                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">ERP warehouse code *</label>
+                            <input class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" @bind="af.ErpCode" placeholder="e.g. DC-BHIWANDI-01" />
+                        </div>
+                    }
                     <div>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Country *</label>
                         <GeoAutocomplete Placeholder="Country" Value="@af.Country"
@@ -235,9 +281,6 @@
     private bool CanRead => Token.HasPermission("Settings.Read");
     private bool busy;
 
-    // Address types mirror the supplier address control (Register.razor) + the §4.2 "Plant" option.
-    private static readonly string[] AddressTypes = { "Registered", "Billing", "Shipping", "Plant", "Other" };
-
     // ---- Companies (read-only TenantEntities from api/companies/accessible) ----
     private List<CompanyDto>? companies;
     private bool companiesLoading = true;
@@ -247,7 +290,12 @@
     private List<CompanyAddressDto>? addresses;
     private bool addressesLoading;
 
+    // R13 split: the single base (identity) address vs the warehouse pool (ErpCode-bearing rows).
+    private CompanyAddressDto? baseAddress => addresses?.FirstOrDefault(a => a.IsBase);
+    private List<CompanyAddressDto> warehouses => addresses?.Where(a => !a.IsBase).ToList() ?? new();
+
     private bool showAddressDialog;
+    private bool isBaseDialog; // true → the dialog edits the base address (hides ErpCode, no type selector)
     private Guid? editingAddressId;
     private readonly AddressForm af = new();
     private string addressError = string.Empty;
@@ -289,15 +337,39 @@
     }
 
     // ---- Address CRUD ----
+    // R13: warehouse-pool add/edit (ErpCode required, server-set type "Warehouse").
     private void OpenNewAddress()
     {
         editingAddressId = null;
+        isBaseDialog = false;
         af.Reset();
         addressError = string.Empty;
         showAddressDialog = true;
     }
 
     private void OpenEditAddress(CompanyAddressDto a)
+    {
+        isBaseDialog = false;
+        FillFormForEdit(a);
+    }
+
+    // R13: base (identity) address add/edit (no ErpCode, singleton, server-set type "Base").
+    private void OpenNewBaseAddress()
+    {
+        editingAddressId = null;
+        isBaseDialog = true;
+        af.Reset();
+        addressError = string.Empty;
+        showAddressDialog = true;
+    }
+
+    private void OpenEditBaseAddress(CompanyAddressDto a)
+    {
+        isBaseDialog = true;
+        FillFormForEdit(a);
+    }
+
+    private void FillFormForEdit(CompanyAddressDto a)
     {
         editingAddressId = a.Id;
         af.AddressName = a.AddressName;
@@ -322,12 +394,15 @@
         addressError = string.Empty;
         if (selectedCompany == null) { addressError = "Select a company first."; return; }
         if (string.IsNullOrWhiteSpace(af.AddressName)) { addressError = "Address name is required."; return; }
-        if (string.IsNullOrWhiteSpace(af.AddressType)) { addressError = "Address type is required."; return; }
+        // R13: a warehouse must carry an ERP code (the PO-line warehouse resolves against it); the base address has none.
+        if (!isBaseDialog && string.IsNullOrWhiteSpace(af.ErpCode)) { addressError = "ERP warehouse code is required."; return; }
         if (string.IsNullOrWhiteSpace(af.AddressLine1)) { addressError = "Address line 1 is required."; return; }
         if (string.IsNullOrWhiteSpace(af.City)) { addressError = "City is required."; return; }
         if (string.IsNullOrWhiteSpace(af.State)) { addressError = "State is required."; return; }
 
-        var erp = string.IsNullOrWhiteSpace(af.ErpCode) ? null : af.ErpCode.Trim();
+        // Base → no ErpCode + server forces type "Base"; warehouse → ErpCode + server forces type "Warehouse".
+        var erp = isBaseDialog || string.IsNullOrWhiteSpace(af.ErpCode) ? null : af.ErpCode.Trim();
+        var addressType = isBaseDialog ? "Base" : "Warehouse";
         var line2 = string.IsNullOrWhiteSpace(af.AddressLine2) ? null : af.AddressLine2.Trim();
         var pincode = string.IsNullOrWhiteSpace(af.Pincode) ? null : af.Pincode.Trim();
         var country = string.IsNullOrWhiteSpace(af.Country) ? null : af.Country.Trim();
@@ -338,12 +413,12 @@
         ApiResult<CompanyAddressDto>? resp;
         if (editingAddressId.HasValue)
         {
-            var req = new UpdateCompanyAddressRequest(af.AddressName.Trim(), erp, af.AddressType, af.AddressLine1.Trim(), line2, af.City.Trim(), af.State.Trim(), pincode, country, af.IsActive);
+            var req = new UpdateCompanyAddressRequest(af.AddressName.Trim(), erp, addressType, af.AddressLine1.Trim(), line2, af.City.Trim(), af.State.Trim(), pincode, country, af.IsActive, isBaseDialog);
             resp = await Api.PutAsync<CompanyAddressDto, UpdateCompanyAddressRequest>($"api/settings/company-addresses/{editingAddressId}", req);
         }
         else
         {
-            var req = new CreateCompanyAddressRequest(selectedCompany.Id, af.AddressName.Trim(), erp, af.AddressType, af.AddressLine1.Trim(), line2, af.City.Trim(), af.State.Trim(), pincode, country);
+            var req = new CreateCompanyAddressRequest(selectedCompany.Id, af.AddressName.Trim(), erp, addressType, af.AddressLine1.Trim(), line2, af.City.Trim(), af.State.Trim(), pincode, country, isBaseDialog);
             resp = await Api.PostAsync<CompanyAddressDto, CreateCompanyAddressRequest>("api/settings/company-addresses", req);
         }
 
@@ -366,7 +441,7 @@
     {
         if (!await Dialog.ConfirmDeactivateAsync(a.AddressName, "ADDRESS")) return;
         busy = true;
-        var req = new UpdateCompanyAddressRequest(a.AddressName, a.ErpCode, a.AddressType, a.AddressLine1, a.AddressLine2, a.City, a.State, a.Pincode, a.Country, false);
+        var req = new UpdateCompanyAddressRequest(a.AddressName, a.ErpCode, a.AddressType, a.AddressLine1, a.AddressLine2, a.City, a.State, a.Pincode, a.Country, false, a.IsBase);
         var resp = await Api.PutAsync<CompanyAddressDto, UpdateCompanyAddressRequest>($"api/settings/company-addresses/{a.Id}", req);
         if (resp?.Success == true)
         {

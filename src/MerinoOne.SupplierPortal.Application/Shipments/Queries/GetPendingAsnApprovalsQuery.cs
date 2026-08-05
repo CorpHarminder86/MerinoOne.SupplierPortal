@@ -73,7 +73,9 @@ public class GetPendingAsnApprovalsQueryHandler
                 a.Seq,
                 a.AsnNumber,
                 SupplierName = s.LegalName,
-                a.ShipToAddressId,
+                // R13 — warehouse grouping key (ship-to retired): the frozen snapshot label + the raw code. Read
+                // straight off the owned snapshot on the ASN row — no CompanyAddress join/batch needed.
+                WarehouseAddressName = a.WarehouseAddressSnapshot.AddressName,
                 a.Warehouse,
                 // Distinct covered POs = lines' POs ∪ junction POs ∪ legacy scalar header PO.
                 PoIdsViaLines = _db.AsnLines.IgnoreQueryFilters()
@@ -92,25 +94,15 @@ public class GetPendingAsnApprovalsQueryHandler
                 SubmittedOn = latest != null ? (DateTime?)latest.SubmittedOn : null,
             }).ToListAsync(ct);
 
-        // Resolve the ship-to labels in one batch (avoids an N+1 join to CompanyAddress in the main projection).
-        var shipToIds = rows.Where(r => r.ShipToAddressId.HasValue).Select(r => r.ShipToAddressId!.Value).Distinct().ToList();
-        var shipToNames = shipToIds.Count == 0
-            ? new Dictionary<Guid, string?>()
-            : await _db.CompanyAddresses.IgnoreQueryFilters()
-                .Where(ca => shipToIds.Contains(ca.Id))
-                .Select(ca => new { ca.Id, ca.AddressName })
-                .ToDictionaryAsync(x => x.Id, x => (string?)x.AddressName, ct);
-
         return rows.Select(r =>
         {
             var poCount = r.PoIdsViaLines.Concat(r.PoIdsViaJunction)
                 .Concat(r.LegacyPoId.HasValue ? new[] { r.LegacyPoId.Value } : Array.Empty<Guid>())
                 .Distinct()
                 .Count();
-            string? shipToName = r.ShipToAddressId.HasValue && shipToNames.TryGetValue(r.ShipToAddressId.Value, out var n)
-                ? n : null;
+            // 5th positional arg = the (renamed) WarehouseAddressName slot; trailing arg = the raw Warehouse code.
             return new AsnApprovalListItemDto(
-                r.Id, r.Seq, r.AsnNumber, r.SupplierName, shipToName, poCount, r.SubmittedBy, r.SubmittedOn, r.Warehouse);
+                r.Id, r.Seq, r.AsnNumber, r.SupplierName, r.WarehouseAddressName, poCount, r.SubmittedBy, r.SubmittedOn, r.Warehouse);
         }).ToList();
     }
 }

@@ -76,14 +76,17 @@ public class AsnWarehouseTests
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
-        // PO B is force-nulled after ingest to simulate a PO ingested before R11 (the inbound contract now
-        // requires a warehouse, so this state is only reachable for legacy rows).
+        // PO B's LINE is force-nulled after ingest to simulate a line ingested before R13 (warehouse is per line
+        // now and the inbound contract requires it, so a null warehouse is only reachable for legacy rows). Null the
+        // code AND the resolved address FK + snapshot so the resolver treats the line as warehouse-absent.
         var ctx = await SetupAsync(IntegrationTestFixture.WarehouseCode, IntegrationTestFixture.WarehouseCodeAlt);
         using (var seed = _fx.Factory.Services.CreateScope())
         {
             var sdb = seed.ServiceProvider.GetRequiredService<AppDbContext>();
-            var poB = await sdb.PurchaseOrders.IgnoreQueryFilters().FirstAsync(p => p.Id == ctx.PoIdB);
-            poB.Warehouse = null;
+            var lineB = await sdb.PurchaseOrderLines.IgnoreQueryFilters().FirstAsync(l => l.Id == ctx.LineB);
+            lineB.Warehouse = null;
+            lineB.WarehouseAddressId = null;
+            lineB.WarehouseAddressSnapshot = null;
             await sdb.SaveChangesAsync();
         }
 
@@ -338,15 +341,16 @@ public class AsnWarehouseTests
         var poA = $"PO-WHA-{tag}";
         var poB = $"PO-WHB-{tag}";
 
+        // R13 — warehouse is per LINE now (header ship-to/warehouse retired). Each PO's single line carries the
+        // requested warehouse code, which hard-resolves to a CompanyAddress; the ASN single-warehouse invariant
+        // then fires on the covered lines' warehouse addresses.
         PoRecord Po(string poNumber, string warehouse) => new(
             PoNumber: poNumber, SupplierCode: supplier.SupplierCode, PoDate: DateTime.UtcNow.Date,
             Lines: new[]
             {
                 new PoLineRecord(PositionNo: 10, SequenceNo: 1, ItemCode: item.ItemCode,
-                    OrderUnit: "EA", OrderQty: 50, PriceUnit: 1, Price: 50),
+                    OrderUnit: "EA", OrderQty: 50, PriceUnit: 1, Price: 50, Warehouse: warehouse),
             },
-            ShipToAddress: IntegrationTestFixture.ShipToErpCode,
-            Warehouse: warehouse,
             PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR");
 
         var resp = await _fx.CreateInboundClient().PostAsJsonAsync("/api/integration/inbound/purchase-orders",

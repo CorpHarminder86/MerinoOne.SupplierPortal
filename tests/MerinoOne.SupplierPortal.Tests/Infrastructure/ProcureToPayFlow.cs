@@ -86,12 +86,12 @@ public static class ProcureToPayFlow
                 PoNumber: poNumber, SupplierCode: supplier.SupplierCode, PoDate: DateTime.UtcNow.Date,
                 Lines: new[]
                 {
+                    // R13 — warehouse is per LINE now (header ship-to retired). shipToErpCode resolves to a warehouse
+                    // CompanyAddress; every schedule / ASN raised off this PO inherits that resolved warehouse address.
                     new PoLineRecord(PositionNo: positionNo, SequenceNo: 1, ItemCode: item.ItemCode,
                         OrderUnit: "EA", OrderQty: orderQty, PriceUnit: priceUnit, Price: priceUnit * orderQty,
-                        TaxCode: taxCode),
+                        TaxCode: taxCode, Warehouse: shipToErpCode),
                 },
-                ShipToAddress: shipToErpCode,
-                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: currencyCode),
         });
         var poResp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", poBody);

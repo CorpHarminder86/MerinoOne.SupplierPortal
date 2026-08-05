@@ -145,13 +145,19 @@ public class InboundValidatorTests
     private static UpsertPurchaseOrdersCommand PoCmd(params PoRecord[] orders)
         => new(new PushPurchaseOrdersRequest("2000", orders), NoBoundCompanies, null);
 
-    // R5 — ShipToAddress is now REQUIRED; supply a valid one so the supplier-identity one-of rule is isolated.
-    // R11 — same for Warehouse. Both are overridable so the required-field rules can be exercised directly.
+    // R13 — the header ship-to is retired and warehouse moved to the LINE. The supplier-identity one-of tests
+    // isolate the header rule with NO lines (an empty Lines array fires no per-line warehouse rule); the warehouse
+    // tests supply a single Line(...) so the per-line Warehouse NotEmpty/MaxLength rule is what is exercised.
     private static PoRecord Po(string? supplierCode = null, string? erpSupplierCode = null,
-                               string shipToAddress = "DC-TEST-01", string warehouse = "WH-TEST-01")
+                               IReadOnlyList<PoLineRecord>? lines = null)
         => new(PoNumber: "PO-1", SupplierCode: supplierCode, PoDate: DateTime.UtcNow.Date,
-               Lines: Array.Empty<PoLineRecord>(), ShipToAddress: shipToAddress, Warehouse: warehouse,
-               ErpSupplierCode: erpSupplierCode);
+               Lines: lines ?? Array.Empty<PoLineRecord>(), ErpSupplierCode: erpSupplierCode);
+
+    // R13 — one inbound line carrying a warehouse (the per-line required field). ItemCode is valid so the per-line
+    // warehouse rule is the one under test.
+    private static PoLineRecord Line(string? warehouse)
+        => new(PositionNo: 10, SequenceNo: 1, ItemCode: "ITM", OrderUnit: "EA", OrderQty: 1, PriceUnit: 1, Price: 1,
+               Warehouse: warehouse);
 
     [Fact] // flow 2
     public void Po_with_only_supplierCode_passes()
@@ -190,35 +196,29 @@ public class InboundValidatorTests
         result.Errors.Should().Contain(e => e.ErrorMessage.Contains("Either supplierCode or erpSupplierCode is required"));
     }
 
-    [Fact] // R5 (§6.3) — ShipToAddress is required on the inbound PO.
-    public void Po_with_blank_shipToAddress_is_rejected()
+    [Fact] // R13 (D1) — Warehouse is required PER LINE. Blank/whitespace counts as absent → error on "warehouse".
+    public void Po_line_with_blank_warehouse_is_rejected()
     {
         var result = new UpsertPurchaseOrdersCommandValidator()
-            .Validate(PoCmd(Po(supplierCode: "S0001", shipToAddress: "  ")));
-        result.IsValid.Should().BeFalse(because: "shipToAddress is mandatory");
+            .Validate(PoCmd(Po(supplierCode: "S0001", lines: new[] { Line("  ") })));
+        result.IsValid.Should().BeFalse(because: "warehouse is mandatory on every inbound PO line");
+        result.Errors.Should().Contain(e => e.ErrorMessage.Contains("warehouse", StringComparison.OrdinalIgnoreCase),
+            because: "the failure is on the per-line warehouse rule");
     }
 
-    [Fact] // R11 (D1) — Warehouse is required on the inbound PO. Blank/whitespace counts as absent.
-    public void Po_with_blank_warehouse_is_rejected()
+    [Fact] // R13 (D1) — warehouse is capped at 50 per line to match the column width.
+    public void Po_line_with_overlong_warehouse_is_rejected()
     {
         var result = new UpsertPurchaseOrdersCommandValidator()
-            .Validate(PoCmd(Po(supplierCode: "S0001", warehouse: "  ")));
-        result.IsValid.Should().BeFalse(because: "warehouse is mandatory on the inbound contract");
-    }
-
-    [Fact] // R11 (D1) — warehouse is capped at 50 to match the column width.
-    public void Po_with_overlong_warehouse_is_rejected()
-    {
-        var result = new UpsertPurchaseOrdersCommandValidator()
-            .Validate(PoCmd(Po(supplierCode: "S0001", warehouse: new string('W', 51))));
+            .Validate(PoCmd(Po(supplierCode: "S0001", lines: new[] { Line(new string('W', 51)) })));
         result.IsValid.Should().BeFalse(because: "warehouse is capped at 50");
     }
 
-    [Fact] // R11 — a well-formed warehouse passes; guards against the required rule being over-broad.
-    public void Po_with_valid_warehouse_passes()
+    [Fact] // R13 — a well-formed per-line warehouse passes; guards against the required rule being over-broad.
+    public void Po_line_with_valid_warehouse_passes()
     {
         var result = new UpsertPurchaseOrdersCommandValidator()
-            .Validate(PoCmd(Po(supplierCode: "S0001", warehouse: "WH-01")));
+            .Validate(PoCmd(Po(supplierCode: "S0001", lines: new[] { Line("WH-01") })));
         result.IsValid.Should().BeTrue(because: string.Join("; ", result.Errors.Select(e => e.ErrorMessage)));
     }
 }

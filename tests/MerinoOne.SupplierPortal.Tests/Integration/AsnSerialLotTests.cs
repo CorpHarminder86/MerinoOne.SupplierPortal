@@ -224,13 +224,12 @@ public class AsnSerialLotTests
                 PoNumber: poNumber, SupplierCode: supplier.SupplierCode, PoDate: DateTime.UtcNow.Date,
                 Lines: new[]
                 {
+                    // R13 — both lines share ONE warehouse so an ASN spanning them stays single-warehouse.
                     new PoLineRecord(PositionNo: 10, SequenceNo: 1, ItemCode: serialItem.ItemCode,
-                        OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 100),
+                        OrderUnit: "EA", OrderQty: 10, PriceUnit: 1, Price: 100, Warehouse: IntegrationTestFixture.WarehouseCode),
                     new PoLineRecord(PositionNo: 20, SequenceNo: 2, ItemCode: lotItem.ItemCode,
-                        OrderUnit: "KG", OrderQty: 100, PriceUnit: 1, Price: 5),
+                        OrderUnit: "KG", OrderQty: 100, PriceUnit: 1, Price: 5, Warehouse: IntegrationTestFixture.WarehouseCode),
                 },
-                ShipToAddress: IntegrationTestFixture.ShipToErpCode,
-                Warehouse: IntegrationTestFixture.WarehouseCode,
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
         });
         var poResp = await inbound.PostAsJsonAsync("/api/integration/inbound/purchase-orders", poBody);

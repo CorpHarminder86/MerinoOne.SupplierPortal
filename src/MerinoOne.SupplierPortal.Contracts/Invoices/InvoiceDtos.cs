@@ -68,9 +68,10 @@ public record InvoiceDetailDto(
     List<InvoiceLineDto> Lines,
     // R6 (2026-07-02) — provenance: "SupplierManual" (wizard) vs "AsnGenerated" (grouped ASN generator).
     string InvoiceOrigin = "SupplierManual",
-    // R6 (2026-07-02, PDF ship-to) — resolved ship-to for the PDF: the ASN's live ship-to (AsnId set) else the
-    // header PO's point-in-time ShipTo snapshot (PurchaseOrderId set); null when neither resolves. Same field
-    // naming as PurchaseOrderDetailDto's ShipTo* block.
+    // R6 (2026-07-02, PDF ship-to) / R13 (2026-08-05, source = warehouse) — resolved ship-to for the PDF. The field
+    // NAMES are KEPT (this is the invoice's printed "Ship To" block); only the SOURCE moved to the WAREHOUSE address:
+    // the ASN's resolved WarehouseAddress (AsnId set) else the header PO's first-line WarehouseAddressSnapshot
+    // (PurchaseOrderId set); null when neither resolves.
     string? ShipToAddressName = null,
     string? ShipToLine1 = null,
     string? ShipToLine2 = null,

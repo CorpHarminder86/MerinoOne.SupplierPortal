@@ -5,7 +5,8 @@ namespace MerinoOne.SupplierPortal.Contracts.Masters;
 // duplicate admin.Company was dropped; the company itself is served by Contracts.Companies.CompanyDto over
 // TenantEntity). The CompanyId field below is that company's id — a TenantEntity id.
 
-/// <summary>A named, ERP-mappable ship-to address under a company (§4.2). CompanyId = the owning TenantEntity id.</summary>
+/// <summary>A named, ERP-mappable address under a company (§4.2). CompanyId = the owning TenantEntity id. R13:
+/// IsBase flags the company's single BASE address (no ErpCode); all others are the warehouse pool.</summary>
 public record CompanyAddressDto(
     Guid Id,
     int Seq,
@@ -20,9 +21,12 @@ public record CompanyAddressDto(
     string? Pincode,
     string Country,
     bool IsActive,
+    bool IsBase,
     DateTime CreatedOn);
 
-/// <summary>Settings: create a ship-to address under a Company. AddressName required; ErpCode optional (unique per company).</summary>
+/// <summary>Settings: create an address under a Company. AddressName required. R13: IsBase=true → the company's
+/// single base address (ErpCode forced null, type "Base"); IsBase=false → a warehouse-pool row (type "Warehouse",
+/// ErpCode unique per company).</summary>
 public record CreateCompanyAddressRequest(
     Guid CompanyId,
     string AddressName,
@@ -33,9 +37,11 @@ public record CreateCompanyAddressRequest(
     string City,
     string State,
     string? Pincode,
-    string? Country);
+    string? Country,
+    bool IsBase = false);
 
-/// <summary>Settings: edit a ship-to address (deactivate via IsActive=false). ErpCode stays unique per company when present.</summary>
+/// <summary>Settings: edit an address (deactivate via IsActive=false). R13: IsBase toggles base vs warehouse-pool
+/// (base forces ErpCode null + type "Base" + singleton; warehouse keeps the per-company ErpCode uniqueness).</summary>
 public record UpdateCompanyAddressRequest(
     string AddressName,
     string? ErpCode,
@@ -46,4 +52,5 @@ public record UpdateCompanyAddressRequest(
     string State,
     string? Pincode,
     string? Country,
-    bool IsActive);
+    bool IsActive,
+    bool IsBase = false);

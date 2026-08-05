@@ -2,7 +2,7 @@ namespace MerinoOne.SupplierPortal.Contracts.Shipments;
 
 /// <summary>
 /// R5 (TSD R5 Addendum §4.4 / §8.3) — grid read-model for proc.DeliverySchedule. One row per PO line, joined to
-/// the PO line so the grid renders PO number, position, item, order qty + ship-to without a second round-trip.
+/// the PO line so the grid renders PO number, position, item, order qty + warehouse without a second round-trip.
 /// Supersedes the pre-R5 shape (ProposedDate / TimeWindow / VehicleInfo / ScheduleStatus / ApprovedBy /
 /// RejectionReason removed).
 ///
@@ -23,8 +23,6 @@ public record DeliveryScheduleDto(
     decimal OrderQty,
     decimal ShippedQtyToDate,
     decimal RemainingToShip,
-    Guid ShipToAddressId,
-    string? ShipToAddressName,
     Guid SupplierId,
     string? SupplierName,
     decimal ScheduledQty,
@@ -34,9 +32,11 @@ public record DeliveryScheduleDto(
     // R4 §6.2 — whether the schedule's PO is shippable for its supplier's confirmation mode. The grid hides the
     // ASN checkbox when false (e.g. the PO was reset to Released by an ERP Modify). Computed server-side.
     bool IsShippable = true,
-    // R11 (D4) — the PO's receiving warehouse. Shown BEFORE ship-to in the grid: warehouse and ship-to are the
-    // two keys an ASN is grouped by, and warehouse is the coarser of the two.
-    string? Warehouse = null);
+    // R11/R13 (D4) — the receiving warehouse. Warehouse is the PO LINE's raw code; WarehouseAddress* is the address
+    // it resolves to (was ship-to). The one-warehouse-per-ASN grouping key for schedule-built ASNs.
+    string? Warehouse = null,
+    Guid? WarehouseAddressId = null,
+    string? WarehouseAddressName = null);
 
 /// <summary>
 /// R5 (TSD R5 Addendum §7 / §8.3) — delivery-schedule grid filter/sort request. All filters are optional;
@@ -46,21 +46,21 @@ public record DeliveryScheduleFilterRequest(
     int Page = 1,
     int PageSize = 50,
     Guid? SupplierId = null,
-    Guid? ShipToAddressId = null,
+    Guid? WarehouseAddressId = null,
     Guid? PurchaseOrderId = null,
     DateTime? DeliveryDateFrom = null,
     DateTime? DeliveryDateTo = null,
     string? Status = null);
 
 /// <summary>
-/// R5 (TSD R5 Addendum §7) — the paged grid plus the "auto-hide ship-to" signal. <c>DistinctShipToCount</c> is the
-/// number of distinct ship-to addresses across the schedule rows the supplier can see (BEFORE the ship-to filter is
-/// applied); the UI hides the Ship-To filter when it is ≤ 1 (only one ship-to to choose from).
+/// R5/R13 (TSD R5 Addendum §7) — the paged grid plus the "auto-hide warehouse" signal. <c>DistinctWarehouseCount</c>
+/// is the number of distinct warehouse addresses across the schedule rows the supplier can see (BEFORE the warehouse
+/// filter is applied); the UI hides the Warehouse filter when it is ≤ 1 (only one warehouse to choose from).
 /// </summary>
 public record DeliveryScheduleGridDto(
     PurchaseOrders.PagedResult<DeliveryScheduleDto> Page,
-    int DistinctShipToCount,
-    bool ShowShipToFilter);
+    int DistinctWarehouseCount,
+    bool ShowWarehouseFilter);
 
 // R4 (2026-06-22) — Module 3. Reshaped for multi-PO ASNs (Q1): PurchaseOrderId/PoNumber are NULLABLE now
 // (set for single-PO back-compat, null for multi-PO). PurchaseOrders carries the full covered-PO list, and
@@ -92,7 +92,7 @@ public record AsnApprovalListItemDto(
     int Seq,
     string AsnNumber,
     string SupplierName,
-    string? ShipToAddressName,
+    string? WarehouseAddressName,
     int PoCount,
     string? SubmittedBy,
     DateTime? SubmittedOn,
@@ -139,10 +139,10 @@ public record AsnDetailDto(
     bool IsLocked,
     List<AsnLineDto> Lines,
     IReadOnlyList<Suppliers.DocumentAttachmentDto> Attachments,
-    // R5 — the ship-to grouping key (set for schedule-built ASNs; null for legacy PO-picker ASNs) + its label,
+    // R13 — the warehouse grouping key (set for schedule-built ASNs; null for legacy PO-picker ASNs) + its label,
     // and the latest approval session (null until first Send-for-Approval).
-    Guid? ShipToAddressId = null,
-    string? ShipToAddressName = null,
+    Guid? WarehouseAddressId = null,
+    string? WarehouseAddressName = null,
     AsnApprovalDto? Approval = null,
     // R4 §6.2 — for an editable (Draft/Rejected) ASN: true when Save Changes / Send For Approval are hard-blocked
     // (a covered PO is not shippable, or another ASN for the same PO is pending buyer approval). ShipBlockReason
@@ -298,9 +298,9 @@ public record UpdateAsnRequest(
 // audited). Mandatory-missing always blocks (400) regardless of this flag.
 public record SubmitAsnRequest(string? OverrideReason = null, bool AcknowledgeMissingAttachments = false);
 
-// R5 (TSD R5 Addendum §9) — create an ASN from selected Delivery Schedule lines. All selected schedules must
-// share ONE shipToAddressId (cross-ship-to is blocked, UC-AS-02) and ONE supplier; lines MAY span multiple POs
-// (UC-AS-01). The header is grouped by (supplierId, shipToAddressId); each schedule → one AsnLine referencing its
+// R5/R13 (TSD R5 Addendum §9) — create an ASN from selected Delivery Schedule lines. All selected schedules must
+// share ONE warehouseAddressId (cross-warehouse is blocked, UC-AS-02) and ONE supplier; lines MAY span multiple POs
+// (UC-AS-01). The header is grouped by (supplierId, warehouseAddressId); each schedule → one AsnLine referencing its
 // purchaseOrderLineId + deliveryScheduleId, ship qty defaulted to the line's remaining balance (editable, §9.2).
 // ShipQtyByScheduleId optionally overrides the defaulted balance per schedule (keyed by deliveryScheduleId).
 public record CreateAsnFromScheduleRequest(
