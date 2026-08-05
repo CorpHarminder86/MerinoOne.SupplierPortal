@@ -1,0 +1,181 @@
+@*
+    Reusable address disclosure — a compact trigger that opens a small card with the full postal address.
+
+    Addresses show up all over the portal (the PO's customer/base address, a PO line's warehouse, a supplier
+    address, an ASN's receiving warehouse) and each one is the same shape: a name, an optional code, and up to
+    four lines of geography. Rendering them inline eats vertical space on already-dense screens and buries the
+    field the user actually scans for, so the default here is: show the ONE line that identifies the address,
+    and reveal the rest on demand.
+
+    Usage:
+        <AddressCard Title="Customer address"
+                     TriggerText="@detail.CustomerName"
+                     Name="@detail.CustomerAddressName"
+                     Line1="@detail.CustomerAddressLine1" ... />
+
+    Renders the plain EmptyText (no trigger, not interactive) when every address field is blank, so a sparse
+    or unresolved address never presents an affordance that opens an empty card.
+*@
+
+<div class="mer-addr @(open ? "mer-addr--open" : "")" @onfocusout="OnFocusOut" @onkeydown="OnKeyDown">
+    @if (!HasAddress)
+    {
+        @* Nothing to disclose — degrade to inert text rather than an empty popover. *@
+        <span class="mer-addr__empty">@(string.IsNullOrWhiteSpace(TriggerText) ? EmptyText : TriggerText)</span>
+    }
+    else
+    {
+        <button type="button"
+                class="@TriggerClass"
+                aria-haspopup="dialog"
+                aria-expanded="@(open ? "true" : "false")"
+                title="@(open ? null : "Show full address")"
+                @onclick="Toggle">
+            <span class="mer-addr__trigger-text">@DisplayTrigger</span>
+            <span class="material-symbols-outlined mer-addr__chevron">expand_more</span>
+        </button>
+
+        @if (open)
+        {
+            @* preventDefault on mousedown keeps focus inside the wrapper, so selecting text in the card does
+               not trip the focusout close. Same trick GlobalSearch uses for its results dropdown. *@
+            <div class="mer-addr__card mer-addr__card--@(Align == AddressAlign.End ? "end" : "start")"
+                 role="dialog"
+                 aria-label="@Title"
+                 @onmousedown:preventDefault>
+                <div class="mer-addr__head">
+                    <span class="mer-addr__eyebrow">@Title</span>
+                    <button type="button" class="mer-addr__close" aria-label="Close" @onclick="Close">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+
+                <div class="mer-addr__body">
+                    @if (!string.IsNullOrWhiteSpace(Name) || !string.IsNullOrWhiteSpace(Code))
+                    {
+                        <div class="mer-addr__title-row">
+                            @if (!string.IsNullOrWhiteSpace(Name))
+                            {
+                                <span class="mer-addr__name">@Name</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(Code))
+                            {
+                                <span class="mer-addr__code">@Code</span>
+                            }
+                        </div>
+                    }
+                    @foreach (var line in AddressLines)
+                    {
+                        <div class="mer-addr__line">@line</div>
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    public enum AddressAlign { Start, End }
+
+    /// <summary>Card heading, e.g. "Delivery address" / "Customer address" / "Warehouse address".</summary>
+    [Parameter] public string Title { get; set; } = "Address";
+
+    /// <summary>What the collapsed trigger shows. Falls back to <see cref="Name"/>, then <see cref="Code"/>.</summary>
+    [Parameter] public string? TriggerText { get; set; }
+
+    /// <summary>Render the trigger as a status-style chip (for table cells) instead of inline text.</summary>
+    [Parameter] public bool Chip { get; set; }
+
+    /// <summary>Which edge the card hangs from. Use End for cells near the right edge of a table.</summary>
+    [Parameter] public AddressAlign Align { get; set; } = AddressAlign.Start;
+
+    [Parameter] public string? Name { get; set; }
+    /// <summary>Optional identifier badge (ERP code / address code) shown next to the name.</summary>
+    [Parameter] public string? Code { get; set; }
+    [Parameter] public string? Line1 { get; set; }
+    [Parameter] public string? Line2 { get; set; }
+    [Parameter] public string? City { get; set; }
+    [Parameter] public string? State { get; set; }
+    [Parameter] public string? Pincode { get; set; }
+    [Parameter] public string? Country { get; set; }
+
+    /// <summary>Shown when there is nothing to disclose and no TriggerText.</summary>
+    [Parameter] public string EmptyText { get; set; } = "—";
+
+    private bool open;
+
+    private void Toggle() => open = !open;
+    private void Close() => open = false;
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (open && e.Key == "Escape") open = false;
+    }
+
+    // Delay the close so a click on the card's own close button lands first (mirrors GlobalSearch.OnBlur).
+    private void OnFocusOut()
+    {
+        if (!open) return;
+        Task.Delay(150).ContinueWith(_ => InvokeAsync(() =>
+        {
+            if (!open) return;
+            open = false;
+            StateHasChanged();
+        }));
+    }
+
+    private string TriggerClass => Chip
+        ? "mer-addr__trigger mer-addr__trigger--chip tlg-status tlg-status--info"
+        : "mer-addr__trigger";
+
+    private string DisplayTrigger =>
+        !string.IsNullOrWhiteSpace(TriggerText) ? TriggerText!
+        : !string.IsNullOrWhiteSpace(Name) ? Name!
+        : !string.IsNullOrWhiteSpace(Code) ? Code!
+        : EmptyText;
+
+    private bool HasAddress =>
+        !string.IsNullOrWhiteSpace(Name)
+        || !string.IsNullOrWhiteSpace(Line1)
+        || !string.IsNullOrWhiteSpace(Line2)
+        || !string.IsNullOrWhiteSpace(City)
+        || !string.IsNullOrWhiteSpace(State)
+        || !string.IsNullOrWhiteSpace(Pincode)
+        || !string.IsNullOrWhiteSpace(Country);
+
+    /// <summary>
+    /// The geography block, with every empty segment dropped so a sparse address never reads with stray
+    /// commas or blank rows: "Line1, Line2" / "City, State Pincode" / "Country".
+    /// </summary>
+    private IEnumerable<string> AddressLines
+    {
+        get
+        {
+            var street = Join(Line1, Line2);
+            if (!string.IsNullOrWhiteSpace(street)) yield return street;
+
+            var cityState = Join(City, State);
+            var locality = string.IsNullOrWhiteSpace(Pincode) ? cityState : $"{cityState} {Pincode?.Trim()}".Trim();
+            if (!string.IsNullOrWhiteSpace(locality)) yield return locality;
+
+            var country = Clean(Country);
+            if (!string.IsNullOrWhiteSpace(country)) yield return country;
+        }
+    }
+
+    /// <summary>
+    /// Comma-joins the non-blank parts. ERP-fed address lines are not tidy: they frequently carry their own
+    /// trailing comma ("Moti Nagar,"), which naive joining turns into a doubled ",,", and some arrive with the
+    /// doubling already baked in. Strip separators off each end, then collapse any run of commas/whitespace that
+    /// survives — purely cosmetic, so a scruffy master record still renders as a clean address everywhere this
+    /// component is reused. (The underlying data is untouched; fix that in the master, not here.)
+    /// </summary>
+    private static string Join(params string?[] parts)
+        => Collapse(string.Join(", ", parts.Select(Clean).Where(s => !string.IsNullOrWhiteSpace(s))));
+
+    private static string Clean(string? s)
+        => string.IsNullOrWhiteSpace(s) ? string.Empty : Collapse(s.Trim()).Trim().Trim(',').Trim();
+
+    private static string Collapse(string s)
+        => System.Text.RegularExpressions.Regex.Replace(s, @"(?:\s*,\s*){2,}", ", ");
+}

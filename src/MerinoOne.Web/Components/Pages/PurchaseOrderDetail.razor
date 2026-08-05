@@ -103,28 +103,17 @@ else
                        company + its single base CompanyAddress), display-only and reflect later edits. *@
                     <dt style="color:var(--mer-ink-500);">Customer</dt>
                     <dd>
-                        <div style="font-weight:600;color:var(--mer-blue-darker);">@(string.IsNullOrEmpty(detail.CustomerName) ? "—" : detail.CustomerName)</div>
-                        @if (HasCustomerAddress)
-                        {
-                            <div style="margin-top:4px;display:flex;flex-direction:column;gap:2px;color:var(--mer-ink-700);font-size:12.5px;">
-                                @if (!string.IsNullOrEmpty(detail.CustomerAddressName))
-                                {
-                                    <div>@detail.CustomerAddressName</div>
-                                }
-                                @if (!string.IsNullOrEmpty(detail.CustomerAddressLine1))
-                                {
-                                    <div>@detail.CustomerAddressLine1@(string.IsNullOrEmpty(detail.CustomerAddressLine2) ? "" : $", {detail.CustomerAddressLine2}")</div>
-                                }
-                                @if (!string.IsNullOrEmpty(CustomerCityLine))
-                                {
-                                    <div>@CustomerCityLine</div>
-                                }
-                                @if (!string.IsNullOrEmpty(detail.CustomerAddressCountry))
-                                {
-                                    <div>@detail.CustomerAddressCountry</div>
-                                }
-                            </div>
-                        }
+                        @* The company name stays the scannable line; its base address moves behind the
+                           AddressCard disclosure so the Order-details block stays compact. *@
+                        <AddressCard Title="Customer address"
+                                     TriggerText="@(string.IsNullOrEmpty(detail.CustomerName) ? "—" : detail.CustomerName)"
+                                     Name="@detail.CustomerAddressName"
+                                     Line1="@detail.CustomerAddressLine1"
+                                     Line2="@detail.CustomerAddressLine2"
+                                     City="@detail.CustomerAddressCity"
+                                     State="@detail.CustomerAddressState"
+                                     Pincode="@detail.CustomerAddressPincode"
+                                     Country="@detail.CustomerAddressCountry" />
                     </dd>
                     <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
                     <dt style="color:var(--mer-ink-500);">PO Date</dt><dd style="font-family:Inter,monospace;">@detail.PoDate.ToString("yyyy-MM-dd")</dd>
@@ -384,24 +373,12 @@ else
     // the non-AutoAccept branch so a missing/empty value never hides the manual actions.
     private bool ManualResponse => !string.Equals(detail?.PoResponseMode, "AutoAccept", StringComparison.OrdinalIgnoreCase);
 
-    // R13 — the customer base address (live from the company) is present when any base-address field is populated.
-    private bool HasCustomerAddress => detail != null && (
-        !string.IsNullOrEmpty(detail.CustomerAddressName) ||
-        !string.IsNullOrEmpty(detail.CustomerAddressLine1) ||
-        !string.IsNullOrEmpty(detail.CustomerAddressCity));
+    // R13 — the has-address test and the "City, State Pincode" assembly moved into AddressCard, which now owns
+    // both the customer base address and the per-line warehouse rendering.
 
-    // "City, State Pincode" — each segment dropped when blank so a sparse address does not read with stray commas.
-    private string CustomerCityLine
-    {
-        get
-        {
-            if (detail == null) return string.Empty;
-            var cityState = string.Join(", ", new[] { detail.CustomerAddressCity, detail.CustomerAddressState }.Where(s => !string.IsNullOrWhiteSpace(s)));
-            return string.IsNullOrEmpty(detail.CustomerAddressPincode) ? cityState : $"{cityState} {detail.CustomerAddressPincode}".Trim();
-        }
-    }
-
-    // R13 — per-line warehouse: code chip + the resolved address name as a hover title.
+    // R13 — per-line warehouse: the ERP code as a chip, with the full snapshotted receiving address behind the
+    // shared AddressCard disclosure (was a hover title, which showed only the name and was unreachable by
+    // keyboard/touch). Aligned to the End edge because Warehouse is the last column.
     private RenderFragment WarehouseCell(PurchaseOrderLineDto line) => builder =>
     {
         if (string.IsNullOrEmpty(line.Warehouse))
@@ -412,13 +389,21 @@ else
             builder.CloseElement();
             return;
         }
-        builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", "tlg-status tlg-status--info");
-        builder.AddAttribute(2, "style", "font-family:Inter,monospace;");
-        var name = line.WarehouseAddressName;
-        if (!string.IsNullOrEmpty(name)) builder.AddAttribute(3, "title", name);
-        builder.AddContent(4, line.Warehouse);
-        builder.CloseElement();
+
+        builder.OpenComponent<AddressCard>(0);
+        builder.AddComponentParameter(1, nameof(AddressCard.Title), "Warehouse address");
+        builder.AddComponentParameter(2, nameof(AddressCard.TriggerText), line.Warehouse);
+        builder.AddComponentParameter(3, nameof(AddressCard.Chip), true);
+        builder.AddComponentParameter(4, nameof(AddressCard.Align), AddressCard.AddressAlign.End);
+        builder.AddComponentParameter(5, nameof(AddressCard.Name), line.WarehouseAddressName);
+        builder.AddComponentParameter(6, nameof(AddressCard.Code), line.WarehouseErpCode);
+        builder.AddComponentParameter(7, nameof(AddressCard.Line1), line.WarehouseLine1);
+        builder.AddComponentParameter(8, nameof(AddressCard.Line2), line.WarehouseLine2);
+        builder.AddComponentParameter(9, nameof(AddressCard.City), line.WarehouseCity);
+        builder.AddComponentParameter(10, nameof(AddressCard.State), line.WarehouseState);
+        builder.AddComponentParameter(11, nameof(AddressCard.Pincode), line.WarehousePincode);
+        builder.AddComponentParameter(12, nameof(AddressCard.Country), line.WarehouseCountry);
+        builder.CloseComponent();
     };
 
     private void TabOverview() => tab = "overview";

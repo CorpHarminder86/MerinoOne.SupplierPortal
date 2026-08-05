@@ -16,6 +16,39 @@ body { margin: 0; }
 .blazor-error-boundary { background: var(--mer-danger); color: #FFFFFF; padding: 1rem 1.5rem; }
 .blazor-error-boundary::after { content: "An error has occurred."; }
 
+/* AddressCard — compact address trigger + disclosure card (Components/Shared/AddressCard.razor).
+   The wrapper is the positioning context; the card hangs below the trigger and is layered above the page
+   chrome so it is never clipped by a table row. */
+.mer-addr { position: relative; display: inline-block; max-width: 100%; }
+.mer-addr__empty { color: var(--mer-ink-500); }
+
+.mer-addr__trigger { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; color: var(--mer-blue-darker); font-weight: 600; text-align: left; }
+.mer-addr__trigger:hover { color: var(--mer-blue); }
+.mer-addr__trigger:focus-visible { outline: 2px solid var(--mer-blue); outline-offset: 2px; border-radius: var(--mer-radius-sm); }
+.mer-addr__trigger-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mer-addr__chevron { font-size: 16px; flex: none; transition: transform .12s ease; }
+.mer-addr--open .mer-addr__chevron { transform: rotate(180deg); }
+
+/* Chip variant — for dense table cells (e.g. the PO line Warehouse column). */
+.mer-addr__trigger--chip { gap: 1px; padding: 2px 6px; font-family: Inter, monospace; cursor: pointer; }
+.mer-addr__trigger--chip .mer-addr__chevron { font-size: 14px; }
+
+.mer-addr__card { position: absolute; top: calc(100% + 6px); z-index: 60; min-width: 240px; max-width: 320px; background: var(--mer-surface); border: 1px solid var(--mer-line); border-radius: var(--mer-radius-lg); box-shadow: var(--mer-shadow-lg); cursor: default; }
+.mer-addr__card--start { left: 0; }
+.mer-addr__card--end { right: 0; }
+
+.mer-addr__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px 0 14px; }
+.mer-addr__eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--mer-ink-500); }
+.mer-addr__close { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--mer-radius-sm); background: none; color: var(--mer-ink-500); cursor: pointer; }
+.mer-addr__close:hover { background: var(--mer-line-soft); color: var(--mer-ink-900); }
+.mer-addr__close .material-symbols-outlined { font-size: 16px; }
+
+.mer-addr__body { padding: 6px 14px 14px; display: flex; flex-direction: column; gap: 2px; }
+.mer-addr__title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.mer-addr__name { font-size: 13.5px; font-weight: 700; color: var(--mer-blue-darker); }
+.mer-addr__code { font-family: Inter, monospace; font-size: 10.5px; font-weight: 600; padding: 2px 6px; border-radius: 999px; background: var(--mer-blue-50, #EEF4FB); color: var(--mer-blue); }
+.mer-addr__line { font-size: 12.5px; line-height: 1.45; color: var(--mer-ink-700); }
+
 /* LoaderOverlay — reusable busy veil. Inline = absolute over parent (parent must be position:relative). Fullscreen = fixed viewport veil. */
 .mer-loader-overlay { display: flex; align-items: center; justify-content: center; background: var(--mer-modal-backdrop, rgba(255, 255, 255, 0.72)); backdrop-filter: blur(2px); z-index: 50; }
 .mer-loader-overlay--inline { position: absolute; inset: 0; border-radius: inherit; }
