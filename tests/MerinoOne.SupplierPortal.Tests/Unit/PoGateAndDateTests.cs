@@ -148,7 +148,7 @@ public class PoGateAndDateTests
 
     // ── D7: the header-date agreement test ────────────────────────────────────────────────────────────
 
-    private static PurchaseOrderLineInputDoc L(string? date) => new(10, 1, date);
+    private static PurchaseOrderLineInputDoc L(string? date) => new(10, 1, date, 5m, "EA");
 
     [Fact]
     public void Header_date_is_the_shared_value_when_every_line_agrees()

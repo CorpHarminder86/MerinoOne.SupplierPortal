@@ -77,32 +77,33 @@ internal static class PoLineDocumentAssembler
     /// omitted line is still unverified (probe P5a): if omitting a line turns out to close it, the fix is an
     /// expression edit instead of a rebuild.</para>
     ///
-    /// <para><paramref name="dateOverrides"/> carries the D10 negotiated dates, keyed
-    /// (positionNo, sequenceNo). A line absent from the map keeps its own delivery date.</para>
+    /// <para><paramref name="overrides"/> carries the D10 negotiated values, keyed
+    /// (positionNo, sequenceNo). A line absent from the map — or an override member left null — keeps the PO
+    /// line's own value: a negotiation that touched only the date must not zero the quantity, and vice versa.</para>
     /// </summary>
     public static async Task<List<PurchaseOrderLineInputDoc>> LinesAsync(
         IAppDbContext db,
         Guid purchaseOrderId,
-        IReadOnlyDictionary<(int PositionNo, int SequenceNo), DateTime?>? dateOverrides,
+        IReadOnlyDictionary<(int PositionNo, int SequenceNo), (DateTime? DeliveryDate, decimal? Qty)>? overrides,
         CancellationToken ct)
     {
         var rows = await db.PurchaseOrderLines.IgnoreQueryFilters()
             .Where(l => l.PurchaseOrderId == purchaseOrderId && !l.IsDeleted)
             .OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo)
-            .Select(l => new { l.PositionNo, l.SequenceNo, l.DeliveryDate })
+            .Select(l => new { l.PositionNo, l.SequenceNo, l.DeliveryDate, l.OrderQty, l.OrderUnit })
             .ToListAsync(ct);
 
         return rows.Select(l =>
         {
-            var effective = l.DeliveryDate;
-            // A negotiated line with an explicit NULL date is not an override — the supplier negotiated qty or
-            // price only, so the PO line's own date stands.
-            if (dateOverrides is not null
-                && dateOverrides.TryGetValue((l.PositionNo, l.SequenceNo), out var negotiated)
-                && negotiated is not null)
-                effective = negotiated;
+            var effectiveDate = l.DeliveryDate;
+            var effectiveQty = l.OrderQty;
+            if (overrides is not null && overrides.TryGetValue((l.PositionNo, l.SequenceNo), out var negotiated))
+            {
+                if (negotiated.DeliveryDate is not null) effectiveDate = negotiated.DeliveryDate;
+                if (negotiated.Qty is not null) effectiveQty = negotiated.Qty.Value;
+            }
 
-            return new PurchaseOrderLineInputDoc(l.PositionNo, l.SequenceNo, FormatUtc(effective));
+            return new PurchaseOrderLineInputDoc(l.PositionNo, l.SequenceNo, FormatUtc(effectiveDate), effectiveQty, l.OrderUnit);
         }).ToList();
     }
 }

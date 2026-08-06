@@ -1,14 +1,30 @@
-/* R12 — LN PO_Update contract. Identical to PoAccept.request.jsonata bar the POStatus literal; see that
-   file for the full rationale on D6 / D7 / D8 / D24 and the "[object Object]" hazard.
+/* R12 — LN PO_Update contract, negotiation flavour. The three PO_Update expressions are NO LONGER the same
+   text: this one carries Lines[] with Quantity, while PoAccept/PoReject go header-only (their Lines[] was
+   removed 2026-08-06 after LN started rejecting the line node — see those files).
 
    The document root here is the NEGOTIATION (portalEntity PoNegotiation, entityId = the negotiation id), but
-   poNegotiation-v2 exposes `lines` in exactly the same shape as the PO document, so this text is
-   interchangeable with the other two. The per-line dates are already the AGREED ones: the builder overlays
-   each approved negotiation line's negotiatedDeliveryDate onto the PO's own line set (D10), because
-   ApprovePoNegotiationCommand deliberately does not mutate PurchaseOrderLine.
+   poNegotiation-v3 exposes `lines` in exactly the same shape as the PO document. The per-line dates AND
+   quantities are already the AGREED ones: the builder overlays each approved negotiation line's
+   negotiatedDeliveryDate / negotiatedQty (only where it differs from the original snapshot) onto the PO's
+   own line set (D10), because ApprovePoNegotiationCommand deliberately does not mutate PurchaseOrderLine.
+
+   Quantity — REQUIRED by LN since between 2026-07-30 and 2026-08-06: the identical Lines-without-Quantity
+   body returned Success on 2026-07-30 (PUR000324/PUR000326, InforSyncLog) and HTTP 500
+   "Attr. 'Quantity', Value '': the value must be numeric." on 2026-08-06. An OMITTED JSON key is
+   indistinguishable from an empty value to LN's wrapper — never let this key be conditionally absent.
+   $formatNumber, NOT $string: orderQty is decimal(18,4), and $string emits "4.0000" and flips to scientific
+   notation ("0e+0", "-2.5e+0") on zero-with-scale and negatives — the same "must be numeric" failure class.
+   $formatNumber(orderQty, "0.####") measured: 4.0000→"4", 0.0000→"0", -2.5→"-2.5", 0.0001→"0.0001".
+   A quoted string is safe on this node — LN accepted "LineNo":"10"/"SeqNo":"1" (strings) on 2026-07-30.
+
+   UOM is DELIBERATELY not mapped: LN's fault named only 'Quantity'; no LN doc/response has ever mentioned a
+   unit key on the PO_Update line node, the repo's only LN unit precedent spells it "Uom" (AsnPost, different
+   schema), and the portal fabricates "EA" for inbound lines that came without a unit — do not add a unit key
+   until LN names it.
 
    The untouched negotiation detail (original vs negotiated qty / price) stays available under
-   `negotiationLines` if LN ever wants it — nothing maps it today.
+   `negotiationLines` if LN ever wants it. NOTE negotiatedPrice is NOT mapped — LN gets the agreed quantity
+   and date but not the agreed price; settle that with LN before mapping it.
 
    !! POStatus "Negotiated" is a WIRE-ONLY literal. PoStatus has no such member: approving a negotiation sets
    the PO to Approved and the negotiation to Approved. Never copy this string into an eligibility gate — a
@@ -23,7 +39,8 @@
         "Lines": [lines[deliveryDate != null].{
             "LineNo": $string(positionNo),
             "SeqNo": $string(sequenceNo),
-            "PlannedDeliveryDate": deliveryDate
+            "PlannedDeliveryDate": deliveryDate,
+            "Quantity": $formatNumber(orderQty, "0.####")
         }]
     }
 }

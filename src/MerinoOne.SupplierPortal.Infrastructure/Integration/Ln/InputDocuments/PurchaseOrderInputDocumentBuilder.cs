@@ -38,7 +38,7 @@ public sealed class PurchaseOrderInputDocumentBuilder : ILnInputDocumentBuilder
             _ => transactionType,
         };
 
-        var lines = await PoLineDocumentAssembler.LinesAsync(db, po.Id, dateOverrides: null, ct);
+        var lines = await PoLineDocumentAssembler.LinesAsync(db, po.Id, overrides: null, ct);
 
         var doc = new PurchaseOrderInputDoc(
             Id: po.Id,

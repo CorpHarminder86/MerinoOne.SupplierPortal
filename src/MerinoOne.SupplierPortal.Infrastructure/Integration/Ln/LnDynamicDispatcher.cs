@@ -138,7 +138,10 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
         {
             // Non-2xx: enrich the error TEXT via the shared default expression (D-R9-5 — text only);
             // permanence comes from the code-owned classifier, which no mapping can influence.
-            var detail = ExtractErrorText(outcome.ResponseBody) ?? Truncate(outcome.ResponseBody ?? string.Empty, 300);
+            // 1800 (not 300): the SOAP <detail> block names the offending attribute/line and must survive
+            // into OutboxMessage.lastError (nvarchar(2000)) — the 2026-08-06 Quantity fault was diagnosed
+            // blind because the block was truncated away.
+            var detail = ExtractErrorText(outcome.ResponseBody) ?? Truncate(outcome.ResponseBody ?? string.Empty, 1800);
             var message = $"[{route.PortalEntity}] Infor rejected the request (HTTP {outcome.StatusCode}): {detail}";
             var permanent = LnRetriabilityClassifier.IsPermanent(outcome.StatusCode);
             return new LnDispatchOutcome(new InforSyncResult(false, row.DeterministicKey, message, canonicalBody), permanent);

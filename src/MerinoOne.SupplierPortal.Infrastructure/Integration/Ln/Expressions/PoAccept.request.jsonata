@@ -1,8 +1,13 @@
 /* R12 — LN PO_Update contract. This expression IS the wire body: R12/D13 deleted the compiled C# PO
    payload builders, so nothing else contributes to the request.
 
-   All three PO_Update expressions (PoAccept / PoReject / PoNegotiationApprove) are this same text with a
-   different POStatus literal — keep them that way, it is what makes a correction a three-file find/replace.
+   2026-08-06 — Lines[] REMOVED (retires D6/D8 for accept/reject; supersedes the "three identical texts"
+   rule). LN's PO_Update began requiring a numeric Quantity on every Lines[] entry (HTTP 500
+   "Attr. 'Quantity', Value '': the value must be numeric." — the identical Lines-without-Quantity body had
+   returned Success on 2026-07-30). Accept/Reject carry no business need to push per-line data, so the live
+   Dynamic rows had Lines[] hand-deleted (audit 8996/8999) and both then succeeded HEADER-ONLY against the
+   real LN. This seed matches that proven shape. Only PoNegotiationApprove still sends Lines[] (with
+   Quantity) — see that file.
 
    Dates arrive pre-formatted from the input-document builder as ISO-8601 seconds-precision UTC with an
    explicit Z. Verified 2026-07-29: LN echoes that form back unchanged, whereas a zone-less value is
@@ -12,25 +17,13 @@
    is null when they disagree or any line has none, and `x != null ? x` then omits the key.
    !! Omitting these keys makes LN echo the literal string "[object Object]" and still answer Status:"Success"
    (probe run 3, 2026-07-29). Whether it PERSISTS that garbage is unconfirmed. If probe P8a/P8b shows that an
-   explicit null or "" is handled cleanly, switch the two lines below — that is a config edit, no deploy.
-
-   D6 — only lines carrying a delivery date go on the wire; the input document deliberately supplies ALL
-   non-deleted lines (D24) so this filter is the single place the decision lives. If probe P5a shows LN CLOSES
-   a line omitted from Lines[], delete the `[deliveryDate != null]` predicate and the whole line set ships.
-
-   The [ ... ] around the Lines mapping is mandatory (D-R9-13): without it JSONata collapses a single-element
-   result to a bare object. It also yields [] for a PO with no dated lines, which is D8. */
+   explicit null or "" is handled cleanly, switch the two lines below — that is a config edit, no deploy. */
 {
     "PurchaseOrderDetail": {
         "CompanyCode": companyCode,
         "OrderNo": poNumber,
         "PlannedDeliveryDate": headerDeliveryDate != null ? headerDeliveryDate,
         "ConfirmedReceiptDate": headerDeliveryDate != null ? headerDeliveryDate,
-        "POStatus": "Accepted",
-        "Lines": [lines[deliveryDate != null].{
-            "LineNo": $string(positionNo),
-            "SeqNo": $string(sequenceNo),
-            "PlannedDeliveryDate": deliveryDate
-        }]
+        "POStatus": "Accepted"
     }
 }

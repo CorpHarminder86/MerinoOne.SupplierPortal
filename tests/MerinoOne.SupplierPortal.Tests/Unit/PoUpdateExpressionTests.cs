@@ -40,7 +40,7 @@ public class PoUpdateExpressionTests
             ResponseContext: new PoResponseContextInputDoc("Accept", null, null));
     }
 
-    private static PurchaseOrderLineInputDoc Line(int pos, int seq, string? date) => new(pos, seq, date);
+    private static PurchaseOrderLineInputDoc Line(int pos, int seq, string? date) => new(pos, seq, date, 5m, "EA");
 
     private const string Dec29 = "2026-12-29T11:00:00Z";
     private const string Dec30 = "2026-12-30T11:00:00Z";
@@ -83,49 +83,18 @@ public class PoUpdateExpressionTests
         detail.TryGetProperty("ConfirmedReceiptDate", out _).Should().BeFalse();
     }
 
-    // ── D6 / D8 — line set ────────────────────────────────────────────────────────────────────────────
+    // ── 2026-08-06 — accept/reject go HEADER-ONLY (LN rejects the un-quantified line node) ────────────
 
     [Fact]
-    public void Undated_lines_are_filtered_off_the_wire()
+    public void Accept_and_reject_carry_no_lines_at_all()
     {
-        var detail = Request(OutboxTransactionType.PoAccept, Doc(Line(10, 1, Dec29), Line(20, 1, null), Line(30, 1, Dec30)));
+        // LN's PO_Update now requires a numeric Quantity on every Lines[] entry; accept/reject have no
+        // business need to push per-line data, so their expressions dropped Lines[] entirely — the shape
+        // proven Success against the live LN on 2026-08-06 (audits 8996/8999).
+        var doc = Doc(Line(10, 1, Dec29), Line(20, 2, Dec29));
 
-        var lines = detail.GetProperty("Lines").EnumerateArray().ToList();
-        lines.Should().HaveCount(2);
-        lines.Select(l => l.GetProperty("LineNo").GetString()).Should().Equal("10", "30");
-    }
-
-    [Fact]
-    public void A_po_with_no_dated_lines_still_posts_with_an_empty_array()
-    {
-        // D8 — header-only payload. LN still learns the outcome; nothing is silently dropped.
-        var detail = Request(OutboxTransactionType.PoAccept, Doc(Line(10, 1, null), Line(20, 1, null)));
-
-        detail.GetProperty("Lines").ValueKind.Should().Be(JsonValueKind.Array);
-        detail.GetProperty("Lines").GetArrayLength().Should().Be(0);
-    }
-
-    [Fact]
-    public void A_single_line_stays_an_array()
-    {
-        // D-R9-13 — without the [ ... ] constructor JSONata collapses a one-element result to a bare object.
-        var detail = Request(OutboxTransactionType.PoAccept, Doc(Line(10, 1, Dec29)));
-
-        detail.GetProperty("Lines").ValueKind.Should().Be(JsonValueKind.Array);
-        detail.GetProperty("Lines").GetArrayLength().Should().Be(1);
-    }
-
-    // ── D5 — line ids are strings ─────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void Line_ids_go_on_the_wire_as_json_strings()
-    {
-        var line = Request(OutboxTransactionType.PoAccept, Doc(Line(10, 1, Dec29))).GetProperty("Lines")[0];
-
-        line.GetProperty("LineNo").ValueKind.Should().Be(JsonValueKind.String);
-        line.GetProperty("SeqNo").ValueKind.Should().Be(JsonValueKind.String);
-        line.GetProperty("LineNo").GetString().Should().Be("10");
-        line.GetProperty("SeqNo").GetString().Should().Be("1");
+        Request(OutboxTransactionType.PoAccept, doc).TryGetProperty("Lines", out _).Should().BeFalse();
+        Request(OutboxTransactionType.PoReject, doc).TryGetProperty("Lines", out _).Should().BeFalse();
     }
 
     // ── D3 — POStatus literals ────────────────────────────────────────────────────────────────────────
@@ -136,16 +105,17 @@ public class PoUpdateExpressionTests
     public void Each_transaction_stamps_its_own_POStatus(string transactionType, string expected)
         => Request(transactionType, Doc(Line(10, 1, Dec29))).GetProperty("POStatus").GetString().Should().Be(expected);
 
-    [Fact]
-    public void Accept_and_reject_differ_only_in_POStatus()
-    {
-        // The three PO_Update expressions are meant to be the same text bar one literal. If this fails,
-        // someone edited one and not the others — which is how the reject payload silently drifts.
-        var doc = Doc(Line(10, 1, Dec29), Line(20, 2, Dec29));
-        var accept = LnJson.CanonicalWrite(Request(OutboxTransactionType.PoAccept, doc).GetRawText());
-        var reject = LnJson.CanonicalWrite(Request(OutboxTransactionType.PoReject, doc).GetRawText());
+    // ── Reject — Remarks carries the portal-typed rejection reason ────────────────────────────────────
 
-        reject.Should().Be(accept.Replace("\"Accepted\"", "\"Rejected\""));
+    [Fact]
+    public void Reject_maps_the_rejection_reason_to_Remarks()
+    {
+        var doc = Doc(Line(10, 1, Dec29)) with
+        {
+            ResponseContext = new PoResponseContextInputDoc("Reject", null, "price too high"),
+        };
+
+        Request(OutboxTransactionType.PoReject, doc).GetProperty("Remarks").GetString().Should().Be("price too high");
     }
 
     // ── D9 — company code ─────────────────────────────────────────────────────────────────────────────
@@ -154,6 +124,114 @@ public class PoUpdateExpressionTests
     public void Company_code_is_carried_from_the_input_document()
         => Request(OutboxTransactionType.PoAccept, Doc(Line(10, 1, Dec29)))
             .GetProperty("CompanyCode").GetString().Should().Be("2000");
+
+    // ── Negotiation request — Quantity / UOM (poNegotiation-v3) ───────────────────────────────────────
+
+    private JsonElement NegotiationRequest(params PurchaseOrderLineInputDoc[] lines)
+    {
+        var list = lines.ToList();
+        var doc = new PoNegotiationInputDoc(
+            Id: Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            PoNumber: "PUR000323",
+            NegotiationId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            SubmittedAt: "2026-08-06T09:00:00.0000000Z",
+            NegotiationStatus: "Approved",
+            CompanyCode: "2000",
+            HeaderDeliveryDate: PoLineDocumentAssembler.HeaderDeliveryDate(list),
+            Lines: list,
+            NegotiationLines: Array.Empty<PoNegotiationLineInputDoc>());
+        var result = _svc.Evaluate(
+            _catalog.TryGet(OutboxTransactionType.PoNegotiationApprove)!.RequestExpr, LnJson.SerializeInputDoc(doc));
+        result.Ok.Should().BeTrue($"expression must evaluate: {result.Error}");
+        return JsonDocument.Parse(result.OutputJson!).RootElement.GetProperty("PurchaseOrderDetail").Clone();
+    }
+
+    [Fact]
+    public void Negotiation_lines_carry_quantity_but_never_a_unit_key()
+    {
+        // The builder has already overlaid negotiatedQty onto orderQty (D10) — the expression maps it 1:1.
+        // No unit key on purpose: LN's validator named only 'Quantity', and no LN response has ever named a
+        // unit attribute on the PO_Update line node.
+        var line = NegotiationRequest(new PurchaseOrderLineInputDoc(10, 1, Dec29, 2m, "PC")).GetProperty("Lines")[0];
+
+        line.GetProperty("Quantity").ValueKind.Should().Be(JsonValueKind.String);
+        line.GetProperty("Quantity").GetString().Should().Be("2");
+        line.TryGetProperty("UOM", out _).Should().BeFalse();
+        line.TryGetProperty("Uom", out _).Should().BeFalse();
+    }
+
+    // $formatNumber, NOT $string — orderQty is decimal(18,4) and STJ preserves scale, so $string emits
+    // "4.0000" and flips to scientific notation ("0e+0", "-2.5e+0") on zero-with-scale and negatives:
+    // the exact "must be numeric" failure class LN 500'd with on 2026-08-06.
+    [Theory]
+    [InlineData("4.0000", "4")]
+    [InlineData("0.0000", "0")]
+    [InlineData("-2.5000", "-2.5")]
+    [InlineData("2.5", "2.5")]
+    [InlineData("0.0001", "0.0001")]
+    [InlineData("1000000.0000", "1000000")]
+    public void Negotiation_quantity_is_plain_notation_at_storage_scale(string stored, string expected)
+    {
+        var line = NegotiationRequest(new PurchaseOrderLineInputDoc(10, 1, Dec29, decimal.Parse(stored), "EA"))
+            .GetProperty("Lines")[0];
+
+        line.GetProperty("Quantity").GetString().Should().Be(expected);
+    }
+
+    [Fact]
+    public void Negotiation_quantity_survives_canonicalisation_on_the_wire()
+    {
+        // The dispatcher writes LnJson.CanonicalWrite(output) — assert the canonical wire text, not just
+        // the raw JSONata output, so a formatter regression cannot hide behind canonicalisation.
+        var detail = NegotiationRequest(new PurchaseOrderLineInputDoc(10, 1, Dec29, 4.0000m, "EA"));
+        var canonical = LnJson.CanonicalWrite(detail.GetRawText());
+
+        canonical.Should().Contain("\"Quantity\":\"4\"");
+        canonical.Should().NotContain("e+", because: "scientific notation is the 'must be numeric' failure class");
+    }
+
+    // ── D6 / D8 / D5 — the line set now lives ONLY on the negotiation expression ─────────────────────
+
+    [Fact]
+    public void Negotiation_undated_lines_are_filtered_off_the_wire()
+    {
+        var lines = NegotiationRequest(Line(10, 1, Dec29), Line(20, 1, null), Line(30, 1, Dec30))
+            .GetProperty("Lines").EnumerateArray().ToList();
+
+        lines.Should().HaveCount(2);
+        lines.Select(l => l.GetProperty("LineNo").GetString()).Should().Equal("10", "30");
+    }
+
+    [Fact]
+    public void Negotiation_with_no_dated_lines_still_posts_with_an_empty_array()
+    {
+        // D8 — header-only payload. LN still learns the outcome; nothing is silently dropped.
+        var detail = NegotiationRequest(Line(10, 1, null), Line(20, 1, null));
+
+        detail.GetProperty("Lines").ValueKind.Should().Be(JsonValueKind.Array);
+        detail.GetProperty("Lines").GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public void Negotiation_single_line_stays_an_array()
+    {
+        // D-R9-13 — without the [ ... ] constructor JSONata collapses a one-element result to a bare object.
+        var detail = NegotiationRequest(Line(10, 1, Dec29));
+
+        detail.GetProperty("Lines").ValueKind.Should().Be(JsonValueKind.Array);
+        detail.GetProperty("Lines").GetArrayLength().Should().Be(1);
+    }
+
+    [Fact]
+    public void Negotiation_line_ids_go_on_the_wire_as_json_strings()
+    {
+        var line = NegotiationRequest(Line(10, 1, Dec29)).GetProperty("Lines")[0];
+
+        line.GetProperty("LineNo").ValueKind.Should().Be(JsonValueKind.String);
+        line.GetProperty("SeqNo").ValueKind.Should().Be(JsonValueKind.String);
+        line.GetProperty("LineNo").GetString().Should().Be("10");
+        line.GetProperty("SeqNo").GetString().Should().Be("1");
+    }
 
     // ── Response mapping ──────────────────────────────────────────────────────────────────────────────
 

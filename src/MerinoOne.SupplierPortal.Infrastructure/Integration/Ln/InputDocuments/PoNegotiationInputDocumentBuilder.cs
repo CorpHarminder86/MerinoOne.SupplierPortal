@@ -52,11 +52,17 @@ public sealed class PoNegotiationInputDocumentBuilder : ILnInputDocumentBuilder
             .OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo)
             .ToList();
 
-        // D10 overlay. Last-wins on a duplicate (positionNo, sequenceNo) rather than throwing: a malformed
-        // negotiation must not be able to kill the dispatch loop.
-        var overrides = new Dictionary<(int, int), DateTime?>();
+        // D10 overlay (date AND qty — a null member means "not negotiated", the PO line's own value stands).
+        // NegotiatedQty is a NON-nullable snapshot (the create flow copies OriginalQty for untouched lines),
+        // so "not negotiated" is detected by comparing against the original snapshot — passing NegotiatedQty
+        // unconditionally would push a stale snapshot qty over a line the negotiation never touched.
+        // Last-wins on a duplicate (positionNo, sequenceNo) rather than throwing: a malformed negotiation
+        // must not be able to kill the dispatch loop.
+        var overrides = new Dictionary<(int, int), (DateTime?, decimal?)>();
         foreach (var l in negotiationLines)
-            overrides[(l.PositionNo, l.SequenceNo)] = l.NegotiatedDeliveryDate;
+            overrides[(l.PositionNo, l.SequenceNo)] = (
+                l.NegotiatedDeliveryDate,
+                l.NegotiatedQty != l.OriginalQty ? l.NegotiatedQty : (decimal?)null);
 
         var lines = await PoLineDocumentAssembler.LinesAsync(db, po.Id, overrides, ct);
 

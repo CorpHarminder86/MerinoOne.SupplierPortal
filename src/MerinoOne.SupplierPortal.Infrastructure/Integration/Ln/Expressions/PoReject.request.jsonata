@@ -1,10 +1,10 @@
-/* R12 — LN PO_Update contract. Identical to PoAccept.request.jsonata bar the POStatus literal; see that
-   file for the full rationale on D6 / D7 / D8 / D24 and the "[object Object]" hazard.
+/* R12 — LN PO_Update contract. Header-only like PoAccept.request.jsonata — see that file for the
+   2026-08-06 Lines[] removal rationale (LN now rejects the un-quantified line node; header-only proven
+   live) and the D7 "[object Object]" hazard.
 
-   NOTE — the rejection reason is NOT on the wire. PurchaseOrderDetail has no field for it, so LN learns THAT
-   a PO was rejected, never why. The reason is still carried into this document as responseContext.reason and
-   is still stored on PurchaseOrder.RejectionReason; the day LN supplies a placeholder field, adding it here
-   is a mapping edit with no deploy. */
+   Remarks — the portal-typed rejection reason (RejectPoCommand.Body.Reason, mandatory ≤1000, folded into
+   the document as responseContext.reason). Mapped since 2026-08-06, mirroring the live row's edit; this
+   retires the old "reason is NOT on the wire" note (R12 §5). */
 {
     "PurchaseOrderDetail": {
         "CompanyCode": companyCode,
@@ -12,10 +12,6 @@
         "PlannedDeliveryDate": headerDeliveryDate != null ? headerDeliveryDate,
         "ConfirmedReceiptDate": headerDeliveryDate != null ? headerDeliveryDate,
         "POStatus": "Rejected",
-        "Lines": [lines[deliveryDate != null].{
-            "LineNo": $string(positionNo),
-            "SeqNo": $string(sequenceNo),
-            "PlannedDeliveryDate": deliveryDate
-        }]
+        "Remarks": responseContext.reason
     }
 }

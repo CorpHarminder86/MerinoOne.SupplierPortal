@@ -45,6 +45,13 @@ public class InforTokenProvider : IInforTokenProvider
         return await IssueAsync(conn, tenantId, ct);
     }
 
+    // Single-flight guard per tenant (2026-08-06). The outbox dispatcher drains rows CONCURRENTLY, so a
+    // cold cache meant N simultaneous password-grant requests — and Infor Mingle SSO rejects the losers of
+    // that race (observed twice: the first of a pair of same-second dispatches failed token acquisition,
+    // the second succeeded). Static because the provider is resolved per-scope while the race is
+    // process-wide; keyed per tenant so one tenant's token fetch never serialises another's.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> TokenLocks = new();
+
     private async Task<string?> IssueAsync(Application.Common.Interfaces.InforConnectionValues? conn, Guid? tenantId, CancellationToken ct)
     {
         if (conn is null || !conn.IsActive || !conn.IsConfigured)
@@ -54,18 +61,31 @@ public class InforTokenProvider : IInforTokenProvider
         if (_cache.TryGetValue(cacheKey, out string? cached) && !string.IsNullOrEmpty(cached))
             return cached;
 
-        var result = await _oauth.RequestAsync(
-            conn.AccessTokenUrl, conn.ClientId, conn.ClientSecret, conn.Username, conn.Password, ct);
-
-        if (!result.Success || string.IsNullOrEmpty(result.AccessToken))
+        var gate = TokenLocks.GetOrAdd(tenantId ?? Guid.Empty, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
         {
-            _logger.LogWarning("Infor token acquisition failed for tenant {TenantId}: {Message}", tenantId, result.Message);
-            return null;
-        }
+            // Double-check under the lock: the winner of the race has usually just cached a token.
+            if (_cache.TryGetValue(cacheKey, out cached) && !string.IsNullOrEmpty(cached))
+                return cached;
 
-        // 60s safety buffer; floor at 30s so a tiny expires_in never yields a zero/negative TTL.
-        var ttl = TimeSpan.FromSeconds(Math.Max(30, (result.ExpiresInSeconds ?? 3600) - 60));
-        _cache.Set(cacheKey, result.AccessToken, ttl);
-        return result.AccessToken;
+            var result = await _oauth.RequestAsync(
+                conn.AccessTokenUrl, conn.ClientId, conn.ClientSecret, conn.Username, conn.Password, ct);
+
+            if (!result.Success || string.IsNullOrEmpty(result.AccessToken))
+            {
+                _logger.LogWarning("Infor token acquisition failed for tenant {TenantId}: {Message}", tenantId, result.Message);
+                return null;
+            }
+
+            // 60s safety buffer; floor at 30s so a tiny expires_in never yields a zero/negative TTL.
+            var ttl = TimeSpan.FromSeconds(Math.Max(30, (result.ExpiresInSeconds ?? 3600) - 60));
+            _cache.Set(cacheKey, result.AccessToken, ttl);
+            return result.AccessToken;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 }

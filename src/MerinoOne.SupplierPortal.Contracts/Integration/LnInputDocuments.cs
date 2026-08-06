@@ -43,15 +43,20 @@ public static class LnInputDocumentVersions
     // LN PO_Update contract. D24: EVERY non-deleted line is carried with a nullable deliveryDate so the
     // line filter (D6) and the header-node handling (D7) live in the JSONata, not here — both are still
     // open against LN (probes P5a/P8) and this keeps their resolution a config edit.
-    public const string PurchaseOrder = "purchaseOrder-v2";
+    // 2026-08-06 — purchaseOrder-v3: each line gains orderQty + orderUnit (the shared line shape changed for
+    // the negotiation payload's Quantity/UOM mapping; accept/reject expressions simply ignore the new fields).
+    public const string PurchaseOrder = "purchaseOrder-v3";
     // R11.3 (2026-07-29) — supplier-v2: the never-written erpCompany field removed with the Supplier.ErpCompany
     // column (migration 0056).
     public const string Supplier = "supplier-v2";
     public const string SupplierChange = "supplierChange-v1";
     // R12 (2026-07-29) — poNegotiation-v2: same three additions as purchaseOrder-v2. NOTE the rename —
-    // `lines` now means PO lines (identical shape to the PO document, so all three request expressions are
-    // the same text bar the POStatus literal); the negotiation delta rows moved to `negotiationLines`.
-    public const string PoNegotiation = "poNegotiation-v2";
+    // `lines` now means PO lines (identical shape to the PO document); the negotiation delta rows moved to
+    // `negotiationLines`.
+    // 2026-08-06 — poNegotiation-v3: lines gain orderQty (negotiated qty overlaid, D10-style) + orderUnit so
+    // the negotiation request maps Quantity/UOM. The three request expressions are no longer the same text —
+    // only the negotiation one maps the new fields.
+    public const string PoNegotiation = "poNegotiation-v3";
 
     /// <summary>Current version for a portalEntity (throws on unknown — config rows are registry-validated).</summary>
     public static string For(string portalEntity) => portalEntity switch
@@ -195,11 +200,16 @@ public sealed record PurchaseOrderInputDoc(
 /// R12 — one PO line as the PO_Update contract sees it. <c>deliveryDate</c> is the EFFECTIVE date: the PO
 /// line's own for accept/reject, or the negotiated one where an approved negotiation changed it (D10).
 /// Null is preserved rather than filtered so the expression owns the D6 decision.
+/// <para>v3 — <c>orderQty</c> is the EFFECTIVE quantity under the same D10 rule (the negotiation's
+/// <c>negotiatedQty</c> where an approved negotiation set one, else the PO line's own <c>OrderQty</c>);
+/// <c>orderUnit</c> is the PO line's unit, echoed back exactly as it arrived inbound from LN.</para>
 /// </summary>
 public sealed record PurchaseOrderLineInputDoc(
     [property: JsonPropertyName("positionNo")] int PositionNo,
     [property: JsonPropertyName("sequenceNo")] int SequenceNo,
-    [property: JsonPropertyName("deliveryDate")] string? DeliveryDate);
+    [property: JsonPropertyName("deliveryDate")] string? DeliveryDate,
+    [property: JsonPropertyName("orderQty")] decimal OrderQty,
+    [property: JsonPropertyName("orderUnit")] string? OrderUnit);
 
 public sealed record PoResponseContextInputDoc(
     [property: JsonPropertyName("action")] string Action,
