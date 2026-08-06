@@ -222,7 +222,11 @@ public record AsnLineDto(
     IReadOnlyList<AsnLineLotDto>? Lots = null,
     decimal ShippedQtyToDate = 0,
     decimal Balance = 0,
-    decimal OverShipAllowance = 0);
+    decimal OverShipAllowance = 0,
+    // R15 — schedule back-link + its delivery date, so the wizard can pre-check the originating schedule rows in
+    // its step-1 grid and show the Delivery column on Quantities. Null for legacy PO-picked lines.
+    Guid? DeliveryScheduleId = null,
+    DateTime? ScheduleDeliveryDate = null);
 
 // R4 (2026-06-22) — Module 3: ASN attachments reuse the existing Contracts.Suppliers.DocumentAttachmentDto
 // (structurally identical; ownerEntityType='Asn', DocumentType.AsnAttachment). No duplicate type introduced
@@ -280,7 +284,10 @@ public record CreateAsnLineRequest(
     string? BatchNumber,
     DateTime? ExpiryDate,
     List<AsnLineSerialInput>? Serials = null,
-    List<AsnLineLotInput>? Lots = null);
+    List<AsnLineLotInput>? Lots = null,
+    // R15 — optional back-link to the originating delivery schedule (the schedule-driven wizard sends it; older
+    // callers may omit). When supplied it must reference a live schedule of the SAME PurchaseOrderLineId.
+    Guid? DeliveryScheduleId = null);
 
 public record UpdateAsnRequest(
     DateTime ExpectedDeliveryDate,

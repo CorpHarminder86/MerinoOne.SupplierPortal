@@ -81,6 +81,8 @@ Returns: AsnDetailDto on success; 404 if not found; 403 if seccode mismatch. Req
     [EndpointDescription(@"Supplier creates a DRAFT ASN spanning one or more POs. NO ERP post on create.
 Body:
 - **body**: CreateAsnRequest — PurchaseOrderId (single) or PurchaseOrderIds (multi), ship lines, carrier metadata.
+  R15 — each line may carry an optional **deliveryScheduleId** back-link; when supplied it must reference a live
+  delivery schedule of the SAME purchaseOrderLineId (else 400), and each schedule may appear on at most one line.
 Side effects:
 - Creates the ASN in Draft, populates the AsnPurchaseOrder junction, snapshots each line's PositionNo/SequenceNo.
 Returns: AsnDetailDto (Draft) on success; 400 on validation; 403 if seccode mismatch. Requires **Asn.Write**.")]
@@ -95,6 +97,8 @@ Returns: AsnDetailDto (Draft) on success; 400 on validation; 403 if seccode mism
     [EndpointSummary("Update ASN (Draft only)")]
     [EndpointDescription(@"Edits a DRAFT ASN (header + lines). Rejected (409) once the ASN is Submitted/Cancelled
 (lock-on-submit). Replaces the line set, re-snapshots PositionNo/SequenceNo, rebuilds the multi-PO junction.
+R15 — each line may carry an optional **deliveryScheduleId** back-link (validated like Create: live schedule of the
+same PO line, unique per request); the replace-set persists it, so draft saves no longer wipe schedule provenance.
 Returns: AsnDetailDto on success; 404 if not found; 409 if not Draft. Requires **Asn.Write**.")]
     public async Task<Result<AsnDetailDto>> Update(Guid id, [FromBody] UpdateAsnRequest body, CancellationToken ct)
     {

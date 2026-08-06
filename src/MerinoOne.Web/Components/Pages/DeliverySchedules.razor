@@ -4,14 +4,18 @@
 @inject NavigationManager Nav
 
 @* R5 (TSD R5 Addendum §7 / §8.3 — Component 4, Delivery Schedule grid). The supplier's ASN-creation surface:
-   one row per open PO line, showing PO number + position + item + order qty + warehouse + remaining-to-ship,
-   sorted PO → Line → Delivery date ASC. Read-only in this phase; Phase 4 layers multi-select → Create ASN on top.
+   one row per open PO line, showing PO number + position + item + order qty + warehouse + remaining-to-ship.
+   R15 — sorted CreatedOn DESC (newest schedules first; server-side).
    Permission: DeliverySchedule.Read (supplier-facing). All hex via var(--mer-*) tokens; Merino .tl-page shell.
 
    R13 — ship-to is retired; the PO line's warehouse (resolving to a CompanyAddress) is the receiving address AND the
    ASN grouping key. Filters (§7): supplier, warehouse, PO, delivery-date range, status. The Warehouse filter AUTO-HIDES
    when only one warehouse is present — the backend computes DistinctWarehouseCount + ShowWarehouseFilter across the
-   supplier's visible schedules (BEFORE the warehouse filter), mirroring the single-supplier filter auto-hide. *@
+   supplier's visible schedules (BEFORE the warehouse filter), mirroring the single-supplier filter auto-hide.
+
+   R15 (D3) — "Create ASN" no longer raises an instant server Draft via api/asns/from-schedule: it deep-links to
+   /asns/new?supplier=<id>&schedules=<ids> where the same lines arrive PRE-CHECKED in the wizard's step-1 grid
+   (warehouse auto-locked) and nothing exists server-side until the supplier saves. One code path for both flows. *@
 
 <PageTitle>Delivery Schedules</PageTitle>
 
@@ -163,10 +167,12 @@
                 // Row is selectable when it has remaining balance to ship AND (no selection yet OR it matches the
                 // locked warehouse). §9.1: cross-warehouse rows are disabled, not silently dropped.
                 var warehouseBlocked = selectedWarehouseId.HasValue && row.WarehouseAddressId != selectedWarehouseId.Value;
+                // R15 — the deep-linked wizard is supplier-scoped, so a selection also locks the supplier.
+                var supplierBlocked = selected.Count > 0 && row.SupplierId != selected.Values.First().SupplierId;
                 var noBalance = row.RemainingToShip <= 0;
                 // §6.2 — a schedule whose PO is no longer shippable (e.g. reset to Released by an ERP Modify) is not
                 // selectable for an ASN; the checkbox is hidden for it (see below).
-                var selectable = CanCreateAsn && !noBalance && !warehouseBlocked && row.IsShippable;
+                var selectable = CanCreateAsn && !noBalance && !warehouseBlocked && !supplierBlocked && row.IsShippable;
                 var rowStyle = (isSelected ? "background:var(--mer-blue-50);" : "")
                     + (CanCreateAsn && !selectable && !isSelected ? "opacity:.55;" : "");
                 <div class="tlg-row" style="@rowStyle">
@@ -176,7 +182,7 @@
                             @if (row.IsShippable)
                             {
                                 <input type="checkbox" checked="@isSelected" disabled="@(!selectable && !isSelected)"
-                                       title="@(noBalance ? "Nothing left to ship on this line" : warehouseBlocked ? "Different warehouse — clear the selection to pick this one" : null)"
+                                       title="@(noBalance ? "Nothing left to ship on this line" : warehouseBlocked ? "Different warehouse — clear the selection to pick this one" : supplierBlocked ? "Different supplier — an ASN ships from one supplier" : null)"
                                        @onchange="() => ToggleRow(row)" />
                             }
                             else
@@ -211,40 +217,7 @@
     }
 </div>
 
-@* ---------------- Create-ASN dialog (§9.2 — header metadata before the draft is raised) ---------------- *@
-@if (showCreateAsn)
-{
-    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
-        <div class="merino-dialog" data-variant="info" data-size="md" style="width:560px;">
-            <div class="merino-dialog__accent"></div>
-            <header class="merino-dialog__header">
-                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">local_shipping</span></div>
-                <div class="merino-dialog__head-text">
-                    <div class="merino-dialog__eyebrow">Delivery schedules</div>
-                    <h2 class="merino-dialog__title">Create ASN from @selected.Count line(s)</h2>
-                    <p class="merino-dialog__subtitle">Warehouse <b>@(selectedWarehouseName ?? "—")</b>. A Draft ASN is raised; you set ship quantities, capture, and attachments on the ASN, then send it for approval.</p>
-                </div>
-                <button class="merino-dialog__close" @onclick="() => showCreateAsn = false"><span class="material-symbols-outlined">close</span></button>
-            </header>
-            <div class="merino-dialog__body">
-                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Expected delivery date *</label>
-                <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;margin-top:4px;" @bind="createExpectedDate" />
-                <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);margin-top:12px;display:block;">Carrier (optional)</label>
-                <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;margin-top:4px;" @bind="createCarrier" />
-                @if (!string.IsNullOrEmpty(createAsnError))
-                {
-                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;white-space:pre-wrap;">@createAsnError</div>
-                }
-            </div>
-            <footer class="merino-dialog__footer">
-                <div class="merino-dialog__actions">
-                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showCreateAsn = false">Cancel</button>
-                    <button class="merino-dialog__btn" data-intent="primary" @onclick="DoCreateAsn" disabled="@(creating || !createExpectedDate.HasValue)">@(creating ? "Creating…" : "Create draft ASN")</button>
-                </div>
-            </footer>
-        </div>
-    </div>
-}
+@* R15 (D3) — the §9.2 instant-draft dialog is retired; Create ASN deep-links into the wizard (see OpenCreateAsn). *@
 
 @code {
     private DeliveryScheduleGridDto? grid;
@@ -392,11 +365,14 @@
     private Guid? selectedWarehouseId => selected.Values.Select(s => s.WarehouseAddressId).FirstOrDefault();
     private string? selectedWarehouseName => selected.Values.Select(s => s.WarehouseAddressName).FirstOrDefault();
 
-    // "Select all" reflects only the rows on THIS page that are currently selectable (have balance + match the locked
-    // warehouse) plus those already selected — so the header box never claims to cover disabled rows.
+    // "Select all" reflects only the rows on THIS page that are currently selectable (have balance + shippable +
+    // match the locked warehouse/supplier) plus those already selected — so the header box never claims to cover
+    // disabled rows. (R15 — IsShippable + the supplier lock joined the filter so select-all mirrors the row rule.)
     private IEnumerable<DeliveryScheduleDto> SelectablePageRows =>
         grid?.Page.Items.Where(r => r.RemainingToShip > 0
-            && (!selectedWarehouseId.HasValue || r.WarehouseAddressId == selectedWarehouseId.Value)) ?? Enumerable.Empty<DeliveryScheduleDto>();
+            && r.IsShippable
+            && (!selectedWarehouseId.HasValue || r.WarehouseAddressId == selectedWarehouseId.Value)
+            && (selected.Count == 0 || r.SupplierId == selected.Values.First().SupplierId)) ?? Enumerable.Empty<DeliveryScheduleDto>();
 
     private bool AllSelectableSelected =>
         SelectablePageRows.Any() && SelectablePageRows.All(r => selected.ContainsKey(r.Id));
@@ -406,6 +382,9 @@
         if (selected.Remove(row.Id)) return;                 // deselect
         if (row.RemainingToShip <= 0) return;                // nothing to ship
         if (selectedWarehouseId.HasValue && row.WarehouseAddressId != selectedWarehouseId.Value) return; // cross-warehouse guard
+        // R15 — one ASN ships from ONE supplier; the deep-linked wizard is supplier-scoped, so the first pick
+        // locks the supplier too (an internal user's grid can mix suppliers within one warehouse name).
+        if (selected.Count > 0 && row.SupplierId != selected.Values.First().SupplierId) return;
         selected[row.Id] = row;
     }
 
@@ -420,53 +399,16 @@
 
     private void ClearSelection() => selected.Clear();
 
-    // ---- Create-ASN dialog ----
-    private bool showCreateAsn;
-    private bool creating;
-    private DateTime? createExpectedDate = DateTime.Today.AddDays(7);
-    private string? createCarrier;
-    private string createAsnError = string.Empty;
-
+    // ---- R15 (D3) — Create ASN: deep-link into the wizard, no instant server draft ----
+    // The wizard (/asns/new) re-loads the supplier's Approved schedules, pre-checks these ids (its own guards
+    // re-apply: balance, shippable, single warehouse) and lands on Quantities. Nothing is persisted until Save,
+    // so backing out of the wizard leaves no orphan Draft — and both creation flows share one code path.
     private void OpenCreateAsn()
     {
         if (selected.Count == 0) return;
-        createAsnError = string.Empty;
-        createExpectedDate ??= DateTime.Today.AddDays(7);
-        showCreateAsn = true;
-    }
-
-    private async Task DoCreateAsn()
-    {
-        if (selected.Count == 0 || !createExpectedDate.HasValue) return;
-        creating = true; createAsnError = string.Empty;
-
-        // §9.1 client-side single-warehouse assertion (defence in depth: the lock should already guarantee this, and the
-        // server derives the single warehouse from the selected schedules). The server §9.3 invariant is the authoritative
-        // fallback and its reject message is surfaced verbatim below.
-        if (selected.Values.Select(s => s.WarehouseAddressId).Distinct().Count() > 1)
-        {
-            createAsnError = "All selected lines must share a single warehouse. Clear the selection and pick lines for one warehouse.";
-            creating = false; return;
-        }
-
-        var req = new CreateAsnFromScheduleRequest(
-            ScheduleIds: selected.Keys.ToList(),
-            ExpectedDeliveryDate: createExpectedDate.Value,
-            CarrierName: string.IsNullOrWhiteSpace(createCarrier) ? null : createCarrier.Trim());
-
-        var resp = await Api.PostAsync<AsnDetailDto, CreateAsnFromScheduleRequest>("api/asns/from-schedule", req);
-        if (resp?.Success == true && resp.Data != null)
-        {
-            showCreateAsn = false;
-            selected.Clear();
-            // §9.2 — land on the new Draft ASN's detail so the supplier sets ship quantities / capture / attachments.
-            // The lines + POs are already chosen from the schedule, so open directly on the Lines step (step=2).
-            Nav.NavigateToRoute($"/asns/{resp.Data.Id}?step=2");
-            return;
-        }
-        // Surface the server's reject (cross-warehouse / multi-supplier / invariant) verbatim — the UI guard's fallback.
-        createAsnError = resp?.Errors?.FirstOrDefault() ?? "Could not create the ASN from the selected schedules.";
-        creating = false;
+        var supplierId = selected.Values.First().SupplierId;
+        var ids = string.Join(",", selected.Keys);
+        Nav.NavigateToRoute($"/asns/new?supplier={supplierId}&schedules={ids}");
     }
 
     private string StatusClass(string status) => status switch

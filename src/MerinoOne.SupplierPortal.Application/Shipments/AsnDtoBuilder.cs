@@ -68,9 +68,13 @@ public static class AsnDtoBuilder
         // serial/lot children (loaded separately below) can be merged in by line id without an N+1 per line.
         // R4 (2026-06-26) — also carry the PO line's cumulative ShippedQtyToDate + the PO's supplier/company so the
         // derived Balance + OverShipAllowance (§7.3 / DI-04) can be computed per line below.
+        // R15 — also left-join the line's originating delivery schedule (nullable back-link) so the wizard can
+        // pre-check the schedule rows in its step-1 grid and show the schedule's delivery date on Quantities.
         var lineRows = await (from al in db.AsnLines
                               join pol in db.PurchaseOrderLines on al.PurchaseOrderLineId equals pol.Id
                               join po in db.PurchaseOrders on pol.PurchaseOrderId equals po.Id
+                              join schJ in db.DeliverySchedules on al.DeliveryScheduleId equals (Guid?)schJ.Id into schJoin
+                              from sch in schJoin.DefaultIfEmpty()
                               where al.AsnId == asnId
                               orderby po.PoNumber, pol.PositionNo
                               select new
@@ -93,6 +97,8 @@ public static class AsnDtoBuilder
                                   al.ShippedQty,
                                   al.BatchNumber,
                                   al.ExpiryDate,
+                                  al.DeliveryScheduleId,
+                                  ScheduleDeliveryDate = sch != null ? (DateTime?)sch.DeliveryDate : null,
                               }).ToListAsync(ct);
 
         // R4 (2026-06-26) — resolve the per-line over-ship tolerance (§7.1 SupplierItem ?? Item) so the derived
@@ -181,7 +187,8 @@ public static class AsnDtoBuilder
                     r.ShippedQty, r.BatchNumber, r.ExpiryDate,
                     serialsByLine.TryGetValue(r.Id, out var sl) ? sl : null,
                     lotsGrouped.TryGetValue(r.Id, out var ll) ? ll : null,
-                    r.ShippedQtyToDate, balance, overShipAllowance);
+                    r.ShippedQtyToDate, balance, overShipAllowance,
+                    r.DeliveryScheduleId, r.ScheduleDeliveryDate);
             })
             .ToList();
 

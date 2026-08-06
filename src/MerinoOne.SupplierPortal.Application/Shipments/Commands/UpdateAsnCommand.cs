@@ -41,6 +41,9 @@ public class UpdateAsnCommandValidator : AbstractValidator<UpdateAsnCommand>
         RuleFor(x => x.Body.PackingList).MaximumLength(AsnHeaderRules.PackingList).WithName("packingList");
 
         RuleFor(x => x.Body.Lines).NotNull().NotEmpty().WithMessage("At least one ASN line is required.");
+        // R15 — a delivery schedule may back one line at most (mirrors CreateAsnCommandValidator).
+        RuleFor(x => x.Body.Lines).Must(AsnLineRules.DeliverySchedulesDistinct)
+            .WithMessage("Each delivery schedule may appear on at most one ASN line.");
         RuleForEach(x => x.Body.Lines).ChildRules(line =>
         {
             line.RuleFor(l => l.PurchaseOrderLineId).NotEmpty();
@@ -123,6 +126,10 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         await AsnCaptureUniquenessSupport.ValidateRequestAsync(
             _db, excludeAsnId: asn.Id, itemCompany, body.Lines, poLines, ct);
 
+        // R15 — every supplied schedule back-link must be a live schedule of the SAME PO line (the replace-set
+        // semantics below would otherwise let a stale/foreign schedule id slip onto the rebuilt lines).
+        await AsnScheduleLinkSupport.ValidateAsync(_db, body.Lines, ct);
+
         // R5 (TSD R5 Addendum §10.4) — NO over-ship tolerance resolution / no balance delta at update; a Draft (or
         // Rejected→Draft) ASN does NOT consume shippedQtyToDate. The atomic guard moved to final Submit.
 
@@ -198,6 +205,9 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
                 Id = Guid.NewGuid(),
                 AsnId = asn.Id,
                 PurchaseOrderLineId = line.PurchaseOrderLineId,
+                // R15 — carry the (validated) schedule back-link through the wholesale line replace; before this
+                // every draft save silently wiped the from-schedule provenance.
+                DeliveryScheduleId = AsnScheduleLinkSupport.Normalize(line.DeliveryScheduleId),
                 ItemId = pol.ItemId ?? flags?.Id,
                 ShippedQty = line.ShippedQty,
                 BatchNumber = line.BatchNumber,

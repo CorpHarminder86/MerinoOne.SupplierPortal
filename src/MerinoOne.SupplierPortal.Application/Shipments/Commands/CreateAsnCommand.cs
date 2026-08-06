@@ -46,6 +46,10 @@ public class CreateAsnCommandValidator : AbstractValidator<CreateAsnCommand>
 
         RuleFor(x => x.Body.Lines).NotNull().NotEmpty()
             .WithMessage("At least one ASN line is required.");
+        // R15 — a delivery schedule may back one line at most (two rows for one PO line are fine, but they must
+        // reference DIFFERENT schedules or none).
+        RuleFor(x => x.Body.Lines).Must(AsnLineRules.DeliverySchedulesDistinct)
+            .WithMessage("Each delivery schedule may appear on at most one ASN line.");
         RuleForEach(x => x.Body.Lines).ChildRules(line =>
         {
             line.RuleFor(l => l.PurchaseOrderLineId).NotEmpty();
@@ -102,6 +106,15 @@ internal static class AsnLineRules
         if (lots is null) return true;
         var nonEmpty = lots.Where(l => !string.IsNullOrWhiteSpace(l.LotNo)).Select(l => l.LotNo.Trim()).ToList();
         return nonEmpty.Count == nonEmpty.Distinct(StringComparer.OrdinalIgnoreCase).Count();
+    }
+
+    // R15 — non-empty schedule back-links must be unique across the request's lines.
+    public static bool DeliverySchedulesDistinct(List<CreateAsnLineRequest>? lines)
+    {
+        if (lines is null) return true;
+        var ids = lines.Where(l => l.DeliveryScheduleId is { } g && g != Guid.Empty)
+            .Select(l => l.DeliveryScheduleId!.Value).ToList();
+        return ids.Count == ids.Distinct().Count();
     }
 }
 
@@ -173,6 +186,9 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
         // the submit-time guard, which only ran after the buyer had already approved.
         await AsnCaptureUniquenessSupport.ValidateRequestAsync(
             _db, excludeAsnId: null, itemCompany, body.Lines, poLines, ct);
+
+        // R15 — every supplied schedule back-link must be a live schedule of the SAME PO line.
+        await AsnScheduleLinkSupport.ValidateAsync(_db, body.Lines, ct);
 
         // R5 (TSD R5 Addendum §10.4) — NO over-ship tolerance resolution / no balance consumption at create; the
         // authoritative atomic guard (which needs the tolerance factor) now runs ONCE at final Submit
@@ -252,6 +268,8 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
                 Id = Guid.NewGuid(),
                 AsnId = asnId,
                 PurchaseOrderLineId = line.PurchaseOrderLineId,
+                // R15 — persist the (validated) schedule back-link when the caller supplied one.
+                DeliveryScheduleId = AsnScheduleLinkSupport.Normalize(line.DeliveryScheduleId),
                 ItemId = pol.ItemId ?? flags?.Id,
                 ShippedQty = line.ShippedQty,
                 BatchNumber = line.BatchNumber,

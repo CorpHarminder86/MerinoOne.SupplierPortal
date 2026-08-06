@@ -364,8 +364,11 @@
 
             @if (currentStep == 1)
             {
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Select purchase order(s)</h3>
-                <p style="font-size:12px;color:var(--mer-ink-500);margin-bottom:12px;">@Step1HelperText Lines from every selected PO merge on the next step.</p>
+                @* R15 (Design 1a) — the PO-picker step is gone: step 1 is a flat grid of the supplier's APPROVED
+                   delivery-schedule lines (hard filter — no toggle). Picking the first line locks the warehouse
+                   (one warehouse per ASN, §9.1); rows for other warehouses stay disabled until Clear. *@
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Select lines to ship</h3>
+                <p style="font-size:12px;color:var(--mer-ink-500);margin-bottom:12px;">@Step1HelperText</p>
 
                 @* Supplier-first chooser — shown when the signed-in user can act for more than one supplier. *@
                 @if (suppliers.Count > 1)
@@ -392,86 +395,167 @@
 
                 @if (selectedSupplierId.HasValue)
                 {
-                    @if (searching)
+                    @if (schedulesLoading)
                     {
-                        <p style="color:var(--mer-ink-500);font-size:13px;">Loading open POs…</p>
+                        <p style="color:var(--mer-ink-500);font-size:13px;">Loading approved delivery schedules…</p>
                     }
-                    else if (openPos.Count == 0)
+                    else if (scheduleRows.Count == 0)
                     {
-                        @* 0 open POs for this supplier — no ship-to selector, no PO list. *@
-                        <p style="color:var(--mer-ink-500);font-size:13px;margin-bottom:14px;">No matching open POs for this supplier.</p>
+                        <div class="tl-empty" style="padding:24px;text-align:left;">
+                            <div style="font-size:13px;color:var(--mer-ink-600);">No approved delivery schedules ready to ship for this supplier.</div>
+                        </div>
                     }
                     else
                     {
-                        @* R13 — ship-to retired; warehouse moved to the PO LINE, so neither is a PO-header field the
-                           picker can group/filter on. The picker now offers ALL of this supplier's eligible open POs.
-                           An ASN is still single-warehouse, but that is enforced SERVER-SIDE over the covered PO lines
-                           (AsnWarehouseRules), which rejects a cross-warehouse selection at save/submit. *@
-                        <div style="font-size:12px;color:var(--mer-ink-500);margin-bottom:12px;display:flex;align-items:flex-start;gap:6px;">
-                            <span class="material-symbols-outlined" style="font-size:16px;color:var(--mer-ink-400);">info</span>
-                            <span>All added POs must share one receiving warehouse — the server rejects the ASN on send if they don't.</span>
-                        </div>
-
-                        <div style="margin-bottom:10px;">
-                            <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:4px;">Find PO</label>
-                            <div style="display:flex;gap:8px;">
-                                <input class="rz-textbox" placeholder="Filter PO number…" style="flex:1;max-width:340px;padding:8px 10px;" @bind="poSearch" @bind:event="oninput" />
-                            </div>
-                        </div>
-
-                        @if (AddablePos.Count > 0)
-                        {
-                            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;max-height:260px;overflow:auto;">
-                                @foreach (var po in AddablePos)
-                                {
-                                    var p = po;
-                                    <button @onclick="() => AddPo(p)" style="display:flex;align-items:center;gap:10px;border:1px solid var(--mer-line);border-radius:6px;padding:8px 12px;cursor:pointer;background:var(--mer-surface);text-align:left;">
-                                        <span style="font-family:Inter,monospace;font-weight:600;font-size:13px;color:var(--mer-blue-darker);">@p.PoNumber</span>
-                                        <span style="font-size:12px;color:var(--mer-ink-500);">@p.PoDate.ToString("yyyy-MM-dd")</span>
-                                        <span class="tlg-status tlg-status--info">@p.PoStatus</span>
-                                        <span style="margin-left:auto;color:var(--mer-blue);font-size:12px;font-weight:600;"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;">add</span> Add</span>
-                                    </button>
-                                }
-                            </div>
-                        }
-                        else
-                        {
-                            <p style="color:var(--mer-ink-500);font-size:13px;margin-bottom:14px;">No matching open POs for this supplier@(string.IsNullOrWhiteSpace(poSearch) ? "" : $" for \"{poSearch}\"").</p>
-                        }
-
-                        <div style="border-top:1px solid var(--mer-line-soft);padding-top:12px;">
-                            <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:8px;">Selected POs (@selectedPoMap.Count) · <span style="font-weight:400;color:var(--mer-ink-500);">@selectedSupplierName</span></div>
-                            @if (selectedPoMap.Count == 0)
+                        @* Filter row — warehouse (hidden when ≤1 distinct), PO/item search, delivery-date range,
+                           and the static hard-gate chip (Design 1a; D2 locked it to Approved with no toggle). *@
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+                            @if (GridWarehouseOptions.Count > 1)
                             {
-                                <p style="font-size:12px;color:var(--mer-ink-500);">None yet — add POs above.</p>
-                            }
-                            else
-                            {
-                                <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                                    @foreach (var p in selectedPoMap.Values.OrderBy(x => x.PoNumber))
+                                <select class="rz-dropdown" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:180px;" @bind="gridWarehouseFilter">
+                                    <option value="">All warehouses</option>
+                                    @foreach (var wh in GridWarehouseOptions)
                                     {
-                                        var pid = p.Id;
-                                        <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--mer-blue);background:var(--mer-blue-50);border-radius:16px;padding:4px 6px 4px 12px;font-size:12.5px;font-family:Inter,monospace;color:var(--mer-blue-darker);">
-                                            @p.PoNumber
-                                            <button @onclick="() => RemovePo(pid)" title="Remove" style="background:transparent;border:0;color:var(--mer-ink-500);cursor:pointer;line-height:1;display:flex;"><span class="material-symbols-outlined" style="font-size:16px;">close</span></button>
-                                        </span>
+                                        <option value="@wh.Id">@wh.Name</option>
                                     }
-                                </div>
+                                </select>
                             }
+                            <input class="rz-textbox" placeholder="PO or item…" style="padding:7px 10px;width:190px;" @bind="lineSearch" @bind:event="oninput" />
+                            <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:6px;">
+                                From
+                                <input type="date" class="rz-textbox" style="padding:6px 8px;" @bind="gridDateFrom" />
+                            </label>
+                            <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:6px;">
+                                To
+                                <input type="date" class="rz-textbox" style="padding:6px 8px;" @bind="gridDateTo" />
+                            </label>
+                            <span style="display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border-radius:6px;border:1px solid var(--mer-green);background:var(--mer-green-50, #f3f9ec);color:var(--mer-green-darker, #3b6d11);font-size:12px;font-weight:600;"
+                                  title="Only lines whose delivery schedule is Approved can be shipped">
+                                <span class="material-symbols-outlined" style="font-size:15px;">event</span> Schedule: Approved
+                            </span>
+                        </div>
+
+                        @* §9.1 warehouse-lock banner — appears on the first pick (Design 1a lock strip). *@
+                        @if (selectedSchedules.Count > 0)
+                        {
+                            <div style="padding:9px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;background:var(--mer-blue-50);border:1px solid var(--mer-blue);border-radius:6px;">
+                                <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-blue);">lock</span>
+                                <div style="flex:1;font-size:12.5px;color:var(--mer-blue-darker);">
+                                    Warehouse locked to <b>@(lockedWarehouseLabel ?? "—")</b>
+                                    <span style="color:var(--mer-ink-500);"> — lines in other warehouses stay unselectable until you clear.</span>
+                                </div>
+                                <button type="button" @onclick="SelectAllInLockedWarehouse"
+                                        style="display:inline-flex;align-items:center;gap:5px;background:var(--mer-surface);border:1px solid var(--mer-blue);border-radius:6px;padding:5px 10px;color:var(--mer-blue);cursor:pointer;font-size:12px;font-weight:600;">
+                                    Select all @LockedWarehousePool.Count() in this warehouse
+                                </button>
+                                <button type="button" @onclick="ClearScheduleSelection"
+                                        style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--mer-blue);border-radius:6px;padding:5px 10px;color:var(--mer-blue);cursor:pointer;font-size:12px;">
+                                    <span class="material-symbols-outlined" style="font-size:14px;">close</span> Clear
+                                </button>
+                            </div>
+                        }
+
+                        <div style="border:1px solid var(--mer-line);border-radius:8px;overflow:hidden;">
+                            <div style="max-height:420px;overflow:auto;">
+                                <table style="width:100%;font-size:12.5px;border-collapse:collapse;min-width:1080px;">
+                                    <thead>
+                                        <tr style="border-bottom:1px solid var(--mer-line);background:var(--mer-ink-50);position:sticky;top:0;z-index:1;">
+                                            <th style="width:36px;padding:8px 4px;text-align:center;">
+                                                <input type="checkbox" checked="@AllLockedSelected" disabled="@(selectedSchedules.Count == 0)"
+                                                       title="@(selectedSchedules.Count == 0 ? "Pick one line first — that fixes the warehouse" : AllLockedSelected ? "Clear all lines in this warehouse" : "Select all lines in this warehouse")"
+                                                       @onchange="ToggleAllInLockedWarehouse" />
+                                            </th>
+                                            <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">PO #</th>
+                                            <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);">Ln</th>
+                                            <th style="text-align:left;padding:8px 10px;color:var(--mer-ink-700);">Item</th>
+                                            <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);">Order qty</th>
+                                            <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);">Shipped</th>
+                                            <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);">Remaining</th>
+                                            <th style="text-align:left;padding:8px 10px;color:var(--mer-ink-700);">Warehouse</th>
+                                            <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Delivery</th>
+                                            <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">Schedule</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    @{
+                                        // Design 1a PO banding: alternate tint per PO block; the PO number renders
+                                        // emphasized on the first row of each block and muted on the rest.
+                                        var _prevPo = (string?)null;
+                                        var _poIdx = -1;
+                                    }
+                                    @foreach (var row in VisibleScheduleRows)
+                                    {
+                                        var r = row;
+                                        var first = r.PoNumber != _prevPo;
+                                        if (first) { _poIdx++; _prevPo = r.PoNumber; }
+                                        var band = _poIdx % 2 == 1;
+                                        var isSelected = selectedSchedules.ContainsKey(r.Id);
+                                        var warehouseBlocked = selectedSchedules.Count > 0 && r.WarehouseAddressId != lockedWarehouseId;
+                                        var noBalance = r.RemainingToShip <= 0;
+                                        var selectable = !noBalance && !warehouseBlocked && r.IsShippable;
+                                        var rowBg = isSelected ? "var(--mer-blue-50)" : band ? "var(--mer-ink-50)" : "var(--mer-surface)";
+                                        <tr style="border-bottom:1px solid var(--mer-line-soft);@(first && _poIdx > 0 ? "border-top:1px solid var(--mer-line);" : "")background:@rowBg;@(!selectable && !isSelected ? "opacity:.55;" : "")">
+                                            <td style="padding:6px 4px;text-align:center;">
+                                                @if (r.IsShippable)
+                                                {
+                                                    <input type="checkbox" checked="@isSelected" disabled="@(!selectable && !isSelected)"
+                                                           title="@(noBalance ? "Nothing left to ship on this line" : warehouseBlocked ? "Different warehouse — clear the selection to pick this one" : null)"
+                                                           @onchange="() => ToggleScheduleRow(r)" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="material-symbols-outlined" style="font-size:15px;color:var(--mer-ink-400);"
+                                                          title="PO not confirmed — re-accept the PO before shipping this schedule">block</span>
+                                                }
+                                            </td>
+                                            <td style="padding:6px 4px;font-family:Inter,monospace;font-weight:@(first ? "700" : "400");color:@(first ? "var(--mer-blue)" : "var(--mer-ink-300)");">@r.PoNumber</td>
+                                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@r.PositionNo</td>
+                                            <td style="padding:6px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;">
+                                                <span style="font-weight:600;font-family:Inter,monospace;color:var(--mer-blue-darker);">@r.ItemCode</span>
+                                                @if (!string.IsNullOrWhiteSpace(r.ItemDescription))
+                                                {
+                                                    <span style="color:var(--mer-ink-500);"> — @r.ItemDescription</span>
+                                                }
+                                            </td>
+                                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@r.OrderQty.ToString("N2") <span style="color:var(--mer-ink-500);">@r.OrderUnit</span></td>
+                                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@r.ShippedQtyToDate.ToString("N2")</td>
+                                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;color:@(r.RemainingToShip > 0 ? "var(--mer-blue-darker)" : "var(--mer-ink-400)");">@r.RemainingToShip.ToString("N2")</td>
+                                            <td style="padding:6px 10px;font-family:Inter,monospace;" title="@r.WarehouseAddressName">@(string.IsNullOrWhiteSpace(r.Warehouse) ? "—" : r.Warehouse)</td>
+                                            <td style="padding:6px 4px;font-family:Inter,monospace;">@r.DeliveryDate.ToString("yyyy-MM-dd")</td>
+                                            <td style="padding:6px 4px;"><span class="tlg-status tlg-status--active">@r.Status</span></td>
+                                        </tr>
+                                    }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        @* Footer summary (Design 1a) — selection count · PO spread · locked warehouse. *@
+                        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+                            <span style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);">
+                                @(selectedSchedules.Count > 0 ? $"{selectedSchedules.Count} line(s) selected" : "No lines selected")
+                            </span>
+                            <span style="font-size:12px;color:var(--mer-ink-500);">
+                                @(selectedSchedules.Count > 0
+                                    ? $"across {selectedSchedules.Values.Select(s => s.PurchaseOrderId).Distinct().Count()} PO(s) · {lockedWarehouseLabel}"
+                                    : "Select lines sharing one warehouse to continue")
+                            </span>
                         </div>
                     }
                 }
             }
             else if (currentStep == 2)
             {
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@lines.Count)</h3>
+                @* R15 — quantities for the SELECTED lines only (the step-1 grid owns add/remove; this step never
+                   sweeps in other lines of the covered POs). *@
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Quantities (@lines.Count line@(lines.Count == 1 ? "" : "s"))</h3>
                 @if (linesLoading)
                 {
                     <p style="color:var(--mer-ink-500);font-size:13px;">Loading lines…</p>
                 }
                 else if (lines.Count == 0)
                 {
-                    <p style="color:var(--mer-ink-500);font-size:13px;">Select at least one PO to load lines.</p>
+                    <p style="color:var(--mer-ink-500);font-size:13px;">Select at least one delivery-schedule line on step 1.</p>
                 }
                 else
                 {
@@ -483,6 +567,7 @@
                                 <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Seq</th>
                                 <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
                                 <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Order Qty</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Delivery</th>
                                 <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Balance / allowance</th>
                                 <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Ship Qty</th>
                                 <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Batch</th>
@@ -500,6 +585,7 @@
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@(ln.SequenceNo?.ToString() ?? "—")</td>
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;" title="Schedule delivery date">@(ln.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                                 <td style="padding:6px 4px;">@BalanceCell(ln) @if (full) { <span class="tlg-status tlg-status--active" style="margin-left:6px;font-size:10px;">Fully shipped</span> }</td>
                                 <td style="padding:6px 4px;text-align:right;">
                                     <input type="number" step="0.001" min="0" max="@ln.OverShipAllowance.ToString("0.###")" class="rz-textbox"
@@ -1018,8 +1104,12 @@
 
 @code {
     [Parameter] public Guid? Id { get; set; }
-    // R4 #6 — "Create ASN from selected POs" on the PO list deep-links here with ?pos=id1,id2 (comma-separated).
-    [SupplyParameterFromQuery(Name = "pos")] public string? PreselectPos { get; set; }
+    // R15 — the delivery-schedules page deep-links here with ?supplier=<id>&schedules=id1,id2: the named supplier
+    // is chosen, the listed schedule lines are pre-checked (warehouse auto-locked) and the wizard lands on
+    // Quantities. NO server draft exists until Save — the instant-draft dialog on that page was retired.
+    // (The dead R4 ?pos= PO-preselect path was removed with the PO-picker step.)
+    [SupplyParameterFromQuery(Name = "supplier")] public Guid? PreselectSupplier { get; set; }
+    [SupplyParameterFromQuery(Name = "schedules")] public string? PreselectSchedules { get; set; }
     // R5 (§9.2) — the delivery-schedule flow lands on /asns/{id}?step=2 so the supplier opens directly on Lines.
     // Also used by the save-draft create path (?step=4) to keep the supplier on Review after the save re-navigation.
     // Applied ONCE, only for an existing ASN with lines already present; a brand-new ASN always starts at step 1.
@@ -1031,23 +1121,25 @@
     private int currentStep = 1;
     private string submitError = string.Empty;
 
-    // PO selection (multi). R4 #6 — supplier-first + server-side PO autocomplete (no load-all): a single supplier
-    // can own thousands of POs, so we pick the supplier first, then SEARCH that supplier's open POs by number.
+    // Supplier-first (chooser hidden at 1 supplier) — unchanged; what follows the supplier changed in R15.
     private List<SupplierListItemDto> suppliers = new();
     private Guid? selectedSupplierId;
     private string? selectedSupplierName;
-    private string poSearch = string.Empty;
-    // R5 (§6.2) — `searching` now covers the one-shot open-PO load per supplier (the per-keystroke server search
-    // was replaced by a client-side filter over the cached openPos, so the ship-to gate can never be bypassed).
-    private bool searching = false;
-    private readonly HashSet<Guid> selectedPoIds = new();
 
-    // R13 — the wizard groups POs by SUPPLIER only (ship-to retired; warehouse moved to the PO LINE). openPos caches
-    // ALL this supplier's open POs (one load per supplier); the picker filters that cache client-side by PO number.
-    // An ASN is still single-warehouse, but that is enforced SERVER-SIDE over the covered PO lines (AsnWarehouseRules),
-    // not in the UI, since the warehouse is no longer a PO-header field the list can pre-filter on.
-    private List<PurchaseOrderListItemDto> openPos = new();
-    private readonly Dictionary<Guid, PurchaseOrderListItemDto> selectedPoMap = new();
+    // R15 (Design 1a) — step 1 is a flat grid of the supplier's APPROVED delivery-schedule lines (hard filter, D2).
+    // scheduleRows caches one status=Approved sweep per supplier; the grid filters it client-side. Selection is
+    // keyed by DeliverySchedule.Id; the FIRST pick locks the warehouse (§9.1) and rows for other warehouses are
+    // disabled until Clear — the server AsnWarehouseRules invariant stays the authoritative fallback.
+    private List<DeliveryScheduleDto> scheduleRows = new();
+    private bool schedulesLoading;
+    private readonly Dictionary<Guid, DeliveryScheduleDto> selectedSchedules = new();
+    private string lineSearch = string.Empty;
+    private string gridWarehouseFilter = string.Empty;
+    private DateTime? gridDateFrom;
+    private DateTime? gridDateTo;
+    // Per-supplier PO-detail cache for line enrichment (serial/lot flags + over-ship allowance come off the PO
+    // line, not the schedule row). One fetch per covered PO, reused across selection changes.
+    private readonly Dictionary<Guid, PurchaseOrderDetailDto> poDetailCache = new();
 
     private List<LineRow> lines = new();
     private bool linesLoading = false;
@@ -1172,8 +1264,9 @@
     private static bool IsGateBlock(string? msg) =>
         !string.IsNullOrEmpty(msg) && msg.Contains("before shipments can be created", StringComparison.OrdinalIgnoreCase);
 
+    // R15 — the covered-PO summary derives from the working line set (there is no PO picker anymore).
     private IEnumerable<string> SelectedPoNumbers =>
-        selectedPoMap.Values.Select(p => p.PoNumber);
+        lines.Select(l => l.PoNumber).Distinct().OrderBy(x => x);
 
     private string PoSummaryText =>
         detail == null ? "" :
@@ -1185,12 +1278,10 @@
         : detail == null ? ""
         : $"ASN for PO {PoSummaryText}";
 
-    // R13 — step-1 helper: pick the supplier (chooser hidden at 1 supplier), then add POs. Single-warehouse is
-    // enforced server-side over the covered PO lines, so there is no ship-to/warehouse step in the wizard anymore.
+    // R15 — step-1 helper (Design 1a): pick approved schedule lines; the first pick locks the warehouse.
     private string Step1HelperText =>
-        suppliers.Count > 1
-            ? "Choose the supplier, then add one or more of its open POs. All POs on an ASN must share one receiving warehouse."
-            : "Add one or more of the supplier's open POs. All POs on an ASN must share one receiving warehouse.";
+        (suppliers.Count > 1 ? "Choose the supplier, then pick" : "Pick")
+        + " the approved delivery-schedule lines to ship — one warehouse per ASN; the first line you pick locks it. Lines may span multiple POs.";
 
     // R11 (D6/D7) — true while any of the three shipment refs is blank. The SERVER is the authority (it hard-
     // blocks Send-For-Approval); this only lets the UI say so before the round-trip. Deliberately NOT wired into
@@ -1200,22 +1291,68 @@
         || string.IsNullOrWhiteSpace(billOfLading)
         || string.IsNullOrWhiteSpace(packingList);
 
-    // R13 — the POs offered to add: this supplier's cached open POs, minus already-selected ones, IsShippable, and
-    // matching the (client-side) PO-number contains text. No ship-to/warehouse pre-filter (neither is a PO-header
-    // field); the single-warehouse rule is enforced server-side over the covered PO lines at save/submit.
-    private List<PurchaseOrderListItemDto> AddablePos =>
-        openPos
-            .Where(p => !selectedPoIds.Contains(p.Id))
-            // R4 §6.2 — offer ONLY POs whose confirmation gate is open (not shippable → hidden from the picker).
-            .Where(p => p.IsShippable)
-            .Where(p => string.IsNullOrWhiteSpace(poSearch) || p.PoNumber.Contains(poSearch.Trim(), StringComparison.OrdinalIgnoreCase))
-            .OrderBy(p => p.PoNumber)
+    // ======================= R15 (Design 1a) — step-1 schedule-grid derived state =======================
+
+    // §9.1 warehouse lock — the first selected schedule fixes the warehouse; null address ids participate as a
+    // legitimate lock value (legacy lines), so the lock is "has a selection", not "has a non-null id".
+    private Guid? lockedWarehouseId => selectedSchedules.Values.Select(s => s.WarehouseAddressId).FirstOrDefault();
+    private string? lockedWarehouseLabel
+    {
+        get
+        {
+            var s = selectedSchedules.Values.FirstOrDefault();
+            if (s is null) return null;
+            return string.IsNullOrWhiteSpace(s.WarehouseAddressName)
+                ? (string.IsNullOrWhiteSpace(s.Warehouse) ? "—" : s.Warehouse)
+                : $"{s.Warehouse} · {s.WarehouseAddressName}";
+        }
+    }
+
+    // The selectable universe inside the locked warehouse (balance left + shippable), across the WHOLE cached
+    // sweep — "Select all in this warehouse" deliberately ignores the client-side filters.
+    private IEnumerable<DeliveryScheduleDto> LockedWarehousePool =>
+        selectedSchedules.Count == 0
+            ? Enumerable.Empty<DeliveryScheduleDto>()
+            : scheduleRows.Where(r => r.WarehouseAddressId == lockedWarehouseId && r.RemainingToShip > 0 && r.IsShippable);
+
+    private bool AllLockedSelected =>
+        LockedWarehousePool.Any() && LockedWarehousePool.All(r => selectedSchedules.ContainsKey(r.Id));
+
+    // Grid rows after the client-side filters, sorted PO → position → delivery date so the PO banding groups.
+    private IEnumerable<DeliveryScheduleDto> VisibleScheduleRows
+    {
+        get
+        {
+            var q = scheduleRows.AsEnumerable();
+            if (!string.IsNullOrEmpty(gridWarehouseFilter) && Guid.TryParse(gridWarehouseFilter, out var wid))
+                q = q.Where(r => r.WarehouseAddressId == wid);
+            if (!string.IsNullOrWhiteSpace(lineSearch))
+            {
+                var t = lineSearch.Trim();
+                q = q.Where(r => r.PoNumber.Contains(t, StringComparison.OrdinalIgnoreCase)
+                                 || r.ItemCode.Contains(t, StringComparison.OrdinalIgnoreCase)
+                                 || (r.ItemDescription?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+            if (gridDateFrom.HasValue) q = q.Where(r => r.DeliveryDate >= gridDateFrom.Value.Date);
+            if (gridDateTo.HasValue) q = q.Where(r => r.DeliveryDate < gridDateTo.Value.Date.AddDays(1));
+            return q.OrderBy(r => r.PoNumber).ThenBy(r => r.PositionNo).ThenBy(r => r.DeliveryDate);
+        }
+    }
+
+    private sealed record GridWarehouseOption(Guid Id, string Name);
+    private List<GridWarehouseOption> GridWarehouseOptions =>
+        scheduleRows.Where(r => r.WarehouseAddressId.HasValue)
+            .Select(r => new GridWarehouseOption(r.WarehouseAddressId!.Value,
+                string.IsNullOrWhiteSpace(r.WarehouseAddressName) ? (r.Warehouse ?? "—") : r.WarehouseAddressName!))
+            .DistinctBy(o => o.Id)
+            .OrderBy(o => o.Name)
             .ToList();
 
     private bool CanProceed => currentStep switch
     {
-        // Step 1 (R13) — ≥1 PO added. Single-warehouse is enforced server-side over the covered PO lines.
-        1 => selectedPoIds.Count > 0,
+        // Step 1 (R15) — ≥1 schedule line picked. Edit mode also passes on legacy lines that have no matching
+        // schedule row (they live only in `lines`) so a pre-R15 draft is never stranded.
+        1 => selectedSchedules.Count > 0 || lines.Count > 0,
         // Step 2 also gates on serial/lot capture: every serialized line must have N serials and every lot line
         // must have Σqty == ShippedQty (no dupes). The backend SubmitAsnCommand re-enforces; this blocks early.
         2 => lines.Any(l => l.ShippedQty > 0) && SerialLotCaptureValid,
@@ -1270,8 +1407,8 @@
             // Suppliers the signed-in user can act for (seccode-scoped). Supplier-first picker when >1.
             var sup = await Api.GetAsync<List<SupplierListItemDto>>("api/suppliers");
             suppliers = sup?.Data ?? new();
-            if (!string.IsNullOrWhiteSpace(PreselectPos))
-                await ApplyPreselectAsync();
+            if (!string.IsNullOrWhiteSpace(PreselectSchedules))
+                await ApplySchedulePreselectAsync();
             else if (suppliers.Count == 1)
                 await ChooseSupplierAsync(suppliers[0].Id);
             loading = false;
@@ -1302,19 +1439,14 @@
                 attachments.Clear();
                 attachments.AddRange(detail.Attachments);
 
-                // Selected PO set from the covered-PO list (falls back to the scalar header for single-PO).
-                selectedPoIds.Clear();
-                selectedPoMap.Clear();
+                // R15 — reset the schedule-grid state for this ASN's supplier.
+                selectedSchedules.Clear();
+                scheduleRows = new();
+                poDetailCache.Clear();
                 selectedSupplierId = detail.SupplierId;
                 selectedSupplierName = detail.SupplierName;
-                // The picker on an edited Draft is fixed to the ASN's supplier (single-entry list → no chooser).
+                // The supplier on an edited Draft is fixed to the ASN's supplier (single-entry list → no chooser).
                 suppliers = new List<SupplierListItemDto> { new(detail.SupplierId, 0, "", detail.SupplierName, null, null, null, "", false, DateTime.UtcNow) };
-                foreach (var po in detail.PurchaseOrders)
-                {
-                    selectedPoIds.Add(po.PurchaseOrderId);
-                    selectedPoMap[po.PurchaseOrderId] = new PurchaseOrderListItemDto(po.PurchaseOrderId, 0, po.PoNumber, detail.SupplierId, detail.SupplierName, "", "", DateTime.UtcNow, "", 0, DateTime.UtcNow);
-                }
-                if (selectedPoIds.Count == 0 && detail.PurchaseOrderId is { } pid) selectedPoIds.Add(pid);
 
                 lines = detail.Lines.Select(l => new LineRow
                 {
@@ -1328,28 +1460,32 @@
                     ShippedQty = l.ShippedQty,
                     BatchNumber = l.BatchNumber,
                     ExpiryDate = l.ExpiryDate,
+                    // R15 — schedule provenance (null on legacy PO-picked lines): drives the step-1 pre-check and
+                    // the Quantities Delivery column.
+                    DeliveryScheduleId = l.DeliveryScheduleId,
+                    DeliveryDate = l.ScheduleDeliveryDate,
                     // AsnLineDto carries no Item flag — infer the line type from which capture collection is
                     // populated (serialized XOR lot-controlled). Re-merged with PO flags below for empty lines.
                     IsSerialized = l.Serials is { Count: > 0 },
                     IsLotControlled = l.Lots is { Count: > 0 },
                     Serials = l.Serials?.Select(s => new SerialRow { Serial = s.SerialNumber, Expiry = s.ExpiryDate }).ToList() ?? new(),
                     Lots = l.Lots?.Select(x => new LotRow { LotNo = x.LotNo, Qty = x.Qty, ExpiryDate = x.ExpiryDate }).ToList() ?? new(),
-                    // R4 (2026-06-26) — §7.3 / DI-04: ship-tracking from the ASN line (ReloadLines re-merges the PO
-                    // line's authoritative figures for editable drafts; the locked read-only view uses these).
+                    // R4 (2026-06-26) — §7.3 / DI-04: ship-tracking from the ASN line (EnrichLinesAsync re-merges the
+                    // PO line's authoritative figures for editable drafts; the locked read-only view uses these).
                     ShippedQtyToDate = l.ShippedQtyToDate,
                     Balance = l.Balance,
                     OverShipAllowance = l.OverShipAllowance
                 }).ToList();
 
-                // For an editable (Draft/Rejected) ASN cache the supplier's open POs so the picker can add/remove POs
-                // (same supplier), and upgrade the covered-PO map to the richer list items. ReloadLines re-fetches the
-                // PO lines and merges authoritative Item flags onto these rows (so a serialized/lot line with NOTHING
-                // captured yet still gets its capture section), preserving the serials/lots just read back from the ASN.
+                // R15 — an editable ASN shows ONLY its own lines (the old ReloadLines() PO sweep — which merged in
+                // EVERY line of every covered PO — is gone; that was the "from-schedule ASN shows all PO lines" bug).
+                // Load the supplier's approved schedule grid, pre-check the rows behind this ASN's lines so step 1
+                // reflects the saved selection, then enrich only these lines with the PO-line flags/allowance.
                 if (!IsLocked)
                 {
-                    await LoadOpenPos();
-                    UpgradeCoveredPoMap();
-                    await ReloadLines();
+                    await LoadSchedulesAsync();
+                    PrecheckSchedulesFromLines();
+                    await EnrichLinesAsync();
                 }
 
                 // R5 (§9.2) — honor ?step= ONCE: the delivery-schedule flow lands on /asns/{id}?step=2 to open
@@ -1372,9 +1508,8 @@
         else
         {
             selectedSupplierId = null; selectedSupplierName = null;
-            // Clearing the supplier also clears the PO cache/selection.
-            selectedPoIds.Clear(); selectedPoMap.Clear(); lines.Clear();
-            openPos = new();
+            // Clearing the supplier also clears the schedule grid + selection.
+            selectedSchedules.Clear(); lines.Clear(); scheduleRows = new(); poDetailCache.Clear();
         }
     }
 
@@ -1383,124 +1518,183 @@
         selectedSupplierId = supplierId;
         attachSupplierId = supplierId;   // create-mode staging uploads stamp this supplier's seccode
         selectedSupplierName = suppliers.FirstOrDefault(s => s.Id == supplierId)?.LegalName;
-        // Switching supplier resets the PO picker (an ASN ships from a single supplier).
-        selectedPoIds.Clear(); selectedPoMap.Clear(); lines.Clear();
-        poSearch = string.Empty;
-        await LoadOpenPos();
+        // Switching supplier resets the grid (an ASN ships from a single supplier).
+        selectedSchedules.Clear(); lines.Clear(); poDetailCache.Clear();
+        lineSearch = string.Empty; gridWarehouseFilter = string.Empty; gridDateFrom = null; gridDateTo = null;
+        await LoadSchedulesAsync();
     }
 
-    // R13 — load this supplier's open POs ONCE (pageSize 200). The picker filters this cache client-side by PO
-    // number; no ship-to/warehouse grouping (both retired from the PO header). Single-warehouse is server-enforced.
-    private async Task LoadOpenPos()
+    // R15 (D1/D2) — ONE Approved-only sweep per supplier (hard gate; pageSize 500 mirrors the delivery-schedules
+    // page option sweep). The step-1 grid filters this cache client-side.
+    private async Task LoadSchedulesAsync()
     {
-        if (!selectedSupplierId.HasValue) { openPos = new(); return; }
-        searching = true; StateHasChanged();
-        var url = $"api/purchase-orders?page=1&pageSize=200&supplierId={selectedSupplierId}&status=Released,Acknowledged,Accepted,PartiallyDelivered";
-        var resp = await Api.GetAsync<PagedResult<PurchaseOrderListItemDto>>(url);
-        openPos = resp?.Data?.Items ?? new();
-        searching = false;
+        if (!selectedSupplierId.HasValue) { scheduleRows = new(); return; }
+        schedulesLoading = true; StateHasChanged();
+        var url = $"api/delivery-schedules?page=1&pageSize=500&supplierId={selectedSupplierId}&status=Approved";
+        var resp = await Api.GetAsync<DeliveryScheduleGridDto>(url);
+        scheduleRows = resp?.Data?.Page.Items.ToList() ?? new();
+        schedulesLoading = false;
     }
 
-    // Existing-ASN edit (R13) — upgrade the synthetic selectedPoMap entries (built from the ASN header) to the
-    // richer open-PO list items where available, so the picker chips and the IsShippable filter stay consistent.
-    // The single-warehouse constraint is enforced server-side over the covered PO lines, not in the picker.
-    private void UpgradeCoveredPoMap()
+    // Edit mode — reflect the ASN's saved lines in the step-1 grid: check each line's schedule row (by the
+    // persisted back-link), and ASSOCIATE legacy lines (null back-link) with the first free schedule row of the
+    // same PO line so re-saving starts carrying the provenance. A line with no schedule row at all stays only in
+    // `lines` (still editable/shippable — never silently dropped).
+    private void PrecheckSchedulesFromLines()
     {
-        foreach (var p in openPos.Where(p => selectedPoIds.Contains(p.Id)))
-            selectedPoMap[p.Id] = p;   // richer list item over the header stub
-    }
-
-    private async Task AddPo(PurchaseOrderListItemDto po)
-    {
-        // R13 — no client-side warehouse guard (warehouse is per-line, not on this DTO). A cross-warehouse selection
-        // is caught server-side (AsnWarehouseRules) at save/submit.
-        if (selectedPoIds.Add(po.Id))
+        var byId = scheduleRows.ToDictionary(r => r.Id);
+        foreach (var line in lines)
         {
-            selectedPoMap[po.Id] = po;
-            await ReloadLines();
-        }
-    }
-
-    // Removing a selected PO just drops it from the set; the supplier can add another. Switching supplier resets all.
-    private async Task RemovePo(Guid poId)
-    {
-        if (selectedPoIds.Remove(poId))
-        {
-            selectedPoMap.Remove(poId);
-            await ReloadLines();
-        }
-    }
-
-    // ?pos=id1,id2 from the PO list "Create ASN from selected". Resolve the supplier from the first PO, then add
-    // every preselected PO that belongs to that supplier (cross-supplier ids are skipped — one ASN, one supplier).
-    // NOTE: the checkbox that produced ?pos= was removed (PreselectPos is effectively dead), but the path is kept
-    // coherent. R13 — no ship-to gate; single-warehouse is enforced server-side over the covered PO lines.
-    private async Task ApplyPreselectAsync()
-    {
-        var ids = (PreselectPos ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).Distinct().ToList();
-        if (ids.Count == 0) return;
-        foreach (var id in ids)
-        {
-            var po = (await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{id}"))?.Data;
-            if (po == null) continue;
-            if (!selectedSupplierId.HasValue)
+            if (line.DeliveryScheduleId is { } sid && byId.TryGetValue(sid, out var row))
             {
-                selectedSupplierId = po.SupplierId; selectedSupplierName = po.SupplierName; attachSupplierId = po.SupplierId;
-                await LoadOpenPos();   // cache the supplier's open POs so the picker can offer them
+                selectedSchedules[row.Id] = row;
+                line.DeliveryDate ??= row.DeliveryDate;
+                line.ScheduledQty = row.ScheduledQty;
+                continue;
             }
-            if (po.SupplierId != selectedSupplierId) continue;
-            // Only add a preselected PO that is in this supplier's open set.
-            var listItem = openPos.FirstOrDefault(x => x.Id == po.Id);
-            if (listItem == null) continue;
-            selectedPoIds.Add(listItem.Id);
-            selectedPoMap[listItem.Id] = listItem;
+            var fallback = scheduleRows.FirstOrDefault(r =>
+                r.PurchaseOrderLineId == line.PurchaseOrderLineId && !selectedSchedules.ContainsKey(r.Id));
+            if (fallback is not null)
+            {
+                line.DeliveryScheduleId = fallback.Id;
+                line.DeliveryDate ??= fallback.DeliveryDate;
+                line.ScheduledQty = fallback.ScheduledQty;
+                selectedSchedules[fallback.Id] = fallback;
+            }
         }
-        if (selectedPoIds.Count > 0) await ReloadLines();
     }
 
-    // Merge PO lines for every selected PO; preserve already-entered ship qty/batch/expiry by line id.
-    private async Task ReloadLines()
+    // R15 — ?supplier&schedules deep link from the delivery-schedules page: choose the supplier, load its grid,
+    // check the listed schedule rows (ids not in the Approved sweep are skipped), and land on Quantities.
+    private async Task ApplySchedulePreselectAsync()
     {
+        var ids = (PreselectSchedules ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).Distinct().ToHashSet();
+        if (ids.Count == 0) return;
+
+        var supplierId = PreselectSupplier
+            ?? (suppliers.Count == 1 ? suppliers[0].Id : (Guid?)null);
+        if (!supplierId.HasValue || suppliers.All(s => s.Id != supplierId.Value)) return;
+
+        await ChooseSupplierAsync(supplierId.Value);
+        foreach (var row in scheduleRows.Where(r => ids.Contains(r.Id)))
+        {
+            // Respect the same rules as a manual pick (balance, shippable, single warehouse).
+            if (row.RemainingToShip <= 0 || !row.IsShippable) continue;
+            if (selectedSchedules.Count > 0 && row.WarehouseAddressId != lockedWarehouseId) continue;
+            selectedSchedules[row.Id] = row;
+        }
+        if (selectedSchedules.Count > 0)
+        {
+            RebuildLinesFromSelection();
+            await EnrichLinesAsync();
+            currentStep = 2;   // land on Quantities — the selection is already made
+        }
+    }
+
+    // ---- Step-1 selection ops (mirror the delivery-schedules page §9.1 rules) ----
+
+    private async Task ToggleScheduleRow(DeliveryScheduleDto row)
+    {
+        if (!selectedSchedules.Remove(row.Id))
+        {
+            if (row.RemainingToShip <= 0 || !row.IsShippable) return;
+            if (selectedSchedules.Count > 0 && row.WarehouseAddressId != lockedWarehouseId) return;   // cross-warehouse guard
+            selectedSchedules[row.Id] = row;
+        }
+        RebuildLinesFromSelection();
+        await EnrichLinesAsync();
+    }
+
+    private async Task SelectAllInLockedWarehouse()
+    {
+        foreach (var r in LockedWarehousePool) selectedSchedules[r.Id] = r;
+        RebuildLinesFromSelection();
+        await EnrichLinesAsync();
+    }
+
+    private async Task ToggleAllInLockedWarehouse()
+    {
+        if (selectedSchedules.Count == 0) return;
+        if (AllLockedSelected)
+        {
+            ClearScheduleSelection();
+            return;
+        }
+        await SelectAllInLockedWarehouse();
+    }
+
+    private void ClearScheduleSelection()
+    {
+        selectedSchedules.Clear();
+        RebuildLinesFromSelection();
+    }
+
+    // Rebuild the working line set from the schedule selection. Rows keep their entered qty/batch/capture across
+    // select/deselect (keyed by schedule id); LEGACY rows (no schedule link — pre-R15 drafts) are always kept.
+    // D4 — a NEW row's ship qty defaults to min(ScheduledQty, remaining balance).
+    private void RebuildLinesFromSelection()
+    {
+        var byScheduleId = lines.Where(l => l.DeliveryScheduleId.HasValue)
+            .ToDictionary(l => l.DeliveryScheduleId!.Value);
+        var keep = lines.Where(l => !l.DeliveryScheduleId.HasValue).ToList();
+
+        foreach (var s in selectedSchedules.Values)
+        {
+            if (byScheduleId.TryGetValue(s.Id, out var prev)) { keep.Add(prev); continue; }
+            keep.Add(new LineRow
+            {
+                DeliveryScheduleId = s.Id,
+                PurchaseOrderLineId = s.PurchaseOrderLineId,
+                PurchaseOrderId = s.PurchaseOrderId,
+                PoNumber = s.PoNumber,
+                PositionNo = s.PositionNo,
+                ItemCode = s.ItemCode,
+                OrderQty = s.OrderQty,
+                DeliveryDate = s.DeliveryDate,
+                ScheduledQty = s.ScheduledQty,
+                ShippedQty = Math.Max(0m, Math.Min(s.ScheduledQty, s.RemainingToShip)),
+                ShippedQtyToDate = s.ShippedQtyToDate,
+                Balance = s.RemainingToShip,
+                // Provisional until EnrichLinesAsync merges the tolerance-adjusted ceiling off the PO line.
+                OverShipAllowance = s.RemainingToShip,
+            });
+        }
+
+        lines = keep
+            .OrderBy(l => l.PoNumber).ThenBy(l => l.PositionNo)
+            .ThenBy(l => l.DeliveryDate ?? DateTime.MaxValue)
+            .ToList();
+    }
+
+    // Enrich the working rows with the PO-LINE figures the schedule row doesn't carry: serial/lot capture flags,
+    // the tolerance-adjusted OverShipAllowance, live Balance/ShippedQtyToDate and SequenceNo. One PO-detail fetch
+    // per covered PO (cached per supplier session); merges onto the SELECTED rows only — never adds rows.
+    private async Task EnrichLinesAsync()
+    {
+        if (lines.Count == 0) return;
         linesLoading = true;
         StateHasChanged();
-        var existing = lines.ToDictionary(l => l.PurchaseOrderLineId);
-        var merged = new List<LineRow>();
-        foreach (var poId in selectedPoIds)
+        foreach (var poId in lines.Select(l => l.PurchaseOrderId).Distinct().ToList())
         {
+            if (poDetailCache.ContainsKey(poId)) continue;
             var resp = await Api.GetAsync<PurchaseOrderDetailDto>($"api/purchase-orders/{poId}");
-            if (resp?.Data == null) continue;
-            var poNo = resp.Data.PoNumber;
-            foreach (var l in resp.Data.Lines.OrderBy(x => x.PositionNo).ThenBy(x => x.SequenceNo))
-            {
-                var prev = existing.GetValueOrDefault(l.Id);
-                merged.Add(new LineRow
-                {
-                    PurchaseOrderLineId = l.Id,
-                    PurchaseOrderId = poId,
-                    PoNumber = poNo,
-                    PositionNo = l.PositionNo,
-                    SequenceNo = l.SequenceNo,
-                    ItemCode = l.ItemCode,
-                    OrderQty = l.OrderQty,
-                    ShippedQty = prev?.ShippedQty ?? 0,
-                    BatchNumber = prev?.BatchNumber,
-                    ExpiryDate = prev?.ExpiryDate,
-                    // Serial/lot capture flags snapshot from the PO line's Item (serialized XOR lot-controlled).
-                    IsSerialized = l.IsSerialized,
-                    IsLotControlled = l.IsLotControlled,
-                    // Preserve already-captured serials/lots across a PO add/remove re-merge.
-                    Serials = prev?.Serials ?? new(),
-                    Lots = prev?.Lots ?? new(),
-                    // R4 (2026-06-26) — §7.3 / DI-04: live ship-tracking from the PO line.
-                    ShippedQtyToDate = l.ShippedQtyToDate,
-                    Balance = l.Balance,
-                    OverShipAllowance = l.OverShipAllowance,
-                    IsOverShippedQtyReduced = l.IsOverShippedQtyReduced
-                });
-            }
+            if (resp?.Data != null) poDetailCache[poId] = resp.Data;
         }
-        lines = merged;
+        foreach (var line in lines)
+        {
+            if (!poDetailCache.TryGetValue(line.PurchaseOrderId, out var po)) continue;
+            var pol = po.Lines.FirstOrDefault(x => x.Id == line.PurchaseOrderLineId);
+            if (pol == null) continue;
+            line.SequenceNo = pol.SequenceNo;
+            line.OrderQty = pol.OrderQty;
+            line.IsSerialized = pol.IsSerialized;
+            line.IsLotControlled = pol.IsLotControlled;
+            line.ShippedQtyToDate = pol.ShippedQtyToDate;
+            line.Balance = pol.Balance;
+            line.OverShipAllowance = pol.OverShipAllowance;
+            line.IsOverShippedQtyReduced = pol.IsOverShippedQtyReduced;
+        }
         linesLoading = false;
         StateHasChanged();
     }
@@ -1513,12 +1707,12 @@
         if (currentStep == 2 && lines.Any(OverAllowance)) { showOverShip = true; return; }
         if (currentStep < 4 && CanProceed) currentStep++;
     }
-    private string StepLabel(int s) => s switch { 1 => "PO(s)", 2 => "Lines", 3 => "Shipment", 4 => "Review", _ => "" };
+    private string StepLabel(int s) => s switch { 1 => "Lines", 2 => "Quantities", 3 => "Shipment", 4 => "Review", _ => "" };
 
     // ---- Save draft (create or update) ----
     private async Task SaveDraft()
     {
-        if (selectedPoIds.Count == 0 || !expectedDeliveryDate.HasValue) { submitError = "Select at least one PO and an expected delivery date."; currentStep = 1; return; }
+        if (lines.Count == 0 || !expectedDeliveryDate.HasValue) { submitError = "Select at least one line and an expected delivery date."; currentStep = lines.Count == 0 ? 1 : 3; return; }
         busy = true; savingDraft = true; submitError = string.Empty;
 
         var lineReqs = BuildLineRequests();
@@ -1610,7 +1804,8 @@
     // ---- Create draft (with optional gate override). On a gate block, route to the override dialog. ----
     private async Task CreateDraftAsync(List<CreateAsnLineRequest> lineReqs, string? overrideReason)
     {
-        var poList = selectedPoIds.ToList();
+        // R15 — the PO set derives from the lines actually being shipped (there is no PO picker anymore).
+        var poList = lines.Where(l => l.ShippedQty > 0).Select(l => l.PurchaseOrderId).Distinct().ToList();
         var req = new CreateAsnRequest(
             poList.Count == 1 ? poList[0] : (Guid?)null,
             poList.Count > 1 ? poList : null,
@@ -1869,7 +2064,8 @@
             else if (l.IsLotControlled)
                 lots = l.Lots.Where(x => !string.IsNullOrWhiteSpace(x.LotNo) && (x.Qty ?? 0) > 0)
                     .Select(x => new AsnLineLotInput(x.LotNo.Trim(), x.Qty ?? 0, x.ExpiryDate)).ToList();
-            return new CreateAsnLineRequest(l.PurchaseOrderLineId, l.ShippedQty, l.BatchNumber, l.ExpiryDate, serials, lots);
+            // R15 — carry the schedule back-link so create AND update preserve provenance (null for legacy lines).
+            return new CreateAsnLineRequest(l.PurchaseOrderLineId, l.ShippedQty, l.BatchNumber, l.ExpiryDate, serials, lots, l.DeliveryScheduleId);
         }).ToList();
 
     // ---- Serial / lot capture helpers (R4 2026-06-23) ----
@@ -1975,6 +2171,12 @@
         public decimal ShippedQty { get; set; }
         public string? BatchNumber { get; set; }
         public DateTime? ExpiryDate { get; set; }
+
+        // R15 — schedule provenance: the originating delivery schedule (null for legacy PO-picked lines), its
+        // delivery date (Quantities column) and its scheduled qty (the D4 default: min(scheduled, balance)).
+        public Guid? DeliveryScheduleId { get; set; }
+        public DateTime? DeliveryDate { get; set; }
+        public decimal ScheduledQty { get; set; }
 
         // R4 (2026-06-23) — Serial/Lot capture. Item flags (serialized XOR lot-controlled) drive which capture
         // section the line gets; Serials/Lots hold the captured values. ShippedQty is the required count/Σ.

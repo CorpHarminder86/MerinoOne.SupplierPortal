@@ -11,7 +11,8 @@ namespace MerinoOne.SupplierPortal.Application.Shipments.Queries;
 /// <summary>
 /// R5/R13 (TSD R5 Addendum §7 / §8.3) — delivery-schedule grid. Returns schedule rows joined to their PO line so the
 /// grid shows PO number, position, item, order qty + warehouse, with RemainingToShip DERIVED from the R4 line balance
-/// (orderQty − shippedQtyToDate) — all in ONE projection (no entity loads). Sort: PO → Line → DeliveryDate ASC.
+/// (orderQty − shippedQtyToDate) — all in ONE projection (no entity loads). Sort (R15): CreatedOn DESC — newest
+/// schedules first (PO → Line as a stable tiebreak within one inbound batch).
 ///
 /// <para>Filters (§7): supplier, warehouse, PO, delivery-date range, status. The result also carries the auto-hide
 /// warehouse signal — the count of DISTINCT warehouse addresses across the supplier's visible schedules (before the
@@ -83,11 +84,12 @@ public class GetDeliveryScheduleListQueryHandler
 
         var total = await baseQuery.CountAsync(ct);
 
-        // Sort PO → Line → DeliveryDate ASC (§8.3). PO by number, line by position, then the schedule date. Project
-        // to a flat intermediate (carrying PoStatus + supplier mode) so IsShippable can be computed in-memory below
-        // (PoConfirmationPolicy is not translatable to SQL and the Web layer cannot call it).
+        // Sort (R15): CreatedOn DESC — newest schedules surface first; PO → Line is the stable tiebreak for rows
+        // created in the same inbound sweep. Project to a flat intermediate (carrying PoStatus + supplier mode) so
+        // IsShippable can be computed in-memory below (PoConfirmationPolicy is not translatable to SQL and the Web
+        // layer cannot call it).
         var raw = await baseQuery
-            .OrderBy(x => x.PoNumber).ThenBy(x => x.line.PositionNo).ThenBy(x => x.sch.DeliveryDate)
+            .OrderByDescending(x => x.sch.CreatedOn).ThenBy(x => x.PoNumber).ThenBy(x => x.line.PositionNo).ThenBy(x => x.sch.DeliveryDate)
             .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new
             {

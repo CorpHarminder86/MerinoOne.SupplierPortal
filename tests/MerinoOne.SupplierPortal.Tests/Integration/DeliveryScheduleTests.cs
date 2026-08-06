@@ -24,7 +24,7 @@ namespace MerinoOne.SupplierPortal.Tests.Integration;
 ///   <item>UC-DS-01 — schedules created on Accept (AcceptToShip mode).</item>
 ///   <item>UC-DS-02 — schedules created for AutoAccept at Released (ingest auto-stamp).</item>
 ///   <item>UC-DS-03 — material Modify upserts in place, NO duplicate (one row per line).</item>
-///   <item>UC-DS-04 — grid sort PO → Line → DeliveryDate ASC + line detail.</item>
+///   <item>UC-DS-04 — grid sort CreatedOn DESC (R15; PO → Line tiebreak) + line detail.</item>
 ///   <item>UC-DS-05 — grid filters + ship-to auto-hide signal.</item>
 /// </list>
 ///
@@ -151,7 +151,7 @@ public class DeliveryScheduleTests
         }
     }
 
-    // ── UC-DS-04 — grid sort PO → Line → DeliveryDate ASC + line detail ───────────────────────────────────
+    // ── UC-DS-04 — grid sort CreatedOn DESC (R15) + line detail ───────────────────────────────────────────
     [SkippableFact]
     public async Task UC_DS_04_Grid_sorts_and_carries_line_detail()
     {
@@ -163,14 +163,16 @@ public class DeliveryScheduleTests
             grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
         await SetConfirmationModeAsync(supplier.SupplierId, PoConfirmationMode.AutoAccept);
 
-        // Two POs (number ordering: B then A pushed so we prove the grid sorts by PO number, not insert order), each
-        // two lines with different delivery dates so the Line + DeliveryDate ordering is observable.
+        // Two POs, each two lines. poA is pushed FIRST (alphabetically first too), poB SECOND — under the old
+        // PO-number sort poA would lead; under R15's CreatedOn DESC the NEWER poB rows must lead, so this ordering
+        // proves the sort really is recency, not PO number. The delay guarantees distinct CreatedOn stamps.
         var poA = $"PO-DSA-{tag}";
         var poB = $"PO-DSB-{tag}";
         var d1 = DateTime.UtcNow.Date.AddDays(5);
         var d2 = DateTime.UtcNow.Date.AddDays(10);
-        await PushAsync(PoBody(poB, supplier.SupplierCode, tag, (20, 5m, d2), (10, 7m, d1)));
         await PushAsync(PoBody(poA, supplier.SupplierCode, tag, (10, 3m, d1), (20, 9m, d2)));
+        await Task.Delay(150);
+        await PushAsync(PoBody(poB, supplier.SupplierCode, tag, (20, 5m, d2), (10, 7m, d1)));
 
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
         var grid = (await Read<DeliveryScheduleGridDto>(
@@ -179,19 +181,21 @@ public class DeliveryScheduleTests
         var rows = grid.Page.Items;
         rows.Should().HaveCount(4, because: "two POs × two lines = four schedules");
 
-        // Sort: PO number ASC, then PositionNo ASC, then DeliveryDate ASC. With one schedule per line the position
-        // ordering dominates within a PO; assert the PO→Line key sequence.
+        // Sort (R15): CreatedOn DESC — the second (newer) push's schedules first; PO → Line is the stable tiebreak
+        // within one push batch (both lines of a PO are stamped in the same ingest).
         var keySequence = rows.Select(r => (r.PoNumber, r.PositionNo)).ToList();
         keySequence.Should().Equal(
-            (poA, 10), (poA, 20), (poB, 10), (poB, 20));
+            (poB, 10), (poB, 20), (poA, 10), (poA, 20));
+        rows.Select(r => r.CreatedOn).Should().BeInDescendingOrder(
+            because: "newest-created schedules surface first (R15)");
 
         // Line detail surfaced + RemainingToShip derived from the R4 balance (no shipments yet → orderQty).
         var first = rows[0];
-        first.PoNumber.Should().Be(poA);
+        first.PoNumber.Should().Be(poB);
         first.PositionNo.Should().Be(10);
         first.ItemCode.Should().Be($"ITM-{tag}-10");
-        first.OrderQty.Should().Be(3m);
-        first.RemainingToShip.Should().Be(3m, because: "remaining = MAX(0, orderQty − shippedQtyToDate) with nothing shipped");
+        first.OrderQty.Should().Be(7m);
+        first.RemainingToShip.Should().Be(7m, because: "remaining = MAX(0, orderQty − shippedQtyToDate) with nothing shipped");
         first.WarehouseAddressName.Should().Be("IntTest DC");
         first.DeliveryDate.Date.Should().Be(d1);
     }
