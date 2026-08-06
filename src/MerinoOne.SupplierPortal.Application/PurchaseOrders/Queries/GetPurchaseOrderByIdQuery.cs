@@ -83,7 +83,9 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
                 r.ResolvedItemId,
                 r.IsSerialized,
                 r.IsLotControlled,
-                l.Price - l.DiscountAmount,
+                // Net amount = the line Price exactly as received from the ERP (already net of discount) — the
+                // portal must NOT subtract DiscountAmount again.
+                l.Price,
                 l.ShippedQtyToDate, balance, overShipAllowance,
                 isOverShippedQtyReduced,
                 // R13 — per-line warehouse: the raw code + the owned point-in-time snapshot VO. LOAD-THEN-READ: the
@@ -100,7 +102,7 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
                 l.WarehouseAddressSnapshot?.Country);
         }).ToList();
 
-        // PO header total = sum of line net amounts (Price − DiscountAmount). Derived, not persisted.
+        // PO header total = sum of line net amounts (Price as received — ERP-net). Derived, not persisted.
         var totalAmount = lines.Sum(l => l.NetAmount);
 
         // R5 (§6.1 / [[r5-consolidation]]) — CustomerName is DERIVED live from the TenantEntity (the company) by the

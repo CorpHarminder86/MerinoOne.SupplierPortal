@@ -16,8 +16,8 @@ public record PurchaseOrderListItemDto(
     // Supplier.PoResponseMode. Lets the PO list gate accept/reject affordances per-row without a second
     // GET /api/suppliers/{id} per PO. Trailing optional positional — defaults to "Manual".
     string PoResponseMode = "Manual",
-    // PO list display: total amount (sum of line net = Price − DiscountAmount) + currency snapshot + the
-    // header payment/delivery term strings. Trailing optional positionals.
+    // PO list display: total amount (sum of line net = Price as received from the ERP, already discount-net) +
+    // currency snapshot + the header payment/delivery term strings. Trailing optional positionals.
     decimal TotalAmount = 0,
     string? CurrencyCode = null,
     string? PaymentTerms = null,
@@ -61,7 +61,7 @@ public record PurchaseOrderDetailDto(
     // "AcceptToShip"), joined from Supplier.PoConfirmationMode — replaces the UI's second GET per PO detail. Field
     // name kept as PoResponseMode for contract stability (the UI rename is Phase 5). Default "AcceptToShip".
     string PoResponseMode = "AcceptToShip",
-    // PO header total = sum of each line's NetAmount (Price − DiscountAmount). Display-only (derived, not stored).
+    // PO header total = sum of each line's NetAmount (Price as received — ERP-net). Display-only (derived, not stored).
     decimal TotalAmount = 0,
     // R4 (2026-06-26) — Phase 5b / D1, D2: the owning supplier's action toggles, joined from
     // Supplier.AllowNegotiate / Supplier.AllowReject. They gate the PO-detail affordances: AllowReject=false hides
@@ -104,7 +104,8 @@ public record PurchaseOrderLineDto(
     Guid? ItemId = null,
     bool IsSerialized = false,
     bool IsLotControlled = false,
-    // Line net amount = Price (extended line amount) − DiscountAmount. The PO header TotalAmount is the sum of these.
+    // Line net amount = Price exactly as received from the ERP (already net of discount — never re-subtracted).
+    // The PO header TotalAmount is the sum of these.
     decimal NetAmount = 0,
     // R4 (2026-06-26) — Addendum §7.3 / DI-04 (ASN quantity tracking). The PO-line-picker the ASN wizard reads:
     // ShippedQtyToDate is the maintained cumulative; Balance is the nominal remaining (MAX(0, orderQty −

@@ -69,9 +69,10 @@ public class GetPurchaseOrderListQueryHandler : IRequestHandler<GetPurchaseOrder
                 x.po.Version, x.po.CreatedOn,
                 // PO-confirmation mode from the joined supplier — per-row accept/reject gating, no N+1.
                 x.s.PoConfirmationMode.ToString(),
-                // Total = sum of live line net amounts (Price − DiscountAmount); correlated subquery, paged so bounded.
+                // Total = sum of live line net amounts (Price as received from the ERP — already net of discount,
+                // do NOT subtract DiscountAmount again); correlated subquery, paged so bounded.
                 _db.PurchaseOrderLines.Where(l => !l.IsDeleted && l.PurchaseOrderId == x.po.Id)
-                    .Sum(l => (decimal?)(l.Price - l.DiscountAmount)) ?? 0m,
+                    .Sum(l => (decimal?)l.Price) ?? 0m,
                 // Term display: the header snapshot string (written at inbound from the term master — no read join).
                 x.po.CurrencyCode, x.po.PaymentTerms, x.po.DeliveryTerms,
                 // R13 — ship-to and the PO-header warehouse are gone from the list DTO (warehouse is per PO LINE now).

@@ -138,7 +138,7 @@ public class PurchaseOrderInboundTests
         var listResp = await supplierClient.GetAsync($"/api/purchase-orders?supplierId={supplier.SupplierId}&pageSize=200");
         var list = await Read<MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<PurchaseOrderListItemDto>>(listResp);
         var listRow = list.Data!.Items.Single(p => p.PoNumber == poNumber);
-        listRow.TotalAmount.Should().Be(125m, because: "list amount = sum of line net amounts (Price − DiscountAmount)");
+        listRow.TotalAmount.Should().Be(125m, because: "list amount = sum of line Price as received (ERP-net; no discount re-subtraction)");
         listRow.CurrencyCode.Should().Be("INR");
     }
 
@@ -517,7 +517,7 @@ public class PurchaseOrderInboundTests
                     PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR")
             });
 
-        // Push 1: position 10 / seq 1, qty 5, price 100, discount 10 → net 90.
+        // Push 1: position 10 / seq 1, qty 5, price 100, discount 10 (price is ERP-net; discount is informational).
         var resp1 = await inbound_PostAsync(Body(10, 1, qty: 5, price: 100m, discountAmount: 10m));
         (await Read<UpsertResultDto>(resp1)).Data!.Inserted.Should().Be(1);
 
@@ -544,7 +544,7 @@ public class PurchaseOrderInboundTests
             lines.Single().Price.Should().Be(200m);
         }
 
-        // Header total = the single folded line's net (price 200 − discount 0 = 200).
+        // Header total = the single folded line's Price as received (200).
         var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
         var detail = (await Read<PurchaseOrderDetailDto>(await supplierClient.GetAsync($"/api/purchase-orders/{poId}"))).Data!;
         detail.Lines.Should().HaveCount(1);
