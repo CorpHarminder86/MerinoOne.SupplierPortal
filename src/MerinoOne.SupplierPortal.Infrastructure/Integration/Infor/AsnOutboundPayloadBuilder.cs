@@ -13,6 +13,17 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Integration.Infor;
 ///
 /// TODO (Q-LN-serial): the LN advance-shipment-notice field map (header + line-child "serials"/"lots"/"lotNo"/"qty")
 /// is a STARTER — confirm with the Infor LN team before enabling Mode=Live.
+///
+/// <para><b>!! R16 (2026-08-10) — THIS SHAPE IS NO LONGER THE WIRE CONTRACT.</b> The real LN ASN_Update body wraps
+/// everything in an <c>ASNDetail</c> node, renames CreateDate/ShipmentDate to ASNCreationDate/ShippingDate, uses a
+/// lower-camel driver/carrier block, ships numerics as strings and has no ShippedQty_InvUnit or InvoiceNo. That
+/// contract lives in <c>Ln/Expressions/AsnPost.request.jsonata</c> and reaches LN only through the Dynamic route;
+/// the byte-parity assertion that used to bind the two was retired with it. What remains here is the Mock-mode
+/// "what we sent" payload and the compiled Legacy fallback — and the Legacy fallback has never actually posted an
+/// ASN from the dispatcher anyway, because <see cref="LiveInforIntegrationService"/> resolves the connection via
+/// the AMBIENT tenant (<c>GetCurrentAsync</c>), which is null in the background worker. Every AsnPost row on the
+/// Legacy route fails pre-flight with "Infor connection is not configured". Do not flip an ASN config back to
+/// Legacy expecting a working rollback.</para>
 /// </summary>
 internal static class AsnOutboundPayloadBuilder
 {

@@ -253,6 +253,15 @@
                     @if (detail.PostedAt.HasValue) { <dt style="color:var(--mer-ink-500);">Posted</dt><dd style="font-family:Inter,monospace;">@detail.PostedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.PostedBy) ? "" : $"by {detail.PostedBy}")</dd> }
                     @if (!string.IsNullOrEmpty(detail.ErpSyncId)) { <dt style="color:var(--mer-ink-500);">ERP sync id</dt><dd style="font-family:Inter,monospace;font-size:11px;">@detail.ErpSyncId</dd> }
                     @if (!string.IsNullOrEmpty(detail.ErpCode)) { <dt style="color:var(--mer-ink-500);">ERP code</dt><dd style="font-family:Inter,monospace;">@detail.ErpCode</dd> }
+                    @* R16 — the LN verdict. PartialFailure is the one state where "no ERP code" ≠ "not in LN":
+                       LN holds an ASN header for this record but refused ≥1 line, so it renders as a warning. *@
+                    @if (!string.IsNullOrEmpty(detail.ErpStatus))
+                    {
+                        <dt style="color:var(--mer-ink-500);">ERP status</dt>
+                        <dd>
+                            <span style="font-family:Inter,monospace;font-size:11px;border-radius:4px;padding:2px 6px;border:1px solid @(detail.ErpStatus == "Success" ? "var(--mer-green)" : "var(--mer-amber-800)");background:@(detail.ErpStatus == "Success" ? "var(--mer-green-soft)" : "var(--mer-amber-50)");color:@(detail.ErpStatus == "Success" ? "inherit" : "var(--mer-amber-800)");">@detail.ErpStatus</span>
+                        </dd>
+                    }
                 </dl>
                 @if (!string.IsNullOrEmpty(detail.Notes))
                 {

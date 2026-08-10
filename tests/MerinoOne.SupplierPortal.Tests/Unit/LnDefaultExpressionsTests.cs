@@ -66,7 +66,9 @@ public class LnDefaultExpressionsTests
         // R12 — the PO_Update transactions are no longer starters: their response mapping targets the REAL
         // LN envelope (PurchaseOrder[].Header/.Line), so validating them against the generic OData
         // created-entity sample would be meaningless. They get their own sample and their own assertions below.
-        foreach (var e in _catalog.All.Where(e => !IsPoUpdate(e.TransactionType)))
+        // R16 — AsnPost joined them (ASN[].Header/.Lines); its assertions live in AsnUpdateExpressionTests.
+        foreach (var e in _catalog.All.Where(e => !IsPoUpdate(e.TransactionType)
+                                                 && e.TransactionType != OutboxTransactionType.AsnPost))
         {
             var result = _svc.Evaluate(e.ResponseExpr, _catalog.ODataCreatedEntitySample);
             result.Ok.Should().BeTrue(result.Error);

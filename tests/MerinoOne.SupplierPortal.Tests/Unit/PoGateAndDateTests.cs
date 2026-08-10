@@ -87,12 +87,25 @@ public class PoGateAndDateTests
 
     [Fact]
     public void Every_po_update_transaction_ships_a_gate()
-        => LnOutboundSeeder.EligibilityGateByType.Keys.Should().BeEquivalentTo(new[]
+        => LnOutboundSeeder.EligibilityGateByType.Keys.Should().Contain(new[]
         {
             OutboxTransactionType.PoAccept,
             OutboxTransactionType.PoReject,
             OutboxTransactionType.PoNegotiationApprove,
         });
+
+    [Fact]
+    public void The_asn_gate_reads_a_field_the_input_document_actually_has()
+    {
+        // R16 regression guard. The Merino tenant shipped a hand-authored `$exists(postedAt)`: postedAt is a
+        // column on proc.Asn but NOT a field of the frozen AsnInputDoc, so the gate was strict-true fail-closed
+        // on every row — every ASN silently skipped, no error anywhere. Same class of bug as the "Negotiated"
+        // literal above, and just as invisible.
+        var gate = LnOutboundSeeder.EligibilityGateByType[OutboxTransactionType.AsnPost];
+
+        gate.Should().NotContain("postedAt");
+        gate.Should().Be("$exists(shipmentDate)");
+    }
 
     // ── D4: the wire date format ──────────────────────────────────────────────────────────────────────
 

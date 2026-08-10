@@ -42,8 +42,17 @@ public class LiveInforIntegrationService : IInforIntegrationService
     {
         public const string Supplier = "LN/lnapi/odata/tdapi.bpSuppliers/Suppliers";
         public const string Invoice = "LN/lnapi/odata/cisli.selfBillingInvoices/Invoices";
-        public const string Asn = "LN/lnapi/odata/whinh.advanceShipmentNotices/Asns";
         public const string SupplierChange = "LN/lnapi/odata/tdapi.bpSuppliers/SupplierChanges";
+
+        /// <summary>
+        /// R16 (2026-08-10) — the ASN custom ION API, same family and same base-URL assumption as
+        /// <see cref="PoUpdate"/> (base ends at the ION tenant segment). Replaces the never-real
+        /// <c>LN/lnapi/odata/whinh.advanceShipmentNotices/Asns</c> starter.
+        /// </summary>
+        public const string Asn = "CustomerApi/LNAPI/ASN_Update";
+
+        /// <summary>R16 — the pre-R16 ASN starter path, kept only so the seeder can correct an untouched row.</summary>
+        internal const string RetiredAsnStarterPath = "LN/lnapi/odata/whinh.advanceShipmentNotices/Asns";
 
         /// <summary>
         /// R12 (2026-07-29) — the REAL path, confirmed against the DEM tenant. All three PO-response

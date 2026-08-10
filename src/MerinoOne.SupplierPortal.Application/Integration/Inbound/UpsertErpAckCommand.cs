@@ -250,6 +250,9 @@ public class UpsertErpAckCommandHandler(
                 // LN ASNNo — IS the ASN IDM gate field now, so its change carries the D4b auto-enqueue.
                 var asnErpCodeChanged = !string.Equals(e.ErpCode, erpCode, StringComparison.Ordinal);
                 e.ErpCode = erpCode; e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
+                // R16 — a successful ack IS the Success verdict; keep the D-R9-20 column consistent with the
+                // dispatcher's inline stamp (both carry ERP truth, last-writer-wins is safe).
+                e.ErpStatus = "Success";
                 if (asnErpCodeChanged)
                     await idmEnqueuer.EnqueueOwnerUpdatesAsync(db, tenantId, DocumentOwnerTypes.Asn, e.Id, "infor:inbound", ct);
                 return (true, null);

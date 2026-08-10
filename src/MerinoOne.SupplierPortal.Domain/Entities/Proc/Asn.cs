@@ -74,6 +74,14 @@ public class Asn : BaseAggregateRoot
     public string? ErpSyncId { get; set; }
     public string? ErpCode { get; set; }
 
+    // R16 (2026-08-10) — the LN ASN_Update VERDICT, mirroring PurchaseOrder.ErpStatus (D-R9-20: erpStatus
+    // lands on the owning entity's ERP-owned status column). "Success" on an acked post; "PartialFailure"
+    // when LN created the ASN header but refused ≥1 line — in THAT case ErpCode above stays NULL on purpose
+    // (erpCode is the ASN's IDM eligibility gate; stamping it would start syncing documents for a broken
+    // ASN), so this column is the only structured footprint that LN holds an ASN for this record. Null =
+    // nothing ever landed in LN. ERP truth, never the portal workflow status.
+    public string? ErpStatus { get; set; }
+
     // R11.2 (2026-07-29) — the R8 LN composite key (ErpCompany/ErpTransactionType/ErpDocumentNo) was REMOVED
     // from the ASN (migration 0055; Invoice keeps its trio). User decision: erpCompany always equals the
     // company code already held via TenantEntityId, and the IDM ASN mapping that consumed the other two was

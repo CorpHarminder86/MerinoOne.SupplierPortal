@@ -70,52 +70,15 @@ public class LnRequestExpressionParityTests
             db => InvoiceOutboundPayloadBuilder.BuildJsonAsync(db, IntegrationTestFixture.InvoiceId));
     }
 
-    [SkippableFact]
-    public async Task AsnPost_parity_with_serials_lots_and_null_optionals()
-    {
-        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
-
-        Guid asnId;
-        using (var scope = _fx.Factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var now = DateTime.UtcNow;
-            var tag = Guid.NewGuid().ToString("N")[..8];
-            var asn = new Asn
-            {
-                Id = Guid.NewGuid(), AsnNumber = $"ASN-PAR-{tag}", PurchaseOrderId = IntegrationTestFixture.PoId,
-                SupplierId = IntegrationTestFixture.SupplierId, ExpectedDeliveryDate = now.Date.AddDays(2),
-                AsnStatus = AsnStatus.Submitted, CarrierName = "BlueDart", TrackingNumber = null, VehicleNumber = "MH12AB1234",
-                SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
-                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now,
-            };
-            db.Asns.Add(asn);
-            var line1 = new AsnLine
-            {
-                Id = Guid.NewGuid(), AsnId = asn.Id, PurchaseOrderLineId = IntegrationTestFixture.PoLine1Id,
-                PositionNo = 10, SequenceNo = 1, ShippedQty = 40.50m, BatchNumber = "B-01",
-                ExpiryDate = now.Date.AddYears(1), CreatedBy = "seed", CreatedOn = now,
-            };
-            line1.Serials.Add(new AsnLineSerial { Id = Guid.NewGuid(), AsnLineId = line1.Id, SerialNumber = "SER-001", CreatedBy = "seed", CreatedOn = now });
-            line1.Serials.Add(new AsnLineSerial { Id = Guid.NewGuid(), AsnLineId = line1.Id, SerialNumber = "SER-002", CreatedBy = "seed", CreatedOn = now });
-            var line2 = new AsnLine
-            {
-                Id = Guid.NewGuid(), AsnId = asn.Id, PurchaseOrderLineId = IntegrationTestFixture.PoLine2Id,
-                PositionNo = 20, SequenceNo = null, ShippedQty = 5m, BatchNumber = null, ExpiryDate = null,
-                CreatedBy = "seed", CreatedOn = now,
-            };
-            line2.Lots.Add(new AsnLineLot { Id = Guid.NewGuid(), AsnLineId = line2.Id, LotNo = "LOT-9", Qty = 5m, ExpiryDate = null, CreatedBy = "seed", CreatedOn = now });
-            db.AsnLines.AddRange(line1, line2);
-            await db.SaveChangesAsync();
-            asnId = asn.Id;
-        }
-
-        await AssertParityAsync(
-            OutboxTransactionType.AsnPost,
-            new AsnInputDocumentBuilder(),
-            asnId,
-            db => AsnOutboundPayloadBuilder.BuildJsonAsync(db, asnId));
-    }
+    // R16 (2026-08-10) — AsnPost_parity_with_serials_lots_and_null_optionals is GONE, for the same reason the PO
+    // cases went in R12: parity is a comparison against a compiled builder, and the compiled ASN body is no longer
+    // the wire contract. The real LN ASN_Update body wraps in ASNDetail, renames the two date nodes, lower-cases
+    // the driver block and strings its numerics; AsnOutboundPayloadBuilder still produces the old shape for Mock
+    // "what we sent" logging, so asserting equality would now pin the expression to a body LN rejects.
+    //
+    // Replacement: AsnUpdateExpressionTests — the shipped request AND response expressions asserted field by
+    // field against fixture documents, DB-free (this class is SkippableFact behind a SQL fixture, and the ASN
+    // wire contract is too load-bearing to silently skip on a machine with no test database).
 
     private async Task<Guid> SeedResponsePoAsync()
     {

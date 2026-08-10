@@ -72,8 +72,14 @@ public sealed class AsnInputDocumentBuilder : ILnInputDocumentBuilder
             DriverName: asn.DriverName,
             DriverPhone: asn.DriverPhone,
             Warehouse: asn.Warehouse,
-            CreateDate: asn.CreatedOn.ToString("o"),
-            ShipmentDate: asn.SubmittedAt?.ToString("o"),
+            // R16 (2026-08-10) — both instants ship as seconds-precision UTC with an EXPLICIT Z, via the same
+            // helper the PO_Update documents use. SQL Server hands these back as DateTimeKind.Unspecified while
+            // the portal stores UTC, so the old ToString("o") emitted a naive "2026-08-10T07:17:29.2600214" and
+            // left the timezone to LN's imagination — the R12 probe caught LN reading a naive PO date as UTC−05:00
+            // and echoing it back +5 h, looking perfectly healthy. ExpectedDeliveryDate deliberately keeps its
+            // naive "o" form: LN's own ASN sample shows it that way, so it is a business date, not an instant.
+            CreateDate: PoLineDocumentAssembler.FormatUtc(asn.CreatedOn),
+            ShipmentDate: PoLineDocumentAssembler.FormatUtc(asn.SubmittedAt),
             InvoiceNo: asn.InvoiceNo,
             BillOfLading: asn.BillOfLading,
             PackingList: asn.PackingList,

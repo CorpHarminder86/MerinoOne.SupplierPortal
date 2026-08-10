@@ -310,6 +310,8 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.SubmittedBy).HasColumnName("submittedBy").HasMaxLength(100);
         b.Property(x => x.ErpSyncId).HasColumnName("erpSyncId").HasMaxLength(100);
         b.Property(x => x.ErpCode).HasColumnName("erpCode").HasMaxLength(50);
+        // R16 (2026-08-10) — LN ASN_Update verdict (Success | PartialFailure); same shape as PurchaseOrder.erpStatus.
+        b.Property(x => x.ErpStatus).HasColumnName("erpStatus").HasMaxLength(50);
 
         // R14 (2026-08-05) — D9: the shipping date = the instant the supplier posted. Same width/shape as the
         // submittedAt/By pair it runs alongside.

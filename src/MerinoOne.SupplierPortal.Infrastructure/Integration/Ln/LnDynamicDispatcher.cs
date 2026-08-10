@@ -1,5 +1,7 @@
+using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Integration.Idm;
 using MerinoOne.SupplierPortal.Application.Integration.Ln;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Integration;
@@ -55,6 +57,7 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
     private readonly ILnMappingService _mapping;
     private readonly ILnHttpTransport _transport;
     private readonly LnDefaultExpressions _defaults;
+    private readonly IIdmOutboxEnqueuer _idmEnqueuer;
     private readonly IConfiguration _cfg;
     private readonly ILogger<LnDynamicDispatcher> _logger;
 
@@ -64,6 +67,7 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
         ILnMappingService mapping,
         ILnHttpTransport transport,
         LnDefaultExpressions defaults,
+        IIdmOutboxEnqueuer idmEnqueuer,
         IConfiguration cfg,
         ILogger<LnDynamicDispatcher> logger)
     {
@@ -72,6 +76,7 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
         _mapping = mapping;
         _transport = transport;
         _defaults = defaults;
+        _idmEnqueuer = idmEnqueuer;
         _cfg = cfg;
         _logger = logger;
     }
@@ -183,6 +188,48 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
                 + $"'{ack.ErpStatus}': {detail}", canonicalBody);
         }
 
+        // --- 6b. R16 (2026-08-10) — the same logical-verdict rule for AsnPost, with one extra state that the PO
+        // contract does not have. LN can create the ASN HEADER and still refuse a LINE (probe of 2026-08-10:
+        // Header.Status "Success", LnASNNumber "INB00063", line Status "fail"), which is a PARTIAL post: stock
+        // the portal believes it shipped is not on the LN ASN. The response mapping reports that state as
+        // "PartialFailure"; the class of failure is decided here, never by the mapping.
+        //
+        // Partial ⇒ PERMANENT. A retry would replay the whole ASNDetail and create a SECOND ASN header in LN
+        // (the deterministic key is ours, not LN's — nothing on that endpoint dedupes it). Whole-post rejection,
+        // where LN created nothing, stays retriable exactly like the PO case.
+        if (row.TransactionType == OutboxTransactionType.AsnPost
+            && !string.Equals(ack.ErpStatus, "Success", StringComparison.OrdinalIgnoreCase))
+        {
+            var detail = string.IsNullOrWhiteSpace(ack.Message) ? "no remarks returned" : ack.Message;
+            var partial = string.Equals(ack.ErpStatus, "PartialFailure", StringComparison.OrdinalIgnoreCase);
+            var message = partial
+                ? $"[{route.PortalEntity}] PARTIAL POST — LN created ASN '{ack.ErpKey}' but REJECTED at least one line. "
+                  + $"The ASN exists in LN without those lines; DO NOT re-arm (a replay creates a second ASN). Fix in LN: {detail}"
+                : $"[{route.PortalEntity}] LN accepted the request (HTTP {outcome.StatusCode}) but reported "
+                  + $"'{ack.ErpStatus}': {detail}";
+            _logger.LogError("LN ASN post verdict {Status} for {RowId}: {Message}", ack.ErpStatus, row.Id, message);
+
+            // R16 — persist the PARTIAL verdict on the entity (D-R9-20 pattern). ErpCode deliberately NOT
+            // stamped: it is the ASN's IDM eligibility gate, and a partial post must not start document sync.
+            // With erpCode NULL, this column is the only structured record that LN holds an ASN header for
+            // this record — the LN number itself stays in the outbox error text for the operator.
+            // Whole-post rejections skip this write: nothing exists in LN, so there is no footprint to keep.
+            if (partial)
+            {
+                await _db.Asns
+                    .IgnoreQueryFilters()
+                    .Where(a => a.Id == entityId && !a.IsDeleted)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(a => a.ErpStatus, Truncate(ack.ErpStatus, 50))
+                        .SetProperty(a => a.UpdatedBy, "outbox-dispatcher")
+                        .SetProperty(a => a.UpdatedOn, DateTime.UtcNow), ct);
+            }
+
+            return partial
+                ? new LnDispatchOutcome(new InforSyncResult(false, row.DeterministicKey, message, canonicalBody), true)
+                : Retriable(row, message, canonicalBody);
+        }
+
         // --- 7. D-R9-20 — erpStatus → the entity's existing ERP-owned status column (PO responses only today). ----
         // PoNegotiationApprove is absent by necessity, not oversight: its EntityId is the NEGOTIATION id, so this
         // update would match no PurchaseOrder row. PoAcknowledge is gone with the transaction (R12/D14).
@@ -195,6 +242,35 @@ public sealed class LnDynamicDispatcher : ILnDynamicDispatcher
                     .SetProperty(p => p.ErpStatus, Truncate(ack.ErpStatus, 50))
                     .SetProperty(p => p.UpdatedBy, "outbox-dispatcher")
                     .SetProperty(p => p.UpdatedOn, DateTime.UtcNow), ct);
+        }
+
+        // --- 7a. R16 — SYNC write-back of the ASN's ERP handle. The worker's inline-ErpCode seam only Acks the
+        // OUTBOX row; the entity stamp has always lived in UpsertErpAckCommand.StampErpCodeAsync, on the ASYNC
+        // /inbound/erp-ack path. LN's ASN_Update answers with the ASN number in the POST response and sends no
+        // ack afterwards, so without this the row Acks and proc.Asn.erpCode stays NULL forever — and erpCode is
+        // the ASN's whole IDM eligibility signal (R11.2), so its documents would never sync either.
+        //
+        // Mirrors the ack path's ASN arm, including the enqueue-on-change. Not lifted into a shared service yet
+        // (that is the standing TODO on OutboxDispatcherWorker); this is the one transaction that needs it today.
+        if (row.TransactionType == OutboxTransactionType.AsnPost)
+        {
+            var asn = await _db.Asns.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(a => a.Id == entityId && !a.IsDeleted, ct);
+            if (asn is not null)
+            {
+                var erpCode = Truncate(ack.ErpKey, 50);
+                var changed = !string.Equals(asn.ErpCode, erpCode, StringComparison.Ordinal);
+                asn.ErpCode = erpCode;
+                // R16 — the verdict column (D-R9-20). "Success" here by construction: step 6b already
+                // returned for every other ack.ErpStatus. Overwrites a PartialFailure left by an earlier
+                // attempt of the SAME deterministic key — ERP truth, last-writer-wins.
+                asn.ErpStatus = Truncate(ack.ErpStatus, 50);
+                asn.UpdatedBy = "outbox-dispatcher";
+                asn.UpdatedOn = DateTime.UtcNow;
+                if (changed && row.TenantId is Guid asnTenantId)
+                    await _idmEnqueuer.EnqueueOwnerUpdatesAsync(_db, asnTenantId, DocumentOwnerTypes.Asn, asn.Id, "outbox-dispatcher", ct);
+                await _db.SaveChangesAsync(ct);
+            }
         }
 
         // ErpCode = the extracted erpKey → the worker's existing sync-ack seam flips the row straight to Acked.

@@ -2,6 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "apphost",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/MerinoOne.SupplierPortal.AppHost", "--launch-profile", "https", "--no-build"],
+      "port": 17134,
+      "url": "https://localhost:17134",
+      "autoPort": false
+    },
+    {
       "name": "web",
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "src/MerinoOne.Web", "--launch-profile", "https", "--no-build"],

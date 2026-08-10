@@ -55,6 +55,7 @@ public sealed class LnDefaultExpressions : ILnExpressionCatalog
         ODataCreatedEntitySample = Read("ODataCreatedEntity.sample.json");
         ErpAckBodySample = Read("ErpAckBody.sample.json");
         PoUpdateResponseSample = Read("PoUpdateResponse.sample.json");
+        AsnUpdateResponseSample = Read("AsnUpdateResponse.sample.json");
     }
 
     public Entry? TryGet(string transactionType) => _byType.TryGetValue(transactionType, out var e) ? e : null;
@@ -76,6 +77,15 @@ public sealed class LnDefaultExpressions : ILnExpressionCatalog
     /// hand-edited response mapping runs against the real envelope rather than a shape LN never sends.
     /// </summary>
     public string PoUpdateResponseSample { get; }
+
+    /// <summary>
+    /// R16 (2026-08-10) — seeded onto <c>responseSampleJson</c> for the AsnPost config. Captured from the LN
+    /// ASN_Update probe of the same day with ONE correction: the probe's line came back <c>Status: "fail"</c>
+    /// ("The Sequence field must be empty in ASN Lines"), which the request mapping now avoids by sending an
+    /// empty SequenceNo. The sample carries the all-green shape so save-time validation exercises the normal
+    /// path; the failure path is covered by unit tests over the same envelope.
+    /// </summary>
+    public string AsnUpdateResponseSample { get; }
 
     // ── ILnExpressionCatalog (Application-facing view) ─────────────────────────────────────────────
     LnExpressionDefault? ILnExpressionCatalog.TryGet(string transactionType)

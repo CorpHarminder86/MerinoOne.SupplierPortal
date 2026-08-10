@@ -251,7 +251,9 @@ public static class AsnDtoBuilder
             a.Warehouse, a.InvoiceNo, a.BillOfLading, a.PackingList, a.CreatedOn,
             // R14 — the shipping date (= post date) + who posted, the supplier's confirmation mode, and whether
             // Post is the next legal action.
-            a.PostedAt, a.PostedBy, asnConfirmationRequired, canPost);
+            a.PostedAt, a.PostedBy, asnConfirmationRequired, canPost,
+            // R16 — the LN ASN_Update verdict (Success | PartialFailure; null = never landed in LN).
+            a.ErpStatus);
     }
 
     public static async Task<IReadOnlyList<DocumentAttachmentDto>> BuildAttachmentsAsync(

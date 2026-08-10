@@ -38,7 +38,12 @@ public static class LnInputDocumentVersions
     // erpDocumentNo removed (columns dropped in migration 0055). Neither v2 nor v3 has shipped to a tenant,
     // but each bump makes any pinned SampleDocumentJson stale — an ATTESTATION BLOCKER for a Dynamic AsnPost
     // config until re-pinned in the Endpoints UI.
-    public const string Asn = "asn-v3";
+    // R16 (2026-08-10) — asn-v4: createDate/shipmentDate now carry seconds-precision UTC with an explicit Z
+    // (PoLineDocumentAssembler.FormatUtc) instead of a naive "o" round-trip. A naive instant let LN pick a
+    // timezone — the R12 probe caught it reading one as UTC−05:00 — so this is a wire-correctness fix, not
+    // cosmetics. Any pinned SampleDocumentJson stamped asn-v3 is now stale and must be re-snapshotted before
+    // the config can go (or stay) Dynamic.
+    public const string Asn = "asn-v4";
     // R12 (2026-07-29) — purchaseOrder-v2: companyCode + headerDeliveryDate + the full PO line set, for the
     // LN PO_Update contract. D24: EVERY non-deleted line is carried with a nullable deliveryDate so the
     // line filter (D6) and the header-node handling (D7) live in the JSONata, not here — both are still

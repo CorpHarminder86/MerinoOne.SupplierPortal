@@ -1,7 +1,35 @@
-/* R9 STARTER (O-R9-2 — real LN response field names pending tenant Available-APIs export; the
-   pathConfirmed attestation gate blocks Dynamic until verified). LN OData POST returns the created
-   entity (O-R9-1); extract its key into the closed contract { erpKey, erpStatus, message?, correlationBag? }. */
-{
-    "erpKey": $string(id != null ? id : (OrderNumber != null ? OrderNumber : (DocumentNumber != null ? DocumentNumber : "UNCONFIRMED-O-R9-2"))),
-    "erpStatus": "Created"
-}
+/* R16 (2026-08-10) — LN ASN_Update response → the closed contract { erpKey, erpStatus, message?, correlationBag? }.
+   Envelope (sample supplied by the Infor LN team):
+     { "ASN": [ { "Header": { PortalAsnNumber, LnASNNumber, Status, Remarks, ... },
+                  "Lines": [ { PoNumber, PositionNo, Status, Remarks, ReturnID, Serials, Lots } ] } ] }
+
+   erpKey = Header.LnASNNumber — the LN ASN number (e.g. "INB00063"). The dispatcher writes it to
+   OutboxMessage.ErpCode, which Acks the row synchronously AND stamps proc.Asn.erpCode, which is the ASN's
+   IDM eligibility signal (R11.2). PortalAsnNumber is the echo of what we sent, so it is only the fallback
+   that keeps the closed contract satisfiable on a rejected post (that path never Acks anything).
+
+   !! UNLIKE PO_Update, a per-line failure is FATAL here. LN can create the ASN header and refuse a line
+   (the 2026-08-10 probe did exactly that: Header.Status "Success", LnASNNumber "INB00063", line Status
+   "fail"), which leaves an ASN in LN that is missing stock the portal believes it shipped. Acking that
+   silently is the one outcome worse than failing. The expression reports the verdict as "PartialFailure";
+   LnDynamicDispatcher owns what that MEANS (permanent stop, no auto-replay — replaying would create a
+   SECOND ASN header in LN).
+
+   ASN[0] is safe on a singleton: JSONata index-selects the first item whether or not the path result
+   collapsed to a bare object. */
+(
+    $asn := ASN[0];
+    $header := $asn.Header;
+    $failed := [$asn.Lines[$lowercase($string(Status)) != "success"]];
+    $lineText := $count($failed) = 0 ? ""
+        : " [line failures: " & $join($failed.($string(PoNumber) & "/" & $string(PositionNo) & ": " & $string(Remarks)), "; ") & "]";
+    $msg := ($header.Remarks ? $header.Remarks : "") & $lineText;
+    $headerOk := $lowercase($string($header.Status)) = "success";
+    $key := $exists($header.LnASNNumber) and $header.LnASNNumber != "" ? $header.LnASNNumber
+        : ($exists($header.PortalAsnNumber) and $header.PortalAsnNumber != "" ? $header.PortalAsnNumber : "UNKNOWN");
+    {
+        "erpKey": $string($key),
+        "erpStatus": $headerOk and $count($failed) > 0 ? "PartialFailure" : $string($header.Status),
+        "message": $msg != "" ? $msg
+    }
+)

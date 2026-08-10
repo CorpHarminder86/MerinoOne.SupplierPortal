@@ -174,7 +174,11 @@ public record AsnDetailDto(
     DateTime? PostedAt = null,
     string? PostedBy = null,
     bool AsnConfirmationRequired = true,
-    bool CanPost = false);
+    bool CanPost = false,
+    // R16 (2026-08-10) — the LN ASN_Update verdict (Success | PartialFailure), mirroring the PO's ErpStatus.
+    // PartialFailure means LN holds an ASN header for this record while ErpCode is deliberately NULL (the IDM
+    // gate must not open for a broken ASN) — the one state where "no erpCode" does NOT mean "not in LN".
+    string? ErpStatus = null);
 
 /// <summary>One covered PO on a (possibly multi-PO) ASN.</summary>
 public record AsnPurchaseOrderDto(

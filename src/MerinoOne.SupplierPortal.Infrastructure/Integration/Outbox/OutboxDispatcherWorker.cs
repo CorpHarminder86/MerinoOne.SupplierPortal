@@ -475,6 +475,12 @@ internal sealed class OutboxDispatcherWorker : BackgroundService
                 // R4 (2026-06-23) — persist the canonical "what we sent" body (built by the service, Mock + Live) so
                 // the SyncLog payload viewer can render it. Capped to guard the SQL-Express size budget.
                 PayloadJson = result.RequestPayloadJson is null ? null : Truncate(result.RequestPayloadJson, 1_000_000),
+                // R16 (2026-08-10) — persist the SUCCESS outcome text too, not just failures. The dynamic path
+                // folds the ERP's own verdict into this string ("[Asn] Success (HTTP 200): <remarks>"), and it was
+                // being thrown away: a landed post left a Success row with the request body and NOTHING about what
+                // the ERP answered — so certifying a newly-enabled endpoint meant guessing. The column is named
+                // errorMessage for historical reasons; on a Success row it is the outcome message.
+                ErrorMessage = string.IsNullOrWhiteSpace(result.Message) ? null : Truncate(result.Message, 2000),
                 IdempotencyKey = result.IdempotencyKey ?? row.DeterministicKey,
                 SyncedAt = now,
                 CreatedBy = "outbox-dispatcher",

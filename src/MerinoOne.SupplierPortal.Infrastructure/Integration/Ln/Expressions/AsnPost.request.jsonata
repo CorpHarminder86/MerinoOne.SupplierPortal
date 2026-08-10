@@ -1,48 +1,80 @@
-/* R11 default — reproduces AsnOutboundPayloadBuilder byte-for-byte (LnRequestExpressionParityTests asserts it).
-   Wire contract per D15: PascalCase throughout, with the source payload's misspellings corrected
-   (vechicalNo→VehicleNo, ShippmentDate→ShipmentDate, BillOfLanding→BillOfLading, Packinglist→PackingList).
-   ShippedQty_InvUnit keeps its underscore and is a MIRROR of ShippedQty, not a unit conversion (D5).
+/* R16 (2026-08-10) — the LN ASN_Update request contract, taken from the request sample supplied by the
+   Infor LN team. This REPLACES the R11 shape that reproduced AsnOutboundPayloadBuilder byte-for-byte;
+   that builder is now dead for dispatch (see the note on AsnOutboundPayloadBuilder) and the byte-parity
+   assertion for AsnPost has been retired, exactly as R12 did for the PO_Update transactions.
 
-   `x != null ? x` omits the key when the value is null, reproducing the legacy WhenWritingNull behaviour.
-   Array constructors are mandatory for collection outputs (D-R9-13 singleton-collapse guard); `serials ? [...]`
-   re-wraps the path-flattened sequence AND omits the key when null. */
+   Differences from the R11 shape, all sample-driven:
+     · everything is wrapped in an "ASNDetail" node (the PO_Update contract wraps the same way);
+     · the driver/carrier block is lower-camel on the WAY IN (timeWindow / carrierName / trackingNo /
+       vechicalNo / driverName / driverPhone) even though LN echoes it back PascalCase in the response.
+       `vechicalNo` is LN's misspelling and is REQUIRED — do not "fix" it;
+     · CreateDate → ASNCreationDate, ShipmentDate → ShippingDate;
+     · numerics ship as STRINGS ("40", "1"), as they do on PO_Update;
+     · ShippedQty_InvUnit and InvoiceNo are GONE — neither exists in the LN contract. The portal still
+       captures InvoiceNo (the supplier's own commercial invoice reference); it simply has no wire slot.
+       PackingSlip is the mirror gap: LN accepts it, the portal has no field to fill it from, so the key
+       is not emitted.
+
+   !! SequenceNo is the CONSTANT "0", never the PO line's sequence. Two live probes on 2026-08-10 pinned it
+   from both sides, and LN's own two layers disagree in wording:
+     · with "1", the business layer refused the line — "Error In whinh301 Updaton: :The Sequence field must
+       be empty in ASN Lines." (the header was created as INB00063; only the LINE was rejected);
+     · with "", request validation refused the whole message — "Attr. 'SequenceNo', Value '': the value must
+       be numeric."
+   "0" is the only value that satisfies both: numeric for the schema, and LN-"empty" for whinh301 (a line
+   that belongs to no delivery schedule). The portal's own sequenceNo is the PO line sequence, a different
+   thing entirely, and is not what this field means.
+
+   `x != null ? x` omits the key when the value is null (the legacy WhenWritingNull behaviour).
+   Array constructors are mandatory for collection outputs (D-R9-13 singleton-collapse guard); `serials ?
+   [...]` re-wraps the path-flattened sequence AND omits the key when null. */
 {
-    "CompanyCode": companyCode != null ? companyCode,
-    "SupplierBp": supplierBp != null ? supplierBp,
-    "AsnNumber": asnNumber,
-    "ExpectedDeliveryDate": expectedDeliveryDate,
-    "TimeWindow": timeWindow != null ? timeWindow,
-    "CarrierName": carrierName != null ? carrierName,
-    "TrackingNo": trackingNumber != null ? trackingNumber,
-    "VehicleNo": vehicleNumber != null ? vehicleNumber,
-    "DriverName": driverName != null ? driverName,
-    "DriverPhone": driverPhone != null ? driverPhone,
-    "Warehouse": warehouse != null ? warehouse,
-    "CreateDate": createDate != null ? createDate,
-    "ShipmentDate": shipmentDate != null ? shipmentDate,
-    "InvoiceNo": invoiceNo != null ? invoiceNo,
-    "BillOfLading": billOfLading != null ? billOfLading,
-    "PackingList": packingList != null ? packingList,
-    "Notes": notes != null ? notes,
-    "Lines": [lines.{
-        "PoNumber": poNumber != null ? poNumber,
-        "PoOrigin": poOrigin != null ? poOrigin,
-        "PositionNo": positionNo != null ? positionNo,
-        "SequenceNo": sequenceNo != null ? sequenceNo,
-        "ItemCode": itemCode != null ? itemCode,
-        "ShippedQty": shippedQty,
-        "ShippedQty_InvUnit": shippedQtyInvUnit,
-        "Uom": uom != null ? uom,
-        "Batch": batchNumber != null ? batchNumber,
-        "Expiry": expiryDate != null ? expiryDate,
-        "Serials": serials ? [serials.{
-            "Serial": serial,
-            "Expiry": expiry != null ? expiry
-        }],
-        "Lots": lots ? [lots.{
-            "LotNo": lotNo,
-            "Qty": qty,
-            "Expiry": expiryDate != null ? expiryDate
+    "ASNDetail": {
+        "CompanyCode": companyCode != null ? companyCode,
+        "AsnNumber": asnNumber,
+        "SupplierBp": supplierBp != null ? supplierBp,
+        "ExpectedDeliveryDate": expectedDeliveryDate,
+        "timeWindow": timeWindow != null ? timeWindow,
+        "carrierName": carrierName != null ? carrierName,
+        "trackingNo": trackingNumber != null ? trackingNumber,
+        "vechicalNo": vehicleNumber != null ? vehicleNumber,
+        "driverName": driverName != null ? driverName,
+        "driverPhone": driverPhone != null ? driverPhone,
+        "Warehouse": warehouse != null ? warehouse,
+        "ShippingDate": shipmentDate != null ? shipmentDate,
+        "ASNCreationDate": createDate != null ? createDate,
+        "BillOfLading": billOfLading != null ? billOfLading,
+        "PackingList": packingList != null ? packingList,
+        "Notes": notes != null ? notes,
+        "Lines": [lines.{
+            "PoNumber": poNumber != null ? poNumber,
+            /* !! CONSTANT, not the portal's poOrigin. Two different vocabularies wear the same name: LN's
+               PoOrigin is its order-origin domain ("purchase" in the only round-tripped probe), while
+               proc.PurchaseOrder.poOrigin is a portal classification ("PurchaseOrder" / "EP" / "Requisition" /
+               "Manual") and is NULL on essentially every replicated PO. Passing it through would send LN either
+               nothing or a value it has never seen. The portal only ever ships against LN purchase orders, so
+               the literal is correct today; if schedules/contracts ever ship, this becomes a real projection. */
+            "PoOrigin": "purchase",
+            "PositionNo": positionNo != null ? $string(positionNo),
+            "SequenceNo": "0",
+            "ItemCode": itemCode != null ? itemCode,
+            /* `* 1` is load-bearing, not noise: proc.AsnLine.shippedQty is decimal(18,4), so the input document
+               carries "2.0000" and $string() of that literal would put "2.0000" on the wire where LN's sample
+               shows "1". The arithmetic forces a numeric result the engine re-formats without the scale.
+               $number() alone does NOT do it — it hands back the same decimal. */
+            "ShippedQty": $string(shippedQty * 1),
+            "Uom": uom != null ? uom,
+            "batch": batchNumber != null ? batchNumber,
+            "expiry": expiryDate != null ? expiryDate,
+            "Serials": serials ? [serials.{
+                "Serial": serial,
+                "Expiry": expiry != null ? expiry
+            }],
+            "Lots": lots ? [lots.{
+                "LotNo": lotNo,
+                "Qty": $string(qty * 1),
+                "Expiry": expiryDate != null ? expiryDate
+            }]
         }]
-    }]
+    }
 }

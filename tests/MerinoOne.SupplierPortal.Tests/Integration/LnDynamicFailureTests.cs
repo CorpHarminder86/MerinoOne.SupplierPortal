@@ -60,6 +60,7 @@ public class LnDynamicFailureTests
             scope.ServiceProvider.GetRequiredService<ILnMappingService>(),
             transport,
             Defaults,
+            scope.ServiceProvider.GetRequiredService<MerinoOne.SupplierPortal.Application.Integration.Idm.IIdmOutboxEnqueuer>(),
             liveCfg,
             NullLogger<LnDynamicDispatcher>.Instance);
         return (dispatcher, transport, scope);
@@ -233,5 +234,130 @@ public class LnDynamicFailureTests
             outcome.Result.Success.Should().BeFalse();
             outcome.Result.Message.Should().Contain("VERIFY IN LN BEFORE RE-ARM").And.Contain("'rogue'");
         }
+    }
+
+    // ── R16 — the AsnPost verdict + footprint writes ──────────────────────────────────────────────────
+
+    private async Task<(OutboxMessage Row, LnEndpointRoute Route, Guid AsnId)> SeedAsnPostAsync()
+    {
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var now = DateTime.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var asn = new Asn
+        {
+            Id = Guid.NewGuid(), AsnNumber = $"ASN-DYN-{tag}", PurchaseOrderId = IntegrationTestFixture.PoId,
+            SupplierId = IntegrationTestFixture.SupplierId, ExpectedDeliveryDate = now.Date.AddDays(2),
+            AsnStatus = AsnStatus.Submitted, SubmittedAt = now, SubmittedBy = "seed",
+            SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+            TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now,
+        };
+        db.Asns.Add(asn);
+        db.AsnLines.Add(new AsnLine
+        {
+            Id = Guid.NewGuid(), AsnId = asn.Id, PurchaseOrderLineId = IntegrationTestFixture.PoLine1Id,
+            PositionNo = 10, SequenceNo = 1, ShippedQty = 2m, CreatedBy = "seed", CreatedOn = now,
+        });
+        await db.SaveChangesAsync();
+
+        var row = new OutboxMessage
+        {
+            Id = Guid.NewGuid(),
+            TenantId = IntegrationTestFixture.TenantId,
+            TransactionType = OutboxTransactionType.AsnPost,
+            EntityName = OutboxEntity.Asn,
+            EntityId = asn.Id,
+            DeterministicKey = OutboxKey.For(OutboxEntity.Asn, IntegrationTestFixture.TenantId, asn.AsnNumber, "post"),
+            Status = OutboxStatus.Sending,
+            CreatedBy = "seed",
+            CreatedOn = now,
+        };
+        var entry = Defaults.TryGet(OutboxTransactionType.AsnPost)!;
+        var route = new LnEndpointRoute(
+            IntegrationTestFixture.TenantId, OutboxTransactionType.AsnPost, OutboundDispatchMode.Dynamic,
+            LnPortalEntity.Asn, "CustomerApi/LNAPI/ASN_Update", "POST",
+            entry.RequestExpr, entry.ResponseExpr);
+        return (row, route, asn.Id);
+    }
+
+    /// <summary>The real ASN_Update envelope with one parameterized header/line verdict pair.</summary>
+    private static string AsnEnvelope(string headerStatus, string lnAsnNumber, string lineStatus, string lineRemarks = "")
+        => $$"""
+            { "ASN": [ { "Header": { "PortalAsnNumber": "ASN-ECHO", "LnASNNumber": "{{lnAsnNumber}}",
+                                     "Status": "{{headerStatus}}", "Remarks": "" },
+                        "Lines": [ { "PoNumber": "PUR-1", "PositionNo": "10", "Status": "{{lineStatus}}",
+                                     "Remarks": "{{lineRemarks}}" } ] } ] }
+            """;
+
+    [SkippableFact]
+    public async Task Asn_landed_200_stamps_erpCode_and_Success_verdict_on_the_entity()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+        var (row, route, asnId) = await SeedAsnPostAsync();
+        var (dispatcher, transport, scope) = Build();
+        using (scope)
+        {
+            transport.Next = new LnHttpOutcome(200, AsnEnvelope("Success", "INB00099", "Success"), null);
+            var outcome = await dispatcher.DispatchAsync(row, route);
+            outcome.Result.Success.Should().BeTrue(outcome.Result.Message);
+            outcome.Result.ErpCode.Should().Be("INB00099"); // → worker sync-ack seam flips the row Acked
+        }
+
+        using var verify = _fx.Factory.Services.CreateScope();
+        var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = await db.Asns.IgnoreQueryFilters().AsNoTracking().FirstAsync(a => a.Id == asnId);
+        // R16 — LN sends no async erp-ack for ASN_Update, so the INLINE stamp is the only writer of both.
+        asn.ErpCode.Should().Be("INB00099");
+        asn.ErpStatus.Should().Be("Success");
+        asn.AsnStatus.Should().Be(AsnStatus.Submitted); // never the portal workflow status
+    }
+
+    [SkippableFact]
+    public async Task Asn_partial_failure_is_permanent_and_keeps_the_footprint_without_opening_the_idm_gate()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+        var (row, route, asnId) = await SeedAsnPostAsync();
+        var (dispatcher, transport, scope) = Build();
+        using (scope)
+        {
+            // The 2026-08-10 probe verbatim: header created (INB00063), line refused.
+            transport.Next = new LnHttpOutcome(200,
+                AsnEnvelope("Success", "INB00063", "fail", "The Sequence field must be empty in ASN Lines."), null);
+            var outcome = await dispatcher.DispatchAsync(row, route);
+            outcome.Result.Success.Should().BeFalse();
+            outcome.PermanentFailure.Should().BeTrue("a replay would create a SECOND ASN header in LN");
+            outcome.Result.Message.Should().Contain("PARTIAL POST").And.Contain("INB00063");
+        }
+
+        using var verify = _fx.Factory.Services.CreateScope();
+        var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = await db.Asns.IgnoreQueryFilters().AsNoTracking().FirstAsync(a => a.Id == asnId);
+        // The verdict IS the structured footprint that LN holds an ASN header for this record …
+        asn.ErpStatus.Should().Be("PartialFailure");
+        // … while erpCode stays NULL on purpose: it is the ASN's IDM eligibility gate, and a broken ASN
+        // must not start syncing documents. The LN number lives in the outbox error text for the operator.
+        asn.ErpCode.Should().BeNull();
+    }
+
+    [SkippableFact]
+    public async Task Asn_whole_post_rejection_is_retriable_and_writes_no_footprint()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+        var (row, route, asnId) = await SeedAsnPostAsync();
+        var (dispatcher, transport, scope) = Build();
+        using (scope)
+        {
+            transport.Next = new LnHttpOutcome(200, AsnEnvelope("Error", "", "fail", "no such supplier"), null);
+            var outcome = await dispatcher.DispatchAsync(row, route);
+            outcome.Result.Success.Should().BeFalse();
+            outcome.PermanentFailure.Should().BeFalse("nothing exists in LN — a re-arm replays the same key safely");
+        }
+
+        using var verify = _fx.Factory.Services.CreateScope();
+        var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = await db.Asns.IgnoreQueryFilters().AsNoTracking().FirstAsync(a => a.Id == asnId);
+        // Nothing landed in LN, so there is no footprint to keep.
+        asn.ErpStatus.Should().BeNull();
+        asn.ErpCode.Should().BeNull();
     }
 }

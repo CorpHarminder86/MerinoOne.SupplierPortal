@@ -71,6 +71,12 @@ public static class LnOutboundSeeder
             [OutboxTransactionType.PoAccept] = "$exists(acceptedAt)",
             [OutboxTransactionType.PoReject] = "poStatus = \"Rejected\"",
             [OutboxTransactionType.PoNegotiationApprove] = "negotiationStatus = \"Approved\"",
+            // R16 — the ASN's monotonic "it was posted" fact. shipmentDate IS submittedAt, stamped once inside
+            // AsnSubmitExecutor at the supplier's Post (R14 D9) and never cleared, so it cannot go stale the way
+            // `asnStatus = "Submitted"` would once LN moves the ASN on. !! NOT `$exists(postedAt)`: postedAt is a
+            // column on proc.Asn but NOT a field of the frozen AsnInputDoc, so that gate evaluates false forever
+            // and silently Skips every ASN — a gate authored by hand on the Merino tenant did exactly that.
+            [OutboxTransactionType.AsnPost] = "$exists(shipmentDate)",
         };
 
     /// <summary>R12 — the transactions whose responseSampleJson is the PO_Update envelope, not the OData one.</summary>
@@ -78,6 +84,13 @@ public static class LnOutboundSeeder
         => transactionType is OutboxTransactionType.PoAccept
             or OutboxTransactionType.PoReject
             or OutboxTransactionType.PoNegotiationApprove;
+
+    /// <summary>R16 — the seeded responseSampleJson for a transaction type (the OData created-entity body is the
+    /// fallback for the types whose real envelope is still unconfirmed).</summary>
+    private static string ResponseSampleFor(LnDefaultExpressions defaults, string transactionType)
+        => IsPoUpdate(transactionType) ? defaults.PoUpdateResponseSample
+            : transactionType == OutboxTransactionType.AsnPost ? defaults.AsnUpdateResponseSample
+            : defaults.ODataCreatedEntitySample;
 
     public static async Task SeedAsync(AppDbContext ctx, CancellationToken ct = default)
     {
@@ -144,9 +157,7 @@ public static class LnOutboundSeeder
                         CandidateFilterName = filter.Name,
                         CandidateFilterParams = filter.ParamsJson,
                         GateVersion = 1,
-                        ResponseSampleJson = IsPoUpdate(entry.TransactionType)
-                            ? defaults.PoUpdateResponseSample
-                            : defaults.ODataCreatedEntitySample,
+                        ResponseSampleJson = ResponseSampleFor(defaults, entry.TransactionType),
                         AckSampleJson = defaults.ErpAckBodySample,
                         CreatedBy = Actor,
                     });
@@ -175,6 +186,28 @@ public static class LnOutboundSeeder
                         || string.Equals(existing.ResponseSampleJson, defaults.ODataCreatedEntitySample, StringComparison.Ordinal))
                     {
                         existing.ResponseSampleJson = defaults.PoUpdateResponseSample;
+                        existing.UpdatedBy = Actor;
+                        existing.UpdatedOn = DateTime.UtcNow;
+                    }
+                }
+
+                // R16 — the same insert-only correction for AsnPost: a tenant seeded before R16 points at the
+                // OData starter that LN never exposed, and carries the generic OData response sample that cannot
+                // validate an ASN_Update mapping. Corrected only while each value is still the seeded one; a
+                // hand-edited path or sample is left alone, because that divergence IS the drift signal.
+                if (entry.TransactionType == OutboxTransactionType.AsnPost)
+                {
+                    if (string.Equals(existing.EndpointPath, LiveInforIntegrationService.EndpointPaths.RetiredAsnStarterPath, StringComparison.Ordinal))
+                    {
+                        existing.EndpointPath = EndpointPathByType[entry.TransactionType];
+                        existing.UpdatedBy = Actor;
+                        existing.UpdatedOn = DateTime.UtcNow;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(existing.ResponseSampleJson)
+                        || string.Equals(existing.ResponseSampleJson, defaults.ODataCreatedEntitySample, StringComparison.Ordinal))
+                    {
+                        existing.ResponseSampleJson = defaults.AsnUpdateResponseSample;
                         existing.UpdatedBy = Actor;
                         existing.UpdatedOn = DateTime.UtcNow;
                     }

@@ -1,0 +1,53 @@
+{
+  "ASN": [
+    {
+      "Header": {
+        "CompanyCode": "2000",
+        "PortalAsnNumber": "ASN-S0013-20260810073024923",
+        "SupplierBp": "BUS000048",
+        "Notes": "",
+        "TimeWindow": "",
+        "CarrierName": "",
+        "TrackingNo": "",
+        "VehicleNo": "",
+        "DriverName": "",
+        "DriverPhone": "",
+        "Warehouse": "AMSWH",
+        "ShippingDate": "2026-09-05T07:24:00Z",
+        "ASNCreationDate": "2026-09-05T07:24:00Z",
+        "BillOfLading": "bil123",
+        "PackingList": "Packing1234",
+        "PackingSlip": "Slip12345",
+        "LnASNNumber": "INB00063",
+        "Status": "Success",
+        "Remarks": ""
+      },
+      "Lines": [
+        {
+          "PoNumber": "PUR000339",
+          "PoOrigin": "purchase",
+          "PositionNo": "40",
+          "SequenceNo": "1",
+          "ItemCode": "90000003329146-F-601",
+          "ShippedQty": "1",
+          "Uom": "",
+          "Batch": "test batch",
+          "Status": "Success",
+          "Remarks": "",
+          "ReturnID": "",
+          "Serials": [
+            {
+              "Serial": ""
+            }
+          ],
+          "Lots": [
+            {
+              "LotNo": "",
+              "Qty": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
