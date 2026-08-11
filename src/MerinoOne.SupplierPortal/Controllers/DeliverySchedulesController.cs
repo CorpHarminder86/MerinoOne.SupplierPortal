@@ -33,6 +33,7 @@ Filters / params (all optional):
 - **purchaseOrderId**: restrict to one PO.
 - **deliveryDateFrom / deliveryDateTo**: inclusive delivery-date day range.
 - **status**: schedule status (Approved).
+- **onlyWithBalance**: when true, hides lines with nothing left to ship (remaining-to-ship = 0). Omitted/false returns every line. The portal grid sends true by default.
 Returns: DeliveryScheduleGridDto — the paged rows plus the auto-hide warehouse signal (DistinctWarehouseCount + ShowWarehouseFilter; the Warehouse filter is hidden when only one warehouse is present). Requires permission **DeliverySchedule.Read**.")]
     public async Task<Result<DeliveryScheduleGridDto>> List(
         [FromQuery] int page = 1,
@@ -43,10 +44,12 @@ Returns: DeliveryScheduleGridDto — the paged rows plus the auto-hide warehouse
         [FromQuery] DateTime? deliveryDateFrom = null,
         [FromQuery] DateTime? deliveryDateTo = null,
         [FromQuery] string? status = null,
+        [FromQuery] bool? onlyWithBalance = null,
         CancellationToken ct = default)
     {
         var filter = new DeliveryScheduleFilterRequest(
-            page, pageSize, supplierId, warehouseAddressId, purchaseOrderId, deliveryDateFrom, deliveryDateTo, status);
+            page, pageSize, supplierId, warehouseAddressId, purchaseOrderId, deliveryDateFrom, deliveryDateTo, status,
+            onlyWithBalance);
         var data = await _mediator.Send(new GetDeliveryScheduleListQuery(filter), ct);
         return Result<DeliveryScheduleGridDto>.Ok(data, HttpContext.TraceIdentifier);
     }

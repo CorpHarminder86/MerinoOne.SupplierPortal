@@ -82,6 +82,34 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         var body = request.Body;
         var now = DateTime.UtcNow;
 
+        // 2026-08-11 — an Approved ASN is editable for ONE reason (R14 D5): the supplier still has to fill in the
+        // shipment references and upload the documents. The buyer confirmed a specific line set at specific
+        // quantities, so those are frozen from Approve onward — changing them would silently invalidate the
+        // confirmation the buyer gave. The wizard hides the Lines and Quantities steps for this status; this is
+        // the enforcement, because the UI gate alone leaves PUT /api/asns/{id} open.
+        // The escape hatch is unchanged: Cancel the ASN, or have the buyer reject it back to the supplier.
+        if (wasApproved)
+        {
+            var frozen = await _db.AsnLines.AsNoTracking()
+                .Where(l => l.AsnId == asn.Id)
+                .Select(l => new { l.PurchaseOrderLineId, l.ShippedQty })
+                .ToListAsync(ct);
+
+            static Dictionary<Guid, decimal> Fold(IEnumerable<(Guid Line, decimal Qty)> src) =>
+                src.GroupBy(x => x.Line).ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
+
+            var before = Fold(frozen.Select(l => (l.PurchaseOrderLineId, l.ShippedQty)));
+            var after = Fold(body.Lines.Select(l => (l.PurchaseOrderLineId, l.ShippedQty)));
+
+            if (before.Count != after.Count
+                || before.Any(kv => !after.TryGetValue(kv.Key, out var q) || q != kv.Value))
+            {
+                throw new ConflictException(
+                    "Cannot change lines or quantities: the buyer has already confirmed this ASN. "
+                    + "Cancel it and start again, or ask the buyer to reject it, if the shipment must change.");
+            }
+        }
+
         // Resolve the new line set — every line must belong to a PO owned by this ASN's supplier.
         var requestedLineIds = body.Lines.Select(l => l.PurchaseOrderLineId).Distinct().ToList();
         var poLines = await (from pol in _db.PurchaseOrderLines

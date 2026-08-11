@@ -50,7 +50,11 @@ public record DeliveryScheduleFilterRequest(
     Guid? PurchaseOrderId = null,
     DateTime? DeliveryDateFrom = null,
     DateTime? DeliveryDateTo = null,
-    string? Status = null);
+    string? Status = null,
+    // 2026-08-11 — hide lines with nothing left to ship (RemainingToShip == 0). SERVER-side on purpose: the grid
+    // is paged, so a client-side hide would leave the row count and page links describing rows nobody can see.
+    // The UI ships it defaulted ON; null/false keeps the pre-existing "show everything" behaviour for API callers.
+    bool? OnlyWithBalance = null);
 
 /// <summary>
 /// R5/R13 (TSD R5 Addendum §7) — the paged grid plus the "auto-hide warehouse" signal. <c>DistinctWarehouseCount</c>

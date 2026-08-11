@@ -28,7 +28,7 @@
                 }
                 else
                 {
-                    <span class="tl-count-chip">Step @currentStep of 4</span>
+                    <span class="tl-count-chip">Step @StepOrdinal(currentStep) of @VisibleSteps.Count</span>
                 }
             </div>
             <p class="tl-sub">@HeaderSubtitle</p>
@@ -230,43 +230,70 @@
 
         @* R7 (§2/§3.2) — the old 1.4fr/1fr grid (Shipment beside the always-expanded panel) is gone: the document
            surface moved into the right rail, and the Shipment card spans the full main column. *@
+        @* 2026-08-11 — was a 15-row single-column <dl> with a 160px label gutter: correct, but a screenful of
+           scrolling for ~10 short values. Now three labelled groups of auto-fitting tiles (label above value), so
+           the same facts read in a third of the height and the eye can scan across instead of down.
+           Two dates were ALWAYS identical here — "Shipping date" is defined as postedAt (R14), so it printed the
+           same timestamp as "Posted" one row later. They are one fact now. *@
         <div class="rz-card" style="padding:20px;">
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Shipment</h3>
-                <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
-                    <dt style="color:var(--mer-ink-500);">Purchase order(s)</dt><dd>@PoSummaryText</dd>
-                    <dt style="color:var(--mer-ink-500);">Expected delivery</dt><dd style="font-family:Inter,monospace;">@detail.ExpectedDeliveryDate.ToString("yyyy-MM-dd")</dd>
-                    @if (!string.IsNullOrEmpty(detail.TimeWindow)) { <dt style="color:var(--mer-ink-500);">Time window</dt><dd>@detail.TimeWindow</dd> }
-                    @if (!string.IsNullOrEmpty(detail.CarrierName)) { <dt style="color:var(--mer-ink-500);">Carrier</dt><dd>@detail.CarrierName</dd> }
-                    @if (!string.IsNullOrEmpty(detail.TrackingNumber)) { <dt style="color:var(--mer-ink-500);">Tracking</dt><dd style="font-family:Inter,monospace;">@detail.TrackingNumber</dd> }
-                    @if (!string.IsNullOrEmpty(detail.VehicleNumber)) { <dt style="color:var(--mer-ink-500);">Vehicle</dt><dd style="font-family:Inter,monospace;">@detail.VehicleNumber</dd> }
-                    @if (!string.IsNullOrEmpty(detail.DriverName)) { <dt style="color:var(--mer-ink-500);">Driver</dt><dd>@detail.DriverName @(string.IsNullOrEmpty(detail.DriverPhone) ? "" : $"· {detail.DriverPhone}")</dd> }
-                    @* R11 (D12) — warehouse + the three shipment refs, read-only. Warehouse is the D4 grouping key
-                       (derived from the covered PO); the refs are what the supplier entered before sending. *@
-                    @if (!string.IsNullOrEmpty(detail.Warehouse)) { <dt style="color:var(--mer-ink-500);">Warehouse</dt><dd style="font-family:Inter,monospace;">@detail.Warehouse</dd> }
-                    @if (!string.IsNullOrEmpty(detail.InvoiceNo)) { <dt style="color:var(--mer-ink-500);">Invoice no.</dt><dd style="font-family:Inter,monospace;">@detail.InvoiceNo</dd> }
-                    @if (!string.IsNullOrEmpty(detail.BillOfLading)) { <dt style="color:var(--mer-ink-500);">Bill of lading</dt><dd style="font-family:Inter,monospace;">@detail.BillOfLading</dd> }
-                    @if (!string.IsNullOrEmpty(detail.PackingList)) { <dt style="color:var(--mer-ink-500);">Packing list</dt><dd style="font-family:Inter,monospace;">@detail.PackingList</dd> }
-                    @if (detail.CreatedOn.HasValue) { <dt style="color:var(--mer-ink-500);">Created</dt><dd style="font-family:Inter,monospace;">@detail.CreatedOn.Value.ToString("yyyy-MM-dd HH:mm")</dd> }
-                    @* R14 — the shipping date IS the POST date (postedAt), not the confirmation date. It equals the
-                       submittedAt the LN payload carries as ShipmentDate, because both are stamped at post. *@
-                    <dt style="color:var(--mer-ink-500);">Shipping date</dt><dd style="font-family:Inter,monospace;">@(detail.PostedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
-                    @if (detail.PostedAt.HasValue) { <dt style="color:var(--mer-ink-500);">Posted</dt><dd style="font-family:Inter,monospace;">@detail.PostedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.PostedBy) ? "" : $"by {detail.PostedBy}")</dd> }
-                    @if (!string.IsNullOrEmpty(detail.ErpSyncId)) { <dt style="color:var(--mer-ink-500);">ERP sync id</dt><dd style="font-family:Inter,monospace;font-size:11px;">@detail.ErpSyncId</dd> }
-                    @if (!string.IsNullOrEmpty(detail.ErpCode)) { <dt style="color:var(--mer-ink-500);">ERP code</dt><dd style="font-family:Inter,monospace;">@detail.ErpCode</dd> }
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:14px;color:var(--mer-blue-darker);">Shipment</h3>
+
+                <div style="@FactGrid">
+                    <div><div style="@FactLabel">Purchase order(s)</div><div style="@FactValue">@PoSummaryText</div></div>
+                    <div><div style="@FactLabel">Expected delivery</div><div style="@FactMono">@detail.ExpectedDeliveryDate.ToString("yyyy-MM-dd")</div></div>
+                    @* R11 (D12) — warehouse is the D4 grouping key, derived from the covered PO. *@
+                    @if (!string.IsNullOrEmpty(detail.Warehouse)) { <div><div style="@FactLabel">Warehouse</div><div style="@FactMono">@detail.Warehouse</div></div> }
+                    @if (!string.IsNullOrEmpty(detail.TimeWindow)) { <div><div style="@FactLabel">Time window</div><div style="@FactValue">@detail.TimeWindow</div></div> }
+                    @if (!string.IsNullOrEmpty(detail.CarrierName)) { <div><div style="@FactLabel">Carrier</div><div style="@FactValue">@detail.CarrierName</div></div> }
+                    @if (!string.IsNullOrEmpty(detail.TrackingNumber)) { <div><div style="@FactLabel">Tracking</div><div style="@FactMono">@detail.TrackingNumber</div></div> }
+                    @if (!string.IsNullOrEmpty(detail.VehicleNumber)) { <div><div style="@FactLabel">Vehicle</div><div style="@FactMono">@detail.VehicleNumber</div></div> }
+                    @if (!string.IsNullOrEmpty(detail.DriverName)) { <div><div style="@FactLabel">Driver</div><div style="@FactValue">@detail.DriverName @(string.IsNullOrEmpty(detail.DriverPhone) ? "" : $"· {detail.DriverPhone}")</div></div> }
+                </div>
+
+                @* R11 (D12) — the three shipment references the supplier entered before sending. Grouped: they are
+                   one set, and they are what a warehouse clerk actually looks for. *@
+                @if (!string.IsNullOrEmpty(detail.InvoiceNo) || !string.IsNullOrEmpty(detail.BillOfLading) || !string.IsNullOrEmpty(detail.PackingList))
+                {
+                    <h4 style="@FactSection">References</h4>
+                    <div style="@FactGrid">
+                        <div><div style="@FactLabel">Invoice no.</div><div style="@FactMono">@(string.IsNullOrEmpty(detail.InvoiceNo) ? "—" : detail.InvoiceNo)</div></div>
+                        <div><div style="@FactLabel">Bill of lading</div><div style="@FactMono">@(string.IsNullOrEmpty(detail.BillOfLading) ? "—" : detail.BillOfLading)</div></div>
+                        <div><div style="@FactLabel">Packing list</div><div style="@FactMono">@(string.IsNullOrEmpty(detail.PackingList) ? "—" : detail.PackingList)</div></div>
+                    </div>
+                }
+
+                <h4 style="@FactSection">Timeline &amp; ERP</h4>
+                <div style="@FactGrid">
+                    @if (detail.CreatedOn.HasValue) { <div><div style="@FactLabel">Created</div><div style="@FactMono">@detail.CreatedOn.Value.ToString("yyyy-MM-dd HH:mm")</div></div> }
+                    @* R14 — the shipping date IS the post date (postedAt), and equals the submittedAt the LN payload
+                       carries as ShipmentDate: both are stamped at post. One fact, one row. *@
+                    <div>
+                        <div style="@FactLabel">Posted · shipping date</div>
+                        <div style="@FactMono">
+                            @(detail.PostedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")@(detail.PostedAt.HasValue && !string.IsNullOrEmpty(detail.PostedBy) ? $" by {detail.PostedBy}" : "")
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(detail.ErpCode)) { <div><div style="@FactLabel">ERP code</div><div style="@FactMono">@detail.ErpCode</div></div> }
                     @* R16 — the LN verdict. PartialFailure is the one state where "no ERP code" ≠ "not in LN":
                        LN holds an ASN header for this record but refused ≥1 line, so it renders as a warning. *@
                     @if (!string.IsNullOrEmpty(detail.ErpStatus))
                     {
-                        <dt style="color:var(--mer-ink-500);">ERP status</dt>
-                        <dd>
-                            <span style="font-family:Inter,monospace;font-size:11px;border-radius:4px;padding:2px 6px;border:1px solid @(detail.ErpStatus == "Success" ? "var(--mer-green)" : "var(--mer-amber-800)");background:@(detail.ErpStatus == "Success" ? "var(--mer-green-soft)" : "var(--mer-amber-50)");color:@(detail.ErpStatus == "Success" ? "inherit" : "var(--mer-amber-800)");">@detail.ErpStatus</span>
-                        </dd>
+                        <div>
+                            <div style="@FactLabel">ERP status</div>
+                            <div><span style="font-family:Inter,monospace;font-size:11px;border-radius:4px;padding:2px 6px;border:1px solid @(detail.ErpStatus == "Success" ? "var(--mer-green)" : "var(--mer-amber-800)");background:@(detail.ErpStatus == "Success" ? "var(--mer-green-soft)" : "var(--mer-amber-50)");color:@(detail.ErpStatus == "Success" ? "inherit" : "var(--mer-amber-800)");">@detail.ErpStatus</span></div>
+                        </div>
                     }
-                </dl>
+                    @* Full width: a 64-char hash wrapping inside a 200px tile would push every sibling tile taller. *@
+                    @if (!string.IsNullOrEmpty(detail.ErpSyncId))
+                    {
+                        <div style="grid-column:1/-1;"><div style="@FactLabel">ERP sync id</div><div style="font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-600);word-break:break-all;">@detail.ErpSyncId</div></div>
+                    }
+                </div>
+
                 @if (!string.IsNullOrEmpty(detail.Notes))
                 {
-                    <h4 style="font-size:12px;font-weight:700;margin:16px 0 6px;color:var(--mer-ink-700);">Notes</h4>
-                    <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@detail.Notes</p>
+                    <h4 style="@FactSection">Notes</h4>
+                    <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;margin:0;">@detail.Notes</p>
                 }
         </div>
 
@@ -359,17 +386,31 @@
         <div style="flex:1;min-width:0;">
         <div class="rz-card" style="padding:20px;">
             <!-- Stepper -->
+            @* 2026-08-11 — the stepper renders VisibleSteps, not a fixed 1..4: an Approved ASN shows Shipment +
+               Review only (the buyer confirmed the lines and quantities; only the refs and documents remain).
+               Numbering is by POSITION, so the supplier sees 1. Shipment · 2. Review with no gap. *@
             <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--mer-line);">
-                @for (int i = 1; i <= 4; i++)
+                @foreach (var step in VisibleSteps)
                 {
-                    var step = i;
-                    var active = currentStep == step;
-                    var done = currentStep > step;
-                    <div style="padding:10px 16px;font-size:13px;font-weight:600;border-bottom:3px solid @(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "transparent");color:@(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "var(--mer-ink-500)");cursor:pointer;" @onclick="@(() => GoStep(step))">
-                        @step. @StepLabel(step)
+                    var s = step;
+                    var active = currentStep == s;
+                    var done = currentStep > s;
+                    <div style="padding:10px 16px;font-size:13px;font-weight:600;border-bottom:3px solid @(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "transparent");color:@(active ? "var(--mer-blue)" : done ? "var(--mer-green)" : "var(--mer-ink-500)");cursor:pointer;" @onclick="@(() => GoStep(s))">
+                        @StepOrdinal(s). @StepLabel(s)
                     </div>
                 }
             </div>
+
+            @if (!CanEditLines)
+            {
+                <div style="padding:9px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;background:var(--mer-blue-50);border:1px solid var(--mer-blue);border-radius:6px;">
+                    <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-blue);">verified</span>
+                    <div style="flex:1;font-size:12.5px;color:var(--mer-blue-darker);">
+                        The buyer has confirmed this shipment — <b>lines and quantities are fixed</b>.
+                        <span style="color:var(--mer-ink-500);"> Complete the shipment references and documents, then post.</span>
+                    </div>
+                </div>
+            }
 
             @if (currentStep == 1)
             {
@@ -848,7 +889,7 @@
                 }
             }
 
-            @if (currentStep == 4 && !IsNew && detail?.ShipBlocked == true)
+            @if (currentStep == LastStep && !IsNew && detail?.ShipBlocked == true)
             {
                 <div style="background:var(--mer-amber-50, #fff8e6);border:1px solid var(--mer-amber-200,#ffe2a8);color:var(--mer-ink-700);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;">
                     <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">block</span>
@@ -857,9 +898,9 @@
             }
 
             <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--mer-line);">
-                <button class="mbtn mbtn--outline" @onclick="PrevStep" disabled="@(currentStep == 1)">Back</button>
+                <button class="mbtn mbtn--outline" @onclick="PrevStep" disabled="@(currentStep == FirstStep)">Back</button>
                 <div style="display:flex;gap:8px;">
-                    @if (currentStep == 4)
+                    @if (currentStep == LastStep)
                     {
                         <button class="mbtn mbtn--outline" @onclick="SaveDraft" disabled="@(busy || (!IsNew && detail?.ShipBlocked == true))">@(busy && savingDraft ? "Saving…" : (IsNew ? "Save draft" : "Save changes"))</button>
                         @if (!IsNew && detail is not null)
@@ -1128,6 +1169,14 @@
     private bool busy = false;
     private bool savingDraft = false;
     private int currentStep = 1;
+
+    // 2026-08-11 — shared styling for the read-only "fact tile" layout (label above value, auto-fitting columns).
+    // Kept as constants rather than a stylesheet class to match this page's existing inline-style idiom.
+    private const string FactGrid = "display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px 20px;";
+    private const string FactLabel = "font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--mer-ink-500);margin-bottom:2px;";
+    private const string FactValue = "font-size:13px;color:var(--mer-ink-800);";
+    private const string FactMono = "font-size:13px;font-family:Inter,monospace;color:var(--mer-ink-800);";
+    private const string FactSection = "font-size:12px;font-weight:700;margin:18px 0 8px;padding-top:14px;border-top:1px solid var(--mer-line-soft);color:var(--mer-ink-700);";
     private string submitError = string.Empty;
 
     // Supplier-first (chooser hidden at 1 supplier) — unchanged; what follows the supplier changed in R15.
@@ -1144,8 +1193,14 @@
     private readonly Dictionary<Guid, DeliveryScheduleDto> selectedSchedules = new();
     private string lineSearch = string.Empty;
     private string gridWarehouseFilter = string.Empty;
-    private DateTime? gridDateFrom;
-    private DateTime? gridDateTo;
+    // 2026-08-11 — the grid opens on the CURRENT MONTH (1st → last day) rather than unbounded. The upper bound is
+    // month-END, not today: delivery dates are typically FORWARD-dated, so a "to today" default would hide the very
+    // lines a supplier is preparing to ship.
+    private DateTime? gridDateFrom = MonthStart();
+    private DateTime? gridDateTo = MonthEnd();
+
+    private static DateTime MonthStart() { var t = DateTime.Today; return new DateTime(t.Year, t.Month, 1); }
+    private static DateTime MonthEnd() { var s = MonthStart(); return s.AddMonths(1).AddDays(-1); }
     // Per-supplier PO-detail cache for line enrichment (serial/lot flags + over-ship allowance come off the PO
     // line, not the schedule row). One fetch per covered PO, reused across selection changes.
     private readonly Dictionary<Guid, PurchaseOrderDetailDto> poDetailCache = new();
@@ -1328,24 +1383,34 @@
         LockedWarehousePool.Any() && LockedWarehousePool.All(r => selectedSchedules.ContainsKey(r.Id));
 
     // Grid rows after the client-side filters, sorted PO → position → delivery date so the PO banding groups.
-    private IEnumerable<DeliveryScheduleDto> VisibleScheduleRows
+    //
+    // 2026-08-11 — a SELECTED row is never filtered out, by anything. Two of the filters now hide rows the
+    // supplier did not ask to hide: the fully-shipped rule, and the current-month date window the grid opens
+    // with. Either could swallow a row that is already picked — a saved draft whose delivery date falls in
+    // another month, or a line whose balance a concurrent ASN consumed after the pick — leaving the footer
+    // count, the warehouse lock and the saved ASN referring to something invisible.
+    private IEnumerable<DeliveryScheduleDto> VisibleScheduleRows =>
+        scheduleRows
+            .Where(r => selectedSchedules.ContainsKey(r.Id) || PassesGridFilters(r))
+            .OrderBy(r => r.PoNumber).ThenBy(r => r.PositionNo).ThenBy(r => r.DeliveryDate);
+
+    private bool PassesGridFilters(DeliveryScheduleDto r)
     {
-        get
+        // Nothing left to ship — the row can never be picked, so it is pure noise on a picker.
+        if (r.RemainingToShip <= 0) return false;
+        if (!string.IsNullOrEmpty(gridWarehouseFilter) && Guid.TryParse(gridWarehouseFilter, out var wid)
+            && r.WarehouseAddressId != wid) return false;
+        if (!string.IsNullOrWhiteSpace(lineSearch))
         {
-            var q = scheduleRows.AsEnumerable();
-            if (!string.IsNullOrEmpty(gridWarehouseFilter) && Guid.TryParse(gridWarehouseFilter, out var wid))
-                q = q.Where(r => r.WarehouseAddressId == wid);
-            if (!string.IsNullOrWhiteSpace(lineSearch))
-            {
-                var t = lineSearch.Trim();
-                q = q.Where(r => r.PoNumber.Contains(t, StringComparison.OrdinalIgnoreCase)
-                                 || r.ItemCode.Contains(t, StringComparison.OrdinalIgnoreCase)
-                                 || (r.ItemDescription?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false));
-            }
-            if (gridDateFrom.HasValue) q = q.Where(r => r.DeliveryDate >= gridDateFrom.Value.Date);
-            if (gridDateTo.HasValue) q = q.Where(r => r.DeliveryDate < gridDateTo.Value.Date.AddDays(1));
-            return q.OrderBy(r => r.PoNumber).ThenBy(r => r.PositionNo).ThenBy(r => r.DeliveryDate);
+            var t = lineSearch.Trim();
+            var hit = r.PoNumber.Contains(t, StringComparison.OrdinalIgnoreCase)
+                      || r.ItemCode.Contains(t, StringComparison.OrdinalIgnoreCase)
+                      || (r.ItemDescription?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false);
+            if (!hit) return false;
         }
+        if (gridDateFrom.HasValue && r.DeliveryDate < gridDateFrom.Value.Date) return false;
+        if (gridDateTo.HasValue && r.DeliveryDate >= gridDateTo.Value.Date.AddDays(1)) return false;
+        return true;
     }
 
     private sealed record GridWarehouseOption(Guid Id, string Name);
@@ -1356,6 +1421,28 @@
             .DistinctBy(o => o.Id)
             .OrderBy(o => o.Name)
             .ToList();
+
+    // ======================= 2026-08-11 — which wizard steps a status may show =======================
+    // The internal step ids never move (1 Lines · 2 Quantities · 3 Shipment · 4 Review), so every existing
+    // reference — CanProceed, the SaveDraft error routing, the ?step= deep link — keeps its meaning. What varies
+    // is WHICH ids render, and the stepper numbers them by position.
+    //
+    // An ASN is editable in three states (AsnDtoBuilder.IsLocked): Draft, Rejected, Approved. Approved means the
+    // BUYER already confirmed this exact line set and these exact quantities, so changing either behind their
+    // back is the defect; R14 (D5) kept Approved editable for a narrower reason — the supplier still has to fill
+    // in the shipment references and upload the Packing List / Invoice before posting. That is Shipment + Review.
+    private bool CanEditLines => IsNew || detail is null || detail.AsnStatus is "Draft" or "Rejected";
+
+    private List<int> VisibleSteps => CanEditLines
+        ? new List<int> { 1, 2, 3, 4 }
+        : new List<int> { 3, 4 };
+
+    private int FirstStep => VisibleSteps[0];
+    private int LastStep => VisibleSteps[^1];
+    /// <summary>Position of a step in the visible sequence, 1-based — what the stepper actually prints.</summary>
+    private int StepOrdinal(int step) => VisibleSteps.IndexOf(step) + 1;
+    /// <summary>Clamps a step id onto the visible set (a hidden id lands on the first visible step).</summary>
+    private int ClampStep(int step) => VisibleSteps.Contains(step) ? step : FirstStep;
 
     private bool CanProceed => currentStep switch
     {
@@ -1506,6 +1593,11 @@
                     currentStep = Math.Clamp(StartStep.Value, 1, 4);
                 }
                 _startStepApplied = true;
+
+                // 2026-08-11 — the status is only known NOW (OnParametersSetAsync reset the step before the fetch),
+                // so land the wizard on a step this status actually shows: an Approved ASN has no Lines/Quantities
+                // step, and leaving currentStep on a hidden id would render an empty wizard body.
+                currentStep = ClampStep(currentStep);
             }
             loading = false;
         }
@@ -1529,7 +1621,8 @@
         selectedSupplierName = suppliers.FirstOrDefault(s => s.Id == supplierId)?.LegalName;
         // Switching supplier resets the grid (an ASN ships from a single supplier).
         selectedSchedules.Clear(); lines.Clear(); poDetailCache.Clear();
-        lineSearch = string.Empty; gridWarehouseFilter = string.Empty; gridDateFrom = null; gridDateTo = null;
+        lineSearch = string.Empty; gridWarehouseFilter = string.Empty;
+        gridDateFrom = MonthStart(); gridDateTo = MonthEnd();   // back to the default window, not to unbounded
         await LoadSchedulesAsync();
     }
 
@@ -1597,7 +1690,7 @@
         {
             RebuildLinesFromSelection();
             await EnrichLinesAsync();
-            currentStep = 2;   // land on Quantities — the selection is already made
+            currentStep = ClampStep(2);   // land on Quantities — the selection is already made
         }
     }
 
@@ -1708,24 +1801,30 @@
         StateHasChanged();
     }
 
-    private void GoStep(int s) { if (s <= currentStep) currentStep = s; }
-    private void PrevStep() { if (currentStep > 1) currentStep--; }
+    // Navigation walks VisibleSteps by position, so a hidden step is never landed on (2026-08-11).
+    private void GoStep(int s) { if (VisibleSteps.Contains(s) && s <= currentStep) currentStep = s; }
+    private void PrevStep()
+    {
+        var i = VisibleSteps.IndexOf(currentStep);
+        if (i > 0) currentStep = VisibleSteps[i - 1];
+    }
     private void NextStep()
     {
         // Over-ship: surface a dialog naming the offending lines rather than silently disabling Next (§7 guard).
         if (currentStep == 2 && lines.Any(OverAllowance)) { showOverShip = true; return; }
-        if (currentStep < 4 && CanProceed) currentStep++;
+        var i = VisibleSteps.IndexOf(currentStep);
+        if (i >= 0 && i < VisibleSteps.Count - 1 && CanProceed) currentStep = VisibleSteps[i + 1];
     }
     private string StepLabel(int s) => s switch { 1 => "Lines", 2 => "Quantities", 3 => "Shipment", 4 => "Review", _ => "" };
 
     // ---- Save draft (create or update) ----
     private async Task SaveDraft()
     {
-        if (lines.Count == 0 || !expectedDeliveryDate.HasValue) { submitError = "Select at least one line and an expected delivery date."; currentStep = lines.Count == 0 ? 1 : 3; return; }
+        if (lines.Count == 0 || !expectedDeliveryDate.HasValue) { submitError = "Select at least one line and an expected delivery date."; currentStep = ClampStep(lines.Count == 0 ? 1 : 3); return; }
         busy = true; savingDraft = true; submitError = string.Empty;
 
         var lineReqs = BuildLineRequests();
-        if (lineReqs.Count == 0) { submitError = "Enter a ship quantity on at least one line."; busy = false; savingDraft = false; currentStep = 2; return; }
+        if (lineReqs.Count == 0) { submitError = "Enter a ship quantity on at least one line."; busy = false; savingDraft = false; currentStep = ClampStep(2); return; }
 
         if (IsNew)
         {
@@ -1755,7 +1854,7 @@
         if (!SerialLotCaptureValid)
         {
             submitError = "Fix the serial/lot capture before sending: every serialized line needs one serial per unit, and every lot line's quantities must sum to the shipped quantity (no duplicates).";
-            busy = false; currentStep = 2; return;
+            busy = false; currentStep = ClampStep(2); return;
         }
 
         if (!await SavePendingEditsAsync("sending for approval")) { busy = false; return; }
@@ -1776,7 +1875,7 @@
         if (!SerialLotCaptureValid)
         {
             submitError = "Fix the serial/lot capture before posting: every serialized line needs one serial per unit, and every lot line's quantities must sum to the shipped quantity (no duplicates).";
-            busy = false; currentStep = 2; return;
+            busy = false; currentStep = ClampStep(2); return;
         }
 
         // Client-side pre-check on the three references so the supplier is sent straight to the field that is

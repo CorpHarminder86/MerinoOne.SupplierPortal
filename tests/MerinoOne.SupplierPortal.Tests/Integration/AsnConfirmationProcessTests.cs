@@ -170,6 +170,39 @@ public class AsnConfirmationProcessTests
             .Should().BeTrue(because: "post-confirmation edits are recorded (D5 accountability)");
     }
 
+    // ── 2026-08-11 — the confirmed line set + quantities are FROZEN; only refs/documents may still change ──
+    [SkippableFact]
+    public async Task Editing_a_confirmed_asn_cannot_change_the_quantities_the_buyer_approved()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var (asnId, setup, supplier) = await NewDraftAsync(orderQty: 10m);
+        await SendAsync(supplier, asnId);
+        await ConfirmAsync(asnId);
+
+        // Same line, LOWER quantity — the wizard hides the Quantities step for a confirmed ASN, so this can only
+        // arrive from a direct API call. It must not silently invalidate the buyer's confirmation.
+        var lowered = new UpdateAsnRequest(
+            DateTime.UtcNow.Date.AddDays(2), null, "Carrier-2", "TRK-2", null, null, null, null,
+            new List<CreateAsnLineRequest> { new(setup.PoLineId, 4m, null, null) },
+            InvoiceNo: "INV-1", BillOfLading: "BOL-1", PackingList: "PL-1");
+        var put = await supplier.PutAsJsonAsync($"/api/asns/{asnId}", lowered);
+        put.StatusCode.Should().Be(HttpStatusCode.Conflict, because: await Body(put));
+
+        // Dropping the only line is the same violation from the other direction.
+        var emptied = lowered with { Lines = new List<CreateAsnLineRequest>() };
+        var put2 = await supplier.PutAsJsonAsync($"/api/asns/{asnId}", emptied);
+        put2.StatusCode.Should().BeOneOf(
+            new[] { HttpStatusCode.Conflict, HttpStatusCode.BadRequest },
+            "an empty line set is rejected either by the guard or by the not-empty validator");
+
+        // The stored quantity is untouched.
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.AsnLines.IgnoreQueryFilters().Where(l => l.AsnId == asnId).SumAsync(l => l.ShippedQty))
+            .Should().Be(10m, because: "the confirmed quantity survives a rejected edit");
+    }
+
     // ── Cancel is still available on a confirmed-but-unposted ASN ───────────────────────────────────────
     [SkippableFact]
     public async Task Confirmed_asn_can_still_be_cancelled()

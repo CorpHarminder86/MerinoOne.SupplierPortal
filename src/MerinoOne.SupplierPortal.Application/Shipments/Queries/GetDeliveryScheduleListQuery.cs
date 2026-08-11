@@ -72,6 +72,11 @@ public class GetDeliveryScheduleListQueryHandler
         }
         if (f.DeliveryDateFrom is DateTime from) baseQuery = baseQuery.Where(x => x.sch.DeliveryDate >= from.Date);
         if (f.DeliveryDateTo is DateTime to) baseQuery = baseQuery.Where(x => x.sch.DeliveryDate < to.Date.AddDays(1));
+        // 2026-08-11 — "only with balance": drop lines with nothing left to ship. Same expression the projection
+        // uses for RemainingToShip, applied in SQL so the total/page count describe the rows actually returned.
+        // Sits with the other filters (before the distinct-warehouse count) so the warehouse auto-hide reflects
+        // the warehouses of rows the user can actually see.
+        if (f.OnlyWithBalance == true) baseQuery = baseQuery.Where(x => x.line.OrderQty - x.line.ShippedQtyToDate > 0);
 
         // §7 — auto-hide warehouse signal: the count of DISTINCT warehouse addresses across the rows the supplier can
         // see BEFORE the warehouse filter is applied. Computed off the filtered-but-not-warehouse-filtered set so
