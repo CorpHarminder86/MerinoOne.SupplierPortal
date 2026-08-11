@@ -59,17 +59,49 @@ public class GetDocumentsQueryHandler : IRequestHandler<GetDocumentsQuery, Paged
         var ownerRefs = await ResolveOwnerRefsAsync(rows, ct);
         var supplierDisplay = await DocumentOwnerSupplierResolver.ResolveSupplierDisplayAsync(
             _db, rows.Select(r => (r.OwnerEntityType, r.OwnerEntityId)), ct);
+        var syncStates = await ResolveIdmSyncStatesAsync(rows, ct);
 
         var items = rows.Select(r =>
         {
             supplierDisplay.TryGetValue((r.OwnerEntityType, r.OwnerEntityId), out var sup);
+            syncStates.TryGetValue(r.Id, out var sync);
             return new DocumentListItemDto(
                 r.Id, r.Seq, r.FileName, r.DocumentType, r.OwnerEntityType, r.OwnerEntityId,
                 ownerRefs.GetValueOrDefault(r.OwnerEntityId), r.FileSizeKb, r.MimeType, r.UploadedBy,
-                r.CreatedOn, r.IdmEntityType, r.Pid, sup.Code, sup.Name);
+                r.CreatedOn, r.IdmEntityType, r.Pid, sup.Code, sup.Name,
+                sync?.Status, sync?.Operation, sync?.LastError);
         }).ToList();
 
         return new PagedResult<DocumentListItemDto> { Items = items, Page = request.Page, PageSize = pageSize, TotalCount = total };
+    }
+
+    /// <summary>
+    /// 2026-08-11 — the REAL IDM sync state per row: the status of the document's latest outbox row. The screen
+    /// previously inferred "Eligible" from (idmEntityType set &amp;&amp; pid null), which says only that a config
+    /// classified the document — it reported Eligible for rows the gate had Blocked and for rows the seed scan had
+    /// never even reached. The outbox carries the same seccode/tenant envelope as the document, so this stays
+    /// RLS-filtered (no IgnoreQueryFilters) exactly like the rest of the handler.
+    /// </summary>
+    private async Task<Dictionary<Guid, SyncState>> ResolveIdmSyncStatesAsync(List<Row> rows, CancellationToken ct)
+    {
+        var docIds = rows.Select(r => r.Id).ToList();
+        if (docIds.Count == 0) return new Dictionary<Guid, SyncState>();
+
+        var outboxRows = await _db.IdmDocumentOutboxes
+            .Where(o => docIds.Contains(o.DocumentUploadId))
+            .Select(o => new { o.DocumentUploadId, o.Seq, o.Status, o.Operation, o.LastError })
+            .ToListAsync(ct);
+
+        // Latest row per document (Seq is the two-key monotonic surrogate) — a Delete supersedes its Create.
+        return outboxRows
+            .GroupBy(o => o.DocumentUploadId)
+            .ToDictionary(
+                g => g.Key,
+                g =>
+                {
+                    var latest = g.OrderByDescending(o => o.Seq).First();
+                    return new SyncState(latest.Status.ToString(), latest.Operation.ToString(), latest.LastError);
+                });
     }
 
     // Batch-resolve each owner type's human ref. Each sub-query is ALSO RLS-filtered (no IgnoreQueryFilters), so an
@@ -108,4 +140,6 @@ public class GetDocumentsQueryHandler : IRequestHandler<GetDocumentsQuery, Paged
     private sealed record Row(Guid Id, int Seq, string FileName, string DocumentType, string OwnerEntityType,
         Guid OwnerEntityId, long FileSizeKb, string MimeType, string UploadedBy, DateTime CreatedOn,
         string? IdmEntityType, string? Pid);
+
+    private sealed record SyncState(string Status, string Operation, string? LastError);
 }

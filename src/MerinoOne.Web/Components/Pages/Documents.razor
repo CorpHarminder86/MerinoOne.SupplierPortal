@@ -118,18 +118,8 @@ else
                         <div class="tlg-col tlg-col--num">@row.FileSizeKb</div>
                         <div class="tlg-col" title="@row.UploadedBy">@row.UploadedBy</div>
                         <div class="tlg-col">
-                            @if (!string.IsNullOrEmpty(row.Pid))
-                            {
-                                <span class="tlg-status tlg-status--active" title="@row.Pid">Pushed</span>
-                            }
-                            else if (!string.IsNullOrEmpty(row.IdmEntityType))
-                            {
-                                <span class="tlg-status tlg-status--pending" title="@row.IdmEntityType">Eligible</span>
-                            }
-                            else
-                            {
-                                <span class="tlg-status tlg-status--info">—</span>
-                            }
+                            @{ var idm = IdmBadge(row); }
+                            <span class="tlg-status @idm.Css" title="@idm.Tip">@idm.Label</span>
                         </div>
                         <div class="tlg-col tlg-code">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
                         <div class="tlg-col tlg-col--actions">
@@ -229,4 +219,32 @@ else
         "PendingInvite" => "Pending Invite",
         _ => ownerType
     };
+
+    private sealed record IdmBadgeView(string Label, string Css, string Tip);
+
+    /// <summary>
+    /// 2026-08-11 — the IDM-state cell reads the document's LATEST outbox row. It previously printed "Eligible"
+    /// whenever a config had classified the document (idmEntityType set, no pid), which was true of rows the gate
+    /// had Blocked and of rows the dispatcher had never seeded — the screen claimed eligible while nothing was ever
+    /// pushed. "Not queued" is the honest label for a classified document with no outbox row yet.
+    /// </summary>
+    private static IdmBadgeView IdmBadge(DocumentListItemDto d)
+    {
+        if (!string.IsNullOrEmpty(d.Pid))
+            return new("Pushed", "tlg-status--active", $"IDM pid {d.Pid}");
+
+        var op = string.IsNullOrEmpty(d.IdmSyncOperation) ? "" : $"{d.IdmSyncOperation}: ";
+        return d.IdmSyncStatus switch
+        {
+            "Pending" => new("Queued", "tlg-status--pending", $"{op}waiting for the IDM dispatcher"),
+            "InFlight" => new("Sending", "tlg-status--info", $"{op}dispatch in progress"),
+            "Blocked" => new("Blocked", "tlg-status--off", $"{op}eligibility gate not satisfied yet"),
+            "Failed" => new("Failed", "tlg-status--danger", $"{op}{d.IdmSyncError ?? "dispatch failed"}"),
+            "Unresolvable" => new("Unresolvable", "tlg-status--danger", $"{op}{d.IdmSyncError ?? "owner no longer resolves"}"),
+            "Success" => new("Synced", "tlg-status--active", $"{op}acknowledged by IDM"),
+            _ when !string.IsNullOrEmpty(d.IdmEntityType) =>
+                new("Not queued", "tlg-status--off", $"Classified as {d.IdmEntityType} — no outbox row seeded yet"),
+            _ => new("—", "tlg-status--info", "Not mapped to any IDM entity type"),
+        };
+    }
 }

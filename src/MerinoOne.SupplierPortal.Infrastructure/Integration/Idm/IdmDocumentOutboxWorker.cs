@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Data.SqlClient;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Integration.Idm;
 using MerinoOne.SupplierPortal.Application.SystemSettings.InforIdm;
@@ -157,8 +158,25 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
             await PromoteBlockedAsync(db, provider, gate, cfg, tenantId, batchSize, ct);
         }
 
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            // Migration 0061 — UQ_IdmDocumentOutbox_documentUploadId_operation_live. Another dispatcher instance
+            // seeded the same document between this scan's anti-join read and its write. Its row is authoritative
+            // and ours is redundant by construction, so discard the whole staged batch: the next poll re-derives
+            // whatever is still missing, cheaply, because the anti-join skips everything already seeded.
+            logger.LogInformation(ex,
+                "[IDM] Seed lost a race to a concurrent dispatcher — discarding this pass's staged rows.");
+            db.ClearChangeTracker();
+        }
     }
+
+    /// <summary>SQL Server unique-index/constraint violation (2601 duplicate key row, 2627 constraint).</summary>
+    private static bool IsUniqueViolation(DbUpdateException ex)
+        => ex.InnerException is SqlException { Number: 2601 or 2627 };
 
     /// <summary>R10 gate rule, aligned with the LN plane: a blank/NULL gate = no gate = eligible (was: the R8
     /// dot-path column was required). Non-blank gates keep the strict-true fail-closed engine semantics.</summary>
@@ -172,25 +190,37 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         // (NULL attachmentType = catch-all: every document of this entity). NOT idmEntityType (D7: many types
         // may share one entityType, which would make every such config seed the same document). Attachment filter
         // built in C# (see the stamp query above for why an inline `== null` OR is unsafe).
+        //
+        // 2026-08-11 STARVATION FIX — the already-seeded exclusion is IN SQL (was: an unordered Take(batchSize)
+        // over every unsynced document, deduped in memory afterwards). Once the first batchSize candidates all
+        // carried a row, every drain re-picked exactly those and no newer document was ever reached, permanently:
+        // observed on dev with 31 ASN candidates at batchSize 25 — the 6 newest uploads never seeded, so documents
+        // whose ASN had since gained an erpCode could never even be gate-evaluated. The anti-join keeps the batch
+        // budget for documents that still need a row; the OrderBy makes the pick deterministic (oldest first).
+        // Dedupe is against ANY non-reaped Create row (incl. terminal Failed/Success) — a terminal 4xx must NOT
+        // re-seed every poll (verifier fix; D-R8-23). Retry re-arms instead.
         var candQuery = db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
-            .Where(d => !d.IsDeleted && d.TenantId == tenantId && d.Pid == null && d.OwnerEntityType == ownerType);
+            .Where(d => !d.IsDeleted && d.TenantId == tenantId && d.Pid == null && d.OwnerEntityType == ownerType
+                        && !db.IdmDocumentOutboxes.Any(o => !o.IsDeleted
+                            && o.Operation == IdmOutboxOperation.Create && o.DocumentUploadId == d.Id));
         if (attachmentType != null) candQuery = candQuery.Where(d => d.DocumentType == attachmentType);
         var candidates = await candQuery
+            .OrderBy(d => d.Seq)
             .Select(d => new { d.Id, d.OwnerEntityId, d.SeccodeId, d.TenantId, d.TenantEntityId, d.FileName })
             .Take(batchSize)
             .ToListAsync(ct);
         if (candidates.Count == 0) return;
 
-        var docIds = candidates.Select(c => c.Id).ToList();
-        // Dedupe against ANY non-reaped Create row (incl. terminal Failed/Success) — a terminal 4xx must NOT re-seed
-        // every poll (verifier fix; D-R8-23). Retry re-arms instead.
-        var existing = (await db.IdmDocumentOutboxes.IgnoreQueryFilters()
-            .Where(o => !o.IsDeleted && o.Operation == IdmOutboxOperation.Create && docIds.Contains(o.DocumentUploadId))
-            .Select(o => o.DocumentUploadId).ToListAsync(ct)).ToHashSet();
+        // The anti-join cannot see rows staged by an earlier config in THIS unit of work (nothing is saved until
+        // the end of the scan), so a catch-all config and a specific-attachment-type config over the same document
+        // would otherwise both add a Create row. Same defence as the LN gated enqueuer.
+        var stagedLocally = db.IdmDocumentOutboxes.Local
+            .Where(o => o.Operation == IdmOutboxOperation.Create)
+            .Select(o => o.DocumentUploadId).ToHashSet();
 
         foreach (var d in candidates)
         {
-            if (existing.Contains(d.Id)) continue;
+            if (stagedLocally.Contains(d.Id)) continue;
             var snapshot = await provider.BuildSnapshotAsync(tenantId, d.OwnerEntityId, d.Id, includeFileContent: false, ct);
             var eligible = snapshot is not null && GatePasses(gate, cfg.EligibilityGateExpr, snapshot);
             db.IdmDocumentOutboxes.Add(new IdmDocumentOutbox
@@ -213,20 +243,27 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
     {
         // Soft-deleted documents that WERE synced (pid present) emit an IDM delete. Match on (ownerEntityType,
         // documentType) so a document is handled by exactly one config (owner filter added 2026-07-06 — a catch-all
-        // NULL attachmentType would otherwise match every entity's deleted docs).
+        // NULL attachmentType would otherwise match every entity's deleted docs). The already-emitted exclusion is
+        // in SQL for the same starvation reason as the Create seed (a batch full of already-handled deletes would
+        // never reach a newer one), which also removes the per-row AnyAsync round-trip.
         var deletedQuery = db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
-            .Where(d => d.IsDeleted && d.Pid != null && d.TenantId == tenantId && d.OwnerEntityType == ownerType);
+            .Where(d => d.IsDeleted && d.Pid != null && d.TenantId == tenantId && d.OwnerEntityType == ownerType
+                        && !db.IdmDocumentOutboxes.Any(o => !o.IsDeleted
+                            && o.Operation == IdmOutboxOperation.Delete && o.DocumentUploadId == d.Id));
         if (attachmentType != null) deletedQuery = deletedQuery.Where(d => d.DocumentType == attachmentType);
         var deleted = await deletedQuery
+            .OrderBy(d => d.Seq)
             .Select(d => new { d.Id, d.OwnerEntityId, d.SeccodeId, d.TenantId, d.TenantEntityId, d.FileName, d.Pid })
             .Take(batchSize)
             .ToListAsync(ct);
 
+        var deletesStagedLocally = db.IdmDocumentOutboxes.Local
+            .Where(o => o.Operation == IdmOutboxOperation.Delete)
+            .Select(o => o.DocumentUploadId).ToHashSet();
+
         foreach (var d in deleted)
         {
-            var hasDelete = await db.IdmDocumentOutboxes.IgnoreQueryFilters()
-                .AnyAsync(o => !o.IsDeleted && o.Operation == IdmOutboxOperation.Delete && o.DocumentUploadId == d.Id, ct);
-            if (hasDelete) continue;
+            if (deletesStagedLocally.Contains(d.Id)) continue;
             db.IdmDocumentOutboxes.Add(new IdmDocumentOutbox
             {
                 DocumentUploadId = d.Id,
@@ -244,15 +281,27 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
         }
 
         // Soft-deleted documents that were NEVER synced (no pid): reap any non-terminal Create rows immediately (D-R8-6).
+        // Restricted to documents that still HAVE such a row — otherwise already-reaped documents consume the batch
+        // budget forever and a newly deleted one is never reached (same starvation class as the seeds above).
         var neverSyncedQuery = db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
-            .Where(d => d.IsDeleted && d.Pid == null && d.TenantId == tenantId && d.OwnerEntityType == ownerType);
+            .Where(d => d.IsDeleted && d.Pid == null && d.TenantId == tenantId && d.OwnerEntityType == ownerType
+                        && db.IdmDocumentOutboxes.Any(o => !o.IsDeleted
+                            && o.DocumentUploadId == d.Id && NonTerminal.Contains(o.Status)));
         if (attachmentType != null) neverSyncedQuery = neverSyncedQuery.Where(d => d.DocumentType == attachmentType);
         var neverSynced = await neverSyncedQuery
+            .OrderBy(d => d.Seq)
             .Select(d => d.Id)
             .Take(batchSize)
             .ToListAsync(ct);
         if (neverSynced.Count > 0)
         {
+            // Drop any Create this scan staged for a document that is being reaped right now (only possible when
+            // the soft-delete lands mid-scan — the Create seed reads !IsDeleted). Inserting it would immediately
+            // orphan a non-terminal row the reap has already passed over.
+            foreach (var entry in db.ChangeTrackerEntries())
+                if (entry.Entity is IdmDocumentOutbox tracked && neverSynced.Contains(tracked.DocumentUploadId))
+                    entry.State = EntityState.Detached;
+
             var now = DateTime.UtcNow;
             await db.IdmDocumentOutboxes.IgnoreQueryFilters()
                 .Where(o => !o.IsDeleted && neverSynced.Contains(o.DocumentUploadId) && NonTerminal.Contains(o.Status))
@@ -266,57 +315,82 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
     private static async Task PromoteBlockedAsync(IAppDbContext db, IEntitySnapshotProvider provider, IEligibilityGate gate,
         OutboundIntegrationConfig cfg, Guid tenantId, int batchSize, CancellationToken ct)
     {
-        var blocked = await db.IdmDocumentOutboxes.IgnoreQueryFilters()
+        // NEWEST FIRST (2026-08-11): a gate that stays unsatisfied leaves its row Blocked, so a batch-sized backlog
+        // of permanently-blocked old rows would consume every pass and a freshly seeded row would never be
+        // re-evaluated. Oldest-first starves exactly the rows most likely to become eligible (the recent ones);
+        // newest-first starves the stale tail instead, which is the better failure mode. Raise BatchSize when the
+        // Blocked backlog legitimately exceeds it.
+        //
+        // Rows of SOFT-DELETED documents are excluded — promoting one would dispatch a document the portal has
+        // deleted, and they are exactly the rows SeedDeletesAsync reaps.
+        //
+        // The status transition is a GUARDED ExecuteUpdate (`… && Status == Blocked`), not a tracked mutation.
+        // Promotion is not the only writer of these rows: a second dispatcher instance (two app hosts against one
+        // DB — the standing dev situation) or this host's own dispatch pass can move a row between the read here
+        // and the write. A tracked mutation turns that lost race into a DbUpdateConcurrencyException on the scan's
+        // SaveChanges, which also rolls back every Create staged in the same pass (observed as soon as the seed
+        // starvation fix gave the scan real work to do). Guarded ExecuteUpdate degrades to "0 rows, someone else
+        // moved it" and the next poll re-derives. Same posture as the dispatcher's Pending→InFlight claim.
+        var blocked = await db.IdmDocumentOutboxes.IgnoreQueryFilters().AsNoTracking()
             .Where(o => !o.IsDeleted && o.Status == IdmOutboxStatus.Blocked
-                        && o.TenantId == tenantId && o.IdmEntityType == cfg.TargetEntityName)
+                        && o.TenantId == tenantId && o.IdmEntityType == cfg.TargetEntityName
+                        && db.DocumentUploads.Any(d => d.Id == o.DocumentUploadId && !d.IsDeleted))
+            .OrderByDescending(o => o.Seq)
+            .Select(o => new { o.Id, o.OwnerEntityId, o.DocumentUploadId })
             .Take(batchSize)
             .ToListAsync(ct);
 
         foreach (var row in blocked)
         {
             var snapshot = await provider.BuildSnapshotAsync(tenantId, row.OwnerEntityId, row.DocumentUploadId, includeFileContent: false, ct);
+            var now = DateTime.UtcNow;
+
             if (snapshot is null)
             {
                 // Owner/document no longer resolves — terminal, keep the log actionable (D-R8-7 conservative substitute).
-                row.Status = IdmOutboxStatus.Unresolvable;
-                row.LastError = "Owning entity or document no longer resolves.";
-                row.UpdatedBy = "idm-dispatcher";
-                row.UpdatedOn = DateTime.UtcNow;
+                await db.IdmDocumentOutboxes.IgnoreQueryFilters()
+                    .Where(o => o.Id == row.Id && o.Status == IdmOutboxStatus.Blocked)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(o => o.Status, IdmOutboxStatus.Unresolvable)
+                        .SetProperty(o => o.LastError, "Owning entity or document no longer resolves.")
+                        .SetProperty(o => o.UpdatedBy, "idm-dispatcher")
+                        .SetProperty(o => o.UpdatedOn, now), ct);
                 continue;
             }
+
             if (GatePasses(gate, cfg.EligibilityGateExpr, snapshot))
-            {
-                row.Status = IdmOutboxStatus.Pending;
-                row.UpdatedBy = "idm-dispatcher";
-                row.UpdatedOn = DateTime.UtcNow;
-            }
+                await db.IdmDocumentOutboxes.IgnoreQueryFilters()
+                    .Where(o => o.Id == row.Id && o.Status == IdmOutboxStatus.Blocked)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(o => o.Status, IdmOutboxStatus.Pending)
+                        .SetProperty(o => o.UpdatedBy, "idm-dispatcher")
+                        .SetProperty(o => o.UpdatedOn, now), ct);
         }
     }
 
     // ── Per-partition FIFO head selection: only the lowest-Seq non-terminal row of each partition, when it is a due Pending. ──
+    /// <summary>
+    /// 2026-08-11 STARVATION FIX — was: an UNORDERED <c>Distinct().Take(batchSize)</c> over the partitions holding a
+    /// due Pending row, then one query per partition that DROPPED the partition when its head turned out to be
+    /// InFlight/Blocked or still in backoff. Both halves starve: the batch budget was spent on partitions that
+    /// yielded no dispatchable head (so a queue of them permanently hid every later partition), and the arbitrary
+    /// order meant which partitions got the budget was up to the storage engine. Now one query selects the head
+    /// rows themselves — a due Pending row with NO non-terminal sibling ahead of it (that is exactly the partition
+    /// head, so still one row per partition, successors still held behind an InFlight/Blocked head) — ordered
+    /// oldest-queued-first. Non-dispatchable partitions no longer consume the budget, ordering is FIFO and
+    /// deterministic, and the per-partition N+1 round-trips are gone.
+    /// </summary>
     internal static async Task<List<Guid>> SelectDueHeadRowsAsync(IAppDbContext db, int batchSize, DateTime now, CancellationToken ct)
-    {
-        var partitions = await db.IdmDocumentOutboxes.IgnoreQueryFilters()
-            .Where(o => !o.IsDeleted && o.Status == IdmOutboxStatus.Pending && (o.NextAttemptAt == null || o.NextAttemptAt <= now))
-            .Select(o => o.DocumentUploadId)
-            .Distinct()
+        => await db.IdmDocumentOutboxes.IgnoreQueryFilters()
+            .Where(o => !o.IsDeleted && o.Status == IdmOutboxStatus.Pending
+                        && (o.NextAttemptAt == null || o.NextAttemptAt <= now)
+                        && !db.IdmDocumentOutboxes.Any(p => !p.IsDeleted
+                            && p.DocumentUploadId == o.DocumentUploadId
+                            && NonTerminal.Contains(p.Status) && p.Seq < o.Seq))
+            .OrderBy(o => o.Seq)
+            .Select(o => o.Id)
             .Take(batchSize)
             .ToListAsync(ct);
-
-        var heads = new List<Guid>(partitions.Count);
-        foreach (var partition in partitions)
-        {
-            var head = await db.IdmDocumentOutboxes.IgnoreQueryFilters()
-                .Where(o => !o.IsDeleted && o.DocumentUploadId == partition && NonTerminal.Contains(o.Status))
-                .OrderBy(o => o.Seq)
-                .Select(o => new { o.Id, o.Status, o.NextAttemptAt })
-                .FirstOrDefaultAsync(ct);
-            if (head is null || head.Status != IdmOutboxStatus.Pending) continue;              // hold successors behind an InFlight/Blocked head
-            if (head.NextAttemptAt is { } next && next > now) continue;                          // backoff not elapsed
-            heads.Add(head.Id);
-        }
-        return heads;
-    }
 
     // ── Dispatch one row (own scope for thread-safety under the concurrency cap). ────────────────────────────────
     private static async Task DispatchRowAsync(IServiceScopeFactory scopeFactory, Guid rowId, IInforIdmSettings settings, ILogger logger, CancellationToken ct)

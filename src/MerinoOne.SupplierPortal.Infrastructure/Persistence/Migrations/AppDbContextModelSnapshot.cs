@@ -3291,6 +3291,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
 
+                    b.HasIndex("DocumentUploadId", "Operation")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_IdmDocumentOutbox_documentUploadId_operation_live")
+                        .HasFilter("[isDeleted] = 0 AND [operation] IN ('Create', 'Delete')");
+
                     b.HasIndex("DocumentUploadId", "Seq")
                         .HasDatabaseName("IX_IdmDocumentOutbox_documentUploadId_seq");
 

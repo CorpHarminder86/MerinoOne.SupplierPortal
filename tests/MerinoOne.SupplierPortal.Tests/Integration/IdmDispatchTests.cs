@@ -8,6 +8,7 @@ using MerinoOne.SupplierPortal.Domain.Enums;
 using MerinoOne.SupplierPortal.Infrastructure.Integration.Idm;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
 using MerinoOne.SupplierPortal.Tests.Infrastructure;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -162,6 +163,376 @@ public class IdmDispatchTests
         creates.Should().HaveCount(1, because: "a terminal 4xx Failed create must not be re-seeded every drain (D-R8-23)");
         creates[0].Status.Should().Be(IdmOutboxStatus.Failed);
         creates[0].LastError.Should().NotBeNullOrEmpty();
+    }
+
+    /// <summary>
+    /// 2026-08-11 STARVATION REGRESSION — the seed scan must not spend its batch budget on documents that ALREADY
+    /// carry a Create row. Pre-fix the candidate query was an unordered <c>Take(batchSize)</c> over every unsynced
+    /// document with the dedupe applied in memory afterwards, so once the first batchSize candidates all had rows
+    /// every subsequent drain re-picked exactly those and seeded nothing — newer uploads were never reached (dev:
+    /// 31 ASN candidates at batchSize 25 → the 6 newest never seeded, so a document whose ASN had since gained an
+    /// erpCode could not even be gate-evaluated). Three documents, batchSize 2: the third can only appear if the
+    /// second pass skips the two already-seeded ones. The gate is deliberately UNSATISFIED (the invoice carries no
+    /// erp trio), so the rows stay Blocked and no dispatch is involved — this is a seeding test.
+    /// </summary>
+    [SkippableFact]
+    public async Task Seed_scan_reaches_newer_documents_when_the_batch_is_full_of_already_seeded_ones()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var attachmentType = $"IdmStarve-{tag}";
+        var docIds = new List<Guid>();
+        Guid cfgId;
+
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var now = DateTime.UtcNow;
+            var invoiceId = Guid.NewGuid();
+            db.Invoices.Add(new Invoice
+            {
+                Id = invoiceId, InvoiceNumber = $"STARVE-{tag}", SupplierId = IntegrationTestFixture.SupplierId,
+                InvoiceDate = now.Date, InvoiceAmount = 100, TaxAmount = 0, NetAmount = 100, CurrencyCode = "INR",
+                InvoiceStatus = InvoiceStatus.Submitted,
+                ErpCompany = null, ErpTransactionType = null, ErpDocumentNo = null,   // gate stays UNSATISFIED
+                SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now,
+            });
+
+            for (var i = 1; i <= 3; i++)
+            {
+                var docId = Guid.NewGuid();
+                docIds.Add(docId);
+                db.DocumentUploads.Add(new DocumentUpload
+                {
+                    Id = docId, OwnerEntityType = DocumentOwnerTypes.Invoice, OwnerEntityId = invoiceId,
+                    DocumentType = attachmentType, FileName = $"starve-{tag}-{i}.pdf",
+                    FileUrl = $"idmtest/starve-{tag}-{i}.pdf",   // never dispatched (Blocked) — no real bytes needed
+                    FileSizeKb = 1, MimeType = "application/pdf", UploadedBy = "seed", IdmEntityType = null, Pid = null,
+                    SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                    TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now.AddSeconds(i),
+                });
+            }
+
+            var cfg = NewDocumentConfig(attachmentType);
+            db.OutboundIntegrationConfigs.Add(cfg);
+            await db.SaveChangesAsync();
+            cfgId = cfg.Id;
+        }
+
+        try
+        {
+            // batchSize 2 < 3 candidates: pass 1 can seed at most two, pass 2 must reach the remaining one.
+            await SeedPassAsync(batchSize: 2);
+            await SeedPassAsync(batchSize: 2);
+
+            using var scope = _fx.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var rows = await db.IdmDocumentOutboxes.IgnoreQueryFilters()
+                .Where(o => !o.IsDeleted && o.Operation == IdmOutboxOperation.Create && docIds.Contains(o.DocumentUploadId))
+                .ToListAsync();
+
+            rows.Select(r => r.DocumentUploadId).Should().BeEquivalentTo(docIds,
+                because: "a batch already full of seeded documents must not starve the ones still needing a row");
+            rows.Should().OnlyContain(r => r.Status == IdmOutboxStatus.Blocked,
+                because: "the invoice carries no erp trio, so the eligibility gate withholds every row");
+        }
+        finally
+        {
+            using var cleanup = _fx.Factory.Services.CreateScope();
+            var db = cleanup.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.OutboundIntegrationConfigs.IgnoreQueryFilters().Where(c => c.Id == cfgId).ExecuteDeleteAsync();
+        }
+    }
+
+    /// <summary>
+    /// 2026-08-11 STARVATION REGRESSION (dispatch side) — head selection must not spend its batch budget on
+    /// partitions that yield no dispatchable head. Pre-fix it took an unordered <c>Distinct().Take(batchSize)</c>
+    /// over the partitions holding a due Pending row and only afterwards dropped the ones whose head was
+    /// InFlight/Blocked, so a queue of blocked-head partitions permanently hid every later partition. Two
+    /// blocked-head partitions (each with a Pending successor) plus one plain Pending partition, with a budget of
+    /// exactly one slot beyond the pre-existing heads: the slot must reach the dispatchable partition, and the
+    /// held successors must never be selected.
+    /// </summary>
+    [SkippableFact]
+    public async Task Head_selection_skips_blocked_head_partitions_without_spending_the_batch_budget()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var docIds = new List<Guid>();
+        var heldSuccessorIds = new List<Guid>();
+        Guid dispatchableRowId;
+        var now = DateTime.UtcNow;
+
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            IdmDocumentOutbox NewRow(Guid docId, IdmOutboxOperation op, IdmOutboxStatus status) => new()
+            {
+                Id = Guid.NewGuid(), DocumentUploadId = docId, IdmEntityType = "InforInvoice",
+                OwnerEntityId = Guid.NewGuid(), FileName = $"head-{tag}.pdf",
+                Operation = op, Status = status,
+                SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed",
+            };
+
+            // A DocumentUpload per partition (FK target). Their DocumentType matches no config, so no scan touches them.
+            Guid NewDoc(string suffix)
+            {
+                var docId = Guid.NewGuid();
+                db.DocumentUploads.Add(new DocumentUpload
+                {
+                    Id = docId, OwnerEntityType = DocumentOwnerTypes.Invoice, OwnerEntityId = Guid.NewGuid(),
+                    DocumentType = $"IdmHead-{tag}-{suffix}", FileName = $"head-{tag}-{suffix}.pdf",
+                    FileUrl = $"idmtest/head-{tag}-{suffix}.pdf", FileSizeKb = 1, MimeType = "application/pdf",
+                    UploadedBy = "seed", IdmEntityType = null, Pid = null,
+                    SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                    TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now,
+                });
+                docIds.Add(docId);
+                return docId;
+            }
+
+            // Two partitions whose HEAD is a Blocked Create with a due Pending DELETE queued behind it — the real
+            // shape of "the document was deleted while its create was still gated". Seq is assigned in insert
+            // order, so the head must be saved first. (A second Create would be the shape migration 0061 forbids;
+            // a partition stacks DIFFERENT operations, which is exactly why that index is per-operation.)
+            foreach (var suffix in new[] { "blocked1", "blocked2" })
+            {
+                var docId = NewDoc(suffix);
+                db.IdmDocumentOutboxes.Add(NewRow(docId, IdmOutboxOperation.Create, IdmOutboxStatus.Blocked));
+                await db.SaveChangesAsync();
+                var successor = NewRow(docId, IdmOutboxOperation.Delete, IdmOutboxStatus.Pending);
+                db.IdmDocumentOutboxes.Add(successor);
+                await db.SaveChangesAsync();
+                heldSuccessorIds.Add(successor.Id);
+            }
+
+            // One plain due-Pending partition — the only dispatchable head of the three, and the newest of all.
+            var dispatchable = NewRow(NewDoc("pending"), IdmOutboxOperation.Create, IdmOutboxStatus.Pending);
+            db.IdmDocumentOutboxes.Add(dispatchable);
+            await db.SaveChangesAsync();
+            dispatchableRowId = dispatchable.Id;
+
+            // The shared test DB has the real dispatcher polling it (the fixture leaves the hosted workers
+            // running), so the global set of due heads shifts under the test. Assert the two invariants against an
+            // unbounded read, then re-derive the tight budget from that same read and retry a couple of times if a
+            // foreign head appears in between — the flake would otherwise be noise, not a regression.
+            List<Guid> heads = null!;
+            for (var attempt = 1; attempt <= 3; attempt++)
+            {
+                heads = await IdmDocumentOutboxWorker.SelectDueHeadRowsAsync(db, 10_000, DateTime.UtcNow, CancellationToken.None);
+
+                heads.Should().Contain(dispatchableRowId,
+                    because: "a plain due-Pending partition is a dispatchable head");
+                heads.Should().NotContain(heldSuccessorIds,
+                    because: "a successor stays held behind its non-terminal head (per-partition FIFO)");
+
+                // Exactly enough budget to reach our row: it can only survive the Take if the two blocked-head
+                // partitions never occupied a slot, i.e. they are excluded IN the query, not after it.
+                var tight = await IdmDocumentOutboxWorker.SelectDueHeadRowsAsync(
+                    db, heads.IndexOf(dispatchableRowId) + 1, DateTime.UtcNow, CancellationToken.None);
+                if (tight.Contains(dispatchableRowId) || attempt == 3)
+                {
+                    tight.Should().Contain(dispatchableRowId,
+                        because: "partitions whose head is Blocked must not consume the dispatch batch budget");
+                    break;
+                }
+            }
+        }
+
+        using (var cleanup = _fx.Factory.Services.CreateScope())
+        {
+            var db = cleanup.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.IdmDocumentOutboxes.IgnoreQueryFilters().Where(o => docIds.Contains(o.DocumentUploadId)).ExecuteDeleteAsync();
+            await db.DocumentUploads.IgnoreQueryFilters().Where(d => docIds.Contains(d.Id)).ExecuteDeleteAsync();
+        }
+    }
+
+    /// <summary>
+    /// Migration 0061 — <c>UQ_IdmDocumentOutbox_documentUploadId_operation_live</c>. Two dispatcher instances
+    /// racing one poll used to seed the same document twice and push two items to IDM (observed on the test DB:
+    /// two Create rows 76 ms apart, both dispatched). The index makes the seed scan's in-SQL dedupe durable.
+    /// Covers the three semantics the filter has to preserve at once: a live duplicate is rejected, a TERMINAL
+    /// Failed Create still blocks a re-seed (D-R8-23), and a REAPED row releases the slot so the
+    /// create→delete→reap→re-seed cycle stays open. Update rows are outside the filter and stay unconstrained.
+    /// </summary>
+    [SkippableFact]
+    public async Task Unique_live_index_allows_one_create_per_document_and_releases_on_reap()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        Guid docId;
+
+        IdmDocumentOutbox NewRow(IdmOutboxOperation op, IdmOutboxStatus status, Guid document) => new()
+        {
+            Id = Guid.NewGuid(), DocumentUploadId = document, IdmEntityType = "InforInvoice",
+            OwnerEntityId = Guid.NewGuid(), FileName = $"uq-{tag}.pdf", Operation = op, Status = status,
+            SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+            TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed",
+        };
+
+        try
+        {
+            using (var scope = _fx.Factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                docId = Guid.NewGuid();
+                db.DocumentUploads.Add(new DocumentUpload
+                {
+                    Id = docId, OwnerEntityType = DocumentOwnerTypes.Invoice, OwnerEntityId = Guid.NewGuid(),
+                    DocumentType = $"IdmUq-{tag}", FileName = $"uq-{tag}.pdf", FileUrl = $"idmtest/uq-{tag}.pdf",
+                    FileSizeKb = 1, MimeType = "application/pdf", UploadedBy = "seed", IdmEntityType = null, Pid = null,
+                    SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                    TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+                });
+                // A TERMINAL Failed Create — still live (not reaped), so it must hold the slot.
+                db.IdmDocumentOutboxes.Add(NewRow(IdmOutboxOperation.Create, IdmOutboxStatus.Failed, docId));
+                await db.SaveChangesAsync();
+            }
+
+            using (var scope = _fx.Factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.IdmDocumentOutboxes.Add(NewRow(IdmOutboxOperation.Create, IdmOutboxStatus.Pending, docId));
+                var act = async () => await db.SaveChangesAsync();
+                (await act.Should().ThrowAsync<DbUpdateException>(
+                        because: "a second live Create for the same document is exactly the duplicate-push race"))
+                    .Which.InnerException.Should().BeOfType<SqlException>()
+                    .Which.Number.Should().BeOneOf(2601, 2627);
+            }
+
+            using (var scope = _fx.Factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                // An Update row is outside the filter — two live ones must still be accepted.
+                db.IdmDocumentOutboxes.Add(NewRow(IdmOutboxOperation.Update, IdmOutboxStatus.Pending, docId));
+                db.IdmDocumentOutboxes.Add(NewRow(IdmOutboxOperation.Update, IdmOutboxStatus.Success, docId));
+                await db.SaveChangesAsync();
+
+                // Reap the Create row → the slot is released and the document can be seeded again.
+                await db.IdmDocumentOutboxes.IgnoreQueryFilters()
+                    .Where(o => o.DocumentUploadId == docId && o.Operation == IdmOutboxOperation.Create)
+                    .ExecuteUpdateAsync(s => s.SetProperty(o => o.IsDeleted, true).SetProperty(o => o.DeletedOn, DateTime.UtcNow));
+
+                db.IdmDocumentOutboxes.Add(NewRow(IdmOutboxOperation.Create, IdmOutboxStatus.Blocked, docId));
+                var act = async () => await db.SaveChangesAsync();
+                await act.Should().NotThrowAsync(
+                    because: "a reaped Create leaves the filter, so create→delete→reap→re-seed stays possible");
+            }
+        }
+        finally
+        {
+            using var cleanup = _fx.Factory.Services.CreateScope();
+            var db = cleanup.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.IdmDocumentOutboxes.IgnoreQueryFilters().Where(o => o.FileName == $"uq-{tag}.pdf").ExecuteDeleteAsync();
+            await db.DocumentUploads.IgnoreQueryFilters().Where(d => d.DocumentType == $"IdmUq-{tag}").ExecuteDeleteAsync();
+        }
+    }
+
+    /// <summary>
+    /// Migration 0061 companion — the seed scan must SURVIVE losing the race, not blow up the drain. A concurrent
+    /// dispatcher's Create row is planted on a separate connection between the scan's read and its write; the pass
+    /// must swallow the unique violation and the next pass must still seed everything else.
+    /// </summary>
+    [SkippableFact]
+    public async Task Seed_scan_swallows_a_lost_race_and_still_seeds_the_rest_next_pass()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var attachmentType = $"IdmRace-{tag}";
+        Guid racedDocId, otherDocId, cfgId;
+
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var now = DateTime.UtcNow;
+            var invoiceId = Guid.NewGuid();
+            db.Invoices.Add(new Invoice
+            {
+                Id = invoiceId, InvoiceNumber = $"RACE-{tag}", SupplierId = IntegrationTestFixture.SupplierId,
+                InvoiceDate = now.Date, InvoiceAmount = 100, TaxAmount = 0, NetAmount = 100, CurrencyCode = "INR",
+                InvoiceStatus = InvoiceStatus.Submitted,
+                ErpCompany = null, ErpTransactionType = null, ErpDocumentNo = null,   // gate stays UNSATISFIED
+                SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now,
+            });
+
+            Guid NewDoc(string suffix)
+            {
+                var docId = Guid.NewGuid();
+                db.DocumentUploads.Add(new DocumentUpload
+                {
+                    Id = docId, OwnerEntityType = DocumentOwnerTypes.Invoice, OwnerEntityId = invoiceId,
+                    DocumentType = attachmentType, FileName = $"race-{tag}-{suffix}.pdf",
+                    FileUrl = $"idmtest/race-{tag}-{suffix}.pdf", FileSizeKb = 1, MimeType = "application/pdf",
+                    UploadedBy = "seed", IdmEntityType = null, Pid = null,
+                    SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                    TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = now,
+                });
+                return docId;
+            }
+
+            racedDocId = NewDoc("raced");
+            otherDocId = NewDoc("other");
+            var cfg = NewDocumentConfig(attachmentType);
+            db.OutboundIntegrationConfigs.Add(cfg);
+            await db.SaveChangesAsync();
+            cfgId = cfg.Id;
+        }
+
+        try
+        {
+            // The "other dispatcher": plant a Create row for one of the two documents before the scan writes.
+            using (var scope = _fx.Factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.IdmDocumentOutboxes.Add(new IdmDocumentOutbox
+                {
+                    Id = Guid.NewGuid(), DocumentUploadId = racedDocId, IdmEntityType = "InforInvoice",
+                    OwnerEntityId = Guid.NewGuid(), FileName = $"race-{tag}-raced.pdf",
+                    Operation = IdmOutboxOperation.Create, Status = IdmOutboxStatus.Blocked,
+                    SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+                    TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "other-dispatcher",
+                });
+                await db.SaveChangesAsync();
+            }
+
+            // This pass may or may not collide depending on read timing; either way it must not throw…
+            var pass = async () => await SeedPassAsync(batchSize: 25);
+            await pass.Should().NotThrowAsync(because: "a lost seed race is a log line, not a failed drain");
+
+            // …and a follow-up pass must leave both documents with exactly one live Create row.
+            await SeedPassAsync(batchSize: 25);
+
+            using var check = _fx.Factory.Services.CreateScope();
+            var verify = check.ServiceProvider.GetRequiredService<AppDbContext>();
+            foreach (var docId in new[] { racedDocId, otherDocId })
+                (await verify.IdmDocumentOutboxes.IgnoreQueryFilters()
+                    .CountAsync(o => !o.IsDeleted && o.Operation == IdmOutboxOperation.Create && o.DocumentUploadId == docId))
+                    .Should().Be(1, because: "every candidate ends with exactly one live Create row");
+        }
+        finally
+        {
+            using var cleanup = _fx.Factory.Services.CreateScope();
+            var db = cleanup.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.OutboundIntegrationConfigs.IgnoreQueryFilters().Where(c => c.Id == cfgId).ExecuteDeleteAsync();
+        }
+    }
+
+    /// <summary>One maintenance pass (stamp → seed → promote) at an explicit batch size — no dispatch, no reap.</summary>
+    private async Task SeedPassAsync(int batchSize)
+    {
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var registry = scope.ServiceProvider.GetRequiredService<Application.Integration.Idm.ISnapshotProviderRegistry>();
+        var gate = scope.ServiceProvider.GetRequiredService<Application.Integration.Idm.IEligibilityGate>();
+        await IdmDocumentOutboxWorker.SeedAndPromoteAsync(db, registry, gate, batchSize, NullLogger.Instance, CancellationToken.None);
     }
 
     /// <summary>

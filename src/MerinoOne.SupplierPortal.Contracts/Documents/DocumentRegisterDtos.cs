@@ -5,6 +5,9 @@ namespace MerinoOne.SupplierPortal.Contracts.Documents;
 /// <see cref="OwnerRef"/> is the human handle of the owning entity (ASN no / invoice no / supplier code / license
 /// no), resolved where the caller can also see that owner; null falls back to the short owner id in the UI.
 /// <see cref="IdmEntityType"/>/<see cref="Pid"/> surface the Infor IDM sync state (pid set = pushed).
+/// <see cref="IdmSyncStatus"/> is the status of the document's LATEST IDM outbox row (Blocked / Pending /
+/// InFlight / Success / Failed / Unresolvable), null when no row has been seeded yet — a classified document
+/// (<see cref="IdmEntityType"/> set) with no row is queued for nothing, which is NOT the same as gate-eligible.
 /// </summary>
 public record DocumentListItemDto(
     Guid Id,
@@ -21,4 +24,7 @@ public record DocumentListItemDto(
     string? IdmEntityType,
     string? Pid,
     string? SupplierCode,
-    string? SupplierName);
+    string? SupplierName,
+    string? IdmSyncStatus = null,
+    string? IdmSyncOperation = null,
+    string? IdmSyncError = null);

@@ -56,5 +56,16 @@ public class IdmDocumentOutboxConfiguration : IEntityTypeConfiguration<IdmDocume
         // Per-partition FIFO scan.
         b.HasIndex(x => new { x.DocumentUploadId, x.Seq })
             .HasDatabaseName("IX_IdmDocumentOutbox_documentUploadId_seq");
+        // 2026-08-11 (migration 0061) — one live Create and one live Delete per document: the seed scan's in-SQL
+        // dedupe made durable, so two dispatcher instances racing the same poll cannot both seed (observed on the
+        // test DB: two Create rows 76 ms apart, both dispatched → a duplicate item in IDM). The filter is isDeleted,
+        // NOT status: a terminal Failed Create must still block re-seeding (D-R8-23), while a reaped row drops out
+        // of the filter so the create→delete→reap→re-seed cycle stays open. Update is deliberately excluded — its
+        // rows are inserted inside business commands (a violation would surface as a user-facing failure) and a
+        // duplicate Update is an idempotent re-write of the same pid, not a new IDM item.
+        b.HasIndex(x => new { x.DocumentUploadId, x.Operation })
+            .HasDatabaseName("UQ_IdmDocumentOutbox_documentUploadId_operation_live")
+            .IsUnique()
+            .HasFilter("[isDeleted] = 0 AND [operation] IN ('Create', 'Delete')");
     }
 }
