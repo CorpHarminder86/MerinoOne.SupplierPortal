@@ -4,8 +4,91 @@
 @inject NavigationManager NavMgr
 @inject TokenAccessor Token
 @inject NotificationService Notif
+@inject IJSRuntime JS
 
 <PageTitle>@(IsNew ? "New ASN" : detail?.AsnNumber)</PageTitle>
+
+@* Design 2a — read-only ASN. A <style> block rather than the page's usual inline styles: the layout needs
+   sibling selectors (column rules), :hover, and a stacking media query, none of which an inline style can
+   express. Everything is prefixed asnro- (ASN read-only) so it cannot collide with merino.css. *@
+<style>
+    .asnro-strip { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+                   padding:8px 14px; margin-bottom:12px; border:1px solid; border-radius:var(--mer-radius, 6px); }
+    .asnro-strip__text { font:500 12.5px/1.35 'Plus Jakarta Sans', sans-serif; }
+    .asnro-strip__text b { font-weight:700; }
+    .asnro-strip__sep { width:1px; height:15px; }
+    .asnro-strip__muted { font:400 12.5px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-600); }
+    .asnro-strip__link { font:600 12.5px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-blue); text-decoration:none; }
+    .asnro-strip__link:hover { text-decoration:underline; }
+    .asnro-sync { display:inline-flex; align-items:center; gap:5px; cursor:pointer;
+                  font:400 11px/1 Inter, ui-monospace, monospace; color:var(--mer-ink-500); }
+    .asnro-sync:hover { color:var(--mer-ink-800); }
+
+    .asnro-facts { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); padding:14px 18px; gap:0; }
+    .asnro-facts > div + div { border-left:1px solid var(--mer-line-soft); padding-left:20px; margin-left:20px; }
+    .asnro-facts__head { font:700 9.5px/1 'Plus Jakarta Sans', sans-serif; letter-spacing:.1em;
+                         text-transform:uppercase; color:var(--mer-ink-500); margin-bottom:9px; }
+    .asnro-kv { display:grid; grid-template-columns:auto 1fr; column-gap:14px; row-gap:6px;
+                align-items:baseline; margin:0; }
+    .asnro-kv dt { font:400 11.5px/1.4 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-500); }
+    .asnro-kv dd { margin:0; font:600 12.5px/1.4 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-900);
+                   min-width:0; overflow-wrap:anywhere; }
+    .asnro-mono { font-family:Inter, ui-monospace, monospace !important; }
+    .asnro-by { font-weight:400; color:var(--mer-ink-500); }
+    .asnro-pill { display:inline-block; padding:2px 8px; border-radius:999px;
+                  font:700 10.5px/1.5 'Plus Jakarta Sans', sans-serif; }
+
+    .asnro-lines { padding:0; margin-top:12px; overflow:hidden; }
+    .asnro-lines__head { display:flex; align-items:baseline; gap:10px; padding:12px 18px;
+                         border-bottom:1px solid var(--mer-line); }
+    .asnro-lines__head h3 { margin:0; font:700 13.5px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-blue-darker); }
+    .asnro-lines__totals { font:400 12px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-500); }
+
+    .asnro-grid { display:grid; align-items:center; gap:0 10px; padding:0 18px;
+                  grid-template-columns:118px 42px 42px minmax(0,1fr) 88px 90px 172px 104px 96px 28px; }
+    .asnro-grid--head { height:32px; background:var(--mer-ink-50); border-bottom:1px solid var(--mer-line);
+                        font:700 9.5px/1 'Plus Jakarta Sans', sans-serif; letter-spacing:.07em;
+                        text-transform:uppercase; color:var(--mer-ink-500); }
+    .asnro-grid--row { min-height:40px; border-bottom:1px solid var(--mer-line-soft); font-size:12px; }
+    .asnro-grid--clickable { cursor:pointer; }
+    .asnro-grid--clickable:hover { background:var(--mer-blue-50); }
+    .asnro-grid--open { background:var(--mer-ink-50); }
+    .asnro-r { text-align:right; }
+    .asnro-dim { color:var(--mer-ink-500); }
+    .asnro-po { font:600 11.5px/1 Inter, ui-monospace, monospace; color:var(--mer-blue); }
+    .asnro-ship { font:700 12.5px/1 Inter, ui-monospace, monospace; color:var(--mer-blue-darker);
+                  font-variant-numeric:tabular-nums; }
+    .asnro-item { min-width:0; display:flex; align-items:baseline; gap:8px; }
+    .asnro-item b { font:600 11.5px/1 Inter, ui-monospace, monospace; color:var(--mer-ink-900); flex:none; }
+    .asnro-item__desc { font-size:12px; color:var(--mer-ink-500); white-space:nowrap; overflow:hidden;
+                        text-overflow:ellipsis; }
+    .asnro-tag { flex:none; padding:2px 7px; border-radius:4px; font:600 10px/1.4 'Plus Jakarta Sans', sans-serif;
+                 background:var(--mer-ink-100); color:var(--mer-ink-600); }
+    .asnro-bal { font-size:11.5px; }
+    .asnro-chev { justify-self:end; color:var(--mer-ink-400); display:inline-flex; }
+    .asnro-chev .material-symbols-outlined { font-size:17px; }
+
+    .asnro-detail { padding:10px 18px 12px 136px; background:var(--mer-ink-50);
+                    border-bottom:1px solid var(--mer-line-soft); }
+    .asnro-detail__head { font:700 9.5px/1 'Plus Jakarta Sans', sans-serif; letter-spacing:.09em;
+                          text-transform:uppercase; color:var(--mer-ink-500); margin-bottom:7px; }
+    .asnro-chips { display:flex; flex-wrap:wrap; gap:5px; }
+    .asnro-chip { padding:3px 8px; border-radius:4px; font:400 11px/1.4 Inter, ui-monospace, monospace;
+                  background:var(--mer-surface); border:1px solid var(--mer-line); color:var(--mer-ink-700); }
+    .asnro-chip--lot { background:var(--mer-green-soft); border-color:var(--mer-green); }
+
+    /* Below ~1180px the ten-column line grid and the three fact columns both stop fitting: stack the facts,
+       drop the column rules that would then read as stray vertical lines, and let the table scroll sideways
+       inside its own card rather than widening the page. */
+    @@media (max-width: 1180px) {
+        .asnro-facts { grid-template-columns:1fr; gap:14px; }
+        .asnro-facts > div + div { border-left:0; padding-left:0; margin-left:0;
+                                   border-top:1px solid var(--mer-line-soft); padding-top:14px; }
+        .asnro-lines { overflow-x:auto; }
+        .asnro-grid { min-width:1060px; }
+        .asnro-detail { min-width:1060px; }
+    }
+</style>
 
 <div class="tl-page">
     <a href="asns" class="mer-back-link">
@@ -211,156 +294,188 @@
                 }
             </div>
         }
-        else if (draftInvoiceIds.Count > 0)
-        {
-            <div class="rz-card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--mer-green-50);border:1px solid var(--mer-green);">
-                <span class="material-symbols-outlined" style="font-size:22px;color:var(--mer-green-dark);">receipt_long</span>
-                <div style="flex:1;min-width:240px;">
-                    <div style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);">@(draftInvoiceIds.Count == 1 ? "Draft invoice created" : $"{draftInvoiceIds.Count} draft invoices created")</div>
-                    <div style="font-size:12px;color:var(--mer-ink-600);">@(draftInvoiceIds.Count == 1 ? "A draft invoice spanning this ASN's PO(s) was generated on approval." : "One draft invoice per PO currency / payment-term group was generated on approval.")</div>
-                </div>
+        @* ── Design 2a (claude.ai/design "Header space optimization", 2026-08-11) ────────────────────────
+           The read-only ASN spent its first ~640px on two banners and three stacked fact sections, so Lines —
+           the reason the page was opened — began below the fold. 2a reclaims it three ways:
+             · one status strip absorbs the draft-invoice banner, the posted/ERP verdict and the sync id;
+             · the facts sit in three columns (Shipment · References · Timeline & ERP) instead of stacked;
+             · serial/lot chips collapse behind a per-row chevron, so a serialized ASN no longer runs for pages.
+           Deviation from the mock, by decision: the page keeps its NATURAL scroll (the mock pins the shell to
+           the viewport and scrolls only the table), and the mock's Export button is not built. ─────────────── *@
+        @{
+            var strip = LockedStrip(detail, draftInvoiceIds.Count);
+            var lineTotal = detail.Lines.Sum(l => l.ShippedQty);
+        }
+
+        <div class="asnro-strip" style="background:@strip.Bg;border-color:@strip.Border;">
+            <span class="material-symbols-outlined" style="font-size:16px;color:@strip.Fg;">@strip.Icon</span>
+            <span class="asnro-strip__text" style="color:@strip.Fg;">@((MarkupString)strip.Text)</span>
+
+            @* R6 — the draft invoice(s) generated on approval. Was a full banner card; it is a sentence here,
+               because "a draft exists, open it" is one fact and one link. The Blocked state keeps its card
+               below: that one needs an explanation and a Retry button. *@
+            @if (draftInvoiceIds.Count > 0)
+            {
+                <span class="asnro-strip__sep" style="background:@strip.Border;"></span>
+                <span class="asnro-strip__muted">@(draftInvoiceIds.Count == 1 ? "Draft invoice generated on approval" : $"{draftInvoiceIds.Count} draft invoices generated on approval")</span>
                 @for (var i = 0; i < draftInvoiceIds.Count; i++)
                 {
                     var draftId = draftInvoiceIds[i];
-                    var draftLabel = draftInvoiceIds.Count == 1 ? "Open draft invoice" : $"Draft invoice #{i + 1}";
-                    <a href="invoices/@draftId" class="rz-button rz-primary" style="padding:8px 14px;border-radius:6px;border:0;color:#fff;text-decoration:none;flex:none;">@draftLabel</a>
+                    <a class="asnro-strip__link" href="invoices/@draftId">@(draftInvoiceIds.Count == 1 ? "Open draft invoice →" : $"Draft #{i + 1} →")</a>
                 }
-            </div>
-        }
+            }
 
-        @* R7 (§2/§3.2) — the old 1.4fr/1fr grid (Shipment beside the always-expanded panel) is gone: the document
-           surface moved into the right rail, and the Shipment card spans the full main column. *@
-        @* 2026-08-11 — was a 15-row single-column <dl> with a 160px label gutter: correct, but a screenful of
-           scrolling for ~10 short values. Now three labelled groups of auto-fitting tiles (label above value), so
-           the same facts read in a third of the height and the eye can scan across instead of down.
-           Two dates were ALWAYS identical here — "Shipping date" is defined as postedAt (R14), so it printed the
-           same timestamp as "Posted" one row later. They are one fact now. *@
-        <div class="rz-card" style="padding:20px;">
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:14px;color:var(--mer-blue-darker);">Shipment</h3>
+            <span style="flex:1;"></span>
 
-                <div style="@FactGrid">
-                    <div><div style="@FactLabel">Purchase order(s)</div><div style="@FactValue">@PoSummaryText</div></div>
-                    <div><div style="@FactLabel">Expected delivery</div><div style="@FactMono">@detail.ExpectedDeliveryDate.ToString("yyyy-MM-dd")</div></div>
+            @* The 64-char sync id was a full-width row of its own. It is an operator's copy-paste handle, not a
+               fact to read, so it renders truncated and copies on click. *@
+            @if (!string.IsNullOrEmpty(detail.ErpSyncId))
+            {
+                <span class="asnro-sync" title="@detail.ErpSyncId — click to copy" @onclick="() => CopySyncIdAsync(detail.ErpSyncId!)">
+                    <span class="material-symbols-outlined" style="font-size:14px;">content_copy</span>@ShortSyncId(detail.ErpSyncId!)
+                </span>
+            }
+        </div>
+
+        <div class="rz-card asnro-facts">
+            <div>
+                <div class="asnro-facts__head">Shipment</div>
+                <dl class="asnro-kv">
+                    <dt>Purchase order(s)</dt><dd>@PoSummaryText</dd>
+                    <dt>Expected delivery</dt><dd class="asnro-mono">@detail.ExpectedDeliveryDate.ToString("yyyy-MM-dd")</dd>
                     @* R11 (D12) — warehouse is the D4 grouping key, derived from the covered PO. *@
-                    @if (!string.IsNullOrEmpty(detail.Warehouse)) { <div><div style="@FactLabel">Warehouse</div><div style="@FactMono">@detail.Warehouse</div></div> }
-                    @if (!string.IsNullOrEmpty(detail.TimeWindow)) { <div><div style="@FactLabel">Time window</div><div style="@FactValue">@detail.TimeWindow</div></div> }
-                    @if (!string.IsNullOrEmpty(detail.CarrierName)) { <div><div style="@FactLabel">Carrier</div><div style="@FactValue">@detail.CarrierName</div></div> }
-                    @if (!string.IsNullOrEmpty(detail.TrackingNumber)) { <div><div style="@FactLabel">Tracking</div><div style="@FactMono">@detail.TrackingNumber</div></div> }
-                    @if (!string.IsNullOrEmpty(detail.VehicleNumber)) { <div><div style="@FactLabel">Vehicle</div><div style="@FactMono">@detail.VehicleNumber</div></div> }
-                    @if (!string.IsNullOrEmpty(detail.DriverName)) { <div><div style="@FactLabel">Driver</div><div style="@FactValue">@detail.DriverName @(string.IsNullOrEmpty(detail.DriverPhone) ? "" : $"· {detail.DriverPhone}")</div></div> }
-                </div>
+                    @if (!string.IsNullOrEmpty(detail.Warehouse)) { <dt>Warehouse</dt><dd class="asnro-mono">@detail.Warehouse</dd> }
+                    @if (!string.IsNullOrEmpty(detail.CarrierName)) { <dt>Carrier</dt><dd>@detail.CarrierName</dd> }
+                    @if (!string.IsNullOrEmpty(detail.TrackingNumber)) { <dt>Tracking</dt><dd class="asnro-mono">@detail.TrackingNumber</dd> }
+                    @if (!string.IsNullOrEmpty(detail.TimeWindow)) { <dt>Time window</dt><dd>@detail.TimeWindow</dd> }
+                    @if (!string.IsNullOrEmpty(detail.VehicleNumber)) { <dt>Vehicle</dt><dd class="asnro-mono">@detail.VehicleNumber</dd> }
+                    @if (!string.IsNullOrEmpty(detail.DriverName)) { <dt>Driver</dt><dd>@detail.DriverName @(string.IsNullOrEmpty(detail.DriverPhone) ? "" : $"· {detail.DriverPhone}")</dd> }
+                </dl>
+            </div>
 
-                @* R11 (D12) — the three shipment references the supplier entered before sending. Grouped: they are
-                   one set, and they are what a warehouse clerk actually looks for. *@
-                @if (!string.IsNullOrEmpty(detail.InvoiceNo) || !string.IsNullOrEmpty(detail.BillOfLading) || !string.IsNullOrEmpty(detail.PackingList))
-                {
-                    <h4 style="@FactSection">References</h4>
-                    <div style="@FactGrid">
-                        <div><div style="@FactLabel">Invoice no.</div><div style="@FactMono">@(string.IsNullOrEmpty(detail.InvoiceNo) ? "—" : detail.InvoiceNo)</div></div>
-                        <div><div style="@FactLabel">Bill of lading</div><div style="@FactMono">@(string.IsNullOrEmpty(detail.BillOfLading) ? "—" : detail.BillOfLading)</div></div>
-                        <div><div style="@FactLabel">Packing list</div><div style="@FactMono">@(string.IsNullOrEmpty(detail.PackingList) ? "—" : detail.PackingList)</div></div>
-                    </div>
-                }
+            @* R11 (D12) — the three shipment references the supplier entered before sending, plus the document
+               count the rail owns: together they answer "is this shipment papered". *@
+            <div>
+                <div class="asnro-facts__head">References</div>
+                <dl class="asnro-kv">
+                    <dt>Invoice no.</dt><dd class="asnro-mono">@Dash(detail.InvoiceNo)</dd>
+                    <dt>Bill of lading</dt><dd class="asnro-mono">@Dash(detail.BillOfLading)</dd>
+                    <dt>Packing list</dt><dd class="asnro-mono">@Dash(detail.PackingList)</dd>
+                    @if (railSummary is { TotalSlots: > 0 } rs)
+                    {
+                        <dt>Documents</dt><dd>@rs.SatisfiedSlots of @rs.TotalSlots uploaded</dd>
+                    }
+                </dl>
+            </div>
 
-                <h4 style="@FactSection">Timeline &amp; ERP</h4>
-                <div style="@FactGrid">
-                    @if (detail.CreatedOn.HasValue) { <div><div style="@FactLabel">Created</div><div style="@FactMono">@detail.CreatedOn.Value.ToString("yyyy-MM-dd HH:mm")</div></div> }
-                    @* R14 — the shipping date IS the post date (postedAt), and equals the submittedAt the LN payload
-                       carries as ShipmentDate: both are stamped at post. One fact, one row. *@
-                    <div>
-                        <div style="@FactLabel">Posted · shipping date</div>
-                        <div style="@FactMono">
-                            @(detail.PostedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")@(detail.PostedAt.HasValue && !string.IsNullOrEmpty(detail.PostedBy) ? $" by {detail.PostedBy}" : "")
-                        </div>
-                    </div>
-                    @if (!string.IsNullOrEmpty(detail.ErpCode)) { <div><div style="@FactLabel">ERP code</div><div style="@FactMono">@detail.ErpCode</div></div> }
+            <div>
+                <div class="asnro-facts__head">Timeline &amp; ERP</div>
+                <dl class="asnro-kv">
+                    @if (detail.CreatedOn.HasValue) { <dt>Created</dt><dd class="asnro-mono">@detail.CreatedOn.Value.ToString("yyyy-MM-dd HH:mm")</dd> }
+                    @* R14 — the shipping date IS the post date (postedAt), and equals the submittedAt the LN
+                       payload carries as ShipmentDate: both are stamped at post. One fact, one row. *@
+                    <dt>Posted · shipped</dt>
+                    <dd class="asnro-mono">
+                        @(detail.PostedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")@if (detail.PostedAt.HasValue && !string.IsNullOrEmpty(detail.PostedBy))
+                        {<span class="asnro-by"> by @detail.PostedBy</span>}
+                    </dd>
+                    @if (!string.IsNullOrEmpty(detail.ErpCode)) { <dt>ERP code</dt><dd class="asnro-mono">@detail.ErpCode</dd> }
                     @* R16 — the LN verdict. PartialFailure is the one state where "no ERP code" ≠ "not in LN":
                        LN holds an ASN header for this record but refused ≥1 line, so it renders as a warning. *@
                     @if (!string.IsNullOrEmpty(detail.ErpStatus))
                     {
-                        <div>
-                            <div style="@FactLabel">ERP status</div>
-                            <div><span style="font-family:Inter,monospace;font-size:11px;border-radius:4px;padding:2px 6px;border:1px solid @(detail.ErpStatus == "Success" ? "var(--mer-green)" : "var(--mer-amber-800)");background:@(detail.ErpStatus == "Success" ? "var(--mer-green-soft)" : "var(--mer-amber-50)");color:@(detail.ErpStatus == "Success" ? "inherit" : "var(--mer-amber-800)");">@detail.ErpStatus</span></div>
-                        </div>
+                        <dt>ERP status</dt>
+                        <dd><span class="asnro-pill" style="background:@(detail.ErpStatus == "Success" ? "var(--mer-green-soft)" : "var(--mer-amber-50)");color:@(detail.ErpStatus == "Success" ? "var(--mer-green-darker, #3b6d11)" : "var(--mer-amber-800)");">@detail.ErpStatus</span></dd>
                     }
-                    @* Full width: a 64-char hash wrapping inside a 200px tile would push every sibling tile taller. *@
-                    @if (!string.IsNullOrEmpty(detail.ErpSyncId))
-                    {
-                        <div style="grid-column:1/-1;"><div style="@FactLabel">ERP sync id</div><div style="font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-600);word-break:break-all;">@detail.ErpSyncId</div></div>
-                    }
-                </div>
-
-                @if (!string.IsNullOrEmpty(detail.Notes))
-                {
-                    <h4 style="@FactSection">Notes</h4>
-                    <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;margin:0;">@detail.Notes</p>
-                }
+                </dl>
+            </div>
         </div>
 
-        <div class="rz-card" style="padding:20px;margin-top:16px;">
-            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)</h3>
-            <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
-                <thead>
-                    <tr style="border-bottom:1px solid var(--mer-line);">
-                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">PO</th>
-                        <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
-                        <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Seq</th>
-                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
-                        <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Order Qty</th>
-                        <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Ship Qty</th>
-                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Balance / allowance</th>
-                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Batch</th>
-                        <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Expiry</th>
-                    </tr>
-                </thead>
-                <tbody>
-                @foreach (var ln in detail.Lines)
+        @if (!string.IsNullOrEmpty(detail.Notes))
+        {
+            <div class="rz-card" style="padding:14px 18px;margin-top:12px;">
+                <div class="asnro-facts__head" style="margin-bottom:6px;">Notes</div>
+                <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;margin:0;">@detail.Notes</p>
+            </div>
+        }
+
+        <div class="rz-card asnro-lines">
+            <div class="asnro-lines__head">
+                <h3>Lines (@detail.Lines.Count)</h3>
+                <span class="asnro-lines__totals">@lineTotal.ToString("0.###") shipped across @detail.Lines.Select(l => l.PoNumber).Distinct().Count() PO(s)</span>
+            </div>
+
+            <div class="asnro-grid asnro-grid--head">
+                <span>PO</span><span class="asnro-r">Pos</span><span class="asnro-r">Seq</span><span>Item</span>
+                <span class="asnro-r">Order qty</span><span class="asnro-r">Ship qty</span><span>Balance / allowance</span>
+                <span>Batch</span><span>Expiry</span><span></span>
+            </div>
+
+            @foreach (var ln in detail.Lines)
+            {
+                var line = ln;
+                var serialCount = line.Serials?.Count ?? 0;
+                var lotCount = line.Lots?.Count ?? 0;
+                @* Only a line that HAS serial/lot detail is expandable — everything else stays a plain row, with
+                   no chevron to promise a disclosure that would open empty. *@
+                var expandable = serialCount > 0 || lotCount > 0;
+                var open = expandable && expandedLines.Contains(line.Id);
+
+                <div class="asnro-grid asnro-grid--row @(expandable ? "asnro-grid--clickable" : "") @(open ? "asnro-grid--open" : "")"
+                     @onclick="() => ToggleLine(line.Id, expandable)">
+                    <span class="asnro-po">@line.PoNumber</span>
+                    <span class="asnro-r asnro-mono">@(line.PositionNo ?? line.PoPositionNo)</span>
+                    <span class="asnro-r asnro-mono asnro-dim">@(line.SequenceNo?.ToString() ?? "—")</span>
+                    <span class="asnro-item">
+                        <b>@line.ItemCode</b>
+                        @if (!string.IsNullOrWhiteSpace(line.ItemDescription))
+                        {
+                            <span class="asnro-item__desc">@line.ItemDescription</span>
+                        }
+                        @if (expandable)
+                        {
+                            <span class="asnro-tag">@(serialCount > 0 ? $"{serialCount} serial(s)" : $"{lotCount} lot(s)")</span>
+                        }
+                    </span>
+                    <span class="asnro-r asnro-mono">@line.OrderQty.ToString("0.###")</span>
+                    <span class="asnro-r asnro-ship">@line.ShippedQty.ToString("0.###")</span>
+                    <span class="asnro-bal">@DetailBalanceCell(line)</span>
+                    <span class="asnro-mono asnro-dim">@Dash(line.BatchNumber)</span>
+                    <span class="asnro-mono asnro-dim">@(line.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</span>
+                    <span class="asnro-chev">
+                        @if (expandable)
+                        {
+                            <span class="material-symbols-outlined">@(open ? "expand_less" : "expand_more")</span>
+                        }
+                    </span>
+                </div>
+
+                @if (open)
                 {
-                    var line = ln;
-                    var hasSerials = line.Serials is { Count: > 0 };
-                    var hasLots = line.Lots is { Count: > 0 };
-                    <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                        <td style="padding:6px 4px;font-family:Inter,monospace;">@line.PoNumber</td>
-                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.PositionNo ?? line.PoPositionNo)</td>
-                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.SequenceNo?.ToString() ?? "—")</td>
-                        <td style="padding:6px 4px;font-family:Inter,monospace;">@line.ItemCode</td>
-                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.OrderQty.ToString("0.###")</td>
-                        <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQty.ToString("0.###")</td>
-                        <td style="padding:6px 4px;">@DetailBalanceCell(line)</td>
-                        <td style="padding:6px 4px;">@(string.IsNullOrEmpty(line.BatchNumber) ? "—" : line.BatchNumber)</td>
-                        <td style="padding:6px 4px;font-family:Inter,monospace;">@(line.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                    </tr>
-                    @if (hasSerials)
-                    {
-                        <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                            <td colspan="9" style="padding:4px 4px 10px 16px;">
-                                <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:4px;">Serials (@line.Serials!.Count)</div>
-                                <div style="display:flex;flex-wrap:wrap;gap:4px;">
-                                    @foreach (var s in line.Serials!)
-                                    {
-                                        <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-ink-50);border:1px solid var(--mer-line);border-radius:4px;padding:2px 6px;">@s.SerialNumber@(s.ExpiryDate is { } ex ? $" · exp {ex:yyyy-MM-dd}" : "")</span>
-                                    }
-                                </div>
-                            </td>
-                        </tr>
-                    }
-                    @if (hasLots)
-                    {
-                        <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                            <td colspan="9" style="padding:4px 4px 10px 16px;">
-                                <div style="font-size:11px;font-weight:700;color:var(--mer-ink-600);margin-bottom:4px;">Lots (@line.Lots!.Count)</div>
-                                <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                                    @foreach (var lot in line.Lots!)
-                                    {
-                                        <span style="font-family:Inter,monospace;font-size:11px;background:var(--mer-green-soft);border:1px solid var(--mer-green);border-radius:4px;padding:2px 6px;">@lot.LotNo · @lot.Qty.ToString("0.###")@(lot.ExpiryDate.HasValue ? $" · exp {lot.ExpiryDate:yyyy-MM-dd}" : "")@(string.IsNullOrEmpty(lot.ErpCode) ? "" : $" · {lot.ErpCode}")</span>
-                                    }
-                                </div>
-                            </td>
-                        </tr>
-                    }
+                    <div class="asnro-detail">
+                        @if (serialCount > 0)
+                        {
+                            <div class="asnro-detail__head">Serials (@serialCount)</div>
+                            <div class="asnro-chips">
+                                @foreach (var s in line.Serials!)
+                                {
+                                    <span class="asnro-chip">@s.SerialNumber@(s.ExpiryDate is { } ex ? $" · exp {ex:yyyy-MM-dd}" : "")</span>
+                                }
+                            </div>
+                        }
+                        @if (lotCount > 0)
+                        {
+                            <div class="asnro-detail__head" style="@(serialCount > 0 ? "margin-top:10px;" : "")">Lots (@lotCount)</div>
+                            <div class="asnro-chips">
+                                @foreach (var lot in line.Lots!)
+                                {
+                                    <span class="asnro-chip asnro-chip--lot">@lot.LotNo · @lot.Qty.ToString("0.###")@(lot.ExpiryDate.HasValue ? $" · exp {lot.ExpiryDate:yyyy-MM-dd}" : "")@(string.IsNullOrEmpty(lot.ErpCode) ? "" : $" · {lot.ErpCode}")</span>
+                                }
+                            </div>
+                        }
+                    </div>
                 }
-                </tbody>
-            </table>
+            }
         </div>
 
         </div>
@@ -1170,13 +1285,71 @@
     private bool savingDraft = false;
     private int currentStep = 1;
 
-    // 2026-08-11 — shared styling for the read-only "fact tile" layout (label above value, auto-fitting columns).
-    // Kept as constants rather than a stylesheet class to match this page's existing inline-style idiom.
-    private const string FactGrid = "display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px 20px;";
-    private const string FactLabel = "font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--mer-ink-500);margin-bottom:2px;";
-    private const string FactValue = "font-size:13px;color:var(--mer-ink-800);";
-    private const string FactMono = "font-size:13px;font-family:Inter,monospace;color:var(--mer-ink-800);";
-    private const string FactSection = "font-size:12px;font-weight:700;margin:18px 0 8px;padding-top:14px;border-top:1px solid var(--mer-line-soft);color:var(--mer-ink-700);";
+    // ===================== Design 2a — read-only ASN view helpers (2026-08-11) =====================
+
+    /// <summary>Lines whose serial/lot detail is expanded. Collapsed is the default: a serialized ASN can carry
+    /// hundreds of chips, which is what made this page run for screens.</summary>
+    private readonly HashSet<Guid> expandedLines = new();
+
+    private void ToggleLine(Guid lineId, bool expandable)
+    {
+        if (!expandable) return;
+        if (!expandedLines.Remove(lineId)) expandedLines.Add(lineId);
+    }
+
+    private static string Dash(string? s) => string.IsNullOrWhiteSpace(s) ? "—" : s;
+
+    /// <summary>First 8 / last 6 of the sync id — enough to match against a log line; the full value copies.</summary>
+    private static string ShortSyncId(string id) => id.Length <= 18 ? id : $"{id[..8]}…{id[^6..]}";
+
+    private async Task CopySyncIdAsync(string id)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", id);
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Info, Summary = "ERP sync id copied" });
+        }
+        catch
+        {
+            // Clipboard access is origin- and permission-gated; a failure is not worth an error toast.
+        }
+    }
+
+    private sealed record StripStyle(string Icon, string Bg, string Border, string Fg, string Text);
+
+    /// <summary>
+    /// The one-line verdict strip at the top of the read-only view. The locked branch covers more than
+    /// Submitted (PendingApproval / Approved-after-post / InTransit / Delivered / Cancelled), so the strip
+    /// states whichever fact that status actually has — never an empty green bar.
+    /// </summary>
+    private static StripStyle LockedStrip(AsnDetailDto d, int draftInvoiceCount)
+    {
+        // R16 — a PartialFailure carries an ERP header but refused ≥1 line, so "posted" is true and "accepted"
+        // is not. It reads amber with the verdict named, rather than green with the failure hidden.
+        var erpBad = !string.IsNullOrEmpty(d.ErpStatus) && d.ErpStatus != "Success";
+
+        if (d.PostedAt.HasValue)
+        {
+            var by = string.IsNullOrEmpty(d.PostedBy) ? "" : $" by <b>{d.PostedBy}</b>";
+            var erp = !string.IsNullOrEmpty(d.ErpCode)
+                ? $" · ERP <b>{d.ErpCode}</b> {(erpBad ? d.ErpStatus : "accepted")}"
+                : erpBad ? $" · ERP {d.ErpStatus}" : " · awaiting ERP acknowledgement";
+            var text = $"Posted{by} · {d.PostedAt.Value:yyyy-MM-dd HH:mm}{erp}";
+            return erpBad
+                ? new StripStyle("warning", "var(--mer-amber-50, #fff8e6)", "var(--mer-amber-200, #ffe2a8)", "var(--mer-amber-800)", text)
+                : new StripStyle("verified", "var(--mer-green-50, #f3f9ec)", "var(--mer-green)", "var(--mer-green-darker, #3b6d11)", text);
+        }
+
+        return d.AsnStatus switch
+        {
+            "PendingApproval" => new StripStyle("hourglass_top", "var(--mer-blue-50)", "var(--mer-blue)", "var(--mer-blue-darker)",
+                "Sent for approval — awaiting the buyer's confirmation. The shipment is locked while it is reviewed."),
+            "Cancelled" => new StripStyle("block", "var(--mer-ink-50)", "var(--mer-line)", "var(--mer-ink-600)",
+                "Cancelled — this ASN was withdrawn and never posted to the ERP."),
+            _ => new StripStyle("lock", "var(--mer-ink-50)", "var(--mer-line)", "var(--mer-ink-600)",
+                $"{d.AsnStatus} — read-only."),
+        };
+    }
     private string submitError = string.Empty;
 
     // Supplier-first (chooser hidden at 1 supplier) — unchanged; what follows the supplier changed in R15.
