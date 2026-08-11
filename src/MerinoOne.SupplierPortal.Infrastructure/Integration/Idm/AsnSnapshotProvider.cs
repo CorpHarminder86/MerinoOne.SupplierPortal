@@ -43,6 +43,14 @@ public sealed class AsnSnapshotProvider : IEntitySnapshotProvider
                 .Select(t => t.Code).FirstOrDefaultAsync(ct)
             : null;
 
+        // R16.1 (2026-08-11) — the fresh mapping's MDS_id1 is the SUPPLIER's ERP code (BUS…), so the snapshot
+        // grows an asn.supplier block. It is ALSO a gate term: a supplier with no erpCode holds the document
+        // Blocked rather than pushing an item IDM cannot key.
+        var supplier = await _db.Suppliers.IgnoreQueryFilters().AsNoTracking()
+            .Where(s => s.Id == asn.SupplierId && !s.IsDeleted)
+            .Select(s => new { s.ErpCode, s.SupplierCode })
+            .FirstOrDefaultAsync(ct);
+
         var base64 = includeFileContent ? await _files.ToBase64Async(doc.FileUrl, ct) : null;
 
         return new Dictionary<string, object?>
@@ -58,6 +66,11 @@ public sealed class AsnSnapshotProvider : IEntitySnapshotProvider
                 ["erpCode"] = asn.ErpCode,
                 ["erpSyncId"] = asn.ErpSyncId,
                 ["status"] = asn.AsnStatus.ToString(),
+                ["supplier"] = new Dictionary<string, object?>
+                {
+                    ["erpCode"] = supplier?.ErpCode,
+                    ["supplierCode"] = supplier?.SupplierCode,
+                },
             },
             ["attachment"] = new Dictionary<string, object?>
             {

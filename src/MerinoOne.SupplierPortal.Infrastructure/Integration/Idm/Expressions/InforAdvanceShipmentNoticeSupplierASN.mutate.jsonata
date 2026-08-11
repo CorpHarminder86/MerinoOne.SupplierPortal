@@ -1,7 +1,7 @@
-/* R11.2 INTERIM (2026-07-29) — the previous mapping was wrong (user-confirmed) and its MDS_id2/MDS_id3
-   sources (the ack-stamped erpTransactionType/erpDocumentNo, dropped in migration 0055) no longer exist.
-   The FRESH mapping is pending from the user; the ASN document config stays HELD until it lands. Company
-   slots carry the portal company code (== what LN acks as erpCompany, user-confirmed identical). */
+/* R16.1 (2026-08-11) — mirrors .create exactly; only the runtime `pid` differs (an Update carries the real
+   IDM pid). Kept in lockstep on purpose: ASN documents DO get Update ops enqueued after the Create — both
+   /inbound/erp-ack (UpsertErpAckCommand) and the LN dispatcher call EnqueueOwnerUpdatesAsync for Asn — so a
+   Mutate on an older attr shape would rewrite the attrs of the pushed item and drop MDS_id2/MDS_id3. */
 {
   "headers": {
     "Content-Type": "application/json",
@@ -12,7 +12,9 @@
       "attrs": { "attr": [
         { "name": "MDS_EntityType",       "value": entityType },
         { "name": "MDS_AccountingEntity", "value": "infor.ln." & asn.financialCompany },
-        { "name": "MDS_id1",              "value": asn.financialCompany }
+        { "name": "MDS_id1",              "value": asn.supplier.erpCode },
+        { "name": "MDS_id2",              "value": asn.asnNumber },
+        { "name": "MDS_id3",              "value": asn.erpCode }
       ]},
       "resrs": { "res": [ { "filename": attachment.filename, "base64": attachment.base64 } ] },
       "acl": { "name": "Public" },

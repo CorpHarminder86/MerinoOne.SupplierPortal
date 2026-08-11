@@ -60,44 +60,74 @@ public class IdmMappingExpressionTests
         item.GetProperty("pid").GetString().Should().Be("");
     }
 
-    [Fact]
-    // R11.2 (2026-07-29) — INTERIM envelope: the old mapping's MDS_id2/MDS_id3 (erpTransactionType/
-    // erpDocumentNo, dropped in migration 0055) are gone pending the user's fresh mapping; the config is
-    // Held meanwhile. The snapshot mirrors AsnSnapshotProvider's real keys — the pre-R11.2 test fed keys
-    // the provider could never produce, so it asserted an envelope production could never emit.
-    public async Task Asn_create_reproduces_the_interim_envelope()
+    // R16.1 (2026-08-11) — the fresh ASN mapping (supersedes the R11.2 INTERIM stub). Keys mirror
+    // AsnSnapshotProvider's real output, including the new asn.supplier block that feeds MDS_id1.
+    private static Dictionary<string, object?> AsnSnapshot(string pid) => new()
     {
-        var expr = _defaults.TryGet("InforAdvanceShipmentNoticeSupplierASN")!.CreateExpression;
-        var snapshot = new Dictionary<string, object?>
+        ["entityType"] = "InforAdvanceShipmentNoticeSupplierASN",
+        ["asn"] = new Dictionary<string, object?>
         {
-            ["entityType"] = "InforAdvanceShipmentNoticeSupplierASN",
-            ["asn"] = new Dictionary<string, object?>
-            {
-                ["financialCompany"] = "2000",
-                ["logisticCompany"] = "2000",
-                ["companyCode"] = "2000",
-                ["asnNumber"] = "ASN-S0001-1",
-                ["erpCode"] = "ASN-LN-0001",
-                ["erpSyncId"] = "key-1",
-                ["status"] = "Submitted",
-            },
-            ["attachment"] = new Dictionary<string, object?> { ["filename"] = "packing.pdf", ["base64"] = "UERG" },
-            ["config"] = new Dictionary<string, object?> { ["acl"] = "Public", ["entityName"] = "MDS_GenericDocument" },
-            ["pid"] = "",
-        };
+            ["financialCompany"] = "2000",
+            ["logisticCompany"] = "2000",
+            ["companyCode"] = "2000",
+            ["asnNumber"] = "ASN-S0013-20260811063857479INB00107",
+            ["erpCode"] = "INB00107",
+            ["erpSyncId"] = "key-1",
+            ["status"] = "Posted",
+            ["supplier"] = new Dictionary<string, object?> { ["erpCode"] = "BUS000048", ["supplierCode"] = "S0013" },
+        },
+        ["attachment"] = new Dictionary<string, object?> { ["filename"] = "PC00000305.pdf", ["base64"] = "UERG" },
+        ["config"] = new Dictionary<string, object?> { ["acl"] = "Public", ["entityName"] = "MDS_GenericDocument" },
+        ["pid"] = pid,
+    };
 
-        var envelope = await _builder.BuildAsync(expr, snapshot, CancellationToken.None);
+    [Theory]
+    [InlineData("create", "")]
+    [InlineData("mutate", "PID-1")]   // Mutate mirrors Create attr-for-attr; only the pid differs at runtime
+    public async Task Asn_envelope_carries_the_supplier_asn_erp_id_trio(string slot, string pid)
+    {
+        var entry = _defaults.TryGet("InforAdvanceShipmentNoticeSupplierASN")!;
+        var expr = slot == "create" ? entry.CreateExpression : entry.MutateExpression;
 
+        var envelope = await _builder.BuildAsync(expr, AsnSnapshot(pid), CancellationToken.None);
+
+        envelope.Headers["Content-Type"].Should().Be("application/json");
         envelope.Headers["X-Infor-LnCompany"].Should().Be("2000");
+
         using var doc = JsonDocument.Parse(envelope.Body);
-        var attrs = doc.RootElement.GetProperty("item").GetProperty("attrs").GetProperty("attr");
+        var item = doc.RootElement.GetProperty("item");
+        var attrs = item.GetProperty("attrs").GetProperty("attr");
 
         AttrValue(attrs, "MDS_EntityType").Should().Be("InforAdvanceShipmentNoticeSupplierASN");
         AttrValue(attrs, "MDS_AccountingEntity").Should().Be("infor.ln.2000");
-        AttrValue(attrs, "MDS_id1").Should().Be("2000");
-        // MDS_id2/MDS_id3 must be ABSENT until the fresh mapping defines them.
-        attrs.EnumerateArray().Select(a => a.GetProperty("name").GetString())
-            .Should().NotContain(new[] { "MDS_id2", "MDS_id3" });
+        AttrValue(attrs, "MDS_id1").Should().Be("BUS000048");                             // supplier ERP code
+        AttrValue(attrs, "MDS_id2").Should().Be("ASN-S0013-20260811063857479INB00107");   // portal ASN number
+        AttrValue(attrs, "MDS_id3").Should().Be("INB00107");                              // LN ASNNo (erpCode)
+
+        var res = item.GetProperty("resrs").GetProperty("res")[0];
+        res.GetProperty("filename").GetString().Should().Be("PC00000305.pdf");
+        res.GetProperty("base64").GetString().Should().Be("UERG");
+        item.GetProperty("acl").GetProperty("name").GetString().Should().Be("Public");
+        item.GetProperty("entityName").GetString().Should().Be("MDS_GenericDocument");
+        item.GetProperty("pid").GetString().Should().Be(pid);
+    }
+
+    [Fact]
+    public void Asn_gate_blocks_until_both_the_ln_asn_number_and_the_supplier_erp_code_exist()
+    {
+        var gate = IdmDefaultExpressions.Seeds["InforAdvanceShipmentNoticeSupplierASN"].GateExpr;
+        var engine = new MerinoOne.SupplierPortal.Infrastructure.Integration.JsonataEligibilityGate(
+            new MerinoOne.SupplierPortal.Infrastructure.Integration.Ln.LnMappingService());
+
+        engine.IsSatisfied(gate, AsnSnapshot("")).Should().BeTrue();
+
+        var noSupplierCode = AsnSnapshot("");
+        ((Dictionary<string, object?>)((Dictionary<string, object?>)noSupplierCode["asn"]!)["supplier"]!)["erpCode"] = null;
+        engine.IsSatisfied(gate, noSupplierCode).Should().BeFalse();
+
+        var noErpCode = AsnSnapshot("");
+        ((Dictionary<string, object?>)noErpCode["asn"]!)["erpCode"] = null;
+        engine.IsSatisfied(gate, noErpCode).Should().BeFalse();
     }
 
     [Fact]

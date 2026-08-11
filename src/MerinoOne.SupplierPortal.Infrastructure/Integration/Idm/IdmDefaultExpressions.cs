@@ -17,6 +17,10 @@ public sealed class IdmDefaultExpressions : IIdmExpressionCatalog
     // idmEntityType → default (portal entity, attachmentType, gate) seed (out-of-the-box mapping for the demo
     // tenant). R9 (§2.11): the gate is now a JSONata boolean expression — the shared IdmGateConversion helper
     // renders the same required-non-null semantics the old dot-path arrays carried.
+    // CAUTION (R10, 2026-07-07): only the KEYS still drive behaviour — they pick which .jsonata resources load.
+    // IdmOutboundSeeder was deleted when Document rows folded into OutboundIntegrationConfig, so the tuple
+    // values (portal entity / attachment type / gate) are DOCUMENTATION of the intended default: editing them
+    // does not touch any existing config row. Changing a live gate means updating the row (UI or SQL).
     public static readonly IReadOnlyDictionary<string, (string OwnerEntityType, string AttachmentType, string GateExpr)> Seeds =
         new Dictionary<string, (string, string, string)>(StringComparer.Ordinal)
         {
@@ -24,8 +28,10 @@ public sealed class IdmDefaultExpressions : IIdmExpressionCatalog
                 IdmGateConversion.ToJsonata(new[] { "invoice.erpCompany", "invoice.erpTransactionType", "invoice.erpDocumentNo" })),
             // R11.2 (2026-07-29) — the ASN's erpCompany/erpTransactionType/erpDocumentNo columns were dropped;
             // the "LN has the record" signal is erpCode (the ASNNo written back by /inbound/erp-ack).
+            // R16.1 (2026-08-11) — supplier.erpCode joins the gate: it is the fresh mapping's MDS_id1, so a
+            // supplier without one must hold the document Blocked instead of pushing a blank key.
             ["InforAdvanceShipmentNoticeSupplierASN"] = ("Asn", "AsnAttachment",
-                IdmGateConversion.ToJsonata(new[] { "asn.erpCode" })),
+                IdmGateConversion.ToJsonata(new[] { "asn.erpCode", "asn.supplier.erpCode" })),
         };
 
     private readonly Dictionary<string, Entry> _byType = new(StringComparer.Ordinal);

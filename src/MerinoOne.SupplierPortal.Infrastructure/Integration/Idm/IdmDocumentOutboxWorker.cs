@@ -183,6 +183,16 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
     private static bool GatePasses(IEligibilityGate gate, string? gateExpr, object snapshot)
         => string.IsNullOrWhiteSpace(gateExpr) || gate.IsSatisfied(gateExpr, snapshot);
 
+    /// <summary>
+    /// 2026-08-11 — the text a Blocked row carries in <c>lastError</c>. Blocked used to be silent: the sync log
+    /// showed a status and an empty error, so "which gate term is missing" was only answerable by hand-running
+    /// the expression. Failure path only — <see cref="GateDiagnostics.Describe"/> re-evaluates per conjunct.
+    /// </summary>
+    private static string BlockReason(IEligibilityGate gate, OutboundIntegrationConfig cfg, object? snapshot)
+        => snapshot is null
+            ? "Snapshot could not be assembled — the owning entity or document did not resolve."
+            : Truncate(GateDiagnostics.Describe(gate, cfg.EligibilityGateExpr, snapshot), 4000);
+
     private static async Task SeedCreatesAsync(IAppDbContext db, IEntitySnapshotProvider provider, IEligibilityGate gate,
         OutboundIntegrationConfig cfg, string ownerType, string? attachmentType, Guid tenantId, int batchSize, CancellationToken ct)
     {
@@ -231,6 +241,9 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                 FileName = d.FileName,
                 Operation = IdmOutboxOperation.Create,
                 Status = eligible ? IdmOutboxStatus.Pending : IdmOutboxStatus.Blocked,
+                // 2026-08-11 — a Blocked row used to carry no reason at all (see GateDiagnostics). Promotion
+                // refreshes this each poll, so it always describes the CURRENT hold, not the one at seed time.
+                LastError = eligible ? null : BlockReason(gate, cfg, snapshot),
                 SeccodeId = d.SeccodeId,
                 TenantId = d.TenantId,
                 TenantEntityId = d.TenantEntityId,
@@ -336,7 +349,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                         && o.TenantId == tenantId && o.IdmEntityType == cfg.TargetEntityName
                         && db.DocumentUploads.Any(d => d.Id == o.DocumentUploadId && !d.IsDeleted))
             .OrderByDescending(o => o.Seq)
-            .Select(o => new { o.Id, o.OwnerEntityId, o.DocumentUploadId })
+            .Select(o => new { o.Id, o.OwnerEntityId, o.DocumentUploadId, o.LastError })
             .Take(batchSize)
             .ToListAsync(ct);
 
@@ -359,10 +372,26 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
             }
 
             if (GatePasses(gate, cfg.EligibilityGateExpr, snapshot))
+            {
                 await db.IdmDocumentOutboxes.IgnoreQueryFilters()
                     .Where(o => o.Id == row.Id && o.Status == IdmOutboxStatus.Blocked)
                     .ExecuteUpdateAsync(s => s
                         .SetProperty(o => o.Status, IdmOutboxStatus.Pending)
+                        .SetProperty(o => o.LastError, (string?)null)   // the hold is over — do not leave it on screen
+                        .SetProperty(o => o.UpdatedBy, "idm-dispatcher")
+                        .SetProperty(o => o.UpdatedOn, now), ct);
+                continue;
+            }
+
+            // Still blocked: keep the reason CURRENT (a gate edit or a partly-filled entity changes which term
+            // fails). Written only when the text actually differs, so a permanently-blocked row does not churn
+            // updatedOn — and the sync log keeps showing when the hold last changed, not when it was last polled.
+            var reason = BlockReason(gate, cfg, snapshot);
+            if (!string.Equals(row.LastError, reason, StringComparison.Ordinal))
+                await db.IdmDocumentOutboxes.IgnoreQueryFilters()
+                    .Where(o => o.Id == row.Id && o.Status == IdmOutboxStatus.Blocked)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(o => o.LastError, reason)
                         .SetProperty(o => o.UpdatedBy, "idm-dispatcher")
                         .SetProperty(o => o.UpdatedOn, now), ct);
         }
@@ -504,6 +533,7 @@ internal sealed class IdmDocumentOutboxWorker : BackgroundService
                     .Where(o => o.Id == rowId && o.Status == IdmOutboxStatus.InFlight)
                     .ExecuteUpdateAsync(s => s
                         .SetProperty(o => o.Status, IdmOutboxStatus.Blocked)
+                        .SetProperty(o => o.LastError, BlockReason(gate, cfg, snapshot))
                         .SetProperty(o => o.UpdatedBy, "idm-dispatcher")
                         .SetProperty(o => o.UpdatedOn, DateTime.UtcNow), ct);
                 return;
