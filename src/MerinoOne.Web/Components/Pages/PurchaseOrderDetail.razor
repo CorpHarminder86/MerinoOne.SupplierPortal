@@ -6,6 +6,98 @@
 
 <PageTitle>@detail?.PoNumber</PageTitle>
 
+@* Design 1a — PO detail header compaction. A <style> block rather than this page's usual inline styles: the
+   layout needs sibling selectors, :hover, :focus-within and a stacking media query. Prefixed podt- (PO detail)
+   so nothing can collide with merino.css. *@
+<style>
+    .podt-head { display:flex; align-items:center; gap:8px; min-height:46px; padding:4px 0 8px;
+                 border-bottom:1px solid var(--mer-line); flex-wrap:wrap; }
+    .podt-back { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px;
+                 border-radius:6px; color:var(--mer-ink-600); text-decoration:none; flex:none; }
+    .podt-back:hover { background:var(--mer-ink-100); color:var(--mer-ink-900); }
+    .podt-title { margin:0; font:800 18px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-blue-darker);
+                  letter-spacing:-.01em; }
+    .podt-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+
+    .podt-tabs { display:flex; align-items:center; gap:0; height:36px;
+                 border-bottom:1px solid var(--mer-line); }
+    .podt-tab { padding:0 14px; height:36px; background:transparent; border:0; border-bottom:2px solid transparent;
+                cursor:pointer; font:600 13px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-700); }
+    .podt-tab:hover { color:var(--mer-blue); }
+    .podt-tab--on { border-bottom-color:var(--mer-blue); color:var(--mer-blue); }
+    .podt-tabs__sub { font:400 12px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-500);
+                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-left:12px; }
+
+    .podt-summary { background:var(--mer-surface); border:1px solid var(--mer-line); border-top:0;
+                    border-radius:0 0 8px 8px; }
+    .podt-summary__row { display:flex; align-items:center; gap:12px; min-height:42px; padding:4px 14px; }
+    .podt-summary__right { display:flex; align-items:center; gap:12px; flex:none; padding-left:14px; }
+    .podt-cells { display:flex; align-items:center; flex:1; min-width:0; overflow:hidden; }
+    .podt-cell { display:flex; flex-direction:column; gap:1px; padding:0 14px; min-width:0; }
+    .podt-cell:first-child { padding-left:0; }
+    .podt-cell--grow { flex:1; min-width:0; }
+    .podt-cell--end { align-items:flex-end; padding:0; }
+    .podt-cell__label { font:600 9.5px/1 'Plus Jakarta Sans', sans-serif; letter-spacing:.06em;
+                        text-transform:uppercase; color:var(--mer-ink-400); }
+    .podt-cell__value { font:500 12px/1.25 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-900); }
+    .podt-div { width:1px; height:22px; background:var(--mer-line-soft); flex:none; }
+    .podt-muted { color:var(--mer-ink-500); font-weight:400; }
+    .podt-mono { font-family:Inter, ui-monospace, monospace; }
+    .podt-ellipsis { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .podt-total { font:800 13px/1.2 Inter, ui-monospace, monospace; font-variant-numeric:tabular-nums;
+                  color:var(--mer-blue-darker); }
+    .podt-more { height:28px; padding:0 10px; border-radius:6px; border:1px solid var(--mer-ink-300);
+                 background:var(--mer-surface); color:var(--mer-ink-800); cursor:pointer;
+                 font:600 12px/1 'Plus Jakarta Sans', sans-serif; display:inline-flex; align-items:center; gap:5px; }
+    .podt-more:hover { background:var(--mer-ink-50); border-color:var(--mer-ink-400); }
+    .podt-more .material-symbols-outlined { font-size:16px; }
+
+    .podt-meta { border-top:1px solid var(--mer-line-soft); padding:14px; background:var(--mer-ink-50);
+                 display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:20px; border-radius:0 0 8px 8px; }
+    .podt-meta__head { font:700 11px/1 'Plus Jakarta Sans', sans-serif; text-transform:uppercase;
+                       letter-spacing:.05em; color:var(--mer-ink-600); margin-bottom:8px; }
+    .podt-kv { display:grid; grid-template-columns:120px 1fr; gap:5px 14px; font-size:12.5px; margin:0; }
+    .podt-kv dt { color:var(--mer-ink-500); }
+    .podt-kv dd { margin:0; color:var(--mer-ink-900); overflow-wrap:anywhere; }
+    .podt-addr { font-size:12.5px; line-height:1.5; color:var(--mer-ink-800); }
+    .podt-addr__name { font-weight:600; color:var(--mer-blue-darker); }
+    .podt-notes { font-size:12.5px; color:var(--mer-ink-700); white-space:pre-wrap; }
+    .podt-empty { font-size:12.5px; color:var(--mer-ink-500); margin:0; }
+    .podt-reject { display:inline-block; background:var(--mer-red-50); color:var(--mer-red);
+                   padding:4px 8px; border-radius:4px; }
+
+    .podt-lines { padding:0; margin-top:12px; overflow:hidden; }
+    .podt-lines__head { display:flex; align-items:center; gap:8px; min-height:38px; padding:6px 14px;
+                        border-bottom:1px solid var(--mer-line); }
+    .podt-lines__title { font:700 13px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-blue-darker); }
+    .podt-search { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 8px;
+                   border:1px solid var(--mer-ink-300); border-radius:6px; background:var(--mer-surface); }
+    .podt-search:focus-within { border-color:var(--mer-blue); }
+    .podt-search .material-symbols-outlined { font-size:16px; color:var(--mer-ink-400); }
+    .podt-search input { border:0; outline:0; background:transparent; width:190px;
+                         font:400 12px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-900); }
+    .podt-search__clear { cursor:pointer; }
+    .podt-search__clear:hover { color:var(--mer-ink-700); }
+
+    .podt-table { width:100%; font-size:12.5px; border-collapse:collapse; }
+    /* The header row sticks to the top of the page's scroll while the 15 columns run past it. */
+    .podt-table thead th { position:sticky; top:0; z-index:1; background:var(--mer-ink-50);
+                           border-bottom:1px solid var(--mer-line); padding:7px 8px;
+                           font:700 11px/1.4 'Plus Jakarta Sans', sans-serif; text-transform:uppercase;
+                           letter-spacing:.04em; color:var(--mer-ink-800); }
+    .podt-table tbody tr:hover { background:var(--mer-ink-50); }
+
+    /* Below ~1100px the six summary cells stop fitting on one row: wrap them and drop the dividers, which
+       would otherwise land mid-wrap as stray marks. The detail panel stacks at the same point. */
+    @@media (max-width: 1100px) {
+        .podt-cells { flex-wrap:wrap; gap:8px 0; }
+        .podt-div { display:none; }
+        .podt-cell:first-child { padding-left:0; }
+        .podt-meta { grid-template-columns:1fr; gap:14px; }
+        .podt-search input { width:130px; }
+    }
+</style>
+
 @if (loading)
 {
     <div class="tl-empty">Loading…</div>
@@ -17,20 +109,23 @@ else if (detail == null)
 else
 {
     <div class="tl-page">
-        <a href="purchase-orders" class="mer-back-link">
-            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
-            Back to list
-        </a>
-        <header class="tl-header">
-            <div>
-                <div class="tl-title-row">
-                    <h1 class="tl-title">@detail.PoNumber</h1>
-                    <span class="tlg-status @StatusClass(detail.PoStatus)">@detail.PoStatus</span>
-                    <span class="tl-count-chip">v@detail.Version</span>
-                </div>
-                <p class="tl-sub">@detail.SupplierName · @detail.PoType · @detail.PoDate.ToString("yyyy-MM-dd")</p>
-            </div>
-            <div class="tl-header__actions">
+        @* ── Design 1a (claude.ai/design "Header space optimization", 2026-08-12) ────────────────────────
+           The back link, title block, tabs and three stacked cards cost ~515px before the first line — 61% of
+           the page region. 1a compresses them to one 46px header, a 36px tab strip and a single 42px summary
+           row whose cells expand on demand, so lines start ~124px in.
+           Deviations, by decision: ship-to is REPLACED by the customer address (R13 retired ship-to, which the
+           mock still drew); the mock's header warehouse pill is dropped (warehouse is per LINE since R13 and a
+           PO may span several, so a header pill could state something false — it stays a Lines column); the
+           page keeps its natural scroll rather than pinning the shell; no column chooser. ─────────────────── *@
+        <div class="podt-head">
+            <a href="purchase-orders" class="podt-back" title="Back to list">
+                <span class="material-symbols-outlined">chevron_left</span>
+            </a>
+            <h1 class="podt-title">@detail.PoNumber</h1>
+            <span class="tlg-status @StatusClass(detail.PoStatus)">@detail.PoStatus</span>
+            <span class="tl-count-chip">v@detail.Version</span>
+            <div style="flex:1;"></div>
+            <div class="podt-actions">
                 @* PO response actions are shown only when the supplier is in MANUAL response mode.
                    In AUTO mode the PO is acknowledged + accepted automatically at release, so the
                    manual Ack/Accept/Reject affordances are hidden (req 3 / §0 Q8). *@
@@ -80,11 +175,15 @@ else
                 @* R4 (2026-06-26) — D2: the date-only "Approve Proposal" buyer action is retired; counter-proposals
                    now resolve through PO negotiation. *@
             </div>
-        </header>
+        </div>
 
-        <div class="mer-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--mer-line);margin-bottom:16px;">
-            <button class="mer-tab @(tab=="overview"?"mer-tab--active":"")" @onclick="TabOverview" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="overview"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="overview"?"var(--mer-blue)":"var(--mer-ink-700)");">Overview</button>
-            <button class="mer-tab @(tab=="history"?"mer-tab--active":"")" @onclick="TabHistory" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid @(tab=="history"?"var(--mer-blue)":"transparent");cursor:pointer;font:600 13px/1 'Plus Jakarta Sans',sans-serif;color:@(tab=="history"?"var(--mer-blue)":"var(--mer-ink-700)");">History</button>
+        @* The old <p class="tl-sub"> line moved here: it is orientation, not a heading, so it rides the tab
+           strip's spare width instead of costing a row of its own. *@
+        <div class="podt-tabs">
+            <button class="podt-tab @(tab == "overview" ? "podt-tab--on" : "")" @onclick="TabOverview">Overview</button>
+            <button class="podt-tab @(tab == "history" ? "podt-tab--on" : "")" @onclick="TabHistory">History</button>
+            <div style="flex:1;"></div>
+            <span class="podt-tabs__sub">@detail.SupplierName · @detail.PoType · @detail.PoDate.ToString("yyyy-MM-dd")</span>
         </div>
 
         @if (tab == "history")
@@ -95,56 +194,99 @@ else
         }
         else
         {
-        <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;">
-            <div class="rz-card" style="padding:20px;">
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Order details</h3>
-                <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:13px;">
+        @* One summary row replacing the Order-details + Notes cards. Every fact they carried is still here:
+           the frequently-scanned ones inline, the rest one click away under "All details". *@
+        <div class="podt-summary">
+            <div class="podt-summary__row">
+                <div class="podt-cells">
                     @* R5/R13 — CustomerName + the customer BASE address are DERIVED live (PO.tenantEntityId → the
                        company + its single base CompanyAddress), display-only and reflect later edits. *@
-                    <dt style="color:var(--mer-ink-500);">Customer</dt>
-                    <dd>
-                        @* The company name stays the scannable line; its base address moves behind the
-                           AddressCard disclosure so the Order-details block stays compact. *@
-                        <AddressCard Title="Customer address"
-                                     TriggerText="@(string.IsNullOrEmpty(detail.CustomerName) ? "—" : detail.CustomerName)"
-                                     Name="@detail.CustomerAddressName"
-                                     Line1="@detail.CustomerAddressLine1"
-                                     Line2="@detail.CustomerAddressLine2"
-                                     City="@detail.CustomerAddressCity"
-                                     State="@detail.CustomerAddressState"
-                                     Pincode="@detail.CustomerAddressPincode"
-                                     Country="@detail.CustomerAddressCountry" />
-                    </dd>
-                    <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName (@detail.SupplierCode)</dd>
-                    <dt style="color:var(--mer-ink-500);">PO Date</dt><dd style="font-family:Inter,monospace;">@detail.PoDate.ToString("yyyy-MM-dd")</dd>
-                    <dt style="color:var(--mer-ink-500);">Currency</dt><dd>@(string.IsNullOrEmpty(detail.CurrencyCode) ? "—" : detail.CurrencyCode)</dd>
-                    <dt style="color:var(--mer-ink-500);">Payment terms</dt><dd>@(detail.PaymentTerms ?? "—")</dd>
-                    <dt style="color:var(--mer-ink-500);">Delivery terms</dt><dd>@(detail.DeliveryTerms ?? "—")</dd>
-                    <dt style="color:var(--mer-ink-500);">Total amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@(string.IsNullOrEmpty(detail.CurrencyCode) ? "" : detail.CurrencyCode + " ")@detail.TotalAmount.ToString("0.00")</dd>
-                    @if (detail.AcknowledgmentAt.HasValue)
+                    <div class="podt-cell">
+                        <span class="podt-cell__label">Customer</span>
+                        <span class="podt-cell__value">@Dash(detail.CustomerName)</span>
+                    </div>
+                    <span class="podt-div"></span>
+                    <div class="podt-cell">
+                        <span class="podt-cell__label">Supplier</span>
+                        <span class="podt-cell__value">@detail.SupplierName <span class="podt-muted">(@detail.SupplierCode)</span></span>
+                    </div>
+                    <span class="podt-div"></span>
+                    <div class="podt-cell">
+                        <span class="podt-cell__label">PO date</span>
+                        <span class="podt-cell__value podt-mono">@detail.PoDate.ToString("yyyy-MM-dd")</span>
+                    </div>
+                    <span class="podt-div"></span>
+                    <div class="podt-cell">
+                        <span class="podt-cell__label">Terms</span>
+                        <span class="podt-cell__value podt-muted">Pay @Dash(detail.PaymentTerms) · Del @Dash(detail.DeliveryTerms)</span>
+                    </div>
+                    @* The mock's Ship-to cell: ship-to was retired in R13, so this is the CUSTOMER's base address —
+                       the nearest live equivalent, and the only address a PO header still has. *@
+                    @if (HasCustomerAddress)
                     {
-                        <dt style="color:var(--mer-ink-500);">Acknowledged</dt><dd style="font-family:Inter,monospace;">@detail.AcknowledgmentAt.Value.ToString("yyyy-MM-dd HH:mm")</dd>
+                        <span class="podt-div"></span>
+                        <div class="podt-cell podt-cell--grow">
+                            <span class="podt-cell__label">Customer address</span>
+                            <span class="podt-cell__value podt-ellipsis" title="@CustomerAddressOneLine">@CustomerAddressOneLine</span>
+                        </div>
                     }
-                    @if (detail.AcceptedAt.HasValue)
-                    {
-                        <dt style="color:var(--mer-ink-500);">Accepted</dt><dd style="font-family:Inter,monospace;">@detail.AcceptedAt.Value.ToString("yyyy-MM-dd HH:mm")</dd>
-                    }
-                    @if (!string.IsNullOrEmpty(detail.RejectionReason))
-                    {
-                        <dt style="color:var(--mer-ink-500);">Rejection reason</dt><dd style="background:var(--mer-red-50);color:var(--mer-red);padding:6px 10px;border-radius:4px;">@detail.RejectionReason</dd>
-                    }
-                </dl>
-            </div>
-
-            <div style="display:flex;flex-direction:column;gap:16px;">
-                @* R13 — ship-to is RETIRED. The receiving warehouse now lives per PO LINE (see the Lines grid's
-                   Warehouse column). The right rail is Notes-only; the customer's own BASE address is shown beside
-                   the customer name in the Order-details card (live from the company). *@
-                <div class="rz-card" style="padding:20px;">
-                    <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Notes</h3>
-                    <p style="font-size:13px;color:var(--mer-ink-700);white-space:pre-wrap;">@(string.IsNullOrEmpty(detail.Notes) ? "No notes." : detail.Notes)</p>
+                </div>
+                <div class="podt-summary__right">
+                    <div class="podt-cell podt-cell--end">
+                        <span class="podt-cell__label">Total</span>
+                        <span class="podt-total">@(string.IsNullOrEmpty(detail.CurrencyCode) ? "" : detail.CurrencyCode + " ")@detail.TotalAmount.ToString("0.00")</span>
+                    </div>
+                    <button class="podt-more" @onclick="() => metaOpen = !metaOpen">
+                        All details
+                        <span class="material-symbols-outlined">@(metaOpen ? "expand_less" : "expand_more")</span>
+                    </button>
                 </div>
             </div>
+
+            @if (metaOpen)
+            {
+                <div class="podt-meta">
+                    <div>
+                        <div class="podt-meta__head">Order details</div>
+                        <dl class="podt-kv">
+                            <dt>Payment terms</dt><dd>@Dash(detail.PaymentTerms)</dd>
+                            <dt>Delivery terms</dt><dd>@Dash(detail.DeliveryTerms)</dd>
+                            <dt>Currency</dt><dd>@Dash(detail.CurrencyCode)</dd>
+                            <dt>Acknowledged</dt><dd class="podt-mono">@(detail.AcknowledgmentAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+                            <dt>Accepted</dt><dd class="podt-mono">@(detail.AcceptedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+                            @if (!string.IsNullOrEmpty(detail.RejectionReason))
+                            {
+                                <dt>Rejection reason</dt>
+                                <dd><span class="podt-reject">@detail.RejectionReason</span></dd>
+                            }
+                        </dl>
+                    </div>
+                    <div>
+                        <div class="podt-meta__head">Customer address</div>
+                        @if (HasCustomerAddress)
+                        {
+                            <div class="podt-addr">
+                                @if (!string.IsNullOrWhiteSpace(detail.CustomerAddressName))
+                                {
+                                    <div class="podt-addr__name">@detail.CustomerAddressName</div>
+                                }
+                                @foreach (var part in CustomerAddressLines)
+                                {
+                                    <div>@part</div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="podt-empty">No address on the customer company.</div>
+                        }
+                    </div>
+                    <div>
+                        <div class="podt-meta__head">Notes</div>
+                        <div class="@(string.IsNullOrEmpty(detail.Notes) ? "podt-empty" : "podt-notes")">@(string.IsNullOrEmpty(detail.Notes) ? "No notes." : detail.Notes)</div>
+                    </div>
+                </div>
+            }
         </div>
 
         @* ---------------- Negotiation edit bar (req 3) ---------------- *@
@@ -173,15 +315,35 @@ else
             </div>
         }
 
-        <div class="rz-card" style="padding:20px;margin-top:16px;">
-            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)</h3>
+        <div class="rz-card podt-lines">
+            @* 1a's Lines header: title + count pill + a search box. The mock's column chooser is not built. *@
+            <div class="podt-lines__head">
+                <span class="podt-lines__title">Lines</span>
+                <span class="tl-count-chip">@detail.Lines.Count</span>
+                @if (detail.Lines.Count > 0)
+                {
+                    <div style="flex:1;"></div>
+                    <label class="podt-search">
+                        <span class="material-symbols-outlined">search</span>
+                        <input placeholder="Search item or description…" @bind="lineSearch" @bind:event="oninput" />
+                        @if (!string.IsNullOrWhiteSpace(lineSearch))
+                        {
+                            <span class="material-symbols-outlined podt-search__clear" title="Clear" @onclick="() => lineSearch = string.Empty">close</span>
+                        }
+                    </label>
+                }
+            </div>
             @if (detail.Lines.Count == 0)
             {
-                <p style="font-size:13px;color:var(--mer-ink-500);">No lines on this PO.</p>
+                <p class="podt-empty" style="padding:16px 18px;">No lines on this PO.</p>
+            }
+            else if (VisibleLines.Count == 0)
+            {
+                <p class="podt-empty" style="padding:16px 18px;">No line matches “@lineSearch”.</p>
             }
             else
             {
-                <table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+                <table class="podt-table">
                     <thead>
                         <tr style="border-bottom:1px solid var(--mer-line);">
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
@@ -202,7 +364,7 @@ else
                         </tr>
                     </thead>
                     <tbody>
-                    @foreach (var ln in detail.Lines.OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo))
+                    @foreach (var ln in VisibleLines)
                     {
                         var line = ln;
                         <tr style="border-bottom:1px solid var(--mer-line-soft);">
@@ -250,8 +412,22 @@ else
                     }
                     </tbody>
                     <tfoot>
+                        @* 1a's footer bar. The total is the PO's, NOT the sum of what is on screen — so when a
+                           search narrows the table the left note says how many rows are showing, or the figure
+                           would read as the total of the visible ones. *@
+                        @* Column budget (15): 1 Pos · 2 Seq · 3 Item · 4 Description · 5 Qty · 6 Unit · 7 Price Unit ·
+                           8 Net Amount · 9 Disc % · 10 Disc Amt · 11 Tax · 12 Delivery · 13 Shipped · 14 Balance ·
+                           15 Warehouse. The figure must land in column 8 so it reads as a sum of Net Amount, which
+                           is what it is — so the note takes 1-6, the label sits in 7, and 9-15 are filled by one
+                           spanning cell. Change any span here and re-count, or the total drifts under Disc %. *@
                         <tr style="border-top:2px solid var(--mer-line);font-weight:700;">
-                            <td colspan="7" style="padding:8px 4px;text-align:right;color:var(--mer-ink-700);">Total@(string.IsNullOrEmpty(detail.CurrencyCode) ? "" : " (" + detail.CurrencyCode + ")")</td>
+                            <td colspan="6" style="padding:8px 4px;text-align:left;color:var(--mer-ink-500);font-weight:600;">
+                                @if (VisibleLines.Count != detail.Lines.Count)
+                                {
+                                    <text>Showing @VisibleLines.Count of @detail.Lines.Count lines · total below is for the whole PO</text>
+                                }
+                            </td>
+                            <td style="padding:8px 4px;text-align:right;color:var(--mer-ink-700);white-space:nowrap;">Total@(string.IsNullOrEmpty(detail.CurrencyCode) ? "" : " (" + detail.CurrencyCode + ")")</td>
                             <td style="padding:8px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-blue-darker);">@detail.TotalAmount.ToString("0.00")</td>
                             <td colspan="7"></td>
                         </tr>
@@ -366,6 +542,67 @@ else
     private bool loading = true;
     private bool busy = false;
     private string tab = "overview";
+
+    // ===================== Design 1a — compacted header (2026-08-12) =====================
+
+    /// <summary>"All details" disclosure under the summary row. Closed by default — that is the whole point of
+    /// the compaction; the facts behind it are the ones nobody scans on every visit.</summary>
+    private bool metaOpen;
+
+    /// <summary>Client-side line filter (1a's Lines-header search). Filters only what is already loaded.</summary>
+    private string lineSearch = string.Empty;
+
+    private static string Dash(string? s) => string.IsNullOrWhiteSpace(s) ? "—" : s;
+
+    /// <summary>Lines in display order, narrowed by the search box. Sort is unchanged: position then sequence.</summary>
+    private List<PurchaseOrderLineDto> VisibleLines
+    {
+        get
+        {
+            var q = (detail?.Lines ?? new List<PurchaseOrderLineDto>()).AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(lineSearch))
+            {
+                var t = lineSearch.Trim();
+                q = q.Where(l => (l.ItemCode?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false)
+                                 || (l.ItemDescription?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false)
+                                 || l.PositionNo.ToString().Contains(t, StringComparison.OrdinalIgnoreCase));
+            }
+            return q.OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo).ToList();
+        }
+    }
+
+    // The customer's BASE address (R13). It fills the slot the mock drew as "Ship-to" — ship-to was retired, and
+    // this is the only address a PO header still carries.
+    private bool HasCustomerAddress =>
+        !string.IsNullOrWhiteSpace(detail?.CustomerAddressName)
+        || !string.IsNullOrWhiteSpace(detail?.CustomerAddressLine1)
+        || !string.IsNullOrWhiteSpace(detail?.CustomerAddressCity)
+        || !string.IsNullOrWhiteSpace(detail?.CustomerAddressCountry);
+
+    /// <summary>Address body lines for the expanded panel — name is rendered separately, above these.</summary>
+    private IEnumerable<string> CustomerAddressLines
+    {
+        get
+        {
+            if (detail is null) yield break;
+            if (!string.IsNullOrWhiteSpace(detail.CustomerAddressLine1)) yield return detail.CustomerAddressLine1!;
+            if (!string.IsNullOrWhiteSpace(detail.CustomerAddressLine2)) yield return detail.CustomerAddressLine2!;
+            var locality = string.Join(" ",
+                new[] { Join(", ", detail.CustomerAddressCity, detail.CustomerAddressState), detail.CustomerAddressPincode }
+                    .Where(x => !string.IsNullOrWhiteSpace(x)));
+            if (!string.IsNullOrWhiteSpace(locality)) yield return locality;
+            if (!string.IsNullOrWhiteSpace(detail.CustomerAddressCountry)) yield return detail.CustomerAddressCountry!;
+        }
+    }
+
+    /// <summary>The one-line form for the 42px summary cell (name + city + country), ellipsised by CSS.</summary>
+    private string CustomerAddressOneLine =>
+        Join(", ", detail?.CustomerAddressName, detail?.CustomerAddressCity, detail?.CustomerAddressCountry) is { Length: > 0 } s
+            ? s
+            : "—";
+
+    private static string Join(string sep, params string?[] parts) =>
+        string.Join(sep, parts.Where(p => !string.IsNullOrWhiteSpace(p)));
 
     // R4 (2026-06-26) — D1: the supplier's PO-confirmation mode travels on PurchaseOrderDetailDto.PoResponseMode
     // (joined from Supplier.PoConfirmationMode by the API; field name kept stable). "Manual" here means NOT
