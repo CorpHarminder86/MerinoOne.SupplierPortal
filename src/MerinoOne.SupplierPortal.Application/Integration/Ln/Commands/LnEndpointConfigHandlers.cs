@@ -259,9 +259,12 @@ public class SaveOutboundIntegrationConfigCommandHandler : IRequestHandler<SaveO
     private readonly ILnMappingService _mapping;
     private readonly ILnInputDocumentBuilderRegistry _builders;
     private readonly ICandidateFilterRegistry _filters;
+    // 2026-08-12 — needed to reject a Document target that no snapshot provider serves (see the save guard).
+    private readonly Application.Integration.Idm.ISnapshotProviderRegistry _snapshots;
     public SaveOutboundIntegrationConfigCommandHandler(IAppDbContext db, ICurrentUser user, ILnMappingService mapping,
-        ILnInputDocumentBuilderRegistry builders, ICandidateFilterRegistry filters)
-    { _db = db; _user = user; _mapping = mapping; _builders = builders; _filters = filters; }
+        ILnInputDocumentBuilderRegistry builders, ICandidateFilterRegistry filters,
+        Application.Integration.Idm.ISnapshotProviderRegistry snapshots)
+    { _db = db; _user = user; _mapping = mapping; _builders = builders; _filters = filters; _snapshots = snapshots; }
 
     public async Task<Guid> Handle(SaveOutboundIntegrationConfigCommand request, CancellationToken ct)
     {
@@ -325,6 +328,19 @@ public class SaveOutboundIntegrationConfigCommandHandler : IRequestHandler<SaveO
             // (the Document response contract is {pid}).
             if (string.IsNullOrWhiteSpace(b.TargetEntityName))
                 throw new ValidationException("Document integrations require a target entity name.");
+
+            // 2026-08-12 — the target MUST name a registered snapshot provider. The scan resolves the provider by
+            // this string and simply `continue`s when it cannot (IdmDocumentOutboxWorker), which silently disables
+            // the WHOLE config: no idmEntityType stamping, no Create/Delete seeding, no promotion of Blocked rows,
+            // and not a single log line or sync-log entry to show for it. A typo here cost ~5h of dead ASN
+            // document sync on dev before anyone noticed (config 41FD34C0, 2026-08-12). Fail the save instead.
+            if (_snapshots.TryGet(b.TargetEntityName!) is null)
+            {
+                var valid = string.Join(", ", _snapshots.All.Select(p => p.IdmEntityType).OrderBy(x => x));
+                throw new ValidationException(
+                    $"No snapshot provider serves target entity '{b.TargetEntityName}', so this integration could "
+                    + $"never dispatch. Valid targets: {valid}.");
+            }
             var errors = new List<string>();
             foreach (var (label, expr) in new[]
             {

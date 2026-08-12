@@ -30,7 +30,9 @@ public sealed class IdmDefaultExpressions : IIdmExpressionCatalog
             // the "LN has the record" signal is erpCode (the ASNNo written back by /inbound/erp-ack).
             // R16.1 (2026-08-11) — supplier.erpCode joins the gate: it is the fresh mapping's MDS_id1, so a
             // supplier without one must hold the document Blocked instead of pushing a blank key.
-            ["InforAdvanceShipmentNoticeSupplierASN"] = ("Asn", "AsnAttachment",
+            // 2026-08-12 — renamed from "InforAdvanceShipmentNoticeSupplierASN"; the key must equal
+            // AsnSnapshotProvider.IdmEntityType (it is also the .jsonata resource prefix loaded below).
+            ["InforAdvanceShipmentNotice"] = ("Asn", "AsnAttachment",
                 IdmGateConversion.ToJsonata(new[] { "asn.erpCode", "asn.supplier.erpCode" })),
         };
 

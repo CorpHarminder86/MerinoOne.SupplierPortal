@@ -21,7 +21,13 @@ public sealed class AsnSnapshotProvider : IEntitySnapshotProvider
         _files = files;
     }
 
-    public string IdmEntityType => "InforAdvanceShipmentNoticeSupplierASN";
+    // 2026-08-12 — renamed from "InforAdvanceShipmentNoticeSupplierASN" (user decision: IDM must receive
+    // MDS_EntityType = InforAdvanceShipmentNotice). This ONE constant is four things at once, which is why the
+    // rename could not be done in config alone: it keys the snapshot-provider registry (so the scan can find a
+    // provider for a Document config's targetEntityName), it names the embedded .jsonata pair, it is stamped on
+    // DocumentUpload.idmEntityType, and it flows into the envelope as MDS_EntityType.
+    // NOTE: TSD R8 §4.2b recorded the old value as observed on a live IDM item — see the note added there.
+    public string IdmEntityType => "InforAdvanceShipmentNotice";
     public string OwnerEntityType => DocumentOwnerTypes.Asn;
 
     public async Task<object?> BuildSnapshotAsync(Guid tenantId, Guid ownerEntityId, Guid documentUploadId, bool includeFileContent, CancellationToken ct)

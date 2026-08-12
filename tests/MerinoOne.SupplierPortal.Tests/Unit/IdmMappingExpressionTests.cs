@@ -64,7 +64,7 @@ public class IdmMappingExpressionTests
     // AsnSnapshotProvider's real output, including the new asn.supplier block that feeds MDS_id1.
     private static Dictionary<string, object?> AsnSnapshot(string pid) => new()
     {
-        ["entityType"] = "InforAdvanceShipmentNoticeSupplierASN",
+        ["entityType"] = "InforAdvanceShipmentNotice",
         ["asn"] = new Dictionary<string, object?>
         {
             ["financialCompany"] = "2000",
@@ -86,7 +86,7 @@ public class IdmMappingExpressionTests
     [InlineData("mutate", "PID-1")]   // Mutate mirrors Create attr-for-attr; only the pid differs at runtime
     public async Task Asn_envelope_carries_the_supplier_asn_erp_id_trio(string slot, string pid)
     {
-        var entry = _defaults.TryGet("InforAdvanceShipmentNoticeSupplierASN")!;
+        var entry = _defaults.TryGet("InforAdvanceShipmentNotice")!;
         var expr = slot == "create" ? entry.CreateExpression : entry.MutateExpression;
 
         var envelope = await _builder.BuildAsync(expr, AsnSnapshot(pid), CancellationToken.None);
@@ -98,7 +98,7 @@ public class IdmMappingExpressionTests
         var item = doc.RootElement.GetProperty("item");
         var attrs = item.GetProperty("attrs").GetProperty("attr");
 
-        AttrValue(attrs, "MDS_EntityType").Should().Be("InforAdvanceShipmentNoticeSupplierASN");
+        AttrValue(attrs, "MDS_EntityType").Should().Be("InforAdvanceShipmentNotice");
         AttrValue(attrs, "MDS_AccountingEntity").Should().Be("infor.ln.2000");
         AttrValue(attrs, "MDS_id1").Should().Be("BUS000048");                             // supplier ERP code
         AttrValue(attrs, "MDS_id2").Should().Be("ASN-S0013-20260811063857479INB00107");   // portal ASN number
@@ -115,7 +115,7 @@ public class IdmMappingExpressionTests
     [Fact]
     public void Asn_gate_blocks_until_both_the_ln_asn_number_and_the_supplier_erp_code_exist()
     {
-        var gate = IdmDefaultExpressions.Seeds["InforAdvanceShipmentNoticeSupplierASN"].GateExpr;
+        var gate = IdmDefaultExpressions.Seeds["InforAdvanceShipmentNotice"].GateExpr;
         var engine = new MerinoOne.SupplierPortal.Infrastructure.Integration.JsonataEligibilityGate(
             new MerinoOne.SupplierPortal.Infrastructure.Integration.Ln.LnMappingService());
 

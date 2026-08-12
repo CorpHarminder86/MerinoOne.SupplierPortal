@@ -29,7 +29,7 @@ public class IdmIntegrationController : ControllerBase
     [HttpGet("entity-types")]
     [Authorize(Policy = Perm.SettingsRead)]
     [EndpointSummary("List portal-entity → IDM entity-type pairs for a new mapping")]
-    [EndpointDescription("The (portal entity, IDM entity type) pairs with a registered snapshot provider (today: Asn → InforAdvanceShipmentNoticeSupplierASN, Invoice → InforInvoice) — the only targets a NEW Document integration can dispatch. Requires Settings.Read.")]
+    [EndpointDescription("The (portal entity, IDM entity type) pairs with a registered snapshot provider (today: Asn → InforAdvanceShipmentNotice, Invoice → InforInvoice) — the only targets a NEW Document integration can dispatch. Requires Settings.Read.")]
     public async Task<Result<IReadOnlyList<IdmEntityTypeOptionDto>>> GetEntityTypeOptions(CancellationToken ct)
         => Result<IReadOnlyList<IdmEntityTypeOptionDto>>.Ok(await _mediator.Send(new GetIdmEntityTypeOptionsQuery(), ct), HttpContext.TraceIdentifier);
 

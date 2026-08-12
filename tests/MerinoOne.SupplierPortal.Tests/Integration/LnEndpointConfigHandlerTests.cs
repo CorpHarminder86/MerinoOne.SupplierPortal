@@ -96,7 +96,8 @@ public class OutboundIntegrationConfigHandlerTests
         var (scope, db, user, mapping, builders, filters, catalog) = Services();
         using (scope)
         {
-            var handler = new SaveOutboundIntegrationConfigCommandHandler(db, user, mapping, builders, filters);
+            var handler = new SaveOutboundIntegrationConfigCommandHandler(db, user, mapping, builders, filters,
+                scope.ServiceProvider.GetRequiredService<MerinoOne.SupplierPortal.Application.Integration.Idm.ISnapshotProviderRegistry>());
             return await handler.Handle(new SaveOutboundIntegrationConfigCommand(ValidInvoiceRequest(catalog)), CancellationToken.None);
         }
     }
@@ -108,7 +109,8 @@ public class OutboundIntegrationConfigHandlerTests
         var (scope, db, user, mapping, builders, filters, catalog) = Services();
         using (scope)
         {
-            var handler = new SaveOutboundIntegrationConfigCommandHandler(db, user, mapping, builders, filters);
+            var handler = new SaveOutboundIntegrationConfigCommandHandler(db, user, mapping, builders, filters,
+                scope.ServiceProvider.GetRequiredService<MerinoOne.SupplierPortal.Application.Integration.Idm.ISnapshotProviderRegistry>());
             var valid = ValidInvoiceRequest(catalog);
 
             var badJsonata = valid with { RequestMappingExpr = "{{{{ not jsonata" };
@@ -138,7 +140,8 @@ public class OutboundIntegrationConfigHandlerTests
         var (s1, db1, u1, m1, b1, f1, cat1) = Services();
         using (s1)
         {
-            var handler = new SaveOutboundIntegrationConfigCommandHandler(db1, u1, m1, b1, f1);
+            var handler = new SaveOutboundIntegrationConfigCommandHandler(db1, u1, m1, b1, f1,
+                s1.ServiceProvider.GetRequiredService<MerinoOne.SupplierPortal.Application.Integration.Idm.ISnapshotProviderRegistry>());
             await handler.Handle(new SaveOutboundIntegrationConfigCommand(ValidInvoiceRequest(cat1, id)), CancellationToken.None);
             var row = await db1.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking().FirstAsync(c => c.Id == id);
             row.GateVersion.Should().Be(1);
@@ -149,7 +152,8 @@ public class OutboundIntegrationConfigHandlerTests
         var (s2, db2, u2, m2, b2, f2, cat2) = Services();
         using (s2)
         {
-            var handler = new SaveOutboundIntegrationConfigCommandHandler(db2, u2, m2, b2, f2);
+            var handler = new SaveOutboundIntegrationConfigCommandHandler(db2, u2, m2, b2, f2,
+                s2.ServiceProvider.GetRequiredService<MerinoOne.SupplierPortal.Application.Integration.Idm.ISnapshotProviderRegistry>());
             var withGate = ValidInvoiceRequest(cat2, id) with { EligibilityGateExpr = "invoiceStatus = \"Submitted\"" };
             await handler.Handle(new SaveOutboundIntegrationConfigCommand(withGate), CancellationToken.None);
             var row = await db2.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking().FirstAsync(c => c.Id == id);
