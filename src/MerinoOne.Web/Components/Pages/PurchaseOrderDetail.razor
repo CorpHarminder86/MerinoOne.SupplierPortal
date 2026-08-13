@@ -123,7 +123,9 @@ else
             </a>
             <h1 class="podt-title">@detail.PoNumber</h1>
             <span class="tlg-status @StatusClass(detail.PoStatus)">@detail.PoStatus</span>
-            <span class="tl-count-chip">v@detail.Version</span>
+            @* Parenthesised deliberately: Razor reads a bare @ that follows a letter as part of an email
+               address, so "v@detail.Version" rendered as that literal text on screen. *@
+            <span class="tl-count-chip">v@(detail.Version)</span>
             <div style="flex:1;"></div>
             <div class="podt-actions">
                 @* PO response actions are shown only when the supplier is in MANUAL response mode.
@@ -183,7 +185,7 @@ else
             <button class="podt-tab @(tab == "overview" ? "podt-tab--on" : "")" @onclick="TabOverview">Overview</button>
             <button class="podt-tab @(tab == "history" ? "podt-tab--on" : "")" @onclick="TabHistory">History</button>
             <div style="flex:1;"></div>
-            <span class="podt-tabs__sub">@detail.SupplierName · @detail.PoType · @detail.PoDate.ToString("yyyy-MM-dd")</span>
+            <span class="podt-tabs__sub">@detail.SupplierName · @detail.PoType · @AppTime.Date(detail.PoDate)</span>
         </div>
 
         @if (tab == "history")
@@ -211,9 +213,12 @@ else
                         <span class="podt-cell__value">@detail.SupplierName <span class="podt-muted">(@detail.SupplierCode)</span></span>
                     </div>
                     <span class="podt-div"></span>
+                    @* Feedback 2026-08-12 (1): PO date carries a real time — on live POs poDate lands minutes
+                       before createdOn, so it is an instant, not a calendar date. Shown to the minute HERE ONLY;
+                       the tab-strip subtitle stays date-only so the 36px strip does not grow. *@
                     <div class="podt-cell">
                         <span class="podt-cell__label">PO date</span>
-                        <span class="podt-cell__value podt-mono">@detail.PoDate.ToString("yyyy-MM-dd")</span>
+                        <span class="podt-cell__value podt-mono">@AppTime.Stamp(detail.PoDate)</span>
                     </div>
                     <span class="podt-div"></span>
                     <div class="podt-cell">
@@ -252,8 +257,8 @@ else
                             <dt>Payment terms</dt><dd>@Dash(detail.PaymentTerms)</dd>
                             <dt>Delivery terms</dt><dd>@Dash(detail.DeliveryTerms)</dd>
                             <dt>Currency</dt><dd>@Dash(detail.CurrencyCode)</dd>
-                            <dt>Acknowledged</dt><dd class="podt-mono">@(detail.AcknowledgmentAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
-                            <dt>Accepted</dt><dd class="podt-mono">@(detail.AcceptedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+                            <dt>Acknowledged</dt><dd class="podt-mono">@AppTime.Stamp(detail.AcknowledgmentAt)</dd>
+                            <dt>Accepted</dt><dd class="podt-mono">@AppTime.Stamp(detail.AcceptedAt)</dd>
                             @if (!string.IsNullOrEmpty(detail.RejectionReason))
                             {
                                 <dt>Rejection reason</dt>
@@ -297,7 +302,7 @@ else
                     <span class="material-symbols-outlined" style="font-size:20px;color:var(--mer-blue);">handshake</span>
                     <div style="flex:1;">
                         <div style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);">Negotiation mode</div>
-                        <p style="font-size:12px;color:var(--mer-ink-700);margin:2px 0 10px;">Edit the <b>Qty</b> and <b>Delivery Date</b> on the lines you want to renegotiate. Only changed lines are submitted.</p>
+                        <p style="font-size:12px;color:var(--mer-ink-700);margin:2px 0 10px;">Edit the <b>Qty</b> and <b>Delivery date &amp; time</b> on the lines you want to renegotiate. Only changed lines are submitted. Times are @AppTime.OffsetLabel; a delivery cannot be earlier than the PO date (@AppTime.Stamp(detail.PoDate)).</p>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:4px;">Notes for the buyer (optional)</label>
                         <textarea class="rz-textbox" rows="2" style="width:100%;max-width:560px;padding:8px 10px;font-family:inherit;" @bind="negotiationNotes"></textarea>
                         @if (!string.IsNullOrEmpty(negotiationError))
@@ -374,21 +379,50 @@ else
                             <td style="padding:6px 4px;">@line.ItemDescription</td>
                             @if (negotiating && edits.TryGetValue(line.Id, out var edit))
                             {
-                                @* Editable Qty + Price Unit (req 3 + price addendum) — all other columns stay read-only. *@
+                                @* Editable Qty only (feedback 2026-08-12 (2): Price Unit is no longer negotiable —
+                                   it renders read-only here exactly as it does outside negotiation mode). *@
                                 <td style="padding:6px 4px;text-align:right;">
                                     <input type="number" step="0.001" min="0" class="rz-textbox" style="width:90px;padding:4px 6px;text-align:right;font-family:Inter,monospace;" @bind="edit.Qty" />
                                 </td>
                                 <td style="padding:6px 4px;">@line.OrderUnit</td>
-                                <td style="padding:6px 4px;text-align:right;">
-                                    <input type="number" step="0.01" min="0" class="rz-textbox" style="width:100px;padding:4px 6px;text-align:right;font-family:Inter,monospace;" @bind="edit.Price" />
-                                </td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.PriceUnit.ToString("0.00")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.NetAmount.ToString("0.00")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountPct == 0 ? "—" : line.DiscountPct.ToString("0.##"))</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : line.DiscountAmount.ToString("0.00"))</td>
                                 <td style="padding:6px 4px;" title="@line.TaxCode">@(string.IsNullOrEmpty(line.TaxDescription) ? (string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode) : line.TaxDescription)</td>
-                                @* Editable Delivery Date (req 3). *@
+                                @* Editable Delivery date AND time (feedback 2026-08-12 (3)). The bound value is a
+                                   WALL-CLOCK time in the display zone — LineEdit.DeliveryDateUtc converts it back
+                                   for the wire. @bind:format is required: without it Blazor round-trips a DateTime
+                                   in a shape datetime-local will not accept, and the field renders blank.
+
+                                   NO `min` attribute, deliberately (2026-08-13). It was set to the PO instant, and
+                                   a browser treats `min` as a HARD floor: the picker refuses every earlier value,
+                                   so a same-day delivery before the PO's time-of-day could not be entered at all.
+                                   The rule is a VALIDATION, not an input constraint — the supplier must be able to
+                                   type a wrong value and be told why it is wrong. SubmitNegotiation and
+                                   CreatePoNegotiationCommand both enforce it; the title says it up front. *@
                                 <td style="padding:6px 4px;">
-                                    <input type="date" class="rz-textbox" style="padding:4px 6px;font-family:Inter,monospace;" @bind="edit.DeliveryDate" />
+                                    @{ var tooEarlyHere = IsDeliveryTooEarly(edit); }
+                                    @* Explicit value + @onchange rather than @bind. @bind:format silently failed to
+                                       PARSE the browser's datetime-local value here — the model never updated and
+                                       the field snapped back to its seeded value, which reads as "the delivery date
+                                       cannot be edited" (reported 2026-08-13, reproduced in-browser: the Qty input
+                                       on the same row bound fine, so it was the date conversion, not the state).
+                                       Parsing in our own code makes it explicit, culture-proof and unit-testable. *@
+                                    <input type="datetime-local" class="rz-textbox"
+                                           style="padding:4px 6px;font-family:Inter,monospace;min-width:190px;@(tooEarlyHere ? "border:1px solid var(--mer-red);background:var(--mer-red-50);" : "")"
+                                           title="@($"Must not be earlier than the PO date ({AppTime.Stamp(detail.PoDate)})")"
+                                           value="@DeliveryInputValue(edit)"
+                                           @onchange="e => OnDeliveryChanged(edit, e.Value?.ToString())" />
+                                    @if (tooEarlyHere)
+                                    {
+                                        @* Flagged the moment the field loses focus, not at submit. The rule is a
+                                           validation rather than a picker constraint, so this inline notice is what
+                                           stops "it accepted my edit, then refused to save". *@
+                                        <div style="font-size:10.5px;color:var(--mer-red);margin-top:3px;max-width:190px;line-height:1.3;">
+                                            Earlier than the PO date (@AppTime.Stamp(detail.PoDate))
+                                        </div>
+                                    }
                                 </td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQtyToDate.ToString("0.###")</td>
                                 <td style="padding:6px 4px;">@BalanceCell(line)</td>
@@ -403,7 +437,9 @@ else
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountPct == 0 ? "—" : line.DiscountPct.ToString("0.##"))</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : line.DiscountAmount.ToString("0.00"))</td>
                                 <td style="padding:6px 4px;" title="@line.TaxCode">@(string.IsNullOrEmpty(line.TaxDescription) ? (string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode) : line.TaxDescription)</td>
-                                <td style="padding:6px 4px;font-family:Inter,monospace;">@(line.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                @* Shown to the minute since the negotiation editor can now set a time — a
+                                   date-only column would make a 09:00 → 17:00 change look like no change. *@
+                                <td style="padding:6px 4px;font-family:Inter,monospace;">@AppTime.Stamp(line.DeliveryDate)</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@line.ShippedQtyToDate.ToString("0.###")</td>
                                 <td style="padding:6px 4px;">@BalanceCell(line)</td>
                                 <td style="padding:6px 4px;">@WarehouseCell(line)</td>
@@ -643,6 +679,43 @@ else
         builder.CloseComponent();
     };
 
+    /// <summary>The accepted shapes of an <c>&lt;input type="datetime-local"&gt;</c> value. Browsers post
+    /// minute precision at the default step and second precision when a finer step is set; accepting both means
+    /// the control cannot silently stop working if that ever changes.</summary>
+    private static readonly string[] DeliveryInputFormats = { "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss" };
+
+    /// <summary>Renders the picker's value — a wall-clock time in the display zone, or blank for no date.</summary>
+    private static string DeliveryInputValue(LineEdit edit) => edit.LocalDeliveryDate is { } d
+        ? d.ToString(DeliveryInputFormats[0], System.Globalization.CultureInfo.InvariantCulture)
+        : string.Empty;
+
+    /// <summary>
+    /// Reads the picker back. Clearing the field is meaningful (the supplier is removing the date), so an empty
+    /// value sets null. An UNPARSEABLE value is ignored rather than treated as a clear — that would silently
+    /// discard a date the supplier still believes is set.
+    /// </summary>
+    private static void OnDeliveryChanged(LineEdit edit, string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            edit.LocalDeliveryDate = null;
+            return;
+        }
+
+        if (DateTime.TryParseExact(raw, DeliveryInputFormats, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var parsed))
+            edit.LocalDeliveryDate = parsed;
+    }
+
+    /// <summary>
+    /// The per-row form of the PO-date floor: true when this line PROPOSES a delivery instant earlier than the
+    /// PO date. Gated on <see cref="LineEdit.DateChanged"/> for the same reason the submit check and the handler
+    /// are — a line carrying its existing date verbatim is not proposing anything, and flagging it would accuse
+    /// the supplier of an edit they did not make.
+    /// </summary>
+    private bool IsDeliveryTooEarly(LineEdit edit) =>
+        detail is not null && edit.DateChanged && edit.DeliveryDateUtc is { } d && d < detail.PoDate;
+
     private void TabOverview() => tab = "overview";
     private void TabHistory() => tab = "history";
 
@@ -660,13 +733,40 @@ else
     private sealed class LineEdit
     {
         public decimal OriginalQty;
+
+        /// <summary>The stored (UTC) delivery instant. Kept verbatim so an untouched date is re-sent to the
+        /// byte, not as the minute-truncated value the picker would hand back.</summary>
         public DateTime? OriginalDate;
-        public decimal OriginalPrice;
+
+        /// <summary>Carried through unchanged — price stopped being negotiable (feedback 2026-08-12 (2)) but the
+        /// request contract still takes it, so the PO's own value rides along and no price delta is ever written.</summary>
+        public decimal PriceUnit;
+
         public decimal Qty;
-        public DateTime? DeliveryDate;
-        public decimal Price;
-        public bool Changed => Qty != OriginalQty || DeliveryDate != OriginalDate || Price != OriginalPrice;
+
+        /// <summary>What the picker was seeded with, already minute-truncated. The change test compares against
+        /// THIS rather than against <see cref="OriginalDate"/>: an <c>&lt;input type="datetime-local"&gt;</c> has
+        /// no seconds field, so a stored 11:00:30 would come back as 11:00 and read as an edit nobody made.</summary>
+        public DateTime? SeededLocalDate;
+
+        /// <summary>Bound to the picker — a WALL-CLOCK time in the display zone, never persisted in this form.</summary>
+        public DateTime? LocalDeliveryDate { get; set; }
+
+        /// <summary>True when the supplier actually moved the picker. Distinct from <see cref="Changed"/>: the
+        /// PO-date floor may only judge a date the supplier PROPOSED, never the one carried through below.</summary>
+        public bool DateChanged => LocalDeliveryDate != SeededLocalDate;
+
+        /// <summary>The value for the wire. An untouched date returns the original instant untouched.</summary>
+        public DateTime? DeliveryDateUtc => DateChanged ? AppTime.ToUtc(LocalDeliveryDate) : OriginalDate;
+
+        public bool Changed => Qty != OriginalQty || DateChanged;
     }
+
+
+    /// <summary>Drops seconds so the seeded value and whatever the picker returns are comparable.</summary>
+    private static DateTime? TruncateToMinute(DateTime? value) => value is { } d
+        ? new DateTime(d.Year, d.Month, d.Day, d.Hour, d.Minute, 0, d.Kind)
+        : null;
     private bool negotiating = false;
     private string negotiationNotes = string.Empty;
     private string negotiationError = string.Empty;
@@ -696,7 +796,20 @@ else
         negotiationNotes = string.Empty;
         edits = detail.Lines.ToDictionary(
             l => l.Id,
-            l => new LineEdit { OriginalQty = l.OrderQty, OriginalDate = l.DeliveryDate, OriginalPrice = l.PriceUnit, Qty = l.OrderQty, DeliveryDate = l.DeliveryDate, Price = l.PriceUnit });
+            l =>
+            {
+                // The picker speaks wall-clock in the display zone; storage and the wire stay UTC.
+                var seeded = TruncateToMinute(AppTime.ToLocal(l.DeliveryDate));
+                return new LineEdit
+                {
+                    OriginalQty = l.OrderQty,
+                    OriginalDate = l.DeliveryDate,
+                    PriceUnit = l.PriceUnit,
+                    Qty = l.OrderQty,
+                    SeededLocalDate = seeded,
+                    LocalDeliveryDate = seeded,
+                };
+            });
         negotiating = true;
     }
 
@@ -712,14 +825,35 @@ else
     private async Task SubmitNegotiation()
     {
         if (detail is null) return;
-        var changed = edits
-            .Where(kv => kv.Value.Changed)
-            .Select(kv => new PoNegotiationLineInput(kv.Key, kv.Value.Qty, kv.Value.DeliveryDate, kv.Value.Price))
+        var changedEdits = edits.Where(kv => kv.Value.Changed).ToList();
+        var changed = changedEdits
+            .Select(kv => new PoNegotiationLineInput(kv.Key, kv.Value.Qty, kv.Value.DeliveryDateUtc, kv.Value.PriceUnit))
             .ToList();
 
-        if (changed.Count == 0) { negotiationError = "Change at least one line's quantity, delivery date or price before submitting."; return; }
+        if (changed.Count == 0) { negotiationError = "Change at least one line's quantity or delivery date before submitting."; return; }
         if (changed.Any(l => l.NegotiatedQty <= 0)) { negotiationError = "Negotiated quantity must be greater than zero."; return; }
-        if (changed.Any(l => l.NegotiatedPrice < 0)) { negotiationError = "Negotiated price cannot be negative."; return; }
+
+        // Feedback 2026-08-12 (3). Mirrored server-side in CreatePoNegotiationCommand — the picker's `min` and
+        // this check are both bypassable, and a delivery instant predating the order is never a real proposal.
+        // Only lines whose picker actually MOVED are judged: a qty-only edit re-sends the line's existing
+        // delivery instant verbatim, and faulting that would block the quantity change over a stored date the
+        // supplier never touched — while naming a field they did not edit.
+        var tooEarly = changedEdits
+            .Where(kv => IsDeliveryTooEarly(kv.Value))
+            .Select(kv => detail.Lines.FirstOrDefault(l => l.Id == kv.Key))
+            .Where(l => l is not null)
+            .Select(l => $"{l!.PositionNo}/{l.SequenceNo}")
+            .ToList();
+
+        if (tooEarly.Count > 0)
+        {
+            // Name the offending rows: the picker no longer blocks the value, so the message is the only thing
+            // telling the supplier WHICH line to fix.
+            negotiationError =
+                $"Delivery date and time cannot be earlier than the PO date ({AppTime.Stamp(detail.PoDate)}). "
+                + $"Check line{(tooEarly.Count == 1 ? "" : "s")} {string.Join(", ", tooEarly)}.";
+            return;
+        }
 
         busy = true; negotiationError = string.Empty;
         var req = new CreatePoNegotiationRequest(detail.Id, string.IsNullOrWhiteSpace(negotiationNotes) ? null : negotiationNotes.Trim(), changed);

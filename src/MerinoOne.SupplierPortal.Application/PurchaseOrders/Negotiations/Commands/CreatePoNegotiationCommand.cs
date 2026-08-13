@@ -3,6 +3,7 @@ using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Security;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -112,6 +113,27 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
             var dateChanged = poLine.DeliveryDate != input.NegotiatedDeliveryDate;
             var priceChanged = poLine.PriceUnit != input.NegotiatedPrice;
             if (!qtyChanged && !dateChanged && !priceChanged) continue;   // no-op line — drop it.
+
+            // Feedback 2026-08-12 (3) — a PROPOSED delivery instant may not predate the order itself. Both sides
+            // are UTC (PoDate arrives from LN in UTC; the client converts the picker's wall-clock time before
+            // POSTing), so this is a straight comparison. Enforced HERE and not in the validator because the rule
+            // needs the PO, and mirrored in the UI only as a courtesy — this is the authority.
+            //
+            // Gated on dateChanged, and deliberately placed AFTER it is computed. The client re-sends the line's
+            // EXISTING delivery instant verbatim on a line where only the quantity moved, so validating every
+            // submitted line would reject a pure qty proposal because of a stored date the supplier never touched —
+            // and one such line would fail the whole submission. The rule constrains what a supplier PROPOSES,
+            // not what the ERP already sent.
+            if (dateChanged && input.NegotiatedDeliveryDate is { } proposed && proposed < po.PoDate)
+                throw new ValidationException(new Dictionary<string, string[]>
+                {
+                    ["lines"] = new[]
+                    {
+                        $"Line {poLine.PositionNo}/{poLine.SequenceNo}: the delivery date and time " +
+                        $"({AppTime.Stamp(proposed)}) cannot be earlier than the PO date " +
+                        $"({AppTime.Stamp(po.PoDate)})."
+                    }
+                });
 
             negotiation.Lines.Add(new PurchaseOrderNegotiationLine
             {

@@ -1,5 +1,6 @@
 using System.Globalization;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Domain.Entities.Audit;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 
@@ -62,5 +63,12 @@ internal static class PoNegotiationHistory
     };
 
     private static string Num(decimal d) => d.ToString("0.###", CultureInfo.InvariantCulture);
-    private static string Date(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "—";
+
+    /// <summary>
+    /// Audit old/new values are FROZEN TEXT — the History tab renders them verbatim and never re-formats — so
+    /// the conversion to the display zone has to happen here, at write time, or those rows would be the only
+    /// timestamps in the portal still reading as UTC. Shown to the minute since a negotiation can now propose a
+    /// delivery TIME, and a date-only string would record a 09:00 → 17:00 move as no change at all.
+    /// </summary>
+    private static string Date(DateTime? d) => AppTime.Stamp(d);
 }
