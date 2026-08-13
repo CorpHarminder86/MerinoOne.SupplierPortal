@@ -24,8 +24,30 @@ namespace MerinoOne.SupplierPortal.Tests.Integration;
 [Collection(IntegrationCollection.Name)]
 public class OutboxStaleDispatchedSweepTests
 {
+    private const string ArrangeMarker = "inttest-arrange-cleanup";
+
     private readonly IntegrationTestFixture _fx;
     public OutboxStaleDispatchedSweepTests(IntegrationTestFixture fx) => _fx = fx;
+
+    /// <summary>
+    /// Marks every CURRENTLY stranded row as already-alerted, so the sweep under test has no candidate but the
+    /// row the calling test is about to seed.
+    ///
+    /// <para><b>Why this is needed on top of the fixture's own cleanup.</b> <c>IntegrationTestFixture.SeedAsync</c>
+    /// neutralises stale rows once, at collection-fixture init. That cannot cover rows which go stale DURING the
+    /// run: the test DB is never dropped, the host registers the REAL <see cref="OutboxDispatcherWorker"/>, and on
+    /// a long suite (the 2026-08-12 failure ran 52 minutes) outbox rows created by EARLIER tests age past the
+    /// 30-minute threshold before this class executes. <c>ReconcileStaleDispatchedAsync</c> counts every one of
+    /// them, so an assertion on its return value fails — intermittently, in proportion to suite duration.</para>
+    ///
+    /// <para>Call this BEFORE seeding the test's own row, or it neutralises that row too. Bulk
+    /// <c>ExecuteUpdate</c>: no change tracker, no audit interceptor, and safe against the concurrently running
+    /// worker. Stamping <c>LastError</c> is exactly what the sweep itself does, so this destroys nothing.</para>
+    /// </summary>
+    private static Task<int> NeutraliseStrandedRowsAsync(AppDbContext db) =>
+        db.OutboxMessages.IgnoreQueryFilters()
+            .Where(m => m.Status == OutboxStatus.Dispatched && m.AckedAt == null && m.LastError == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastError, ArrangeMarker));
 
     [SkippableFact]
     public async Task Stale_dispatched_row_raises_exactly_one_alert_and_is_not_re_alerted()
@@ -39,6 +61,10 @@ public class OutboxStaleDispatchedSweepTests
         var rowId = Guid.NewGuid();
         var entityId = Guid.NewGuid();
         var dispatchedAt = DateTime.UtcNow.AddMinutes(-90); // older than the 30-min threshold used below.
+
+        // Foreign stranded rows would be swept and counted alongside ours. Neutralise them FIRST — before the
+        // row below exists, so it stays the only candidate.
+        await NeutraliseStrandedRowsAsync(db);
 
         // Seed a Dispatched (POST-landed, never-Acked) outbox row. CreatedBy="seed" short-circuits the audit
         // interceptor; LastError=null marks "not yet alerted"; AckedAt=null = no ack arrived.
@@ -76,7 +102,14 @@ public class OutboxStaleDispatchedSweepTests
         // ---- First sweep raises exactly one alert for the stranded row. ----
         var raisedFirst = await OutboxDispatcherWorker.ReconcileStaleDispatchedAsync(
             db, threshold, batchSize: 25, NullLogger.Instance, CancellationToken.None);
-        raisedFirst.Should().Be(1, because: "the stranded Dispatched row is past the threshold and unalerted");
+
+        // An UPPER bound, not an equality. It is the assertion that catches the pollution this test used to trip
+        // over — a sweep that touched foreign rows would exceed it — while tolerating the one thing we cannot
+        // exclude: the hosted OutboxDispatcherWorker sweeps the same table on its own schedule and may alert our
+        // row microseconds before this call, which would legitimately return 0. The exact claim is AlertCount()
+        // below, which is scoped to this row's entityId and therefore holds whichever pass raised it.
+        raisedFirst.Should().BeLessThanOrEqualTo(1,
+            because: "only the row seeded above is a candidate — foreign stranded rows were neutralised");
         AlertCount().Should().Be(1, because: "exactly one IntegrationError is raised for the row");
 
         // The row was stamped with the de-dupe marker (no longer 'not yet alerted').
@@ -91,6 +124,10 @@ public class OutboxStaleDispatchedSweepTests
         var db2 = scope2.ServiceProvider.GetRequiredService<AppDbContext>();
         var raisedSecond = await OutboxDispatcherWorker.ReconcileStaleDispatchedAsync(
             db2, threshold, batchSize: 25, NullLogger.Instance, CancellationToken.None);
+
+        // Sound only because of the arrange-time neutralisation. Without it this assertion was doubly fragile:
+        // any foreign stranded row would count here too, AND batchSize 25 means the first pass could leave a
+        // backlog for this one to pick up — so a polluted DB could fail it even when the de-dupe worked.
         raisedSecond.Should().Be(0, because: "an already-alerted row must not be re-alerted on a later sweep");
         AlertCount().Should().Be(1, because: "still exactly one alert after the second pass");
     }
@@ -106,6 +143,11 @@ public class OutboxStaleDispatchedSweepTests
         var tag = Guid.NewGuid().ToString("N")[..8];
         var entityId = Guid.NewGuid();
         var dispatchedAt = DateTime.UtcNow.AddMinutes(-5); // well within the 30-min threshold.
+
+        // Same reason as the sibling test. Here it does not rescue a failing assertion — `alerts` is already
+        // scoped by entityId — but it stops this test alerting unrelated stranded rows as a side effect, and it
+        // is what lets the sweep's return value be asserted at all instead of silently discarded.
+        await NeutraliseStrandedRowsAsync(db);
 
         db.OutboxMessages.Add(new OutboxMessage
         {
@@ -127,6 +169,8 @@ public class OutboxStaleDispatchedSweepTests
 
         var raised = await OutboxDispatcherWorker.ReconcileStaleDispatchedAsync(
             db, TimeSpan.FromMinutes(30), batchSize: 25, NullLogger.Instance, CancellationToken.None);
+
+        raised.Should().Be(0, because: "the only un-neutralised row is still inside the threshold");
 
         using var s = _fx.Factory.Services.CreateScope();
         var d = s.ServiceProvider.GetRequiredService<AppDbContext>();

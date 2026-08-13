@@ -139,6 +139,12 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
         // so that pollution made the stale-dispatched-sweep test's "raised exactly 1" assertion flaky. Neutralize
         // them (mark alerted → the sweep's LastError==null filter skips them). Bulk ExecuteUpdate: no change
         // tracker, no audit interceptor. Runs once at collection-fixture init, BEFORE any test seeds its own row.
+        //
+        // NOT SUFFICIENT ON ITS OWN, and never was (corrected 2026-08-12): running once at init cannot cover rows
+        // that go stale DURING the run. The host registers the real workers, so on a long suite — the observed
+        // failure ran 52 minutes — outbox rows created by earlier tests age past the 30-minute threshold before
+        // OutboxStaleDispatchedSweepTests executes, and the sweep counts them. That test now re-runs the same
+        // neutralisation in its own arrange; this pass only shrinks the backlog it inherits.
         await db.OutboxMessages.IgnoreQueryFilters()
             .Where(m => m.Status == Domain.Enums.OutboxStatus.Dispatched && m.AckedAt == null && m.LastError == null)
             .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastError, "inttest-seed-cleanup"));
