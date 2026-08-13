@@ -83,7 +83,7 @@
             {
                 <div class="tlg-row">
                     <div class="tlg-col tlg-code">@r.InvoiceNumber</div>
-                    <div class="tlg-col tlg-code">@r.InvoiceDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(r.InvoiceDate)</div>
                     <div class="tlg-col tlg-col--num">@r.InvoiceAmount.ToString("N2")</div>
                     <div class="tlg-col">
                         @if (!string.IsNullOrWhiteSpace(r.GrnNumber))
@@ -99,7 +99,7 @@
                             <span class="ps-null">—</span>
                         }
                     </div>
-                    <div class="tlg-col tlg-code">@(r.GrnDate?.ToString("yyyy-MM-dd") ?? "—")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(r.GrnDate)</div>
                     <div class="tlg-col">
                         @if (!string.IsNullOrWhiteSpace(r.IssueReported))
                         {
@@ -113,7 +113,7 @@
                             <span class="ps-null">—</span>
                         }
                     </div>
-                    <div class="tlg-col tlg-code">@(r.PaymentDueDate?.ToString("yyyy-MM-dd") ?? "—")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(r.PaymentDueDate)</div>
                     <div class="tlg-col">
                         @if (!string.IsNullOrWhiteSpace(r.PaymentReference))
                         {

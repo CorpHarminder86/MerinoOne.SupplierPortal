@@ -61,7 +61,7 @@
                     <div class="tlg-col tlg-code">@n.InvoiceNumber</div>
                     <div class="tlg-col tlg-col--num">@n.Amount.ToString("N2")</div>
                     <div class="tlg-col"><span class="tlg-status @StatusClass(n.NoteStatus)">@n.NoteStatus</span></div>
-                    <div class="tlg-col tlg-code">@n.CreatedOn.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(n.CreatedOn)</div>
                 </div>
             }
         </div>

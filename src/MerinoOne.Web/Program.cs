@@ -5,6 +5,12 @@ using Radzen;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Display time zone. Everything stored, transported and pushed to LN is UTC; AppTime is the ONLY place that
+// converts to a wall-clock time, and it must be configured before the first component renders. Blank config
+// falls back to the host zone, which on WEBAPP01 is already IST.
+MerinoOne.SupplierPortal.Contracts.Common.AppTime.Configure(
+    builder.Configuration[MerinoOne.SupplierPortal.Contracts.Common.AppTime.ConfigKey]);
+
 // Aspire shared defaults — service discovery, resilience, OTel, health checks.
 // Required for the "https+http://supplierPortal-api" scheme to resolve when running under AppHost.
 builder.AddServiceDefaults();

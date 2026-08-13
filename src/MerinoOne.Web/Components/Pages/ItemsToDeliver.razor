@@ -84,7 +84,7 @@
                 {
                     <div class="tlg-row itd-row">
                         <div class="tlg-col itd-row__spacer"></div>
-                        <div class="tlg-col tlg-code">@(r.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</div>
+                        <div class="tlg-col tlg-code">@AppTime.Date(r.DeliveryDate)</div>
                         <div class="tlg-col tlg-col--num">@r.TotalQty.ToString("0.###")</div>
                         <div class="tlg-col tlg-col--num @(r.OpenQty > 0 ? "itd-open" : null)">@r.OpenQty.ToString("0.###")</div>
                         <div class="tlg-col tlg-col--num">@r.PoCount</div>

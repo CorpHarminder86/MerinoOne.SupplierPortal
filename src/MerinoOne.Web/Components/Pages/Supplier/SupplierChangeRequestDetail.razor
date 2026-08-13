@@ -75,9 +75,9 @@ else
                 <dt style="color:var(--mer-ink-500);">Summary</dt>
                 <dd style="grid-column:2 / span 3;">@(string.IsNullOrWhiteSpace(detail.Summary) ? "—" : detail.Summary)</dd>
                 <dt style="color:var(--mer-ink-500);">Requested by</dt><dd>@detail.RequestedBy</dd>
-                <dt style="color:var(--mer-ink-500);">Requested at</dt><dd style="font-family:Inter,monospace;">@detail.RequestedAt.ToString("yyyy-MM-dd HH:mm")</dd>
+                <dt style="color:var(--mer-ink-500);">Requested at</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.RequestedAt)</dd>
                 <dt style="color:var(--mer-ink-500);">Reviewed by</dt><dd>@(string.IsNullOrWhiteSpace(detail.ReviewedBy) ? "—" : detail.ReviewedBy)</dd>
-                <dt style="color:var(--mer-ink-500);">Reviewed at</dt><dd style="font-family:Inter,monospace;">@(detail.ReviewedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+                <dt style="color:var(--mer-ink-500);">Reviewed at</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.ReviewedAt)</dd>
             </dl>
             @if (!string.IsNullOrWhiteSpace(detail.RejectionReason))
             {
@@ -111,7 +111,7 @@ else
                             <div class="tlg-col"><span class="tlg-status @OpClass(line.Operation)">@line.Operation</span></div>
                             <div class="tlg-col" style="white-space:normal;">@RenderChange(line)</div>
                             <div class="tlg-col">
-                                <span class="tlg-status @SupplierChangeStatus.PushCssClass(line.PushStatus)" title="@(line.PushedAt?.ToString("yyyy-MM-dd HH:mm"))">@SupplierChangeStatus.PushLabel(line.PushStatus)</span>
+                                <span class="tlg-status @SupplierChangeStatus.PushCssClass(line.PushStatus)" title="@AppTime.Stamp(line.PushedAt, "")">@SupplierChangeStatus.PushLabel(line.PushStatus)</span>
                                 @if (!string.IsNullOrWhiteSpace(line.ErpRef))
                                 {
                                     <div style="font-size:10.5px;color:var(--mer-ink-500);font-family:Inter,monospace;margin-top:2px;">@line.ErpRef</div>

@@ -50,7 +50,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 80px 110px 1.4fr 130px 70px 130px 130px 130px; --tl-min-width: 1180px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 80px 110px 1.4fr 130px 70px 130px 175px 175px; --tl-min-width: 1270px;">
             <div class="tlg-header">
                 <div class="tlg-col">Ref</div>
                 <div class="tlg-col">Supplier</div>
@@ -77,8 +77,8 @@
                     <div class="tlg-col"><span class="tlg-status @SupplierChangeStatus.CssClass(row.ChangeStatus)">@SupplierChangeStatus.Label(row.ChangeStatus)</span></div>
                     <div class="tlg-col">@row.LineCount</div>
                     <div class="tlg-col tlg-desc">@row.RequestedBy</div>
-                    <div class="tlg-col tlg-code">@row.RequestedAt.ToString("yyyy-MM-dd")</div>
-                    <div class="tlg-col tlg-code">@(row.ReviewedAt?.ToString("yyyy-MM-dd") ?? "—")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Stamp(row.RequestedAt)</div>
+                    <div class="tlg-col tlg-code">@AppTime.Stamp(row.ReviewedAt)</div>
                 </div>
             }
         </div>

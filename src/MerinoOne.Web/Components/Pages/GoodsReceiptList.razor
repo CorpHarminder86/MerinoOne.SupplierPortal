@@ -49,7 +49,7 @@
                     <div class="tlg-col tlg-code">@g.AsnNumber</div>
                     <div class="tlg-col tlg-col--num">@g.ReceivedQty.ToString("0.###")</div>
                     <div class="tlg-col tlg-col--num">@(g.ShortQty > 0 ? g.ShortQty.ToString("0.###") : "—")</div>
-                    <div class="tlg-col tlg-code">@g.GrnDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(g.GrnDate)</div>
                     <div class="tlg-col">
                         <span class="tlg-status @StatusClass(g.GrnStatus)" title="@StatusTooltip(g)">@StatusLabel(g.GrnStatus)</span>
                     </div>
@@ -121,6 +121,6 @@
 
     private string StatusTooltip(GoodsReceiptListItemDto g) =>
         g.GrnStatus == "GrnApproved" && g.GrnApprovedAt.HasValue
-            ? $"Approved {g.GrnApprovedAt.Value:yyyy-MM-dd HH:mm}"
+            ? $"Approved {AppTime.Stamp(g.GrnApprovedAt.Value)}"
             : StatusLabel(g.GrnStatus);
 }

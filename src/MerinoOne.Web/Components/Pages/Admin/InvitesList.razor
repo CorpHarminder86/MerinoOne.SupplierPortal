@@ -84,8 +84,8 @@
                     <div class="tlg-col tlg-name">@inv.LegalName</div>
                     <div class="tlg-col tlg-desc">@inv.Email</div>
                     <div class="tlg-col">@inv.InvitedBy</div>
-                    <div class="tlg-col tlg-code">@inv.InvitedAt.ToString("yyyy-MM-dd")</div>
-                    <div class="tlg-col tlg-code">@inv.ExpiresAt.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(inv.InvitedAt)</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(inv.ExpiresAt)</div>
                     <div class="tlg-col"><span class="tlg-status @StatusClass(inv.Status)">@inv.Status</span></div>
                     <div class="tlg-col" style="display:flex;gap:6px;align-items:center;">
                         @if (Token.HasPermission("Supplier.Invite") && (inv.Status == "Pending" || inv.Status == "Expired"))

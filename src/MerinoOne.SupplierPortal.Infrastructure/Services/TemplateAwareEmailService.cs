@@ -1,5 +1,6 @@
 using System.Net;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using Microsoft.Extensions.Logging;
 
@@ -73,7 +74,9 @@ internal sealed class TemplateAwareEmailService : IEmailService
                 ["legalName"] = legalName,
                 ["mobileNo"] = mobileNo,
                 ["registrationUrl"] = registrationUrl,
-                ["expiresAt"] = expiresAt.ToString("u"),
+                // Carries its own zone label: the surrounding sentence lives in an ADMIN-EDITABLE template row,
+                // so this value cannot rely on that text to say which zone it is in.
+                ["expiresAt"] = $"{AppTime.Stamp(expiresAt)} {AppTime.OffsetLabel}",
             },
             fallbackBody: () => BuildFallbackInviteBody(legalName, registrationUrl, expiresAt),
             ct);
@@ -230,7 +233,7 @@ internal sealed class TemplateAwareEmailService : IEmailService
   <h2>You're invited to register on MerinoOne Supplier Portal</h2>
   <p>Hello {WebUtility.HtmlEncode(legalName)},</p>
   <p><a href="{registrationUrl}">{registrationUrl}</a></p>
-  <p>Expires {expiresAt:u} (UTC).</p>
+  <p>Expires {AppTime.Stamp(expiresAt)} {AppTime.OffsetLabel}.</p>
 </body></html>
 """;
 

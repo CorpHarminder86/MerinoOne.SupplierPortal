@@ -73,7 +73,7 @@
                     </div>
                     <div class="tlg-col tlg-code" title="@inv.PoSummary">@(inv.PoCount > 1 ? $"{inv.PoSummary} ({inv.PoCount})" : inv.PoSummary)</div>
                     <div class="tlg-col tlg-name">@inv.SupplierName</div>
-                    <div class="tlg-col tlg-code">@inv.InvoiceDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(inv.InvoiceDate)</div>
                     <div class="tlg-col tlg-col--num">@inv.CurrencyCode @inv.InvoiceAmount.ToString("N2")</div>
                     <div class="tlg-col"><span class="tlg-status @StatusClass(inv.InvoiceStatus)">@inv.InvoiceStatus</span></div>
                 </div>

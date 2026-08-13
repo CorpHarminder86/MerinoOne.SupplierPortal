@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -81,7 +82,7 @@ public class GetOutboxMessageDetailQueryHandler : IRequestHandler<GetOutboxMessa
                 ? null
                 : attempt.ErrorMessage
                   ?? (row.Status == OutboxStatus.Acked && row.AckedAt is not null
-                        ? $"Acked (erp ack received {row.AckedAt:yyyy-MM-dd HH:mm}Z)"
+                        ? $"Acked (erp ack received {AppTime.Stamp(row.AckedAt)})"
                         : "2xx — ack extracted (LN response body is not persisted on success)"));
     }
 }

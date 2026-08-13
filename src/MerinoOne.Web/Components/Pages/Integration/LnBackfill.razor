@@ -64,7 +64,7 @@
             <div style="font-size:12.5px;color:var(--mer-ink-600);margin-bottom:14px;">
                 In-flight (Sending, untouched — the dispatch re-check resolves them): <strong>@preview.SendingInFlight</strong> ·
                 Posted (Dispatched/Acked, immutable): <strong>@preview.PostedImmutable</strong> ·
-                Computed @preview.ComputedAt.ToString("HH:mm:ss")Z at gate v@(preview.GateVersion)
+                Computed @AppTime.Format(preview.ComputedAt, "hh:mm:ss tt") at gate v@(preview.GateVersion)
             </div>
             @if (CanAdmin && (preview.Enqueue.Count + preview.Rearm.Count + preview.Withdraw.Count) > 0)
             {
@@ -101,8 +101,8 @@
                         <div class="tlg-col">@r.EnqueueCount</div>
                         <div class="tlg-col">@r.RearmCount</div>
                         <div class="tlg-col">@r.WithdrawCount</div>
-                        <div class="tlg-col">@r.CreatedOn.ToString("MM-dd HH:mm") · @r.CreatedBy</div>
-                        <div class="tlg-col">@(r.AppliedOn is { } ao ? $"{ao:MM-dd HH:mm} · {r.AppliedBy}" : "—")</div>
+                        <div class="tlg-col">@AppTime.Format(r.CreatedOn, "MM-dd hh:mm tt") · @r.CreatedBy</div>
+                        <div class="tlg-col">@(r.AppliedOn is { } ao ? $"{AppTime.Format(ao, "MM-dd hh:mm tt")} · {r.AppliedBy}" : "—")</div>
                     </div>
                 }
             </div>

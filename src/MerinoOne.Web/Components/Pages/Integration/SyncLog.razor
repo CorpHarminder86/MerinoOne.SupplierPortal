@@ -84,7 +84,7 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 130px 150px 90px 90px 130px 1fr 150px 60px 90px; --tl-min-width: 1350px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 130px 150px 90px 90px 130px 1fr 195px 60px 90px; --tl-min-width: 1395px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Entity</div>
                     <div class="tlg-col">Entity ID</div>
@@ -106,7 +106,7 @@ else
                         <div class="tlg-col"><span class="tlg-status @StatusClass(row.Status)">@row.Status</span></div>
                         <div class="tlg-col tlg-code" title="@row.IdempotencyKey">@(string.IsNullOrEmpty(row.IdempotencyKey) ? "—" : row.IdempotencyKey[..Math.Min(24, row.IdempotencyKey.Length)])</div>
                         <div class="tlg-col" style="@(row.Status == "Failed" ? "color:var(--mer-danger,#b42318);" : "color:var(--mer-ink-500);")" title="@row.ErrorMessage">@(string.IsNullOrEmpty(row.ErrorMessage) ? "—" : (row.ErrorMessage.Length > 90 ? row.ErrorMessage[..90] + "…" : row.ErrorMessage))</div>
-                        <div class="tlg-col tlg-code">@row.SyncedAt.ToString("yyyy-MM-dd HH:mm:ss")</div>
+                        <div class="tlg-col tlg-code">@AppTime.StampSeconds(row.SyncedAt)</div>
                         <div class="tlg-col tlg-col--num">@row.RetryCount</div>
                         <div class="tlg-col tlg-col--actions">
                             @if (row.HasPayload)
@@ -241,7 +241,7 @@ else
         payloadLoading = true;
         payloadText = null;
         payloadEntity = s.EntityName;
-        payloadSubtitle = s.SyncedAt.ToString("yyyy-MM-dd HH:mm:ss");
+        payloadSubtitle = AppTime.StampSeconds(s.SyncedAt);
         busy = true;
         StateHasChanged();
 

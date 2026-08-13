@@ -215,7 +215,7 @@
                     <div class="tlg-col tlg-col--num tlg-code">@row.ShippedQtyToDate.ToString("N2")</div>
                     <div class="tlg-col tlg-col--num tlg-code" style="font-weight:600;color:@(row.RemainingToShip > 0 ? "var(--mer-blue-darker)" : "var(--mer-ink-400)");">@row.RemainingToShip.ToString("N2")</div>
                     <div class="tlg-col tlg-code" title="@row.WarehouseAddressName">@(string.IsNullOrWhiteSpace(row.Warehouse) ? "—" : row.Warehouse)</div>
-                    <div class="tlg-col tlg-code">@row.DeliveryDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(row.DeliveryDate)</div>
                     <div class="tlg-col"><span class="tlg-status @StatusClass(row.Status)">@row.Status</span></div>
                 </div>
             }

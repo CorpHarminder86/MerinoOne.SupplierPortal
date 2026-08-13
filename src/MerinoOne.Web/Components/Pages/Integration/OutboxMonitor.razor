@@ -44,7 +44,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 170px 110px 110px 70px 1fr 150px 150px; --tl-min-width: 1150px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 170px 110px 110px 70px 1fr 175px 150px; --tl-min-width: 1175px;">
             <div class="tlg-header">
                 <div class="tlg-col">Transaction type</div>
                 <div class="tlg-col">Status</div>
@@ -76,7 +76,7 @@
                     <div class="tlg-col" style="font-size:12px;color:var(--mer-ink-600);" title="@(row.SkipReason ?? row.LastError)">
                         @Truncate(row.SkipReason ?? row.LastError, 90)
                     </div>
-                    <div class="tlg-col">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                    <div class="tlg-col">@AppTime.Stamp(row.CreatedOn)</div>
                     <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;justify-content:flex-end;">
                         <button class="mbtn mbtn--row mbtn--outline" @onclick="() => ViewDetail(row)" disabled="@busy" title="Inspect the request payload + attempt outcome">
                             <span class="material-symbols-outlined">data_object</span> Detail
@@ -123,7 +123,7 @@
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                         <div>
                             <div style="font-size:12px;font-weight:700;color:var(--mer-ink-700);margin-bottom:6px;">
-                                Request payload @(detail.AttemptAt is { } at ? $"(attempt {at:yyyy-MM-dd HH:mm}Z · {detail.AttemptStatus})" : "(no dispatch attempt yet)")
+                                Request payload @(detail.AttemptAt is { } at ? $"(attempt {AppTime.Stamp(at)} · {detail.AttemptStatus})" : "(no dispatch attempt yet)")
                             </div>
                             <pre style="margin:0;max-height:56vh;overflow:auto;background:var(--mer-canvas);border:1px solid var(--mer-line);border-radius:8px;padding:12px 14px;font-family:Inter,monospace;font-size:12px;line-height:1.5;color:var(--mer-ink-900);white-space:pre-wrap;word-break:break-all;">@(string.IsNullOrWhiteSpace(detail.RequestPayloadJson) ? "— not dispatched yet (the wire body is built at dispatch time) —" : Pretty(detail.RequestPayloadJson))</pre>
                         </div>

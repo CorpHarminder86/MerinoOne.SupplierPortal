@@ -70,7 +70,7 @@
                     @foreach (var a in summary.RecentActivity)
                     {
                         <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                            <td style="padding:10px 14px;font-family:Inter,monospace;font-variant-numeric:tabular-nums;color:var(--mer-ink-700);">@a.When.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td style="padding:10px 14px;font-family:Inter,monospace;font-variant-numeric:tabular-nums;color:var(--mer-ink-700);">@AppTime.Stamp(a.When)</td>
                             <td style="padding:10px 14px;">
                                 <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;color:var(--mer-blue);">@IconFor(a.Module)</span>
                                 @a.Module

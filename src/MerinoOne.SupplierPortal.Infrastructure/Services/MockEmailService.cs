@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using Microsoft.Extensions.Logging;
 
 namespace MerinoOne.SupplierPortal.Infrastructure.Services;
@@ -156,7 +157,7 @@ public class MockEmailService : IEmailService, IEmailSender
         // of the greeting. mobileNo and registrationUrl are emitted as-is — mobileNo is validated to
         // digits/+ by FluentValidation, and registrationUrl is built server-side from Web:BaseUrl.
         var safeLegalName = WebUtility.HtmlEncode(legalName ?? string.Empty);
-        var expires = expiresAt.ToString("u");
+        var expires = $"{AppTime.Stamp(expiresAt)} {AppTime.OffsetLabel}";
         var mobileLine = string.IsNullOrWhiteSpace(mobileNo)
             ? string.Empty
             : $"<p>We have your mobile number on file ({WebUtility.HtmlEncode(mobileNo)}). We will also use your number for OTP verification at sign-up.</p>";
@@ -169,7 +170,7 @@ public class MockEmailService : IEmailService, IEmailSender
   <p>You have been invited to register as a supplier on the MerinoOne Supplier Portal.</p>
   <p>To complete your registration, click the link below:</p>
   <p><a href="{registrationUrl}">{registrationUrl}</a></p>
-  <p>This invitation expires on {expires} (UTC).</p>
+  <p>This invitation expires on {expires}.</p>
   {mobileLine}
   <p>If you did not expect this email, please ignore it.</p>
   <hr/>

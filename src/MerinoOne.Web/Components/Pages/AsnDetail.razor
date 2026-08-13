@@ -168,7 +168,7 @@
                     @if (detail.Approval is { } ra)
                     {
                         <div style="font-size:11px;color:var(--mer-ink-500);font-family:Inter,monospace;margin-top:6px;">
-                            @(string.IsNullOrEmpty(ra.DecisionBy) ? "" : $"by {ra.DecisionBy} ")@(ra.DecisionOn?.ToString("· yyyy-MM-dd HH:mm"))
+                            @(string.IsNullOrEmpty(ra.DecisionBy) ? "" : $"by {ra.DecisionBy} ")@AppTime.Format(ra.DecisionOn, "· yyyy-MM-dd hh:mm tt", "")
                         </div>
                     }
                     <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">Edit the lines / details below and send it for approval again. Saving any change returns the ASN to <b>Draft</b>.</div>
@@ -183,7 +183,7 @@
                 <div style="flex:1;">
                     <div style="font-size:13px;font-weight:700;color:var(--mer-amber-800);">Awaiting buyer approval</div>
                     <div style="font-size:12px;color:var(--mer-ink-700);font-family:Inter,monospace;margin-top:2px;">
-                        Sent by @(string.IsNullOrEmpty(pa.SubmittedBy) ? "—" : pa.SubmittedBy) · @pa.SubmittedOn.ToString("yyyy-MM-dd HH:mm")
+                        Sent by @(string.IsNullOrEmpty(pa.SubmittedBy) ? "—" : pa.SubmittedBy) · @AppTime.Stamp(pa.SubmittedOn)
                     </div>
                     @if (CanApprove)
                     {
@@ -219,7 +219,7 @@
                     @if (detail.Approval is { } cap)
                     {
                         <div style="font-size:12px;color:var(--mer-ink-700);font-family:Inter,monospace;margin-top:2px;">
-                            Confirmed@(string.IsNullOrEmpty(cap.DecisionBy) ? "" : $" by {cap.DecisionBy}")@(cap.DecisionOn?.ToString(" · yyyy-MM-dd HH:mm"))
+                            Confirmed@(string.IsNullOrEmpty(cap.DecisionBy) ? "" : $" by {cap.DecisionBy}")@AppTime.Format(cap.DecisionOn, " · yyyy-MM-dd hh:mm tt", "")
                         </div>
                     }
                     <div style="font-size:12px;color:var(--mer-ink-600);margin-top:8px;">
@@ -239,9 +239,9 @@
                 <div style="font-size:12px;color:var(--mer-ink-700);font-family:Inter,monospace;">
                     @if (detail.Approval is { Status: "Approved" } ap)
                     {
-                        <text>Confirmed@(string.IsNullOrEmpty(ap.DecisionBy) ? "" : $" by {ap.DecisionBy}")@(ap.DecisionOn?.ToString(" · yyyy-MM-dd HH:mm")) · sent by @(string.IsNullOrEmpty(ap.SubmittedBy) ? "—" : ap.SubmittedBy) · </text>
+                        <text>Confirmed@(string.IsNullOrEmpty(ap.DecisionBy) ? "" : $" by {ap.DecisionBy}")@AppTime.Format(ap.DecisionOn, " · yyyy-MM-dd hh:mm tt", "") · sent by @(string.IsNullOrEmpty(ap.SubmittedBy) ? "—" : ap.SubmittedBy) · </text>
                     }
-                    <text>Posted@(string.IsNullOrEmpty(detail.PostedBy) ? "" : $" by {detail.PostedBy}")@(detail.PostedAt?.ToString(" · yyyy-MM-dd HH:mm"))</text>
+                    <text>Posted@(string.IsNullOrEmpty(detail.PostedBy) ? "" : $" by {detail.PostedBy}")@AppTime.Format(detail.PostedAt, " · yyyy-MM-dd hh:mm tt", "")</text>
                 </div>
             </div>
         }
@@ -342,7 +342,7 @@
                 <div class="asnro-facts__head">Shipment</div>
                 <dl class="asnro-kv">
                     <dt>Purchase order(s)</dt><dd>@PoSummaryText</dd>
-                    <dt>Expected delivery</dt><dd class="asnro-mono">@detail.ExpectedDeliveryDate.ToString("yyyy-MM-dd")</dd>
+                    <dt>Expected delivery</dt><dd class="asnro-mono">@AppTime.Date(detail.ExpectedDeliveryDate)</dd>
                     @* R11 (D12) — warehouse is the D4 grouping key, derived from the covered PO. *@
                     @if (!string.IsNullOrEmpty(detail.Warehouse)) { <dt>Warehouse</dt><dd class="asnro-mono">@detail.Warehouse</dd> }
                     @if (!string.IsNullOrEmpty(detail.CarrierName)) { <dt>Carrier</dt><dd>@detail.CarrierName</dd> }
@@ -371,12 +371,12 @@
             <div>
                 <div class="asnro-facts__head">Timeline &amp; ERP</div>
                 <dl class="asnro-kv">
-                    @if (detail.CreatedOn.HasValue) { <dt>Created</dt><dd class="asnro-mono">@detail.CreatedOn.Value.ToString("yyyy-MM-dd HH:mm")</dd> }
+                    @if (detail.CreatedOn.HasValue) { <dt>Created</dt><dd class="asnro-mono">@AppTime.Stamp(detail.CreatedOn.Value)</dd> }
                     @* R14 — the shipping date IS the post date (postedAt), and equals the submittedAt the LN
                        payload carries as ShipmentDate: both are stamped at post. One fact, one row. *@
                     <dt>Posted · shipped</dt>
                     <dd class="asnro-mono">
-                        @(detail.PostedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")@if (detail.PostedAt.HasValue && !string.IsNullOrEmpty(detail.PostedBy))
+                        @AppTime.Stamp(detail.PostedAt)@if (detail.PostedAt.HasValue && !string.IsNullOrEmpty(detail.PostedBy))
                         {<span class="asnro-by"> by @detail.PostedBy</span>}
                     </dd>
                     @if (!string.IsNullOrEmpty(detail.ErpCode)) { <dt>ERP code</dt><dd class="asnro-mono">@detail.ErpCode</dd> }
@@ -441,7 +441,7 @@
                     <span class="asnro-r asnro-ship">@line.ShippedQty.ToString("0.###")</span>
                     <span class="asnro-bal">@DetailBalanceCell(line)</span>
                     <span class="asnro-mono asnro-dim">@Dash(line.BatchNumber)</span>
-                    <span class="asnro-mono asnro-dim">@(line.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</span>
+                    <span class="asnro-mono asnro-dim">@AppTime.Date(line.ExpiryDate)</span>
                     <span class="asnro-chev">
                         @if (expandable)
                         {
@@ -686,7 +686,7 @@
                                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@r.ShippedQtyToDate.ToString("N2")</td>
                                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;color:@(r.RemainingToShip > 0 ? "var(--mer-blue-darker)" : "var(--mer-ink-400)");">@r.RemainingToShip.ToString("N2")</td>
                                             <td style="padding:6px 10px;font-family:Inter,monospace;" title="@r.WarehouseAddressName">@(string.IsNullOrWhiteSpace(r.Warehouse) ? "—" : r.Warehouse)</td>
-                                            <td style="padding:6px 4px;font-family:Inter,monospace;">@r.DeliveryDate.ToString("yyyy-MM-dd")</td>
+                                            <td style="padding:6px 4px;font-family:Inter,monospace;">@AppTime.Date(r.DeliveryDate)</td>
                                             <td style="padding:6px 4px;"><span class="tlg-status tlg-status--active">@r.Status</span></td>
                                         </tr>
                                     }
@@ -750,7 +750,7 @@
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@(ln.SequenceNo?.ToString() ?? "—")</td>
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.OrderQty.ToString("0.###")</td>
-                                <td style="padding:6px 4px;font-family:Inter,monospace;" title="Schedule delivery date">@(ln.DeliveryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;" title="Schedule delivery date">@AppTime.Date(ln.DeliveryDate)</td>
                                 <td style="padding:6px 4px;">@BalanceCell(ln) @if (full) { <span class="tlg-status tlg-status--active" style="margin-left:6px;font-size:10px;">Fully shipped</span> }</td>
                                 <td style="padding:6px 4px;text-align:right;">
                                     <input type="number" step="0.001" min="0" max="@ln.OverShipAllowance.ToString("0.###")" class="rz-textbox"
@@ -953,12 +953,12 @@
                     </div>
                     <div>
                         <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mer-ink-500);margin-bottom:4px;">Created</div>
-                        <div style="font-size:13px;font-family:Inter,monospace;">@(asnCreatedOn?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+                        <div style="font-size:13px;font-family:Inter,monospace;">@AppTime.Stamp(asnCreatedOn)</div>
                     </div>
                     <div>
                         @* R14 — blank until the ASN is posted, because posting is what sets it. *@
                         <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mer-ink-500);margin-bottom:4px;">Shipping date</div>
-                        <div style="font-size:13px;font-family:Inter,monospace;" title="Set when you post the ASN">@(asnShipmentDate?.ToString("yyyy-MM-dd HH:mm") ?? "on post")</div>
+                        <div style="font-size:13px;font-family:Inter,monospace;" title="Set when you post the ASN">@AppTime.Stamp(asnShipmentDate, "on post")</div>
                     </div>
                 </div>
 
@@ -1334,7 +1334,7 @@
             var erp = !string.IsNullOrEmpty(d.ErpCode)
                 ? $" · ERP <b>{d.ErpCode}</b> {(erpBad ? d.ErpStatus : "accepted")}"
                 : erpBad ? $" · ERP {d.ErpStatus}" : " · awaiting ERP acknowledgement";
-            var text = $"Posted{by} · {d.PostedAt.Value:yyyy-MM-dd HH:mm}{erp}";
+            var text = $"Posted{by} · {AppTime.Stamp(d.PostedAt.Value)}{erp}";
             return erpBad
                 ? new StripStyle("warning", "var(--mer-amber-50, #fff8e6)", "var(--mer-amber-200, #ffe2a8)", "var(--mer-amber-800)", text)
                 : new StripStyle("verified", "var(--mer-green-50, #f3f9ec)", "var(--mer-green)", "var(--mer-green-darker, #3b6d11)", text);
@@ -2155,7 +2155,7 @@
                 Severity = NotificationSeverity.Success,
                 Summary = "ASN posted",
                 Detail = resp.Data.PostedAt is { } p
-                    ? $"Sent to the ERP. Shipping date recorded as {p:dd MMM yyyy}."
+                    ? $"Sent to the ERP. Shipping date recorded as {AppTime.Format(p, "dd MMM yyyy")}."
                     : "Sent to the ERP.",
             });
             await Reload();   // re-render read-only (Submitted)

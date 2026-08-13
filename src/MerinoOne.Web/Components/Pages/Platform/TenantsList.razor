@@ -65,7 +65,7 @@ else
                         <div class="tlg-col tlg-name">@tn.Name</div>
                         <div class="tlg-col tlg-col--num">@tn.CompanyCount</div>
                         <div class="tlg-col"><span class="tlg-status @(tn.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(tn.IsActive ? "Active" : "Inactive")</span></div>
-                        <div class="tlg-col tlg-code">@tn.CreatedOn.ToString("yyyy-MM-dd")</div>
+                        <div class="tlg-col tlg-code">@AppTime.Date(tn.CreatedOn)</div>
                         <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;flex-wrap:wrap;">
                             <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenCompanies(tn)" title="Companies">
                                 <span class="material-symbols-outlined">apartment</span> Companies
@@ -172,7 +172,7 @@ else
                                         <td style="padding:8px 4px;font-family:Inter,monospace;">@c.Code</td>
                                         <td style="padding:8px 4px;">@c.Name</td>
                                         <td style="padding:8px 4px;"><span class="tlg-status @(c.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(c.IsActive ? "Active" : "Inactive")</span></td>
-                                        <td style="padding:8px 4px;font-family:Inter,monospace;">@c.CreatedOn.ToString("yyyy-MM-dd")</td>
+                                        <td style="padding:8px 4px;font-family:Inter,monospace;">@AppTime.Date(c.CreatedOn)</td>
                                     </tr>
                                 }
                             </tbody>

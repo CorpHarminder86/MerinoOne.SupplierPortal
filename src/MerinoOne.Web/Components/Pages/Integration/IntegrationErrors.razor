@@ -62,7 +62,7 @@ else
                         <div class="tlg-col">@e.EntityType</div>
                         <div class="tlg-col tlg-code">@(e.EntityId?.ToString()?[..8] ?? "—")</div>
                         <div class="tlg-col tlg-desc" title="@e.ErrorMessage">@e.ErrorMessage</div>
-                        <div class="tlg-col tlg-code">@e.OccurredAt.ToString("yyyy-MM-dd HH:mm")</div>
+                        <div class="tlg-col tlg-code">@AppTime.Stamp(e.OccurredAt)</div>
                         <div class="tlg-col tlg-col--num">@e.RetryCount</div>
                         <div class="tlg-col"><span class="tlg-status @(e.Resolved ? "tlg-status--active" : "tlg-status--danger")">@(e.Resolved ? "Resolved" : "Open")</span></div>
                         <div class="tlg-col">

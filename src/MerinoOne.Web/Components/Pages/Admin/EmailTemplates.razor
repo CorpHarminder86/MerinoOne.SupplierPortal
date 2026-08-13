@@ -31,7 +31,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.6fr 90px 160px 110px; --tl-min-width: 880px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.6fr 90px 175px 110px; --tl-min-width: 895px;">
             <div class="tlg-header">
                 <div class="tlg-col">Key</div>
                 <div class="tlg-col">Subject</div>
@@ -162,7 +162,7 @@
     private static string FormatLastUpdated(EmailTemplateDto r)
     {
         var ts = r.UpdatedOn ?? r.CreatedOn;
-        return ts.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+        return AppTime.Stamp(ts);
     }
 
     private void OpenEdit(EmailTemplateDto r)

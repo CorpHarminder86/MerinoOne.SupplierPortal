@@ -25,7 +25,7 @@ else
                     <h1 class="tl-title">@detail.PaymentReference</h1>
                     <span class="tlg-status tlg-status--active">Paid</span>
                 </div>
-                <p class="tl-sub">@detail.SupplierName · Invoice <a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);">@detail.InvoiceNumber</a> · @detail.PaymentDate.ToString("yyyy-MM-dd")</p>
+                <p class="tl-sub">@detail.SupplierName · Invoice <a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);">@detail.InvoiceNumber</a> · @AppTime.Date(detail.PaymentDate)</p>
             </div>
         </header>
 
@@ -36,7 +36,7 @@ else
                     <dt style="color:var(--mer-ink-500);">Payment reference</dt><dd style="font-family:Inter,monospace;">@detail.PaymentReference</dd>
                     <dt style="color:var(--mer-ink-500);">Invoice</dt><dd><a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.InvoiceNumber</a></dd>
                     <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName</dd>
-                    <dt style="color:var(--mer-ink-500);">Payment date</dt><dd style="font-family:Inter,monospace;">@detail.PaymentDate.ToString("yyyy-MM-dd")</dd>
+                    <dt style="color:var(--mer-ink-500);">Payment date</dt><dd style="font-family:Inter,monospace;">@AppTime.Date(detail.PaymentDate)</dd>
                     <dt style="color:var(--mer-ink-500);">Mode</dt><dd>@(detail.PaymentMode ?? "—")</dd>
                     <dt style="color:var(--mer-ink-500);">Bank</dt><dd>@(detail.BankName ?? "—")</dd>
                     @if (!string.IsNullOrEmpty(detail.BankAccountRef))
@@ -82,7 +82,7 @@ else
             {
                 <dl style="display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:13px;margin-bottom:12px;">
                     <dt style="color:var(--mer-ink-500);">Payment reference</dt><dd style="font-family:Inter,monospace;">@remittance.PaymentReference</dd>
-                    <dt style="color:var(--mer-ink-500);">Payment date</dt><dd style="font-family:Inter,monospace;">@remittance.PaymentDate.ToString("yyyy-MM-dd")</dd>
+                    <dt style="color:var(--mer-ink-500);">Payment date</dt><dd style="font-family:Inter,monospace;">@AppTime.Date(remittance.PaymentDate)</dd>
                     <dt style="color:var(--mer-ink-500);font-weight:700;">Net paid</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@remittance.NetPaid.ToString("N2")</dd>
                 </dl>
                 @if (!string.IsNullOrEmpty(remittance.RemittancePdfUrl))

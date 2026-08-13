@@ -122,10 +122,10 @@ else
                         <div class="tlg-col">@row.Operation</div>
                         <div class="tlg-col"><span class="tlg-status @StatusClass(row.Status)">@row.Status</span></div>
                         <div class="tlg-col tlg-col--num">@row.AttemptCount</div>
-                        <div class="tlg-col tlg-code">@(row.NextAttemptAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+                        <div class="tlg-col tlg-code">@AppTime.Stamp(row.NextAttemptAt)</div>
                         <div class="tlg-col tlg-code" title="@row.Pid">@(string.IsNullOrEmpty(row.Pid) ? "—" : (row.Pid.Length > 18 ? row.Pid[..18] + "…" : row.Pid))</div>
                         <div class="tlg-col" style="@(IsError(row.Status) ? "color:var(--mer-danger,#b42318);" : "color:var(--mer-ink-500);")" title="@row.LastError">@(string.IsNullOrEmpty(row.LastError) ? "—" : (row.LastError.Length > 90 ? row.LastError[..90] + "…" : row.LastError))</div>
-                        <div class="tlg-col tlg-code">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                        <div class="tlg-col tlg-code">@AppTime.Stamp(row.CreatedOn)</div>
                         <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
                             <button class="mbtn mbtn--row mbtn--accent" @onclick="() => ViewFile(row)" disabled="@busy" title="View the uploaded document">
                                 <span class="material-symbols-outlined">visibility</span> View
@@ -271,9 +271,9 @@ else
     private DocumentPreviewer.DocumentDescriptor? _previewDoc;
 
     private string GridCols => suppliers.Count > 1
-        ? "190px 160px 1fr 90px 110px 80px 140px 130px 1fr 140px 220px"
-        : "190px 1fr 90px 110px 80px 140px 130px 1fr 140px 220px";
-    private string GridMinWidth => suppliers.Count > 1 ? "1720px" : "1560px";
+        ? "190px 160px 1fr 90px 110px 80px 175px 130px 1fr 175px 220px"
+        : "190px 1fr 90px 110px 80px 175px 130px 1fr 175px 220px";
+    private string GridMinWidth => suppliers.Count > 1 ? "1790px" : "1630px";
 
     protected override async Task OnInitializedAsync()
     {
@@ -334,7 +334,7 @@ else
         detailRequest = null;
         detailResponse = null;
         detailEntity = s.IdmEntityType;
-        detailSubtitle = $"{s.FileName} · {s.Operation} · {s.CreatedOn:yyyy-MM-dd HH:mm:ss}";
+        detailSubtitle = $"{s.FileName} · {s.Operation} · {AppTime.StampSeconds(s.CreatedOn)}";
         busy = true;
         StateHasChanged();
 

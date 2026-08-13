@@ -56,7 +56,7 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 1.2fr 1.4fr 150px 110px 170px; --tl-min-width: 1260px;">
+            <div class="tl-grid-wrapper" style="--tl-cols: 1.4fr 150px 1.2fr 1.4fr 175px 110px 170px; --tl-min-width: 1285px;">
                 <div class="tlg-header">
                     <div class="tlg-col">Label</div>
                     <div class="tlg-col">Prefix</div>
@@ -86,7 +86,7 @@ else
                             }
                         </div>
                         <div class="tlg-col tlg-desc" title="@string.Join(", ", key.Scopes)">@string.Join(", ", key.Scopes.Select(ScopeShort))</div>
-                        <div class="tlg-col tlg-code">@(key.LastUsedAt?.ToString("yyyy-MM-dd HH:mm") ?? "never")</div>
+                        <div class="tlg-col tlg-code">@AppTime.Stamp(key.LastUsedAt, "never")</div>
                         <div class="tlg-col"><span class="tlg-status @StatusClass(key)">@StatusLabel(key)</span></div>
                         <div class="tlg-col tlg-col--actions" style="display:flex;gap:6px;">
                             @if (Token.HasPermission("Integration.ApiKeys") && key.IsActive && key.RevokedAt == null)

@@ -90,7 +90,7 @@ else
                             <div class="tlg-col">
                                 <span class="tlg-status @(ep.IsEnabled ? "tlg-status--active" : "tlg-status--danger")">@(ep.IsEnabled ? "On" : "Off")</span>
                             </div>
-                            <div class="tlg-col tlg-code">@(ep.LastReceivedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+                            <div class="tlg-col tlg-code">@AppTime.Stamp(ep.LastReceivedAt)</div>
                             <div class="tlg-col">
                                 @if (string.IsNullOrEmpty(ep.LastStatus))
                                 {

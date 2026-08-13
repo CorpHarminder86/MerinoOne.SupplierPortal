@@ -1,5 +1,6 @@
 using System.Reflection;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Contracts.Invoices;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -85,8 +86,8 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
                         });
                         row.RelativeItem().Column(c =>
                         {
-                            Fact(c, "Invoice date", invoice.InvoiceDate.ToString("yyyy-MM-dd"));
-                            Fact(c, "Submitted", invoice.SubmittedAt?.ToString("yyyy-MM-dd HH:mm 'UTC'") ?? "—");
+                            Fact(c, "Invoice date", AppTime.Date(invoice.InvoiceDate));
+                            Fact(c, "Submitted", AppTime.Stamp(invoice.SubmittedAt));
                             Fact(c, "Matching", invoice.MatchingType);
                         });
                         row.RelativeItem().Column(c =>
@@ -200,7 +201,7 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
 
                 page.Footer().Row(row =>
                 {
-                    row.RelativeItem().Text($"Generated {DateTime.UtcNow:yyyy-MM-dd HH:mm 'UTC'} · MerinoOne Supplier Portal")
+                    row.RelativeItem().Text($"Generated {AppTime.Stamp(DateTime.UtcNow)} · MerinoOne Supplier Portal")
                         .FontSize(7).FontColor(Muted);
                     row.ConstantItem(80).AlignRight().Text(t =>
                     {

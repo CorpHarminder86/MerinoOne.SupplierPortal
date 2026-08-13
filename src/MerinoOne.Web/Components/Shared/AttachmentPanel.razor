@@ -105,7 +105,7 @@
                                             <div class="att-file__ic"><span class="material-symbols-outlined" style="font-size:18px;">@FileIcon(d.MimeType)</span></div>
                                             <div class="att-file__meta">
                                                 <div class="att-file__fn" title="@d.FileName">@d.FileName</div>
-                                                <div class="att-file__fm">@FmtSize(d.SizeBytes)@(string.IsNullOrEmpty(d.UploadedBy) ? "" : $" · {d.UploadedBy}") · @d.UploadedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                                                <div class="att-file__fm">@FmtSize(d.SizeBytes)@(string.IsNullOrEmpty(d.UploadedBy) ? "" : $" · {d.UploadedBy}") · @AppTime.Stamp(d.UploadedOn)</div>
                                             </div>
                                             <div class="att-file__acts">
                                                 <button type="button" class="att-iconbtn" title="View" @onclick="() => PreviewFile(d)"><span class="material-symbols-outlined" style="font-size:17px;">visibility</span></button>

@@ -389,7 +389,9 @@ else
         sb.Append(".keyval{font-size:13px;word-break:break-all;background:#f5f6f8;border:1px solid #ddd;border-radius:5px;padding:8px;font-family:Consolas,'Courier New',monospace;}");
         sb.Append("</style></head><body>");
         sb.Append("<h1>MerinoOne &mdash; Integration Guide</h1>");
-        sb.Append($"<div class=\"sub\">Generated {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC &middot; Base URL: <code>{Enc(baseUrl)}</code></div>");
+        // This file leaves the portal, so unlike the on-screen stamps it KEEPS an explicit zone label — a reader
+        // opening it elsewhere has no other way to interpret the time.
+        sb.Append($"<div class=\"sub\">Generated {AppTime.Stamp(DateTime.UtcNow)} {AppTime.OffsetLabel} &middot; Base URL: <code>{Enc(baseUrl)}</code></div>");
         sb.Append("<div><b>Authentication.</b> Send the header <code>X-APIKey: &lt;your-api-key&gt;</code> on every request. The key must carry the endpoint's scope and, for company-scoped endpoints, be bound to the source company the body resolves to.</div>");
 
         if (key is not null)
@@ -402,7 +404,7 @@ else
             sb.Append($"<div class=\"lbl\">Companies</div><div>{Enc(string.Join(", ", key.CompanyCodes))}</div>");
             sb.Append($"<div class=\"lbl\">Scopes</div><div>{Enc(string.Join(", ", key.Scopes))}</div>");
             if (key.ExpiresAt is DateTime exp)
-                sb.Append($"<div class=\"lbl\">Expires</div><div>{exp:yyyy-MM-dd HH:mm} UTC</div>");
+                sb.Append($"<div class=\"lbl\">Expires</div><div>{AppTime.Stamp(exp)} {AppTime.OffsetLabel}</div>");
             sb.Append("</div>");
         }
 

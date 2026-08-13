@@ -28,7 +28,7 @@ else
                     <span class="tlg-status @TypeClass(detail.NoteType)">@(detail.NoteType == "CN" ? "Credit Note" : "Debit Note")</span>
                     <span class="tlg-status @StatusClass(detail.NoteStatus)">@detail.NoteStatus</span>
                 </div>
-                <p class="tl-sub">@detail.SupplierName · Invoice <a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);">@detail.InvoiceNumber</a> · @detail.CreatedOn.ToString("yyyy-MM-dd")</p>
+                <p class="tl-sub">@detail.SupplierName · Invoice <a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);">@detail.InvoiceNumber</a> · @AppTime.Date(detail.CreatedOn)</p>
             </div>
             <div class="tl-header__actions">
                 @if (Token.HasPermission("CreditDebitNote.Approve") && detail.NoteStatus == "Submitted")
@@ -49,7 +49,7 @@ else
                 <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName</dd>
                 <dt style="color:var(--mer-ink-500);">Amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@detail.Amount.ToString("N2")</dd>
                 <dt style="color:var(--mer-ink-500);">Status</dt><dd><span class="tlg-status @StatusClass(detail.NoteStatus)">@detail.NoteStatus</span></dd>
-                <dt style="color:var(--mer-ink-500);">Created</dt><dd style="font-family:Inter,monospace;">@detail.CreatedOn.ToString("yyyy-MM-dd HH:mm")</dd>
+                <dt style="color:var(--mer-ink-500);">Created</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.CreatedOn)</dd>
             </dl>
             @if (!string.IsNullOrEmpty(detail.Reason))
             {

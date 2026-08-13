@@ -28,7 +28,7 @@ else
                     <h1 class="tl-title">@detail.InvoiceNumber</h1>
                     <span class="tlg-status @StatusClass(detail.InvoiceStatus)">@detail.InvoiceStatus</span>
                 </div>
-                <p class="tl-sub">@detail.SupplierName · @PoHeaderText · @detail.InvoiceDate.ToString("yyyy-MM-dd")</p>
+                <p class="tl-sub">@detail.SupplierName · @PoHeaderText · @AppTime.Date(detail.InvoiceDate)</p>
             </div>
             <div class="tl-header__actions">
                 @* R7 (§2.2) — document-rail toggle pill with the live fulfilment count. Overview tab only — the
@@ -160,7 +160,7 @@ else
                             <span class="tlg-status tlg-status--off">Manual entry</span>
                         }
                     </dd>
-                    <dt style="color:var(--mer-ink-500);">Invoice date</dt><dd style="font-family:Inter,monospace;">@detail.InvoiceDate.ToString("yyyy-MM-dd")</dd>
+                    <dt style="color:var(--mer-ink-500);">Invoice date</dt><dd style="font-family:Inter,monospace;">@AppTime.Date(detail.InvoiceDate)</dd>
                     <dt style="color:var(--mer-ink-500);">Matching</dt><dd>@detail.MatchingType</dd>
                     @if (!string.IsNullOrEmpty(detail.GrnReference))
                     {
@@ -180,15 +180,15 @@ else
                     }
                     @if (detail.SubmittedAt.HasValue)
                     {
-                        <dt style="color:var(--mer-ink-500);">Submitted</dt><dd style="font-family:Inter,monospace;">@detail.SubmittedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.SubmittedBy) ? "" : $"by {detail.SubmittedBy}")</dd>
+                        <dt style="color:var(--mer-ink-500);">Submitted</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.SubmittedAt.Value) @(string.IsNullOrEmpty(detail.SubmittedBy) ? "" : $"by {detail.SubmittedBy}")</dd>
                     }
                     @if (detail.ApprovedAt.HasValue)
                     {
-                        <dt style="color:var(--mer-ink-500);">Approved</dt><dd style="font-family:Inter,monospace;">@detail.ApprovedAt.Value.ToString("yyyy-MM-dd HH:mm") by @detail.ApprovedBy</dd>
+                        <dt style="color:var(--mer-ink-500);">Approved</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.ApprovedAt.Value) by @detail.ApprovedBy</dd>
                     }
                     @if (detail.RevokedAt.HasValue)
                     {
-                        <dt style="color:var(--mer-ink-500);">Revoked</dt><dd style="font-family:Inter,monospace;">@detail.RevokedAt.Value.ToString("yyyy-MM-dd HH:mm") @(string.IsNullOrEmpty(detail.RevokedBy) ? "" : $"by {detail.RevokedBy}")</dd>
+                        <dt style="color:var(--mer-ink-500);">Revoked</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.RevokedAt.Value) @(string.IsNullOrEmpty(detail.RevokedBy) ? "" : $"by {detail.RevokedBy}")</dd>
                     }
                     @if (!string.IsNullOrEmpty(detail.RevokeReason))
                     {
@@ -196,7 +196,7 @@ else
                     }
                     @if (detail.ErpPostedAt.HasValue)
                     {
-                        <dt style="color:var(--mer-ink-500);">ERP posted</dt><dd style="font-family:Inter,monospace;">@detail.ErpPostedAt.Value.ToString("yyyy-MM-dd HH:mm")</dd>
+                        <dt style="color:var(--mer-ink-500);">ERP posted</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.ErpPostedAt.Value)</dd>
                     }
                     @if (!string.IsNullOrEmpty(detail.ErpCode))
                     {

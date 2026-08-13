@@ -57,7 +57,7 @@
                     <div class="tlg-col tlg-code">@(string.IsNullOrWhiteSpace(row.Warehouse) ? "—" : row.Warehouse)</div>
                     <div class="tlg-col">@row.PoCount</div>
                     <div class="tlg-col tlg-name">@(string.IsNullOrWhiteSpace(row.SubmittedBy) ? "—" : row.SubmittedBy)</div>
-                    <div class="tlg-col tlg-code">@(row.SubmittedOn?.ToString("yyyy-MM-dd") ?? "—")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(row.SubmittedOn)</div>
                 </div>
             }
         </div>

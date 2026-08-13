@@ -62,7 +62,7 @@
                     <div class="tlg-col tlg-name">@row.SupplierName</div>
                     <div class="tlg-col"><span class="tlg-status @PoNegotiationStatus.CssClass(row.NegotiationStatus)">@PoNegotiationStatus.Label(row.NegotiationStatus)</span></div>
                     <div class="tlg-col">@row.LineCount</div>
-                    <div class="tlg-col tlg-code">@row.SubmittedAt.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(row.SubmittedAt)</div>
                 </div>
             }
         </div>

@@ -302,11 +302,11 @@ else
                     <dt style="color:var(--mer-ink-500);">Email</dt><dd style="font-family:Inter,monospace;">@detail.InviteSummary.Email</dd>
                     <dt style="color:var(--mer-ink-500);">Mobile</dt><dd style="font-family:Inter,monospace;">@(detail.InviteSummary.MobileNo ?? "—")</dd>
                     <dt style="color:var(--mer-ink-500);">Invited by</dt><dd>@detail.InviteSummary.InvitedBy</dd>
-                    <dt style="color:var(--mer-ink-500);">Invited at</dt><dd style="font-family:Inter,monospace;">@detail.InviteSummary.InvitedAt.ToString("yyyy-MM-dd HH:mm")</dd>
-                    <dt style="color:var(--mer-ink-500);">Expires at</dt><dd style="font-family:Inter,monospace;">@detail.InviteSummary.ExpiresAt.ToString("yyyy-MM-dd HH:mm")</dd>
-                    <dt style="color:var(--mer-ink-500);">Consumed</dt><dd style="font-family:Inter,monospace;">@(detail.InviteSummary.ConsumedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
-                    <dt style="color:var(--mer-ink-500);">Cancelled</dt><dd style="font-family:Inter,monospace;">@(detail.InviteSummary.CancelledAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
-                    <dt style="color:var(--mer-ink-500);">Resends</dt><dd>@detail.InviteSummary.ResendCount @(detail.InviteSummary.LastResentAt != null ? $"(last {detail.InviteSummary.LastResentAt:yyyy-MM-dd HH:mm})" : "")</dd>
+                    <dt style="color:var(--mer-ink-500);">Invited at</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.InviteSummary.InvitedAt)</dd>
+                    <dt style="color:var(--mer-ink-500);">Expires at</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.InviteSummary.ExpiresAt)</dd>
+                    <dt style="color:var(--mer-ink-500);">Consumed</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.InviteSummary.ConsumedAt)</dd>
+                    <dt style="color:var(--mer-ink-500);">Cancelled</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.InviteSummary.CancelledAt)</dd>
+                    <dt style="color:var(--mer-ink-500);">Resends</dt><dd>@detail.InviteSummary.ResendCount @(detail.InviteSummary.LastResentAt != null ? $"(last {AppTime.Stamp(detail.InviteSummary.LastResentAt)})" : "")</dd>
                     <dt style="color:var(--mer-ink-500);">Status</dt><dd><span class="tlg-status @StatusClass(detail.InviteSummary.Status)">@detail.InviteSummary.Status</span></dd>
                 </dl>
             </div>
@@ -320,8 +320,8 @@ else
                     <dt style="color:var(--mer-ink-500);">PAN number</dt><dd style="font-family:Inter,monospace;">@detail.PanNumber @(detail.PanValidated ? Tick("ok") : "")</dd>
                     <dt style="color:var(--mer-ink-500);">MSME number</dt><dd style="font-family:Inter,monospace;">@detail.MsmeRegNumber @(detail.MsmeValidated ? Tick("ok") : "")</dd>
                     <dt style="color:var(--mer-ink-500);">Website</dt><dd>@detail.Website</dd>
-                    <dt style="color:var(--mer-ink-500);">Invited</dt><dd>@(detail.InvitedAt?.ToString("yyyy-MM-dd"))  by @detail.InvitedBy</dd>
-                    <dt style="color:var(--mer-ink-500);">Approved</dt><dd>@(detail.ApprovedAt?.ToString("yyyy-MM-dd"))  @(string.IsNullOrEmpty(detail.ApprovedBy) ? "" : "by " + detail.ApprovedBy)</dd>
+                    <dt style="color:var(--mer-ink-500);">Invited</dt><dd>@AppTime.Date(detail.InvitedAt, "")  by @detail.InvitedBy</dd>
+                    <dt style="color:var(--mer-ink-500);">Approved</dt><dd>@AppTime.Date(detail.ApprovedAt, "")  @(string.IsNullOrEmpty(detail.ApprovedBy) ? "" : "by " + detail.ApprovedBy)</dd>
                     @if (!string.IsNullOrEmpty(detail.ApprovalOverrideComment))
                     {
                         <dt style="color:var(--mer-ink-500);">Override comment</dt><dd style="background:var(--mer-amber-50);padding:6px 10px;border-radius:4px;">@detail.ApprovalOverrideComment</dd>
@@ -351,7 +351,7 @@ else
                         {
                             <tr style="border-bottom:1px solid var(--mer-line-soft);">
                                 <td style="padding:6px 4px;">@v.VerificationType</td>
-                                <td style="padding:6px 4px;font-family:Inter,monospace;">@v.AttemptedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;">@AppTime.Stamp(v.AttemptedAt)</td>
                                 <td style="padding:6px 4px;">@v.AttemptedBy</td>
                                 <td style="padding:6px 4px;"><span class="tlg-status @VStatusClass(v.Result)">@v.Result</span></td>
                             </tr>

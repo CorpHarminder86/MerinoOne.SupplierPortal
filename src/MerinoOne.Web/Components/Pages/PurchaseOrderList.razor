@@ -101,7 +101,7 @@
                     <div class="tlg-col tlg-col--num tlg-code">@(string.IsNullOrEmpty(item.CurrencyCode) ? "" : item.CurrencyCode + " ")@item.TotalAmount.ToString("N2")</div>
                     <div class="tlg-col">@(string.IsNullOrEmpty(item.PaymentTerms) ? "—" : item.PaymentTerms)</div>
                     <div class="tlg-col">@(string.IsNullOrEmpty(item.DeliveryTerms) ? "—" : item.DeliveryTerms)</div>
-                    <div class="tlg-col tlg-code">@item.PoDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(item.PoDate)</div>
                     <div class="tlg-col"><span class="tlg-status @StatusClass(item.PoStatus)">@item.PoStatus</span></div>
                     <div class="tlg-col">
                         @if (isAuto)

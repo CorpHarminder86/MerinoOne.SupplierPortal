@@ -32,7 +32,7 @@ else
                 @foreach (var r in rows)
                 {
                     <tr style="border-bottom:1px solid var(--mer-line-soft);">
-                        <td style="padding:8px 10px;font-family:Inter,monospace;font-variant-numeric:tabular-nums;">@r.ChangedOn.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td style="padding:8px 10px;font-family:Inter,monospace;font-variant-numeric:tabular-nums;">@AppTime.Stamp(r.ChangedOn)</td>
                         <td style="padding:8px 10px;">@r.ChangedBy</td>
                         <td style="padding:8px 10px;"><span class="tlg-status @OpClass(r.Operation)">@r.Operation</span></td>
                         <td style="padding:8px 10px;font-family:Inter,monospace;">@r.FieldName</td>

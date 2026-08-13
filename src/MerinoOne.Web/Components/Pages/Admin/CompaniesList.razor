@@ -60,7 +60,7 @@
                     <div class="tlg-col tlg-code">@r.Code</div>
                     <div class="tlg-col tlg-name">@r.Name</div>
                     <div class="tlg-col"><span class="tlg-status @(r.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(r.IsActive ? "Active" : "Inactive")</span></div>
-                    <div class="tlg-col tlg-code">@r.CreatedOn.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(r.CreatedOn)</div>
                     <div class="tlg-col tlg-col--actions">
                         @if (Token.HasPermission("Settings.Write"))
                         {

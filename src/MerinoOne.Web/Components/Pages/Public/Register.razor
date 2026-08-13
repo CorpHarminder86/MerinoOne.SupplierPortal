@@ -82,7 +82,7 @@ else
         <header style="margin-bottom:20px;">
             <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;color:var(--mer-ink-500);text-transform:uppercase;">Supplier onboarding</div>
             <h1 style="margin:4px 0 4px;font-size:22px;color:var(--mer-blue-darker);">Register as a Merino supplier</h1>
-            <p style="color:var(--mer-ink-500);font-size:13px;">Invited as <b>@invite.LegalName</b> · expires @invite.ExpiresAt.ToString("yyyy-MM-dd HH:mm")</p>
+            <p style="color:var(--mer-ink-500);font-size:13px;">Invited as <b>@invite.LegalName</b> · expires @AppTime.Stamp(invite.ExpiresAt)</p>
         </header>
 
         <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--mer-line);overflow-x:auto;">

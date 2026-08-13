@@ -23,6 +23,11 @@ if (args.Length > 0 && args[0].Equals("seed", StringComparison.OrdinalIgnoreCase
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Display time zone. The API stores and returns UTC everywhere; it needs AppTime only where it composes
+// user-facing TEXT from an instant (the negotiation history rows the PO History tab renders verbatim).
+MerinoOne.SupplierPortal.Contracts.Common.AppTime.Configure(
+    builder.Configuration[MerinoOne.SupplierPortal.Contracts.Common.AppTime.ConfigKey]);
+
 // Structured logging — console + per-level rolling daily file sinks (TSD §11 hardening).
 builder.Host.UseSerilog((ctx, lc) => lc
     .ReadFrom.Configuration(ctx.Configuration)

@@ -48,7 +48,7 @@
                     <div class="tlg-col tlg-desc">@t.LastSnippet</div>
                     <div class="tlg-col tlg-col--num">@t.MessageCount</div>
                     <div class="tlg-col tlg-col--num">@(t.UnreadCount > 0 ? t.UnreadCount.ToString() : "—")</div>
-                    <div class="tlg-col tlg-code">@t.LastMessageAt.ToString("yyyy-MM-dd HH:mm")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Stamp(t.LastMessageAt)</div>
                 </div>
             }
         </div>

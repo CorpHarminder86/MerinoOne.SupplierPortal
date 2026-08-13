@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Mail;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Application.SystemSettings.EmailConfig;
 using Microsoft.Extensions.Logging;
 
@@ -170,7 +171,7 @@ internal sealed class SmtpEmailService : IEmailService, IEmailSender
     private static string BuildInviteBody(string legalName, string? mobileNo, string registrationUrl, DateTime expiresAt)
     {
         var safeLegalName = WebUtility.HtmlEncode(legalName ?? string.Empty);
-        var expires = expiresAt.ToString("u");
+        var expires = $"{AppTime.Stamp(expiresAt)} {AppTime.OffsetLabel}";
         var mobileLine = string.IsNullOrWhiteSpace(mobileNo)
             ? string.Empty
             : $"<p>We have your mobile number on file ({WebUtility.HtmlEncode(mobileNo)}). We will also use your number for OTP verification at sign-up.</p>";
@@ -183,7 +184,7 @@ internal sealed class SmtpEmailService : IEmailService, IEmailSender
   <p>You have been invited to register as a supplier on the MerinoOne Supplier Portal.</p>
   <p>To complete your registration, click the link below:</p>
   <p><a href="{registrationUrl}">{registrationUrl}</a></p>
-  <p>This invitation expires on {expires} (UTC).</p>
+  <p>This invitation expires on {expires}.</p>
   {mobileLine}
   <p>If you did not expect this email, please ignore it.</p>
   <hr/>

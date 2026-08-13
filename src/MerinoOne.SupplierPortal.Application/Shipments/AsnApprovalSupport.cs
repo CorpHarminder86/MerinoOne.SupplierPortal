@@ -1,5 +1,6 @@
 using System.Net;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using Microsoft.EntityFrameworkCore;
@@ -212,7 +213,7 @@ public static class AsnApprovalSupport
 <html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
   <h2 style="color:#0f3b5e;">ASN {WebUtility.HtmlEncode(asnNumber)} posted</h2>
   <p>Advance shipment notice <b>{WebUtility.HtmlEncode(asnNumber)}</b> has been posted by the supplier and sent to the ERP.</p>
-  <p><b>Shipping date:</b> {postedAt:yyyy-MM-dd HH:mm} UTC</p>
+  <p><b>Shipping date:</b> {AppTime.Stamp(postedAt)}</p>
   <p>Open the portal to review the shipment and its documents.</p>
 </body></html>
 """;

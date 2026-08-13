@@ -121,7 +121,7 @@ else
                             @{ var idm = IdmBadge(row); }
                             <span class="tlg-status @idm.Css" title="@idm.Tip">@idm.Label</span>
                         </div>
-                        <div class="tlg-col tlg-code">@row.CreatedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                        <div class="tlg-col tlg-code">@AppTime.Stamp(row.CreatedOn)</div>
                         <div class="tlg-col tlg-col--actions">
                             <button class="mbtn mbtn--row mbtn--accent" @onclick="() => ViewDoc(row)" title="View document">
                                 <span class="material-symbols-outlined">visibility</span> View
@@ -163,9 +163,9 @@ else
     private DocumentPreviewer.DocumentDescriptor? _previewDoc;
 
     private string GridCols => suppliers.Count > 1
-        ? "1fr 150px 150px 180px 160px 90px 130px 140px 130px 90px"
-        : "1fr 150px 150px 180px 90px 130px 140px 130px 90px";
-    private string GridMinWidth => suppliers.Count > 1 ? "1460px" : "1300px";
+        ? "1fr 150px 150px 180px 160px 90px 130px 140px 175px 90px"
+        : "1fr 150px 150px 180px 90px 130px 140px 175px 90px";
+    private string GridMinWidth => suppliers.Count > 1 ? "1505px" : "1345px";
 
     protected override async Task OnInitializedAsync()
     {

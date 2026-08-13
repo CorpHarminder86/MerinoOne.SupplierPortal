@@ -21,7 +21,10 @@ public static class EmailTemplateSeeder
             "<p>Hello {{legalName}},</p>" +
             "<p>You have been invited to register as a supplier. Click the link below to start.</p>" +
             "<p><a href=\"{{registrationUrl}}\">Open registration</a></p>" +
-            "<p>This invitation expires on {{expiresAt}} (UTC).</p>",
+            // No "(UTC)" here: {{expiresAt}} now substitutes a display-zone time that carries its own offset
+            // label. Seeding is NOT-EXISTS, so template rows already in a deployed tenant keep the old wording
+            // and must be corrected on the Email Templates screen.
+            "<p>This invitation expires on {{expiresAt}}.</p>",
             "Placeholders: {{legalName}}, {{mobileNo}}, {{registrationUrl}}, {{expiresAt}}"),
 
         new TemplateSpec(

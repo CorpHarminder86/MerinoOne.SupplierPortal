@@ -44,7 +44,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 140px 160px 1fr 1.2fr 120px 150px; --tl-min-width: 900px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 140px 160px 1fr 1.2fr 120px 175px; --tl-min-width: 925px;">
             <div class="tlg-header">
                 <div class="tlg-col">Module</div>
                 <div class="tlg-col">Code</div>
@@ -69,7 +69,7 @@
                             <span class="tlg-status @StatusClass(r.Status)">@r.Status</span>
                         }
                     </div>
-                    <div class="tlg-col tlg-code" style="font-variant-numeric:tabular-nums;">@r.When.ToString("yyyy-MM-dd HH:mm")</div>
+                    <div class="tlg-col tlg-code" style="font-variant-numeric:tabular-nums;">@AppTime.Stamp(r.When)</div>
                 </div>
             }
         </div>

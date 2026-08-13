@@ -77,7 +77,7 @@ else
                         else
                         {
                             <span class="tlg-status @(cfg.PathConfirmed ? "tlg-status--active" : "tlg-status--pending")"
-                                  title="@($"{cfg.VerifiedBy} · {cfg.VerifiedAt:yyyy-MM-dd HH:mm}Z · {cfg.VerifiedNote}")">
+                                  title="@($"{cfg.VerifiedBy} · {AppTime.Stamp(cfg.VerifiedAt)} · {cfg.VerifiedNote}")">
                                 @(cfg.PathConfirmed ? "Yes" : "No path ✓")
                             </span>
                         }
@@ -402,7 +402,7 @@ else
                                        @onchange="() => selectedSampleId = cand.EntityId" />
                                 <span class="tlg-code">@cand.DisplayKey</span>
                                 <span class="tlg-status tlg-status--pending">@cand.StatusLabel</span>
-                                <span style="color:var(--mer-ink-500);font-size:11.5px;margin-left:auto;">@cand.CreatedOn.ToString("yyyy-MM-dd")</span>
+                                <span style="color:var(--mer-ink-500);font-size:11.5px;margin-left:auto;">@AppTime.Date(cand.CreatedOn)</span>
                             </label>
                         }
                     </div>

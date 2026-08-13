@@ -34,7 +34,7 @@ else
                 }
                 @if (!string.IsNullOrEmpty(sw.LastReason))
                 {
-                    <div style="font-size:12px;color:var(--mer-ink-500);">Last: “@sw.LastReason” — @sw.LastChangedBy · @sw.LastChangedOn?.ToString("yyyy-MM-dd HH:mm")Z</div>
+                    <div style="font-size:12px;color:var(--mer-ink-500);">Last: “@sw.LastReason” — @sw.LastChangedBy · @AppTime.Stamp(sw.LastChangedOn)</div>
                 }
                 @if (CanAdmin)
                 {
@@ -55,7 +55,7 @@ else
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 160px 110px 1fr 160px 150px; --tl-min-width: 900px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 110px 1fr 160px 175px; --tl-min-width: 925px;">
             <div class="tlg-header">
                 <div class="tlg-col">Scope</div>
                 <div class="tlg-col">Change</div>
@@ -70,7 +70,7 @@ else
                     <div class="tlg-col"><span class="tlg-status @(a.NewEnabled ? "tlg-status--active" : "tlg-status--danger")">@(a.OldEnabled ? "On" : "Off") → @(a.NewEnabled ? "On" : "Off")</span></div>
                     <div class="tlg-col" style="font-size:12.5px;">@a.Reason</div>
                     <div class="tlg-col">@a.ChangedBy</div>
-                    <div class="tlg-col">@a.ChangedOn.ToString("yyyy-MM-dd HH:mm")</div>
+                    <div class="tlg-col">@AppTime.Stamp(a.ChangedOn)</div>
                 </div>
             }
         </div>

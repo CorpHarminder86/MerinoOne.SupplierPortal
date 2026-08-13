@@ -1,3 +1,4 @@
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Contracts.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 
@@ -124,7 +125,9 @@ public static class PoMaterialChange
     }
 
     private static string Fmt(decimal d) => d == Math.Truncate(d) ? ((long)d).ToString() : d.ToString("0.####");
-    private static string FmtDate(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "—";
+    // Feeds audit text the History tab renders verbatim, so the display-zone conversion happens at write time —
+    // same reason as PoNegotiationHistory.Date.
+    private static string FmtDate(DateTime? d) => AppTime.Date(d);
 }
 
 /// <summary>

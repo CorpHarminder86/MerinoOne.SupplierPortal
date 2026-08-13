@@ -48,7 +48,7 @@
                     <div class="tlg-col tlg-code">@p.PaymentReference</div>
                     <div class="tlg-col tlg-code">@p.InvoiceNumber</div>
                     <div class="tlg-col tlg-name">@p.SupplierName</div>
-                    <div class="tlg-col tlg-code">@p.PaymentDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(p.PaymentDate)</div>
                     <div class="tlg-col tlg-col--num">@p.PaymentAmount.ToString("N2")</div>
                     <div class="tlg-col">@(p.PaymentMode ?? "—")</div>
                     <div class="tlg-col">@(p.BankName ?? "—")</div>

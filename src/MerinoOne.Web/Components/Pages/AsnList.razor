@@ -68,7 +68,7 @@
                 <div class="tlg-row" @onclick="() => OpenDetail(a.Id)" style="cursor:pointer">
                     <div class="tlg-col tlg-code">@a.AsnNumber</div>
                     <div class="tlg-col tlg-code" title="@a.PoSummary">@(a.PoCount > 1 ? $"{a.PoSummary} ({a.PoCount})" : a.PoSummary)</div>
-                    <div class="tlg-col tlg-code">@a.ExpectedDeliveryDate.ToString("yyyy-MM-dd")</div>
+                    <div class="tlg-col tlg-code">@AppTime.Date(a.ExpectedDeliveryDate)</div>
                     @* R11 (D4) — the receiving warehouse; an ASN never spans two. *@
                     <div class="tlg-col tlg-code">@(string.IsNullOrWhiteSpace(a.Warehouse) ? "—" : a.Warehouse)</div>
                     <div class="tlg-col">@a.CarrierName</div>
