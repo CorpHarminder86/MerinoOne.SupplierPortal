@@ -181,6 +181,9 @@ builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationH
 
 // Rate limiting for inbound integration. Partitioned on the X-APIKey prefix (fallback to remote IP).
 // The named "inbound" policy is applied to the inbound integration route group by backend-developer.
+// Limits are configurable (defaults = production values); the RateLimiting:* keys exist so the test host can lift them.
+var inboundPermitLimit = builder.Configuration.GetValue<int>("RateLimiting:Inbound:PermitLimit", 60);
+var publicGeoPermitLimit = builder.Configuration.GetValue<int>("RateLimiting:PublicGeo:PermitLimit", 120);
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -195,7 +198,7 @@ builder.Services.AddRateLimiter(options =>
             partitionKey,
             _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
-                PermitLimit = 60,
+                PermitLimit = inboundPermitLimit,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             });
@@ -214,7 +217,7 @@ builder.Services.AddRateLimiter(options =>
             partitionKey,
             _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
-                PermitLimit = 120,
+                PermitLimit = publicGeoPermitLimit,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             });

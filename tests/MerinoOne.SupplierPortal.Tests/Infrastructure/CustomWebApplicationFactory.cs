@@ -50,6 +50,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("DataProtection:KeysPath", "");
         // Keep Scalar off to shave a little startup work (the protected endpoints are what we test).
         builder.UseSetting("Scalar:Enabled", "false");
+        // The suite hammers the inbound endpoints far beyond the production budget, so 429s here are noise,
+        // not a product signal. Lift the limiters (keys are read in Program.cs; defaults 60/min and 120/min).
+        builder.UseSetting("RateLimiting:Inbound:PermitLimit", "100000");
+        builder.UseSetting("RateLimiting:PublicGeo:PermitLimit", "100000");
 
         // Belt-and-suspenders: also add the in-memory source LAST so anything reading IConfiguration after the
         // host is built (handlers, the dispatcher scope) sees the same values.
