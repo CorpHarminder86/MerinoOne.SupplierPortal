@@ -1,0 +1,196 @@
+@inject ApiClient Api
+
+@* Reusable PO type-ahead (2026-10-10). Fed by GET api/purchase-orders/lookup — a contains-match on the PO number (2+ characters,
+   newest first, RLS-scoped: a supplier only ever finds its own POs), optionally narrowed to one supplier. Modelled on
+   GeoAutocomplete: ~250 ms debounce, ArrowUp/Down move the highlight, Enter commits the highlighted row, Escape closes, and
+   the × button empties the box.
+
+   Contract. Committing a row writes its PO number into the box and raises ValueChanged(id). Clearing — the × button, or editing
+   the text after a pick (the box then no longer names that PO) — raises ValueChanged(null). Value is parent-driven too: when the
+   parent resets it (a "Clear filters" button, a supplier change) the box empties; a parent that already knows the selected PO's
+   number passes it as InitialText so the box can show it without a lookup of its own.
+
+   Every lookup carries a sequence number, so a slow answer to an older keystroke can never overwrite a newer one — nor reopen
+   the dropdown after a pick or a clear. *@
+
+<div style="position:relative;">
+    <input class="rz-textbox" style="width:100%;padding:7px 28px 7px 10px;font-size:12.5px;" placeholder="@Placeholder" value="@query"
+           @oninput="OnInput" @onkeydown="OnKeyDown" @onfocus="OnFocus" @onfocusout="OnBlur"
+           disabled="@Disabled" autocomplete="off" />
+    @if (!Disabled && query.Length > 0)
+    {
+        <button type="button" title="Clear" aria-label="Clear PO" @onmousedown:preventDefault="true" @onclick="Clear"
+                style="position:absolute;right:6px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;padding:2px;background:transparent;border:0;border-radius:50%;color:var(--mer-ink-500);cursor:pointer;">
+            <span class="material-symbols-outlined" style="font-size:16px;">close</span>
+        </button>
+    }
+    @if (open && !Disabled)
+    {
+        @* The container swallows mousedown's default so the input keeps focus while a row (or the scrollbar) is pressed. *@
+        <div @onmousedown:preventDefault="true"
+             style="position:absolute;z-index:60;left:0;top:calc(100% + 2px);min-width:100%;width:max-content;max-width:480px;background:var(--mer-surface);border:1px solid var(--mer-line);border-radius:6px;box-shadow:var(--mer-shadow-md);max-height:260px;overflow:auto;">
+            @if (suggestions.Count == 0)
+            {
+                <div style="padding:9px 12px;font-size:12.5px;color:var(--mer-ink-500);">No matching POs.</div>
+            }
+            @for (int i = 0; i < suggestions.Count; i++)
+            {
+                var idx = i;
+                var po = suggestions[idx];
+                <div style="display:flex;align-items:baseline;gap:10px;padding:7px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--mer-line-soft);background:@(idx == _active ? "var(--mer-ink-100)" : "var(--mer-surface)");"
+                     @onmousedown="() => Select(po)"
+                     @onmouseenter="() => _active = idx">
+                    <span style="flex:none;font-family:Inter,monospace;font-weight:600;color:var(--mer-blue-darker);">@po.PoNumber</span>
+                    @if (!string.IsNullOrWhiteSpace(po.SupplierName))
+                    {
+                        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mer-ink-600);">@po.SupplierName</span>
+                    }
+                    <span style="flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:8px;">
+                        <span style="font-family:Inter,monospace;font-size:11.5px;color:var(--mer-ink-500);">@AppTime.Date(po.PoDate)</span>
+                        <span class="tlg-status @StatusClass(po.Status)" style="font-size:10.5px;">@PoStatusLabels.Label(po.Status)</span>
+                    </span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Narrows the lookup to one supplier's POs. Null = every PO the caller can see (row-level security still applies).</summary>
+    [Parameter] public Guid? SupplierId { get; set; }
+    /// <summary>The picked PO's id; null = nothing picked. Parent-driven — set it back to null to empty the box.</summary>
+    [Parameter] public Guid? Value { get; set; }
+    [Parameter] public EventCallback<Guid?> ValueChanged { get; set; }
+    [Parameter] public string? Placeholder { get; set; } = "PO number…";
+    [Parameter] public bool Disabled { get; set; }
+    /// <summary>The PO number to show for a <see cref="Value"/> the parent supplied (the box has no lookup of its own for an id).</summary>
+    [Parameter] public string? InitialText { get; set; }
+
+    private const int MinChars = 2;      // the endpoint returns an empty list below this
+    private const int DebounceMs = 250;
+    private const int Limit = 10;
+
+    private string query = "";
+    private List<PoLookupItemDto> suggestions = new();
+    private bool open;
+    private int _active = -1;
+    private Guid? _selectedId;           // the PO this box currently stands for; mirrors Value once the parent has re-rendered
+    private Guid? _lastSupplierId;
+    private int _seq;
+
+    protected override void OnParametersSet()
+    {
+        // The cached suggestions were scoped to the old supplier.
+        if (SupplierId != _lastSupplierId)
+        {
+            _lastSupplierId = SupplierId;
+            suggestions = new(); open = false; _active = -1; _seq++;
+        }
+
+        if (Value != _selectedId)
+        {
+            // A parent-driven change (a reset, or a restored filter) — NOT the echo of a pick made in this box, which records
+            // _selectedId before it raises ValueChanged. Re-sync the text and drop any stale dropdown / in-flight lookup.
+            _selectedId = Value;
+            query = Value.HasValue ? (InitialText ?? query) : "";
+            suggestions = new(); open = false; _active = -1; _seq++;
+        }
+        else if (Value.HasValue && query.Length == 0 && !string.IsNullOrEmpty(InitialText))
+        {
+            query = InitialText;         // InitialText arrived after Value
+        }
+
+        if (Disabled) open = false;
+    }
+
+    private void OnFocus()
+    {
+        // Coming back to a box that still holds an un-picked search: show its results again.
+        if (suggestions.Count > 0 && !_selectedId.HasValue) { open = true; _active = Math.Max(_active, 0); }
+    }
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        var mine = ++_seq;               // supersedes every earlier keystroke's pending debounce AND any lookup still in flight
+        query = e.Value?.ToString() ?? "";
+
+        // Editing the text after a pick un-picks it: the box no longer names that PO, so the parent must stop filtering on it.
+        if (_selectedId.HasValue)
+        {
+            _selectedId = null;
+            await ValueChanged.InvokeAsync(null);
+        }
+
+        var term = query.Trim();
+        if (term.Length < MinChars) { suggestions = new(); open = false; _active = -1; return; }
+
+        await Task.Delay(DebounceMs);    // debounce
+        if (mine != _seq) return;        // superseded by a newer keystroke
+
+        var url = $"api/purchase-orders/lookup?q={Uri.EscapeDataString(term)}&limit={Limit}"
+                  + (SupplierId.HasValue ? $"&supplierId={SupplierId.Value}" : "");
+        var resp = await Api.GetAsync<List<PoLookupItemDto>>(url);
+        if (mine != _seq) return;        // a newer keystroke / pick / clear began while this request was in flight — drop the stale answer
+
+        suggestions = resp?.Data ?? new();
+        _active = suggestions.Count > 0 ? 0 : -1;
+        open = true;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                if (suggestions.Count == 0) return;
+                if (!open) { open = true; _active = Math.Max(_active, 0); }      // reopen on the highlighted row (after Escape)
+                else _active = Math.Min(_active + 1, suggestions.Count - 1);
+                break;
+            case "ArrowUp":
+                if (!open || suggestions.Count == 0) return;
+                _active = Math.Max(_active - 1, 0);
+                break;
+            case "Enter":
+                if (open && _active >= 0 && _active < suggestions.Count) await Select(suggestions[_active]);
+                break;
+            case "Escape":
+                open = false;
+                break;
+        }
+    }
+
+    private async Task Select(PoLookupItemDto po)
+    {
+        _seq++;                          // the pick is final — an in-flight lookup must not reopen the dropdown
+        _selectedId = po.Id;             // pre-record so OnParametersSet treats the parent's echo of this Value as a no-op
+        query = po.PoNumber;
+        open = false; _active = -1; suggestions = new();
+        await ValueChanged.InvokeAsync(po.Id);
+    }
+
+    private async Task Clear()
+    {
+        _seq++;
+        var hadValue = _selectedId.HasValue;
+        _selectedId = null;
+        query = "";
+        open = false; _active = -1; suggestions = new();
+        if (hadValue) await ValueChanged.InvokeAsync(null);
+    }
+
+    private async Task OnBlur()
+    {
+        await Task.Delay(150);           // let a row's mousedown land first
+        open = false;
+        StateHasChanged();
+    }
+
+    // Same status colouring as the PO list.
+    private static string StatusClass(string status) => status switch
+    {
+        "Accepted" or "Delivered" or "Closed" or "Approved" => "tlg-status--active",
+        "Released" or "Acknowledged" or "DateProposed" or "PartiallyDelivered" or "Negotiation" => "tlg-status--pending",
+        "Rejected" or "Cancelled" => "tlg-status--danger",
+        _ => "tlg-status--info"
+    };
+}

@@ -251,7 +251,128 @@ public class DeliveryScheduleTests
         byWarehouse.Page.Items.Should().HaveCount(2, because: "both schedules carry the one seeded warehouse address");
     }
 
+    // ── UC-DS-06 — warehouse CODE filter (2026-10-10) ────────────────────────────────────────────────────
+    // GET /api/delivery-schedules?warehouse=<code> is an EXACT match on the PO line's raw warehouse code, alongside the
+    // address-FK filter. Like it, it is applied after the distinct-warehouse count and leaves paging untouched.
+    [SkippableFact]
+    public async Task UC_DS_06_Warehouse_code_filter_returns_only_that_warehouses_rows()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var supplierId = (await SeedTwoWarehouseGridAsync()).SupplierId;
+        var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var wh1 = IntegrationTestFixture.WarehouseCode;
+        var wh2 = IntegrationTestFixture.WarehouseCodeAlt;
+        var scope = $"supplierId={supplierId}&pageSize=200";
+
+        // No filter → all three lines; two distinct warehouses → the UI keeps its Warehouse filter.
+        var all = await GridAsync(client, scope);
+        all.Page.Items.Select(r => r.PositionNo).Should().BeEquivalentTo(new[] { 10, 20, 30 });
+        all.DistinctWarehouseCount.Should().Be(2);
+        all.ShowWarehouseFilter.Should().BeTrue();
+
+        // WH-TEST-01 → the two lines received there (10 and 30); the other warehouse's line is gone.
+        var first = await GridAsync(client, $"{scope}&warehouse={wh1}");
+        first.Page.Items.Select(r => r.PositionNo).Should().BeEquivalentTo(new[] { 10, 30 });
+        first.Page.Items.Should().OnlyContain(r => r.Warehouse == wh1);
+        first.Page.TotalCount.Should().Be(2, because: "the page count describes the filtered rows");
+        first.DistinctWarehouseCount.Should().Be(2,
+            because: "the warehouse filter must never change the 'how many warehouses exist' answer");
+        first.ShowWarehouseFilter.Should().BeTrue();
+
+        // WH-TEST-02 → just line 20.
+        var second = await GridAsync(client, $"{scope}&warehouse={wh2}");
+        second.Page.Items.Should().ContainSingle().Which.PositionNo.Should().Be(20);
+        second.Page.Items.Single().Warehouse.Should().Be(wh2);
+
+        // Exact match, not "contains": a prefix or an unknown code matches nothing.
+        (await GridAsync(client, $"{scope}&warehouse=WH-TEST")).Page.Items.Should().BeEmpty(
+            because: "the match is exact — a prefix of a real code is not that warehouse");
+        (await GridAsync(client, $"{scope}&warehouse=WH-NO-SUCH")).Page.TotalCount.Should().Be(0);
+
+        // A blank value is "no filter" (the Web grid sends the key with an empty value when nothing is picked).
+        (await GridAsync(client, $"{scope}&warehouse=")).Page.Items.Should().HaveCount(3);
+        (await GridAsync(client, $"{scope}&warehouse=%20%20")).Page.Items.Should().HaveCount(3);
+
+        // Both warehouse filters AND together: the code must belong to the address, or nothing matches.
+        (await GridAsync(client, $"{scope}&warehouseAddressId={IntegrationTestFixture.WarehouseAddressId}&warehouse={wh2}"))
+            .Page.Items.Should().BeEmpty(because: "WH-TEST-02 is not the address of WH-TEST-01");
+        (await GridAsync(client, $"{scope}&warehouseAddressId={IntegrationTestFixture.WarehouseAddressId}&warehouse={wh1}"))
+            .Page.Items.Select(r => r.PositionNo).Should().BeEquivalentTo(new[] { 10, 30 });
+
+        // Paging semantics are unchanged: the filter narrows the set, the page window still slices it.
+        var paged = await GridAsync(client, $"supplierId={supplierId}&pageSize=1&page=1&warehouse={wh1}");
+        paged.Page.Items.Should().HaveCount(1);
+        paged.Page.TotalCount.Should().Be(2);
+        paged.Page.TotalPages.Should().Be(2);
+    }
+
+    // ── UC-DS-07 — each row carries the unit master's precision (2026-10-10) ─────────────────────────────
+    [SkippableFact]
+    public async Task UC_DS_07_Rows_carry_the_unit_decimal_places()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var seeded = await SeedTwoWarehouseGridAsync();
+        var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+
+        var rows = (await GridAsync(client, $"supplierId={seeded.SupplierId}&pageSize=200")).Page.Items;
+        rows.Single(r => r.PositionNo == 10).UnitDecimalPlaces.Should().Be(0, because: $"{ZeroDecimalsUnit} is defined with 0 decimals");
+        rows.Single(r => r.PositionNo == 20).UnitDecimalPlaces.Should().Be(2, because: $"{TwoDecimalsUnit} is defined with 2 decimals");
+        rows.Single(r => r.PositionNo == 30).UnitDecimalPlaces.Should().Be(3,
+            because: $"{seeded.UnknownUnit} is not in the unit master → the fallback precision");
+        rows.Single(r => r.PositionNo == 30).OrderUnit.Should().Be(seeded.UnknownUnit);
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────
+    private const string ZeroDecimalsUnit = "UT-DSCH-0";
+    private const string TwoDecimalsUnit = "UT-DSCH-2";
+
+    /// <summary>
+    /// A fresh tagged supplier (AutoAccept, so schedules exist as soon as the PO lands) with ONE PO of three lines:
+    /// position 10 → WH-TEST-01 / unit UT-DSCH-0, position 20 → WH-TEST-02 / unit UT-DSCH-2, position 30 → WH-TEST-01 /
+    /// a unit that is NOT in the master. Two warehouses, three precisions.
+    /// </summary>
+    private async Task<(Guid SupplierId, string PoNumber, string UnknownUnit)> SeedTwoWarehouseGridAsync()
+    {
+        await UnitMasterDecimalsTests.EnsureUnitAsync(_fx, ZeroDecimalsUnit, 0);
+        await UnitMasterDecimalsTests.EnsureUnitAsync(_fx, TwoDecimalsUnit, 2);
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        await SetConfirmationModeAsync(supplier.SupplierId, PoConfirmationMode.AutoAccept);
+
+        var poNumber = $"PO-DSWH-{tag}";
+        var unknownUnit = $"UT-DSCH-N-{tag}";
+        var due = DateTime.UtcNow.Date.AddDays(7);
+        PoLineRecord Line(int position, string unit, decimal qty, string warehouse) => new(
+            PositionNo: position, SequenceNo: 1, ItemCode: $"ITM-{tag}-{position}", OrderUnit: unit,
+            OrderQty: qty, PriceUnit: 1, Price: qty, DeliveryDate: due, Warehouse: warehouse);
+
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[]
+                {
+                    Line(10, ZeroDecimalsUnit, 4m, IntegrationTestFixture.WarehouseCode),
+                    Line(20, TwoDecimalsUnit, 6m, IntegrationTestFixture.WarehouseCodeAlt),
+                    Line(30, unknownUnit, 8m, IntegrationTestFixture.WarehouseCode),
+                },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        return (supplier.SupplierId, poNumber, unknownUnit);
+    }
+
+    private static async Task<DeliveryScheduleGridDto> GridAsync(HttpClient client, string query)
+    {
+        var resp = await client.GetAsync($"/api/delivery-schedules?{query}");
+        resp.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(resp));
+        return (await Read<DeliveryScheduleGridDto>(resp)).Data!;
+    }
+
     private static PushPurchaseOrdersRequest PoBody(
         string poNumber, string supplierCode, string tag, params (int Position, decimal Qty, DateTime DeliveryDate)[] lines)
         => new(IntegrationTestFixture.CompanyCode, new[]

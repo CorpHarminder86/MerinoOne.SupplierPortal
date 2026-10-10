@@ -36,7 +36,10 @@ public record DeliveryScheduleDto(
     // it resolves to (was ship-to). The one-warehouse-per-ASN grouping key for schedule-built ASNs.
     string? Warehouse = null,
     Guid? WarehouseAddressId = null,
-    string? WarehouseAddressName = null);
+    string? WarehouseAddressName = null,
+    // mdm.Unit.decimalPlaces for OrderUnit, resolved server-side (IUnitDecimalsResolver); 3 when unknown/blank. Drives how
+    // many decimals the grid shows for the quantity columns.
+    int UnitDecimalPlaces = 3);
 
 /// <summary>
 /// R5 (TSD R5 Addendum §7 / §8.3) — delivery-schedule grid filter/sort request. All filters are optional;
@@ -234,7 +237,10 @@ public record AsnLineDto(
     // R15 — schedule back-link + its delivery date, so the wizard can pre-check the originating schedule rows in
     // its step-1 grid and show the Delivery column on Quantities. Null for legacy PO-picked lines.
     Guid? DeliveryScheduleId = null,
-    DateTime? ScheduleDeliveryDate = null);
+    DateTime? ScheduleDeliveryDate = null,
+    // mdm.Unit.decimalPlaces for OrderUnit, resolved server-side (IUnitDecimalsResolver); 3 when unknown/blank. The
+    // wizard/detail format and validate OrderQty/ShippedQty/Balance to this precision.
+    int UnitDecimalPlaces = 3);
 
 // R4 (2026-06-22) — Module 3: ASN attachments reuse the existing Contracts.Suppliers.DocumentAttachmentDto
 // (structurally identical; ownerEntityType='Asn', DocumentType.AsnAttachment). No duplicate type introduced

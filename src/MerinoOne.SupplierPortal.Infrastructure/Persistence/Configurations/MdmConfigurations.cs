@@ -138,7 +138,12 @@ public class UnitConfiguration : IEntityTypeConfiguration<Unit>
         b.Property(x => x.Description).HasColumnName("description").HasMaxLength(150).IsRequired();
         b.Property(x => x.UnitType).HasColumnName("unitType").HasConversion<int>().IsRequired();
         b.Property(x => x.IsoCode).HasColumnName("isoCode").HasMaxLength(10);
-        b.Property(x => x.DecimalPlaces).HasColumnName("decimalPlaces").HasDefaultValue(2);
+        // HasSentinel(-1): with HasDefaultValue alone EF treats the CLR default (0) as "not set" and OMITS the column from
+        // the INSERT, so the database default (2) landed instead — a unit saved with 0 decimals (EA, PCS, ...) was stored as 2.
+        // Pointing the sentinel at an impossible value (the validators allow 0..6) makes 0 an ordinary value that is written.
+        // The entity initialiser (= 2) still gives an untouched Unit the same 2 as the column default. Not schema: the
+        // database default stays 2 and no migration is involved.
+        b.Property(x => x.DecimalPlaces).HasColumnName("decimalPlaces").HasDefaultValue(2).HasSentinel(-1);
         b.Property(x => x.ConversionFactor).HasColumnName("conversionFactor")
             .HasColumnType("decimal(18,6)").HasDefaultValue(1m);
         b.Property(x => x.BaseUnitId).HasColumnName("baseUnitId").HasColumnType("uniqueidentifier");

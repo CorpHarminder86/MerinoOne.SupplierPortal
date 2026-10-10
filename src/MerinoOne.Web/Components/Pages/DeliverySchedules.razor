@@ -13,6 +13,10 @@
    when only one warehouse is present — the backend computes DistinctWarehouseCount + ShowWarehouseFilter across the
    supplier's visible schedules (BEFORE the warehouse filter), mirroring the single-supplier filter auto-hide.
 
+   2026-10-10 — the Warehouse filter has no "All warehouses" entry: it opens on the first warehouse by code and filters
+   server-side by that CODE (&warehouse=). The PO filter is a type-ahead (PoAutocomplete over api/purchase-orders/lookup)
+   driving purchaseOrderId; clearing it shows every PO of the selected warehouse.
+
    R15 (D3) — "Create ASN" no longer raises an instant server Draft via api/asns/from-schedule: it deep-links to
    /asns/new?supplier=<id>&schedules=<ids> where the same lines arrive PRE-CHECKED in the wizard's step-1 grid
    (warehouse auto-locked) and nothing exists server-side until the supplier saves. One code path for both flows. *@
@@ -59,30 +63,24 @@
         }
 
         @* Warehouse filter — AUTO-HIDDEN when only one warehouse is present (backend ShowWarehouseFilter /
-           DistinctWarehouseCount ≤ 1). Mirrors the single-supplier auto-hide above: render only when >1 to pick. *@
+           DistinctWarehouseCount ≤ 1). Mirrors the single-supplier auto-hide above: render only when >1 to pick.
+           2026-10-10 — there is no "All warehouses" entry: one warehouse is always selected (the first by code until another
+           is picked) and the grid filters server-side by its CODE. *@
         @if (showWarehouseFilter && warehouseOptions.Count > 1)
         {
             <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:200px;" @bind="warehouseFilter" @bind:after="OnFilterChanged">
-                <option value="">All warehouses</option>
                 @foreach (var wh in warehouseOptions)
                 {
-                    <option value="@wh.Id">@wh.Name</option>
+                    <option value="@wh.Code">@wh.Label</option>
                 }
             </select>
         }
 
-        @* PO filter — the backend accepts a PO id (purchaseOrderId), not free text, so this is a dropdown built
-           from the visible POs (collected in the same unfiltered sweep as the warehouse options). *@
-        @if (poOptions.Count > 1)
-        {
-            <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:160px;" @bind="poFilter" @bind:after="OnFilterChanged">
-                <option value="">All POs</option>
-                @foreach (var po in poOptions)
-                {
-                    <option value="@po.Id">@po.Number</option>
-                }
-            </select>
-        }
+        @* PO filter — a type-ahead over api/purchase-orders/lookup (PoAutocomplete, scoped to the chosen supplier). Picking a PO
+           drives the grid's purchaseOrderId param; clearing the box shows every PO of the selected warehouse again. *@
+        <div style="width:200px;">
+            <PoAutocomplete SupplierId="@SupplierFilterId" Value="@poFilter" ValueChanged="OnPoPicked" Placeholder="PO number…" />
+        </div>
 
         <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:6px;">
             From
@@ -234,8 +232,8 @@
 
     // Filters (§7).
     private string supplierFilter = string.Empty;
-    private string warehouseFilter = string.Empty;
-    private string poFilter = string.Empty;
+    private string warehouseFilter = string.Empty;   // warehouse CODE; never blank once the option sweep has found a warehouse
+    private Guid? poFilter;                          // the PO picked in the PoAutocomplete (purchaseOrderId)
     private DateTime? dateFrom;
     private DateTime? dateTo;
     private string statusFilter = string.Empty;
@@ -248,17 +246,21 @@
     // Warehouse auto-hide state. The backend's ShowWarehouseFilter / DistinctWarehouseCount is the authoritative signal
     // (it counts distinct warehouses across the supplier's visible schedules BEFORE the warehouse filter). We still
     // need the option list to populate the dropdown; we collect it from an unfiltered sweep on init/supplier-change.
+    // 2026-10-10 — options are keyed by the PO line's warehouse CODE (what &warehouse= matches) and sorted by code, so the
+    // first one is the default selection.
     private bool showWarehouseFilter;
     private readonly List<WarehouseOption> warehouseOptions = new();
-    private sealed record WarehouseOption(Guid Id, string Name);
+    private sealed record WarehouseOption(string Code, string Label);
 
-    // PO option set (the backend filters by PO id, not free text). Built in the same unfiltered sweep.
-    private readonly List<PoOption> poOptions = new();
-    private sealed record PoOption(Guid Id, string Number);
+    private Guid? SupplierFilterId => Guid.TryParse(supplierFilter, out var sid) ? sid : null;
+
+    // The warehouse the page opens on (the first by code). "Clear" returns to it — there is no unfiltered state to return to.
+    private string DefaultWarehouse => warehouseOptions.Count > 0 ? warehouseOptions[0].Code : string.Empty;
 
     private bool HasActiveFilter =>
-        !string.IsNullOrEmpty(supplierFilter) || !string.IsNullOrEmpty(warehouseFilter)
-        || !string.IsNullOrWhiteSpace(poFilter) || dateFrom.HasValue || dateTo.HasValue
+        !string.IsNullOrEmpty(supplierFilter)
+        || !string.Equals(warehouseFilter, DefaultWarehouse, StringComparison.OrdinalIgnoreCase)
+        || poFilter.HasValue || dateFrom.HasValue || dateTo.HasValue
         || !string.IsNullOrEmpty(statusFilter) || !onlyWithBalance;
 
     protected override async Task OnInitializedAsync()
@@ -273,19 +275,19 @@
     }
 
     /// <summary>
-    /// Build the Warehouse + PO dropdown option sets. The grid query returns WarehouseAddressName / PoNumber per row but
+    /// Build the Warehouse dropdown option set. The grid query returns the warehouse code / address name per row but
     /// pages the data, so a single page may not surface every distinct value. We sweep one unfiltered (apart from the
-    /// supplier filter) large page to collect the distinct pairs, then let the backend's ShowWarehouseFilter flag drive
+    /// supplier filter) large page to collect the distinct codes, then let the backend's ShowWarehouseFilter flag drive
     /// the warehouse auto-hide. Re-run whenever the supplier filter changes (a different supplier may ship elsewhere).
+    /// The PO filter needs no such sweep any more — it is a server-side type-ahead (PoAutocomplete).
     /// </summary>
     private async Task LoadFilterOptions()
     {
         warehouseOptions.Clear();
-        poOptions.Clear();
         var url = $"api/delivery-schedules?page=1&pageSize=500";
         if (!string.IsNullOrEmpty(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
-        // The balance filter rides along: a warehouse or PO whose every line is fully shipped would otherwise sit in
-        // the dropdowns and return an empty grid when picked.
+        // The balance filter rides along: a warehouse whose every line is fully shipped would otherwise sit in
+        // the dropdown and return an empty grid when picked.
         if (onlyWithBalance) url += "&onlyWithBalance=true";
         var resp = await Api.GetAsync<DeliveryScheduleGridDto>(url);
         var data = resp?.Data;
@@ -295,23 +297,23 @@
 
         if (data is not null)
         {
-            foreach (var pair in data.Page.Items
-                         .Where(i => i.WarehouseAddressId.HasValue && !string.IsNullOrEmpty(i.WarehouseAddressName))
-                         .Select(i => new WarehouseOption(i.WarehouseAddressId!.Value, i.WarehouseAddressName!))
-                         .DistinctBy(o => o.Id)
-                         .OrderBy(o => o.Name))
+            foreach (var wh in data.Page.Items
+                         .Where(i => !string.IsNullOrWhiteSpace(i.Warehouse))
+                         .GroupBy(i => i.Warehouse!, StringComparer.OrdinalIgnoreCase)
+                         .Select(g => new WarehouseOption(g.Key,
+                             g.Select(i => i.WarehouseAddressName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) is { } name
+                                 ? $"{g.Key} · {name}" : g.Key))
+                         .OrderBy(o => o.Code, StringComparer.OrdinalIgnoreCase))
             {
-                warehouseOptions.Add(pair);
-            }
-
-            foreach (var po in data.Page.Items
-                         .Select(i => new PoOption(i.PurchaseOrderId, i.PoNumber))
-                         .DistinctBy(o => o.Id)
-                         .OrderBy(o => o.Number))
-            {
-                poOptions.Add(po);
+                warehouseOptions.Add(wh);
             }
         }
+
+        // No "All warehouses" entry any more: a pick that is still on offer stays; anything else (first load, a supplier with
+        // other warehouses, the balance toggle dropping the old one) falls to the first warehouse by code. No warehouse codes
+        // at all leaves it blank, so the grid loads unfiltered.
+        if (!warehouseOptions.Any(o => string.Equals(o.Code, warehouseFilter, StringComparison.OrdinalIgnoreCase)))
+            warehouseFilter = DefaultWarehouse;
     }
 
     private async Task Reload()
@@ -319,8 +321,9 @@
         loading = true;
         var url = $"api/delivery-schedules?page={page}&pageSize={PageSize}";
         if (!string.IsNullOrEmpty(supplierFilter)) url += $"&supplierId={Uri.EscapeDataString(supplierFilter)}";
-        if (!string.IsNullOrEmpty(warehouseFilter)) url += $"&warehouseAddressId={Uri.EscapeDataString(warehouseFilter)}";
-        if (!string.IsNullOrEmpty(poFilter)) url += $"&purchaseOrderId={Uri.EscapeDataString(poFilter)}";
+        // 2026-10-10 — the warehouse filter matches the PO line's warehouse CODE (the old warehouseAddressId id is no longer sent).
+        if (!string.IsNullOrEmpty(warehouseFilter)) url += $"&warehouse={Uri.EscapeDataString(warehouseFilter)}";
+        if (poFilter.HasValue) url += $"&purchaseOrderId={poFilter.Value}";
         if (dateFrom.HasValue) url += $"&deliveryDateFrom={dateFrom.Value:yyyy-MM-dd}";
         if (dateTo.HasValue) url += $"&deliveryDateTo={dateTo.Value:yyyy-MM-dd}";
         if (!string.IsNullOrEmpty(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
@@ -336,7 +339,16 @@
         await Reload();
     }
 
-    // The balance filter changes the option UNIVERSE too (a PO whose every line is shipped drops out of the
+    // The PoAutocomplete raises the picked PO's id (null when cleared or edited): narrow the grid to it, or widen it back to
+    // every PO of the selected warehouse.
+    private async Task OnPoPicked(Guid? id)
+    {
+        poFilter = id;
+        page = 1;
+        await Reload();
+    }
+
+    // The balance filter changes the option UNIVERSE too (a warehouse whose every line is shipped drops out of the
     // dropdown), so it refreshes the option sweep as well — unlike the other filters, which only narrow the grid.
     private async Task OnBalanceFilterChanged()
     {
@@ -346,12 +358,12 @@
     }
 
     // Supplier change can change the warehouse universe → refresh the option set + re-evaluate the auto-hide,
-    // and reset a now-irrelevant warehouse selection before reloading.
+    // and reset a now-irrelevant warehouse selection (the refresh re-selects the first by code) before reloading.
     private async Task OnSupplierChanged()
     {
         page = 1;
         warehouseFilter = string.Empty;
-        poFilter = string.Empty;
+        poFilter = null;
         await LoadFilterOptions();
         await Reload();
     }
@@ -360,7 +372,7 @@
     {
         supplierFilter = string.Empty;
         warehouseFilter = string.Empty;
-        poFilter = string.Empty;
+        poFilter = null;
         dateFrom = null;
         dateTo = null;
         statusFilter = string.Empty;

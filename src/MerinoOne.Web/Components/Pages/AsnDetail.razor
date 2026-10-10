@@ -564,7 +564,7 @@
                     {
                         <p style="color:var(--mer-ink-500);font-size:13px;">Loading approved delivery schedules…</p>
                     }
-                    else if (scheduleRows.Count == 0)
+                    else if (GridHasNothingToShow)
                     {
                         <div class="tl-empty" style="padding:24px;text-align:left;">
                             <div style="font-size:13px;color:var(--mer-ink-600);">No approved delivery schedules ready to ship for this supplier.</div>
@@ -572,20 +572,28 @@
                     }
                     else
                     {
-                        @* Filter row — warehouse (hidden when ≤1 distinct), PO/item search, delivery-date range,
-                           and the static hard-gate chip (Design 1a; D2 locked it to Approved with no toggle). *@
+                        @* Filter row — warehouse (hidden when ≤1 distinct), PO type-ahead + item search, delivery-date range,
+                           and the static hard-gate chip (Design 1a; D2 locked it to Approved with no toggle).
+                           2026-10-10 — the warehouse has NO "All" entry (the grid opens on the first by code) and, like the PO
+                           pick, is a SERVER filter (&warehouse= / &purchaseOrderId=). While lines are picked the select is
+                           locked to their warehouse (§9.1) — Clear unlocks it. *@
                         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
-                            @if (GridWarehouseOptions.Count > 1)
+                            @if (gridWarehouseOptions.Count > 1)
                             {
-                                <select class="rz-dropdown" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:180px;" @bind="gridWarehouseFilter">
-                                    <option value="">All warehouses</option>
-                                    @foreach (var wh in GridWarehouseOptions)
+                                <select class="rz-dropdown" style="padding:7px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);min-width:180px;"
+                                        @bind="gridWarehouse" @bind:after="OnGridWarehouseChanged"
+                                        disabled="@(selectedSchedules.Count > 0)"
+                                        title="@(selectedSchedules.Count > 0 ? "Locked to the selected lines' warehouse — clear the selection to change it" : null)">
+                                    @foreach (var wh in gridWarehouseOptions)
                                     {
-                                        <option value="@wh.Id">@wh.Name</option>
+                                        <option value="@wh.Code">@wh.Label</option>
                                     }
                                 </select>
                             }
-                            <input class="rz-textbox" placeholder="PO or item…" style="padding:7px 10px;width:190px;" @bind="lineSearch" @bind:event="oninput" />
+                            <div style="width:190px;">
+                                <PoAutocomplete SupplierId="@selectedSupplierId" Value="@gridPoId" ValueChanged="OnGridPoChanged" Placeholder="PO number…" />
+                            </div>
+                            <input class="rz-textbox" placeholder="Item…" style="padding:7px 10px;width:150px;" @bind="lineSearch" @bind:event="oninput" />
                             <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:6px;">
                                 From
                                 <input type="date" class="rz-textbox" style="padding:6px 8px;" @bind="gridDateFrom" />
@@ -620,17 +628,17 @@
                             </div>
                         }
 
-                        <div style="border:1px solid var(--mer-line);border-radius:8px;overflow:hidden;">
+                        <div style="border:1px solid var(--mer-line);border-radius:8px;overflow:hidden;@(gridBusy ? "opacity:.55;pointer-events:none;" : "")">
                             <div style="max-height:420px;overflow:auto;">
                                 <table style="width:100%;font-size:12.5px;border-collapse:collapse;min-width:1080px;">
                                     <thead>
                                         <tr style="border-bottom:1px solid var(--mer-line);background:var(--mer-ink-50);position:sticky;top:0;z-index:1;">
-                                            <th style="width:36px;padding:8px 4px;text-align:center;">
+                                            <th style="width:30px;padding:8px 4px;text-align:center;">
                                                 <input type="checkbox" checked="@AllLockedSelected" disabled="@(selectedSchedules.Count == 0)"
                                                        title="@(selectedSchedules.Count == 0 ? "Pick one line first — that fixes the warehouse" : AllLockedSelected ? "Clear all lines in this warehouse" : "Select all lines in this warehouse")"
                                                        @onchange="ToggleAllInLockedWarehouse" />
                                             </th>
-                                            <th style="text-align:left;padding:8px 4px;color:var(--mer-ink-700);">PO #</th>
+                                            <th style="text-align:left;padding:8px 4px 8px 0;color:var(--mer-ink-700);">PO #</th>
                                             <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);">Ln</th>
                                             <th style="text-align:left;padding:8px 10px;color:var(--mer-ink-700);">Item</th>
                                             <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);">Order qty</th>
@@ -643,12 +651,17 @@
                                     </thead>
                                     <tbody>
                                     @{
-                                        // Design 1a PO banding: alternate tint per PO block; the PO number renders
-                                        // emphasized on the first row of each block and muted on the rest.
+                                        // Design 1a PO banding: alternate tint per PO block. The PO number is emphasized on EVERY row
+                                        // (2026-10-10 — the muted repeats made rows 2..n of a PO read as disabled).
+                                        var visibleRows = VisibleScheduleRows.ToList();
                                         var _prevPo = (string?)null;
                                         var _poIdx = -1;
                                     }
-                                    @foreach (var row in VisibleScheduleRows)
+                                    @if (visibleRows.Count == 0)
+                                    {
+                                        <tr><td colspan="10" style="padding:18px 10px;text-align:center;color:var(--mer-ink-500);">@(scheduleRows.Count == 0 ? "No approved schedule lines for this selection." : "No lines match the Item / date filters.")</td></tr>
+                                    }
+                                    @foreach (var row in visibleRows)
                                     {
                                         var r = row;
                                         var first = r.PoNumber != _prevPo;
@@ -673,7 +686,7 @@
                                                           title="PO not confirmed — re-accept the PO before shipping this schedule">block</span>
                                                 }
                                             </td>
-                                            <td style="padding:6px 4px;font-family:Inter,monospace;font-weight:@(first ? "700" : "400");color:@(first ? "var(--mer-blue)" : "var(--mer-ink-300)");">@r.PoNumber</td>
+                                            <td style="padding:6px 4px 6px 0;font-family:Inter,monospace;font-weight:700;color:var(--mer-blue);">@r.PoNumber</td>
                                             <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@r.PositionNo</td>
                                             <td style="padding:6px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;">
                                                 <span style="font-weight:600;font-family:Inter,monospace;color:var(--mer-blue-darker);">@r.ItemCode</span>
@@ -735,8 +748,7 @@
                                 <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Delivery</th>
                                 <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Balance / allowance</th>
                                 <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Ship Qty</th>
-                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Batch</th>
-                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Expiry</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Unit</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -744,6 +756,7 @@
                         {
                             var full = FullyShipped(ln);     // ceiling reached (no over-ship headroom) → row read-only
                             var over = OverAllowance(ln);    // entered qty exceeds the order qty + tolerance ceiling → red border (no inline text; dialog carries the message)
+                            var badQty = QtyDecimalsInvalid(ln);   // more decimals than the unit allows → red border + the rule spelled out under the input
                             <tr style="border-bottom:1px solid var(--mer-line-soft);@(full ? "background:var(--mer-ink-50);" : "")">
                                 <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PoNumber</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);">@ln.PositionNo</td>
@@ -753,12 +766,15 @@
                                 <td style="padding:6px 4px;font-family:Inter,monospace;" title="Schedule delivery date">@AppTime.Date(ln.DeliveryDate)</td>
                                 <td style="padding:6px 4px;">@BalanceCell(ln) @if (full) { <span class="tlg-status tlg-status--active" style="margin-left:6px;font-size:10px;">Fully shipped</span> }</td>
                                 <td style="padding:6px 4px;text-align:right;">
-                                    <input type="number" step="0.001" min="0" max="@ln.OverShipAllowance.ToString("0.###")" class="rz-textbox"
-                                           style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;@(over ? "border:1px solid var(--mer-red);" : "")"
+                                    <input type="number" step="@QtyStep(ln.UnitDecimalPlaces)" min="0" max="@ln.OverShipAllowance.ToString("0.###")" class="rz-textbox"
+                                           style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;@(over || badQty ? "border:1px solid var(--mer-red);" : "")"
                                            @bind="ln.ShippedQty" @bind:event="oninput" @onblur="() => OnShipQtyBlur(ln)" disabled="@full" title="@(full ? "Line fully shipped — no remaining ship capacity" : null)" />
+                                    @if (badQty)
+                                    {
+                                        <div style="font-size:11px;color:var(--mer-red);margin-top:3px;white-space:nowrap;">@QtyDecimalsMessage(ln)</div>
+                                    }
                                 </td>
-                                <td style="padding:6px 4px;"><input type="text" class="rz-textbox" style="width:120px;padding:4px 6px;" @bind="ln.BatchNumber" disabled="@full" /></td>
-                                <td style="padding:6px 4px;"><input type="date" class="rz-textbox" style="width:130px;padding:4px 6px;" @bind="ln.ExpiryDate" disabled="@full" /></td>
+                                <td style="padding:6px 4px;font-family:Inter,monospace;color:var(--mer-ink-500);">@ln.OrderUnit</td>
                             </tr>
                         }
                         </tbody>
@@ -1096,26 +1112,33 @@
     </div>
 }
 
-@* ---------------- Over-ship validation dialog (§7 — ship qty exceeds order qty + tolerance) ---------------- *@
+@* ---------------- Over-ship validation dialog (§7 — ship qty exceeds order qty + tolerance) ----------------
+   2026-10-10 — it also names lines whose ship qty carries more decimals than the unit allows (same blur trigger). *@
 @if (showOverShip)
 {
+    var overLines = lines.Where(OverAllowance).ToList();
+    var scaleLines = lines.Where(QtyDecimalsInvalid).ToList();
     <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
         <div class="merino-dialog" data-variant="warning" data-size="md" style="width:560px;">
             <div class="merino-dialog__accent"></div>
             <header class="merino-dialog__header">
                 <div class="merino-dialog__icon merino-dialog__icon--warning"><span class="material-symbols-outlined">production_quantity_limits</span></div>
                 <div class="merino-dialog__head-text">
-                    <div class="merino-dialog__eyebrow">ASN · Over-ship</div>
-                    <h2 class="merino-dialog__title">Ship quantity exceeds the allowance</h2>
-                    <p class="merino-dialog__subtitle">Reduce these lines to within the order qty + over-ship tolerance before continuing.</p>
+                    <div class="merino-dialog__eyebrow">ASN · @(overLines.Count > 0 ? "Over-ship" : "Quantity")</div>
+                    <h2 class="merino-dialog__title">@(scaleLines.Count == 0 ? "Ship quantity exceeds the allowance" : overLines.Count == 0 ? "Ship quantity has too many decimals" : "Ship quantity needs correcting")</h2>
+                    <p class="merino-dialog__subtitle">@(scaleLines.Count == 0 ? "Reduce these lines to within the order qty + over-ship tolerance before continuing." : overLines.Count == 0 ? "Round these lines to the precision of their unit before continuing." : "Fix these lines — within the order qty + over-ship tolerance, and no more decimals than the unit allows — before continuing.")</p>
                 </div>
                 <button class="merino-dialog__close" @onclick="() => showOverShip = false"><span class="material-symbols-outlined">close</span></button>
             </header>
             <div class="merino-dialog__body">
                 <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--mer-ink-700);">
-                    @foreach (var l in lines.Where(OverAllowance))
+                    @foreach (var l in overLines)
                     {
                         <li style="margin-bottom:4px;"><b style="font-family:Inter,monospace;">@l.ItemCode</b> (PO @l.PoNumber · pos @l.PositionNo) — entered <b style="color:var(--mer-red);">@l.ShippedQty.ToString("0.###")</b>, max allowed <b>@l.OverShipAllowance.ToString("0.###")</b></li>
+                    }
+                    @foreach (var l in scaleLines)
+                    {
+                        <li style="margin-bottom:4px;"><b style="font-family:Inter,monospace;">@l.ItemCode</b> (PO @l.PoNumber · pos @l.PositionNo) — entered <b style="color:var(--mer-red);">@l.ShippedQty.ToString("0.######")</b>, allows @QtyDecimalsRule(l)</li>
                     }
                 </ul>
             </div>
@@ -1358,14 +1381,20 @@
     private string? selectedSupplierName;
 
     // R15 (Design 1a) — step 1 is a flat grid of the supplier's APPROVED delivery-schedule lines (hard filter, D2).
-    // scheduleRows caches one status=Approved sweep per supplier; the grid filters it client-side. Selection is
+    // 2026-10-10 — scheduleRows holds the rows of the CHOSEN warehouse (narrowed to the picked PO), filtered server-side — see
+    // LoadSchedulesAsync / LoadGridRowsAsync; the item text and the date window then filter it client-side. Selection is
     // keyed by DeliverySchedule.Id; the FIRST pick locks the warehouse (§9.1) and rows for other warehouses are
     // disabled until Clear — the server AsnWarehouseRules invariant stays the authoritative fallback.
     private List<DeliveryScheduleDto> scheduleRows = new();
     private bool schedulesLoading;
     private readonly Dictionary<Guid, DeliveryScheduleDto> selectedSchedules = new();
+    // "Item…" free text (client-side: item code / description). The warehouse and the PO are SERVER filters instead — a
+    // supplier can ship against more warehouses and POs than one 500-row sweep holds.
     private string lineSearch = string.Empty;
-    private string gridWarehouseFilter = string.Empty;
+    private string gridWarehouse = string.Empty;   // warehouse CODE the grid shows — no "All"; opens on the first by code
+    private Guid? gridPoId;                        // PO picked in the PoAutocomplete (purchaseOrderId)
+    private bool gridBusy;                         // a filter change is reloading the rows — dim the table, keep the filter bar mounted
+    private int _gridSeq;                          // newest-wins guard for those reloads
     // 2026-08-11 — the grid opens on the CURRENT MONTH (1st → last day) rather than unbounded. The upper bound is
     // month-END, not today: delivery dates are typically FORWARD-dated, so a "to today" default would hide the very
     // lines a supplier is preparing to ship.
@@ -1545,8 +1574,9 @@
         }
     }
 
-    // The selectable universe inside the locked warehouse (balance left + shippable), across the WHOLE cached
-    // sweep — "Select all in this warehouse" deliberately ignores the client-side filters.
+    // The selectable universe inside the locked warehouse (balance left + shippable), across ALL loaded rows —
+    // "Select all in this warehouse" deliberately ignores the client-side filters (item text, date window). 2026-10-10 — the
+    // warehouse and PO are SERVER filters, so the loaded rows are that warehouse's (narrowed to the picked PO, when there is one).
     private IEnumerable<DeliveryScheduleDto> LockedWarehousePool =>
         selectedSchedules.Count == 0
             ? Enumerable.Empty<DeliveryScheduleDto>()
@@ -1562,22 +1592,29 @@
     // with. Either could swallow a row that is already picked — a saved draft whose delivery date falls in
     // another month, or a line whose balance a concurrent ASN consumed after the pick — leaving the footer
     // count, the warehouse lock and the saved ASN referring to something invisible.
-    private IEnumerable<DeliveryScheduleDto> VisibleScheduleRows =>
-        scheduleRows
-            .Where(r => selectedSchedules.ContainsKey(r.Id) || PassesGridFilters(r))
-            .OrderBy(r => r.PoNumber).ThenBy(r => r.PositionNo).ThenBy(r => r.DeliveryDate);
+    //
+    // 2026-10-10 — the warehouse and PO filters are SERVER-side now, so a picked row from an earlier filter state (another PO)
+    // is no longer in scheduleRows at all; it is added back from the selection, so it cannot vanish from the grid either.
+    private IEnumerable<DeliveryScheduleDto> VisibleScheduleRows
+    {
+        get
+        {
+            var shown = scheduleRows.Where(r => selectedSchedules.ContainsKey(r.Id) || PassesGridFilters(r)).ToList();
+            var present = shown.Select(r => r.Id).ToHashSet();
+            shown.AddRange(selectedSchedules.Values.Where(s => !present.Contains(s.Id)));
+            return shown.OrderBy(r => r.PoNumber).ThenBy(r => r.PositionNo).ThenBy(r => r.DeliveryDate);
+        }
+    }
 
     private bool PassesGridFilters(DeliveryScheduleDto r)
     {
         // Nothing left to ship — the row can never be picked, so it is pure noise on a picker.
         if (r.RemainingToShip <= 0) return false;
-        if (!string.IsNullOrEmpty(gridWarehouseFilter) && Guid.TryParse(gridWarehouseFilter, out var wid)
-            && r.WarehouseAddressId != wid) return false;
+        // The warehouse and the PO are server filters (LoadGridRowsAsync); only the item text and the date window apply here.
         if (!string.IsNullOrWhiteSpace(lineSearch))
         {
             var t = lineSearch.Trim();
-            var hit = r.PoNumber.Contains(t, StringComparison.OrdinalIgnoreCase)
-                      || r.ItemCode.Contains(t, StringComparison.OrdinalIgnoreCase)
+            var hit = r.ItemCode.Contains(t, StringComparison.OrdinalIgnoreCase)
                       || (r.ItemDescription?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false);
             if (!hit) return false;
         }
@@ -1586,14 +1623,17 @@
         return true;
     }
 
-    private sealed record GridWarehouseOption(Guid Id, string Name);
-    private List<GridWarehouseOption> GridWarehouseOptions =>
-        scheduleRows.Where(r => r.WarehouseAddressId.HasValue)
-            .Select(r => new GridWarehouseOption(r.WarehouseAddressId!.Value,
-                string.IsNullOrWhiteSpace(r.WarehouseAddressName) ? (r.Warehouse ?? "—") : r.WarehouseAddressName!))
-            .DistinctBy(o => o.Id)
-            .OrderBy(o => o.Name)
-            .ToList();
+    // 2026-10-10 — the dropdown lists warehouse CODES (what &warehouse= matches), taken from the unfiltered sweep
+    // LoadSchedulesAsync makes: scheduleRows only holds the chosen warehouse now, so it can no longer say which others exist.
+    private sealed record GridWarehouseOption(string Code, string Label);
+    private List<GridWarehouseOption> gridWarehouseOptions = new();
+
+    private static string WarehouseLabel(string code, IEnumerable<string?> addressNames) =>
+        addressNames.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) is { } name ? $"{code} · {name}" : code;
+
+    // Nothing to pick from AND nothing filtering: the supplier simply has no Approved schedules. Any other empty grid (a PO with
+    // no lines in this warehouse, …) keeps the filter bar up so the filter can be changed or cleared.
+    private bool GridHasNothingToShow => scheduleRows.Count == 0 && gridWarehouseOptions.Count == 0 && !gridPoId.HasValue;
 
     // ======================= 2026-08-11 — which wizard steps a status may show =======================
     // The internal step ids never move (1 Lines · 2 Quantities · 3 Shipment · 4 Review), so every existing
@@ -1624,7 +1664,8 @@
         1 => selectedSchedules.Count > 0 || lines.Count > 0,
         // Step 2 also gates on serial/lot capture: every serialized line must have N serials and every lot line
         // must have Σqty == ShippedQty (no dupes). The backend SubmitAsnCommand re-enforces; this blocks early.
-        2 => lines.Any(l => l.ShippedQty > 0) && SerialLotCaptureValid,
+        // 2026-10-10 — and on every ship qty fitting its unit's decimals (the server rejects the rest as a backstop).
+        2 => lines.Any(l => l.ShippedQty > 0) && SerialLotCaptureValid && !HasQtyDecimalErrors,
         3 => expectedDeliveryDate.HasValue,
         _ => true
     };
@@ -1636,8 +1677,35 @@
     private static bool OverAllowance(LineRow l) => l.ShippedQty > l.OverShipAllowance;
     private static bool FullyShipped(LineRow l) => l.OverShipAllowance <= 0;
 
-    // Surface the over-ship dialog the moment the Ship Qty field loses focus (not only on Next).
-    private void OnShipQtyBlur(LineRow l) { if (OverAllowance(l)) showOverShip = true; }
+    // 2026-10-10 — ship-qty precision: a quantity may carry no more decimals than its unit of measure allows (LineRow.UnitDecimalPlaces,
+    // mdm.Unit.decimalPlaces of the order unit; 3 when the unit is unknown). Same rule as the server's AsnShipQtyScale.ExceedsScale —
+    // rounding to the allowed places must not change the value — so "1.50" is fine for a 1-decimal unit and "1.25" is not. The server
+    // rejects a violation with a 400 regardless; this is the friendly layer.
+    private static bool QtyDecimalsInvalid(LineRow l) =>
+        l.ShippedQty != decimal.Round(l.ShippedQty, Math.Clamp(l.UnitDecimalPlaces, 0, 28));
+
+    // The browser step for the Ship Qty input: 1, 0.1, 0.01, 0.001 for 0, 1, 2, 3+ decimals.
+    private static string QtyStep(int places) => places switch { <= 0 => "1", 1 => "0.1", 2 => "0.01", _ => "0.001" };
+
+    // "at most 0 decimals (EA)" — the rule, worded to read after "Allows" in the inline message and in the dialog.
+    private static string QtyDecimalsRule(LineRow l) =>
+        $"at most {l.UnitDecimalPlaces} decimal{(l.UnitDecimalPlaces == 1 ? "" : "s")}"
+        + (string.IsNullOrWhiteSpace(l.OrderUnit) ? "" : $" ({l.OrderUnit})");
+
+    private static string QtyDecimalsMessage(LineRow l) => "Allows " + QtyDecimalsRule(l);
+
+    // True while any EDITABLE line carries too many decimals — gates Next / Save / Send / Post. An Approved ASN's lines are fixed
+    // (the supplier cannot change them here), so the client does not trap it behind a rule only the server can enforce.
+    private bool HasQtyDecimalErrors => CanEditLines && lines.Any(QtyDecimalsInvalid);
+
+    private string QtyDecimalsBlockMessage(string action) =>
+        $"Fix the ship quantities before {action}: "
+        + string.Join("; ", lines.Where(QtyDecimalsInvalid).Select(l => $"{l.ItemCode} (PO {l.PoNumber} · pos {l.PositionNo}) allows {QtyDecimalsRule(l)}")) + ".";
+
+    // Surface the over-ship dialog the moment the Ship Qty field loses focus (not only on Next). 2026-10-10 — a qty with more
+    // decimals than its unit allows raises the same dialog (it lists those lines too); the red message under the input is the
+    // always-on cue.
+    private void OnShipQtyBlur(LineRow l) { if (OverAllowance(l) || QtyDecimalsInvalid(l)) showOverShip = true; }
 
     // Reload whenever the route id changes — Blazor REUSES this component across /asns/new -> /asns/{id}
     // (the save-draft navigation), so OnInitializedAsync (once-only) would leave detail=null => "ASN not found".
@@ -1711,6 +1779,7 @@
                 // R15 — reset the schedule-grid state for this ASN's supplier.
                 selectedSchedules.Clear();
                 scheduleRows = new();
+                gridWarehouseOptions = new(); gridWarehouse = string.Empty; gridPoId = null;
                 poDetailCache.Clear();
                 selectedSupplierId = detail.SupplierId;
                 selectedSupplierName = detail.SupplierName;
@@ -1725,6 +1794,9 @@
                     PositionNo = l.PositionNo ?? l.PoPositionNo,
                     SequenceNo = l.SequenceNo,
                     ItemCode = l.ItemCode,
+                    // 2026-10-10 — the unit and the decimals it allows: drive the Unit column, the qty input's step and its validation.
+                    OrderUnit = l.OrderUnit,
+                    UnitDecimalPlaces = l.UnitDecimalPlaces,
                     OrderQty = l.OrderQty,
                     ShippedQty = l.ShippedQty,
                     BatchNumber = l.BatchNumber,
@@ -1752,7 +1824,11 @@
                 // reflects the saved selection, then enrich only these lines with the PO-line flags/allowance.
                 if (!IsLocked)
                 {
-                    await LoadSchedulesAsync();
+                    // The ASN's own lines choose the starting warehouse (by schedule back-link or — legacy lines — by PO line), so
+                    // the pre-check below finds them instead of landing on whichever warehouse sorts first.
+                    var lineScheduleIds = lines.Where(l => l.DeliveryScheduleId.HasValue).Select(l => l.DeliveryScheduleId!.Value).ToHashSet();
+                    var linePoLineIds = lines.Select(l => l.PurchaseOrderLineId).ToHashSet();
+                    await LoadSchedulesAsync(r => lineScheduleIds.Contains(r.Id) || linePoLineIds.Contains(r.PurchaseOrderLineId));
                     PrecheckSchedulesFromLines();
                     await EnrichLinesAsync();
                 }
@@ -1784,31 +1860,80 @@
             selectedSupplierId = null; selectedSupplierName = null;
             // Clearing the supplier also clears the schedule grid + selection.
             selectedSchedules.Clear(); lines.Clear(); scheduleRows = new(); poDetailCache.Clear();
+            gridWarehouseOptions = new(); gridWarehouse = string.Empty; gridPoId = null;
         }
     }
 
-    private async Task ChooseSupplierAsync(Guid supplierId)
+    private async Task ChooseSupplierAsync(Guid supplierId, Func<DeliveryScheduleDto, bool>? anchor = null)
     {
         selectedSupplierId = supplierId;
         attachSupplierId = supplierId;   // create-mode staging uploads stamp this supplier's seccode
         selectedSupplierName = suppliers.FirstOrDefault(s => s.Id == supplierId)?.LegalName;
         // Switching supplier resets the grid (an ASN ships from a single supplier).
         selectedSchedules.Clear(); lines.Clear(); poDetailCache.Clear();
-        lineSearch = string.Empty; gridWarehouseFilter = string.Empty;
+        lineSearch = string.Empty; gridWarehouse = string.Empty; gridPoId = null;
         gridDateFrom = MonthStart(); gridDateTo = MonthEnd();   // back to the default window, not to unbounded
-        await LoadSchedulesAsync();
+        await LoadSchedulesAsync(anchor);
     }
 
-    // R15 (D1/D2) — ONE Approved-only sweep per supplier (hard gate; pageSize 500 mirrors the delivery-schedules
-    // page option sweep). The step-1 grid filters this cache client-side.
-    private async Task LoadSchedulesAsync()
+    // R15 (D1/D2) — the supplier's Approved delivery schedules (hard gate; pageSize 500 mirrors the delivery-schedules page
+    // option sweep). 2026-10-10 — the warehouse is a SERVER filter now, so this is two calls:
+    //   1. an UNFILTERED sweep, only to learn which warehouses exist (the dropdown) and where the caller's anchor rows live;
+    //   2. the grid rows for the chosen warehouse (LoadGridRowsAsync).
+    // The starting warehouse is the anchor rows' (an edited ASN's own lines, or the ?schedules= deep-link rows) so the pre-check
+    // finds them; otherwise the one already chosen; otherwise the first by code.
+    private async Task LoadSchedulesAsync(Func<DeliveryScheduleDto, bool>? anchor = null)
     {
-        if (!selectedSupplierId.HasValue) { scheduleRows = new(); return; }
+        if (!selectedSupplierId.HasValue) { scheduleRows = new(); gridWarehouseOptions = new(); return; }
         schedulesLoading = true; StateHasChanged();
-        var url = $"api/delivery-schedules?page=1&pageSize=500&supplierId={selectedSupplierId}&status=Approved";
-        var resp = await Api.GetAsync<DeliveryScheduleGridDto>(url);
-        scheduleRows = resp?.Data?.Page.Items.ToList() ?? new();
+
+        var sweep = await FetchSchedulesAsync(null, null);
+        var anchorRow = anchor is null ? null : sweep.FirstOrDefault(anchor);
+        // Warehouses with something left to ship, plus the anchor's own (its rows may have just run out of balance).
+        gridWarehouseOptions = sweep
+            .Where(r => !string.IsNullOrWhiteSpace(r.Warehouse) && (r.RemainingToShip > 0 || r.Id == anchorRow?.Id))
+            .GroupBy(r => r.Warehouse!, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new GridWarehouseOption(g.Key, WarehouseLabel(g.Key, g.Select(r => r.WarehouseAddressName))))
+            .OrderBy(o => o.Code, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var wanted = string.IsNullOrWhiteSpace(anchorRow?.Warehouse) ? gridWarehouse : anchorRow!.Warehouse!;
+        gridWarehouse = gridWarehouseOptions.FirstOrDefault(o => string.Equals(o.Code, wanted, StringComparison.OrdinalIgnoreCase))?.Code
+                        ?? gridWarehouseOptions.FirstOrDefault()?.Code
+                        ?? string.Empty;
+        // A legacy anchor row with no warehouse code (pre-R13) can only be shown by an UNFILTERED load.
+        if (anchorRow is not null && string.IsNullOrWhiteSpace(anchorRow.Warehouse)) gridWarehouse = string.Empty;
+        await LoadGridRowsAsync();
         schedulesLoading = false;
+    }
+
+    private async Task<List<DeliveryScheduleDto>> FetchSchedulesAsync(string? warehouse, Guid? poId)
+    {
+        var url = $"api/delivery-schedules?page=1&pageSize=500&supplierId={selectedSupplierId}&status=Approved";
+        if (!string.IsNullOrEmpty(warehouse)) url += $"&warehouse={Uri.EscapeDataString(warehouse)}";
+        if (poId.HasValue) url += $"&purchaseOrderId={poId.Value}";
+        var resp = await Api.GetAsync<DeliveryScheduleGridDto>(url);
+        return resp?.Data?.Page.Items.ToList() ?? new();
+    }
+
+    // The grid's rows: the chosen warehouse's Approved schedules, narrowed to the picked PO. Newest filter change wins; the filter
+    // bar stays mounted (the PO box has focus) — the table just dims while a reload is in flight.
+    private async Task LoadGridRowsAsync()
+    {
+        var mine = ++_gridSeq;
+        gridBusy = true; StateHasChanged();
+        var rows = await FetchSchedulesAsync(string.IsNullOrEmpty(gridWarehouse) ? null : gridWarehouse, gridPoId);
+        if (mine != _gridSeq) return;     // a newer filter change superseded this one
+        scheduleRows = rows;
+        gridBusy = false;
+    }
+
+    private Task OnGridWarehouseChanged() => LoadGridRowsAsync();
+
+    private async Task OnGridPoChanged(Guid? poId)
+    {
+        gridPoId = poId;
+        await LoadGridRowsAsync();
     }
 
     // Edit mode — reflect the ASN's saved lines in the step-1 grid: check each line's schedule row (by the
@@ -1851,7 +1976,8 @@
             ?? (suppliers.Count == 1 ? suppliers[0].Id : (Guid?)null);
         if (!supplierId.HasValue || suppliers.All(s => s.Id != supplierId.Value)) return;
 
-        await ChooseSupplierAsync(supplierId.Value);
+        // The deep-linked rows pick the starting warehouse, so they are in the first grid load (they may not be in the first warehouse by code).
+        await ChooseSupplierAsync(supplierId.Value, r => ids.Contains(r.Id));
         foreach (var row in scheduleRows.Where(r => ids.Contains(r.Id)))
         {
             // Respect the same rules as a manual pick (balance, shippable, single warehouse).
@@ -1925,6 +2051,8 @@
                 PoNumber = s.PoNumber,
                 PositionNo = s.PositionNo,
                 ItemCode = s.ItemCode,
+                OrderUnit = s.OrderUnit,
+                UnitDecimalPlaces = s.UnitDecimalPlaces,
                 OrderQty = s.OrderQty,
                 DeliveryDate = s.DeliveryDate,
                 ScheduledQty = s.ScheduledQty,
@@ -1998,6 +2126,7 @@
 
         var lineReqs = BuildLineRequests();
         if (lineReqs.Count == 0) { submitError = "Enter a ship quantity on at least one line."; busy = false; savingDraft = false; currentStep = ClampStep(2); return; }
+        if (HasQtyDecimalErrors) { submitError = QtyDecimalsBlockMessage("saving"); busy = false; savingDraft = false; currentStep = ClampStep(2); return; }
 
         if (IsNew)
         {
@@ -2029,6 +2158,8 @@
             submitError = "Fix the serial/lot capture before sending: every serialized line needs one serial per unit, and every lot line's quantities must sum to the shipped quantity (no duplicates).";
             busy = false; currentStep = ClampStep(2); return;
         }
+
+        if (HasQtyDecimalErrors) { submitError = QtyDecimalsBlockMessage("sending"); busy = false; currentStep = ClampStep(2); return; }
 
         if (!await SavePendingEditsAsync("sending for approval")) { busy = false; return; }
 
@@ -2062,6 +2193,8 @@
             submitError = $"Fill in {string.Join(", ", missingRefs)} before posting the ASN.";
             busy = false; currentStep = 3; return;
         }
+
+        if (HasQtyDecimalErrors) { submitError = QtyDecimalsBlockMessage("posting"); busy = false; currentStep = ClampStep(2); return; }
 
         if (!await SavePendingEditsAsync("posting")) { busy = false; return; }
 
@@ -2448,6 +2581,10 @@
         public int PositionNo { get; set; }
         public int? SequenceNo { get; set; }
         public string ItemCode { get; set; } = string.Empty;
+        // 2026-10-10 — the order unit (read-only Unit column) and the decimals it allows (mdm.Unit.decimalPlaces; 3 when unknown):
+        // the Ship Qty input's step and the most decimals ShippedQty may carry.
+        public string OrderUnit { get; set; } = string.Empty;
+        public int UnitDecimalPlaces { get; set; } = 3;
         public decimal OrderQty { get; set; }
         public decimal ShippedQty { get; set; }
         public string? BatchNumber { get; set; }

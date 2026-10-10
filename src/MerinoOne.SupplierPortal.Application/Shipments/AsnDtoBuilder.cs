@@ -1,5 +1,6 @@
 using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -26,8 +27,14 @@ public static class AsnDtoBuilder
     public static bool IsLocked(AsnStatus status)
         => status is not (AsnStatus.Draft or AsnStatus.Rejected or AsnStatus.Approved);
 
+    /// <param name="unitDecimals">
+    /// 2026-10-10 — resolves each line's <c>UnitDecimalPlaces</c> (mdm.Unit.decimalPlaces of its OrderUnit). Optional so the
+    /// many callers that cannot take the DI-injected resolver keep compiling: when omitted the builder resolves over the
+    /// same <paramref name="db"/> with an equivalent <see cref="UnitDecimalsResolver"/> — same query, same fallback (3).
+    /// </param>
     public static async Task<AsnDetailDto> BuildAsync(IAppDbContext db, Guid asnId, CancellationToken ct,
-        Policies.OverShipRoundingMode rounding = Policies.OverShipRoundingMode.None)
+        Policies.OverShipRoundingMode rounding = Policies.OverShipRoundingMode.None,
+        IUnitDecimalsResolver? unitDecimals = null)
     {
         var a = await db.Asns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == asnId, ct)
                 ?? throw new Common.Exceptions.NotFoundException("Asn", asnId);
@@ -173,6 +180,12 @@ public static class AsnDtoBuilder
             .GroupBy(l => l.AsnLineId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<AsnLineLotDto>)g.Select(x => x.Dto).ToList());
 
+        // 2026-10-10 — decimal precision per line (mdm.Unit.decimalPlaces of the PO line's OrderUnit), ONE batched query for
+        // the whole ASN; an unknown/blank unit gets the resolver's fallback (3). The wizard/detail format and validate
+        // OrderQty / ShippedQty / Balance to this many places.
+        var unitResolver = unitDecimals ?? new UnitDecimalsResolver(db);
+        var unitPlaces = await unitResolver.ResolveAsync(lineRows.Select(r => r.OrderUnit), ct);
+
         var lines = lineRows.Select(r =>
             {
                 // §7.3 / DI-04 — nominal balance + tolerance-adjusted over-ship allowance, computed (never persisted).
@@ -188,7 +201,9 @@ public static class AsnDtoBuilder
                     serialsByLine.TryGetValue(r.Id, out var sl) ? sl : null,
                     lotsGrouped.TryGetValue(r.Id, out var ll) ? ll : null,
                     r.ShippedQtyToDate, balance, overShipAllowance,
-                    r.DeliveryScheduleId, r.ScheduleDeliveryDate);
+                    r.DeliveryScheduleId, r.ScheduleDeliveryDate,
+                    !string.IsNullOrWhiteSpace(r.OrderUnit) && unitPlaces.TryGetValue(r.OrderUnit, out var places)
+                        ? places : unitResolver.Fallback);
             })
             .ToList();
 

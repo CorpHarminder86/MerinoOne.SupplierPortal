@@ -133,7 +133,18 @@ public record PurchaseOrderLineDto(
     string? WarehouseCity = null,
     string? WarehouseState = null,
     string? WarehousePincode = null,
-    string? WarehouseCountry = null);
+    string? WarehouseCountry = null,
+    // 2026-10-10 — ERP-supplied line tax AMOUNT as received (null when LN did not push one / pre-dates the column).
+    decimal? TaxAmount = null,
+    // mdm.Unit.decimalPlaces for this line's OrderUnit, resolved server-side (IUnitDecimalsResolver); 3 when the
+    // unit is unknown/blank. The UI formats and validates the line's quantities to this precision.
+    int UnitDecimalPlaces = 3);
+
+/// <summary>
+/// Lightweight PO row for lookup / picker controls: identity, supplier, date and status only (no lines, no totals).
+/// <see cref="Status"/> is the PoStatus enum NAME — render it with <see cref="PoStatusLabels.Label"/>.
+/// </summary>
+public record PoLookupItemDto(Guid Id, string PoNumber, string? SupplierName, DateTime PoDate, string Status);
 
 public record AcknowledgePoRequest(string? Notes = null);
 // R4 (2026-06-26) — D2: accept is accept-only (the ProposedDate field is removed — counter-proposals go through

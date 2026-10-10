@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
 using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
@@ -30,6 +31,10 @@ namespace MerinoOne.SupplierPortal.Application.Shipments.Commands;
 /// <para><b>NO balance consumption at create (§10.4)</b> — the atomic over-ship guard runs only at final Submit.</para>
 /// <para><b>Persist-time invariant (§9.3):</b> every covered PO line's <c>WarehouseAddressId == the chosen
 /// warehouse</c>, single supplier — asserted as defence in depth behind the UI guard.</para>
+/// <para><b>Ship-quantity precision (2026-10-10):</b> the schedule-driven wizard sends client-typed quantities
+/// (<see cref="CreateAsnFromScheduleRequest.ShipQtyByScheduleId"/>), so the same decimal-places rule Create/Update enforce
+/// (<see cref="AsnShipQtyScale"/>) applies to the quantity each line will actually carry — a typed override OR the
+/// defaulted balance — before anything is written.</para>
 /// </summary>
 public record CreateAsnFromScheduleCommand(CreateAsnFromScheduleRequest Body) : IRequest<AsnDetailDto>;
 
@@ -49,11 +54,13 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
     private readonly ICurrentUser _user;
     private readonly Common.Documents.AsnAttachmentRebinder _rebinder;
     private readonly IFulfilmentSettings _fulfilment;
+    private readonly IUnitDecimalsResolver _unitDecimals;
 
     public CreateAsnFromScheduleCommandHandler(
-        IAppDbContext db, ICurrentUser user, Common.Documents.AsnAttachmentRebinder rebinder, IFulfilmentSettings fulfilment)
+        IAppDbContext db, ICurrentUser user, Common.Documents.AsnAttachmentRebinder rebinder, IFulfilmentSettings fulfilment,
+        IUnitDecimalsResolver unitDecimals)
     {
-        _db = db; _user = user; _rebinder = rebinder; _fulfilment = fulfilment;
+        _db = db; _user = user; _rebinder = rebinder; _fulfilment = fulfilment; _unitDecimals = unitDecimals;
     }
 
     public async Task<AsnDetailDto> Handle(CreateAsnFromScheduleCommand request, CancellationToken ct)
@@ -83,8 +90,10 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
                               po.SupplierId,
                               po.SeccodeId,
                               po.TenantEntityId,
+                              po.PoNumber,
                               pol.ItemCode,
                               pol.ItemId,
+                              pol.OrderUnit,
                               pol.OrderQty,
                               pol.ShippedQtyToDate,
                               pol.PositionNo,
@@ -124,6 +133,26 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
         var warehouse = AsnWarehouseRules.Resolve(
             rows.Select(r => new AsnWarehouseRules.WarehouseLine(r.LineWarehouse, r.LineWarehouseAddressId, null)));
 
+        // ── Ship-quantity precision (2026-10-10) ─────────────────────────────────────────────────────────
+        // The wizard sends client-typed quantities (ShipQtyByScheduleId) and leaves the rest to default to the line's
+        // remaining balance (editable, §9.2). BOTH end up on the ASN line, so the FINAL quantity is judged against the PO
+        // line's unit — not just the typed overrides. Keyed like Create/Update (lines[i].shippedQty, i = the schedule's index
+        // in the SUBMITTED ScheduleIds), the message names the PO + line (the 400 body carries messages only), and nothing
+        // has been written yet, so a rejection persists nothing. See AsnShipQtyScale.
+        var shipQtyOverrides = body.ShipQtyByScheduleId ?? new Dictionary<Guid, decimal>();
+        var shipQtyBySchedule = rows.ToDictionary(
+            r => r.ScheduleId,
+            r => shipQtyOverrides.TryGetValue(r.ScheduleId, out var typed) ? typed : Math.Max(0m, r.OrderQty - r.ShippedQtyToDate));
+        var submittedScheduleIds = body.ScheduleIds.ToList();
+        await AsnShipQtyScale.EnsureAsync(
+            _unitDecimals,
+            rows.OrderBy(r => submittedScheduleIds.IndexOf(r.ScheduleId))
+                .Select(r => new AsnShipQtyScale.Line(
+                    $"lines[{submittedScheduleIds.IndexOf(r.ScheduleId)}].shippedQty",
+                    r.PoNumber, r.PositionNo, r.OrderUnit, shipQtyBySchedule[r.ScheduleId]))
+                .ToList(),
+            ct);
+
         // Snapshot the chosen warehouse's CompanyAddress so the read side renders it without a join. IgnoreQueryFilters
         // — the address is company-scoped and this create runs under the supplier principal (which holds no company).
         WarehouseSnapshot? warehouseSnapshot = null;
@@ -147,7 +176,6 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
         var now = DateTime.UtcNow;
         var asnId = Guid.NewGuid();
         var asnNumber = $"ASN-{supplier.SupplierCode}-{now:yyyyMMddHHmmssfff}";
-        var shipQtyOverrides = body.ShipQtyByScheduleId ?? new Dictionary<Guid, decimal>();
 
         var asn = new Asn
         {
@@ -194,10 +222,6 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
         {
             var flags = !string.IsNullOrWhiteSpace(r.ItemCode) && itemFlags.TryGetValue(r.ItemCode, out var f) ? f : null;
 
-            // Default ship qty = the line's remaining balance (editable via the per-schedule override, §9.2).
-            var balance = Math.Max(0m, r.OrderQty - r.ShippedQtyToDate);
-            var shipQty = shipQtyOverrides.TryGetValue(r.ScheduleId, out var ov) ? ov : balance;
-
             asn.Lines.Add(new AsnLine
             {
                 Id = Guid.NewGuid(),
@@ -205,7 +229,9 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
                 PurchaseOrderLineId = r.PurchaseOrderLineId,
                 DeliveryScheduleId = r.ScheduleId,    // R5 §4.5 / §9.2 — back-link to the originating schedule.
                 ItemId = r.ItemId ?? flags?.Id,
-                ShippedQty = shipQty,
+                // Default ship qty = the line's remaining balance (editable via the per-schedule override, §9.2) — resolved
+                // above, with the precision check, as shipQtyBySchedule.
+                ShippedQty = shipQtyBySchedule[r.ScheduleId],
                 PositionNo = r.PositionNo,            // snapshot from the source PO line (Addendum A4).
                 SequenceNo = r.SequenceNo,
                 CreatedBy = _user.UserCode,
@@ -224,6 +250,6 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
         // confirmed/shippable, §8.1), so no gate re-check is needed at this create. NO balance consumption (§10.4).
         await _db.SaveChangesAsync(ct);
 
-        return await AsnDtoBuilder.BuildAsync(_db, asnId, ct, _fulfilment.OverShipAllowanceRounding);
+        return await AsnDtoBuilder.BuildAsync(_db, asnId, ct, _fulfilment.OverShipAllowanceRounding, _unitDecimals);
     }
 }

@@ -20,10 +20,21 @@
         </div>
     </header>
 
+    @* Toolbar — server-side filters: ?search= (code / description; applied on Enter or ~250 ms after the last keystroke) and
+       ?isActive=true. Unchecked sends no isActive at all, so the default view is still every unit. *@
+    <div class="tl-filter-bar">
+        <input class="rz-textbox" placeholder="Search code / description…" style="width:280px;padding:8px 12px;"
+               value="@search" @oninput="OnSearchInput" @onkeydown="OnSearchKeyDown" />
+        <label style="font-size:12px;color:var(--mer-ink-600);display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" @bind="activeOnly" @bind:after="Load" />
+            Active only
+        </label>
+    </div>
+
     @if (loading) { <div class="tl-empty">Loading…</div> }
     else if (rows == null || rows.Count == 0)
     {
-        <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">straighten</span><div>No units defined.</div></div>
+        <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">straighten</span><div>@(HasFilter ? "No units match." : "No units defined.")</div></div>
     }
     else
     {
@@ -78,7 +89,7 @@
                     <div><label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Base unit</label>
                         <select class="rz-dropdown" style="width:100%;padding:8px 10px;" @bind="formBaseUnitId">
                             <option value="">— is a base unit —</option>
-                            @foreach (var u in rows ?? new()) { @if (!editingId.HasValue || u.Id != editingId) { <option value="@u.Id">@u.Code — @u.Description</option> } }
+                            @foreach (var u in allUnits ?? new()) { @if (!editingId.HasValue || u.Id != editingId) { <option value="@u.Id">@u.Code — @u.Description</option> } }
                         </select>
                     </div>
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;grid-column:1 / span 2;"><input type="checkbox" @bind="formIsActive" /> Active</label>
@@ -98,7 +109,12 @@
 @code {
     private static readonly string[] UnitTypes = { "Quantity", "Length", "Area", "Volume", "Mass", "Time", "Other" };
     private List<UnitDto>? rows;
-    private bool loading = true, busy, showDialog, formIsActive = true;
+    // The WHOLE master: the dialog's Base-unit dropdown must list every unit, whatever the toolbar is filtering the grid on.
+    // Null = stale (first load, or a save / deactivate changed it) — Load refills it.
+    private List<UnitDto>? allUnits;
+    private bool loading = true, busy, showDialog, formIsActive = true, activeOnly;
+    private string search = string.Empty;
+    private int _searchSeq, _loadSeq;
     private Guid? editingId;
     private string formCode = string.Empty, formDescription = string.Empty, formError = string.Empty, formUnitType = "Quantity", formBaseUnitId = string.Empty;
     private string? formIso;
@@ -107,7 +123,40 @@
 
     protected override async Task OnInitializedAsync() => await Load();
 
-    private async Task Load() { loading = true; var resp = await Api.GetAsync<List<UnitDto>>("api/masters/units"); rows = resp?.Data ?? new(); loading = false; }
+    private bool HasFilter => activeOnly || !string.IsNullOrWhiteSpace(search);
+
+    private async Task Load()
+    {
+        var mine = ++_loadSeq;
+        loading = true;
+        var qp = new List<string>();
+        if (!string.IsNullOrWhiteSpace(search)) qp.Add($"search={Uri.EscapeDataString(search.Trim())}");
+        if (activeOnly) qp.Add("isActive=true");
+        var resp = await Api.GetAsync<List<UnitDto>>("api/masters/units" + (qp.Count > 0 ? "?" + string.Join("&", qp) : ""));
+        // Unfiltered, the grid already IS the whole master; filtered, fetch the master once (and again after it changed).
+        var master = qp.Count == 0 ? resp?.Data : allUnits ?? (await Api.GetAsync<List<UnitDto>>("api/masters/units"))?.Data;
+        if (mine != _loadSeq) return;     // a newer search / toggle superseded this response
+        rows = resp?.Data ?? new();
+        allUnits = master;
+        loading = false;
+    }
+
+    // Debounced type-ahead (~250 ms) so a keystroke is not a round-trip each; Enter applies at once.
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        search = e.Value?.ToString() ?? string.Empty;
+        var mine = ++_searchSeq;
+        await Task.Delay(250);
+        if (mine != _searchSeq) return;   // superseded by a newer keystroke (or Enter)
+        await Load();
+    }
+
+    private async Task OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+        _searchSeq++;                     // cancel the pending debounce
+        await Load();
+    }
 
     private void OpenNew() { editingId = null; formCode = ""; formDescription = ""; formIso = null; formUnitType = "Quantity"; formDecimals = 2; formFactor = 1m; formBaseUnitId = ""; formIsActive = true; formError = ""; showDialog = true; }
     private void OpenEdit(UnitDto r) { editingId = r.Id; formCode = r.Code; formDescription = r.Description; formIso = r.IsoCode; formUnitType = r.UnitType; formDecimals = r.DecimalPlaces; formFactor = r.ConversionFactor; formBaseUnitId = r.BaseUnitId?.ToString() ?? ""; formIsActive = r.IsActive; formError = ""; showDialog = true; }
@@ -125,7 +174,7 @@
             resp = await Api.PutAsync<UnitDto, UpdateUnitRequest>($"api/masters/units/{editingId}", new UpdateUnitRequest(formDescription.Trim(), formUnitType, iso, formDecimals, formFactor, baseId, formIsActive));
         else
             resp = await Api.PostAsync<UnitDto, CreateUnitRequest>("api/masters/units", new CreateUnitRequest(formCode.Trim(), formDescription.Trim(), formUnitType, iso, formDecimals, formFactor, baseId, formIsActive));
-        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" }); showDialog = false; await Load(); }
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" }); showDialog = false; allUnits = null; await Load(); }
         else { formError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
         busy = false;
     }
@@ -135,7 +184,7 @@
         if (!await Dialog.ConfirmDeactivateAsync(label, "UNIT")) return;
         busy = true;
         var resp = await Api.PostAsync<object>($"api/masters/units/{id}/deactivate", new { });
-        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" }); await Load(); }
+        if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" }); allUnits = null; await Load(); }
         else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
         busy = false;
     }

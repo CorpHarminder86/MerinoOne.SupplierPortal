@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
 using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
@@ -18,18 +19,28 @@ namespace MerinoOne.SupplierPortal.Application.Shipments.Queries;
 /// warehouse signal — the count of DISTINCT warehouse addresses across the supplier's visible schedules (before the
 /// warehouse filter) so the UI hides the Warehouse filter when there is only one to pick.</para>
 ///
+/// <para>2026-10-10 — <c>Warehouse</c> is an EXACT match on the PO line's raw warehouse CODE (e.g. "WH-01"), alongside the
+/// address-FK <c>WarehouseAddressId</c> filter; like it, it is applied AFTER the distinct-warehouse count so the auto-hide
+/// signal never changes with it. It rides on the query rather than <see cref="DeliveryScheduleFilterRequest"/> (a Contracts
+/// record this query does not own). Every row also carries <c>UnitDecimalPlaces</c> (mdm.Unit.decimalPlaces of its
+/// OrderUnit, one batched lookup per page).</para>
+///
 /// <para>RLS: the query runs under the caller's principal — the always-on seccode/company filters scope a supplier
 /// to its own schedules (each schedule carries the owning PO's G-seccode), so no explicit supplier guard is needed
 /// beyond the optional supplier filter.</para>
 /// </summary>
-public record GetDeliveryScheduleListQuery(DeliveryScheduleFilterRequest Filter)
+public record GetDeliveryScheduleListQuery(DeliveryScheduleFilterRequest Filter, string? Warehouse = null)
     : IRequest<DeliveryScheduleGridDto>;
 
 public class GetDeliveryScheduleListQueryHandler
     : IRequestHandler<GetDeliveryScheduleListQuery, DeliveryScheduleGridDto>
 {
     private readonly IAppDbContext _db;
-    public GetDeliveryScheduleListQueryHandler(IAppDbContext db) => _db = db;
+    private readonly IUnitDecimalsResolver _units;
+    public GetDeliveryScheduleListQueryHandler(IAppDbContext db, IUnitDecimalsResolver units)
+    {
+        _db = db; _units = units;
+    }
 
     public async Task<DeliveryScheduleGridDto> Handle(GetDeliveryScheduleListQuery request, CancellationToken ct)
     {
@@ -87,6 +98,11 @@ public class GetDeliveryScheduleListQueryHandler
         // Apply the warehouse filter AFTER the distinct count (so the count reflects all available warehouses).
         if (f.WarehouseAddressId is Guid warehouseAddr) baseQuery = baseQuery.Where(x => x.sch.WarehouseAddressId == warehouseAddr);
 
+        // 2026-10-10 — warehouse CODE: exact match on the PO line's raw ERP code (blank = no filter). Equality, not Contains,
+        // so "WH-1" never drags in "WH-10"; the column's collation decides case (SQL Server default is case-insensitive).
+        var warehouseCode = request.Warehouse?.Trim();
+        if (!string.IsNullOrEmpty(warehouseCode)) baseQuery = baseQuery.Where(x => x.LineWarehouse == warehouseCode);
+
         var total = await baseQuery.CountAsync(ct);
 
         // Sort (R15): CreatedOn DESC — newest schedules surface first; PO → Line is the stable tiebreak for rows
@@ -124,6 +140,10 @@ public class GetDeliveryScheduleListQueryHandler
             })
             .ToListAsync(ct);
 
+        // 2026-10-10 — decimal precision per row (mdm.Unit.decimalPlaces of the PO line's OrderUnit): ONE batched lookup for
+        // the page; an unknown/blank unit falls back to the resolver's default (3).
+        var unitPlaces = await _units.ResolveAsync(raw.Select(r => r.OrderUnit), ct);
+
         var rows = raw.Select(r => new DeliveryScheduleDto(
             r.Id, r.Seq, r.PurchaseOrderId, r.PoNumber, r.PurchaseOrderLineId, r.PositionNo,
             r.ItemCode, r.ItemDescription, r.OrderUnit, r.OrderQty, r.ShippedQtyToDate,
@@ -133,7 +153,9 @@ public class GetDeliveryScheduleListQueryHandler
             r.DeliveryDate, r.Status.ToString(), r.CreatedOn,
             PoConfirmationPolicy.AllowsShipping(r.PoStatus, r.PoConfirmationMode),
             // R13 (D4) — warehouse: the PO LINE's code + the warehouse address FK/name (was ship-to).
-            r.LineWarehouse, r.WarehouseAddressId, r.WarehouseAddressName)).ToList();
+            r.LineWarehouse, r.WarehouseAddressId, r.WarehouseAddressName,
+            UnitDecimalPlaces: !string.IsNullOrWhiteSpace(r.OrderUnit) && unitPlaces.TryGetValue(r.OrderUnit, out var places)
+                ? places : _units.Fallback)).ToList();
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling(total / (double)pageSize);
         var paged = new PagedResult<DeliveryScheduleDto>(rows, page, pageSize, total, totalPages);

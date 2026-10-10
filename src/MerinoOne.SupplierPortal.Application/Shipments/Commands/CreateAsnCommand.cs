@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
 using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
@@ -118,17 +119,115 @@ internal static class AsnLineRules
     }
 }
 
+/// <summary>
+/// 2026-10-10 — ship-quantity precision rule, shared by Create + Update + CreateFromSchedule. A line may ship only as many
+/// decimal places as its unit of measure allows: <c>mdm.Unit.decimalPlaces</c> of the PO line's <c>OrderUnit</c> (0 for a
+/// piece-counted unit such as EA, 3 for a weight unit, ...). An unknown or blank unit resolves to the resolver's fallback (3).
+/// Exactly <c>n</c> decimals is accepted; the validators' <c>GreaterThan(0)</c> rule still owns the lower bound.
+///
+/// <para>The rule needs the unit master, so it cannot sit in the (DB-free) FluentValidation validators — the handlers call
+/// <see cref="EnsureAsync(IUnitDecimalsResolver, IReadOnlyList{Line}, CancellationToken)"/> once the request's PO lines are
+/// loaded. One resolver call per request, however many lines.</para>
+///
+/// <para>Failures use the field-keyed <see cref="ValidationException"/> pattern <c>AsnSubmitExecutor</c> uses: one entry per
+/// offending line, keyed <c>lines[i].shippedQty</c> (i = index into the SUBMITTED lines). <c>GlobalExceptionHandler</c>
+/// flattens a ValidationException to its messages on the wire (HTTP 400, bare strings), so the KEY never reaches a client —
+/// the MESSAGE therefore locates the line itself, naming the PO and its line position (like the negotiation quantity-scale
+/// message does): "Ship quantity on PUR000359 line 10 for unit EA allows at most 0 decimal places."</para>
+/// </summary>
+public static class AsnShipQtyScale
+{
+    // decimal.Round accepts 0..28 decimals only.
+    private const int MaxDecimalScale = 28;
+
+    /// <summary>
+    /// One ship quantity to judge: <paramref name="Key"/> is the error key it is reported under, <paramref name="PoNumber"/> and
+    /// <paramref name="PositionNo"/> locate the PO line it ships against (for the message), <paramref name="Unit"/> decides its
+    /// precision and <paramref name="Qty"/> is the value being checked.
+    /// </summary>
+    public readonly record struct Line(string Key, string? PoNumber, int PositionNo, string? Unit, decimal Qty);
+
+    /// <summary>True when <paramref name="qty"/> has a non-zero digit beyond <paramref name="places"/> decimal places.</summary>
+    public static bool ExceedsScale(decimal qty, int places)
+    {
+        // decimal.Round(qty, p) == qty  ⇔  qty has no non-zero digit past the p-th decimal. Chosen over (qty * 10^p) % 1 == 0
+        // because that multiplication can overflow on an absurdly large qty (a 500, not a 400), and over reading the scale
+        // out of decimal.GetBits because that counts trailing zeros (1.500 is stored with scale 3 but has ONE decimal place).
+        // decimal equality compares the numeric value, not the scale, so 1.500m == 1.5m and the zeros cost nothing.
+        return decimal.Round(qty, Math.Clamp(places, 0, MaxDecimalScale)) != qty;
+    }
+
+    /// <summary>
+    /// The per-line message, self-locating because the 400 body carries messages only — e.g. "Ship quantity on PUR000359 line 10
+    /// for unit EA allows at most 0 decimal places." A blank unit drops the "for unit" clause; a blank PO number drops the PO.
+    /// </summary>
+    public static string Message(string? poNumber, int positionNo, string? unit, int places)
+    {
+        var where = string.IsNullOrWhiteSpace(poNumber) ? $"line {positionNo}" : $"{poNumber.Trim()} line {positionNo}";
+        var forUnit = string.IsNullOrWhiteSpace(unit) ? string.Empty : $" for unit {unit.Trim()}";
+        return $"Ship quantity on {where}{forUnit} allows at most {places} decimal {(places == 1 ? "place" : "places")}.";
+    }
+
+    /// <summary>
+    /// Throws a keyed <see cref="ValidationException"/> naming every line whose quantity carries more decimals than its unit
+    /// allows. ONE batched resolver call covers every distinct unit; a no-line request makes none.
+    /// </summary>
+    public static async Task EnsureAsync(IUnitDecimalsResolver units, IReadOnlyList<Line> lines, CancellationToken ct)
+    {
+        if (lines.Count == 0) return;
+
+        var places = await units.ResolveAsync(lines.Select(l => l.Unit), ct);
+
+        Dictionary<string, string[]>? errors = null;
+        foreach (var line in lines)
+        {
+            var allowed = !string.IsNullOrWhiteSpace(line.Unit) && places.TryGetValue(line.Unit, out var p) ? p : units.Fallback;
+            if (!ExceedsScale(line.Qty, allowed)) continue;
+
+            (errors ??= new())[line.Key] = new[] { Message(line.PoNumber, line.PositionNo, line.Unit, allowed) };
+        }
+
+        if (errors is not null) throw new ValidationException(errors);
+    }
+
+    /// <summary>
+    /// The Create / Update shape: judges every submitted <see cref="CreateAsnLineRequest"/> against its PO line's unit, keyed
+    /// <c>lines[i].shippedQty</c>. <paramref name="poNumbers"/> maps a PO id to its number for the message. A line whose PO
+    /// line is not in <paramref name="poLines"/> is skipped — the callers report unknown PO-line ids themselves, before this runs.
+    /// </summary>
+    public static Task EnsureAsync(
+        IUnitDecimalsResolver units,
+        IReadOnlyList<CreateAsnLineRequest> lines,
+        IReadOnlyDictionary<Guid, PurchaseOrderLine> poLines,
+        IReadOnlyDictionary<Guid, string> poNumbers,
+        CancellationToken ct)
+    {
+        var scaled = new List<Line>(lines.Count);
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!poLines.TryGetValue(lines[i].PurchaseOrderLineId, out var poLine)) continue;
+
+            poNumbers.TryGetValue(poLine.PurchaseOrderId, out var poNumber);
+            scaled.Add(new Line($"lines[{i}].shippedQty", poNumber, poLine.PositionNo, poLine.OrderUnit, lines[i].ShippedQty));
+        }
+
+        return EnsureAsync(units, scaled, ct);
+    }
+}
+
 public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDetailDto>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly Common.Documents.AsnAttachmentRebinder _rebinder;
     private readonly IFulfilmentSettings _fulfilment;
+    private readonly IUnitDecimalsResolver _unitDecimals;
 
     public CreateAsnCommandHandler(
-        IAppDbContext db, ICurrentUser user, Common.Documents.AsnAttachmentRebinder rebinder, IFulfilmentSettings fulfilment)
+        IAppDbContext db, ICurrentUser user, Common.Documents.AsnAttachmentRebinder rebinder, IFulfilmentSettings fulfilment,
+        IUnitDecimalsResolver unitDecimals)
     {
-        _db = db; _user = user; _rebinder = rebinder; _fulfilment = fulfilment;
+        _db = db; _user = user; _rebinder = rebinder; _fulfilment = fulfilment; _unitDecimals = unitDecimals;
     }
 
     public async Task<AsnDetailDto> Handle(CreateAsnCommand request, CancellationToken ct)
@@ -169,6 +268,11 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
             {
                 ["lines"] = new[] { $"PurchaseOrderLineId(s) not on the supplied PO(s): {string.Join(", ", invalid)}" }
             });
+
+        // 2026-10-10 — ship quantities may carry no more decimals than the line's unit of measure allows (mdm.Unit
+        // .decimalPlaces of the PO line's OrderUnit). Keyed per line: lines[i].shippedQty; the message names the PO and
+        // line position (the 400 body carries messages only). See AsnShipQtyScale.
+        await AsnShipQtyScale.EnsureAsync(_unitDecimals, body.Lines, poLines, pos.ToDictionary(p => p.Id, p => p.PoNumber), ct);
 
         // R4 (2026-06-23) — Serial/Lot capture: the Item control flags (serialized XOR lot-controlled) decide
         // which child rows to persist per line. Resolve by **ItemCode within the PO's company** (NOT ItemId — the
@@ -335,6 +439,6 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
         // (AsnDtoBuilder), but the create path never rejects/consumes — Submit is the single point of truth.
         await _db.SaveChangesAsync(ct);   // ASN + junction + lines + rebound attachments. NO ERP post (Draft only).
 
-        return await AsnDtoBuilder.BuildAsync(_db, asnId, ct, _fulfilment.OverShipAllowanceRounding);
+        return await AsnDtoBuilder.BuildAsync(_db, asnId, ct, _fulfilment.OverShipAllowanceRounding, _unitDecimals);
     }
 }

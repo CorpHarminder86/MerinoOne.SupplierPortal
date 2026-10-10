@@ -1,6 +1,7 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using Microsoft.EntityFrameworkCore;
@@ -13,10 +14,12 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
 {
     private readonly IAppDbContext _db;
     private readonly IFulfilmentSettings _fulfilment;
-    public GetPurchaseOrderByIdQueryHandler(IAppDbContext db, IFulfilmentSettings fulfilment)
+    private readonly IUnitDecimalsResolver _units;
+    public GetPurchaseOrderByIdQueryHandler(IAppDbContext db, IFulfilmentSettings fulfilment, IUnitDecimalsResolver units)
     {
         _db = db;
         _fulfilment = fulfilment;
+        _units = units;
     }
 
     public async Task<PurchaseOrderDetailDto> Handle(GetPurchaseOrderByIdQuery request, CancellationToken ct)
@@ -63,6 +66,10 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
                            })
                           .ToListAsync(ct);
 
+        // mdm.Unit.decimalPlaces for every distinct OrderUnit on the PO in ONE query (not one per line); a unit that is
+        // missing from the master resolves to the resolver's fallback (3). Feeds each line's UnitDecimalPlaces below.
+        var unitDecimals = await _units.ResolveAsync(lineRows.Select(r => (string?)r.Line.OrderUnit), ct);
+
         var lines = lineRows.Select(r =>
         {
             var l = r.Line;
@@ -99,7 +106,12 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
                 l.WarehouseAddressSnapshot?.City,
                 l.WarehouseAddressSnapshot?.State,
                 l.WarehouseAddressSnapshot?.Pincode,
-                l.WarehouseAddressSnapshot?.Country);
+                l.WarehouseAddressSnapshot?.Country,
+                // ERP-supplied line tax AMOUNT exactly as stored (null when LN sent none). Informational only: it is NOT
+                // part of NetAmount / TotalAmount (those stay the line Price as received).
+                l.TaxAmount,
+                // Decimal places of the line's OrderUnit from the unit master (batched above); 3 when unknown/blank.
+                unitDecimals.TryGetValue(l.OrderUnit, out var unitPlaces) ? unitPlaces : _units.Fallback);
         }).ToList();
 
         // PO header total = sum of line net amounts (Price as received — ERP-net). Derived, not persisted.

@@ -30,11 +30,12 @@ Filters / params (all optional):
 - **pageSize**: rows per page (default 50, max 500).
 - **supplierId**: restrict to one supplier.
 - **warehouseAddressId**: restrict to one receiving warehouse (R13; was shipToAddressId).
+- **warehouse**: restrict to one receiving warehouse by its CODE — exact match on the PO line's warehouse code (e.g. WH-01). Combinable with warehouseAddressId; like it, it never changes the DistinctWarehouseCount signal.
 - **purchaseOrderId**: restrict to one PO.
 - **deliveryDateFrom / deliveryDateTo**: inclusive delivery-date day range.
 - **status**: schedule status (Approved).
 - **onlyWithBalance**: when true, hides lines with nothing left to ship (remaining-to-ship = 0). Omitted/false returns every line. The portal grid sends true by default.
-Returns: DeliveryScheduleGridDto — the paged rows plus the auto-hide warehouse signal (DistinctWarehouseCount + ShowWarehouseFilter; the Warehouse filter is hidden when only one warehouse is present). Requires permission **DeliverySchedule.Read**.")]
+Returns: DeliveryScheduleGridDto — the paged rows plus the auto-hide warehouse signal (DistinctWarehouseCount + ShowWarehouseFilter; the Warehouse filter is hidden when only one warehouse is present). Each row carries unitDecimalPlaces — the decimals the unit master allows for its order unit (3 when the unit is unknown). Requires permission **DeliverySchedule.Read**.")]
     public async Task<Result<DeliveryScheduleGridDto>> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
@@ -45,12 +46,13 @@ Returns: DeliveryScheduleGridDto — the paged rows plus the auto-hide warehouse
         [FromQuery] DateTime? deliveryDateTo = null,
         [FromQuery] string? status = null,
         [FromQuery] bool? onlyWithBalance = null,
+        [FromQuery] string? warehouse = null,
         CancellationToken ct = default)
     {
         var filter = new DeliveryScheduleFilterRequest(
             page, pageSize, supplierId, warehouseAddressId, purchaseOrderId, deliveryDateFrom, deliveryDateTo, status,
             onlyWithBalance);
-        var data = await _mediator.Send(new GetDeliveryScheduleListQuery(filter), ct);
+        var data = await _mediator.Send(new GetDeliveryScheduleListQuery(filter, warehouse), ct);
         return Result<DeliveryScheduleGridDto>.Ok(data, HttpContext.TraceIdentifier);
     }
 }

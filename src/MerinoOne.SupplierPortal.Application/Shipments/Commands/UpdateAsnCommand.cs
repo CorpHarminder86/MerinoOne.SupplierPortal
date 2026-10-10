@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
 using MerinoOne.SupplierPortal.Application.Shipments;
 using MerinoOne.SupplierPortal.Application.Shipments.Policies;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
@@ -60,10 +61,12 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly IFulfilmentSettings _fulfilment;
+    private readonly IUnitDecimalsResolver _unitDecimals;
 
-    public UpdateAsnCommandHandler(IAppDbContext db, ICurrentUser user, IFulfilmentSettings fulfilment)
+    public UpdateAsnCommandHandler(
+        IAppDbContext db, ICurrentUser user, IFulfilmentSettings fulfilment, IUnitDecimalsResolver unitDecimals)
     {
-        _db = db; _user = user; _fulfilment = fulfilment;
+        _db = db; _user = user; _fulfilment = fulfilment; _unitDecimals = unitDecimals;
     }
 
     public async Task<AsnDetailDto> Handle(UpdateAsnCommand request, CancellationToken ct)
@@ -112,10 +115,15 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
 
         // Resolve the new line set — every line must belong to a PO owned by this ASN's supplier.
         var requestedLineIds = body.Lines.Select(l => l.PurchaseOrderLineId).Distinct().ToList();
-        var poLines = await (from pol in _db.PurchaseOrderLines
-                             join po in _db.PurchaseOrders on pol.PurchaseOrderId equals po.Id
-                             where requestedLineIds.Contains(pol.Id) && po.SupplierId == asn.SupplierId
-                             select pol).ToDictionaryAsync(l => l.Id, ct);
+        // (The owning PO's number rides along: the ship-quantity scale message names the PO it is about.)
+        var poLineRows = await (from pol in _db.PurchaseOrderLines
+                                join po in _db.PurchaseOrders on pol.PurchaseOrderId equals po.Id
+                                where requestedLineIds.Contains(pol.Id) && po.SupplierId == asn.SupplierId
+                                select new { Line = pol, po.PoNumber }).ToListAsync(ct);
+        var poLines = poLineRows.ToDictionary(x => x.Line.Id, x => x.Line);
+        var poNumbers = poLineRows
+            .GroupBy(x => x.Line.PurchaseOrderId)
+            .ToDictionary(g => g.Key, g => g.First().PoNumber);
 
         var invalid = requestedLineIds.Except(poLines.Keys).ToList();
         if (invalid.Count > 0)
@@ -123,6 +131,13 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
             {
                 ["lines"] = new[] { $"PurchaseOrderLineId(s) not on a PO for this supplier: {string.Join(", ", invalid)}" }
             });
+
+        // 2026-10-10 — ship quantities may carry no more decimals than the line's unit of measure allows (mdm.Unit
+        // .decimalPlaces of the PO line's OrderUnit). Keyed per line: lines[i].shippedQty; the message names the PO and
+        // line position (the 400 body carries messages only). See AsnShipQtyScale.
+        // Applies to EVERY submitted line, Approved edits included: the frozen check above compares per-PO-line SUMS, so
+        // it would let a whole quantity be re-split into fractional rows — skipping the rule there would open that hole.
+        await AsnShipQtyScale.EnsureAsync(_unitDecimals, body.Lines, poLines, poNumbers, ct);
 
         // R4 §6.2 — "saving a Draft" is inside the gate block scope. Hard-block the edit if a target PO is not
         // shippable (e.g. reset to Released by an ERP Modify) or another ASN for the same PO is pending approval.
@@ -300,6 +315,6 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         // not touch shippedQtyToDate). The atomic over-ship guard runs once at final Submit (AsnSubmitExecutor).
         await _db.SaveChangesAsync(ct);
 
-        return await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct, _fulfilment.OverShipAllowanceRounding);
+        return await AsnDtoBuilder.BuildAsync(_db, asn.Id, ct, _fulfilment.OverShipAllowanceRounding, _unitDecimals);
     }
 }

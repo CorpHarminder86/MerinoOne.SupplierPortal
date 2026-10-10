@@ -47,6 +47,27 @@ Returns: PagedResult<PurchaseOrderListItemDto>. Requires permission **PurchaseOr
         return Result<ContractsPagedResult>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    [HttpGet("lookup")]
+    [Authorize(Policy = Perm.PurchaseOrderRead)]
+    [EndpointSummary("Purchase order lookup")]
+    [EndpointDescription(@"Type-ahead for PO pickers: lightweight rows (id, PO number, supplier name, PO date, status) for POs whose number contains the text typed.
+Filters / params:
+- **q**: Required in practice — the text to find inside the PO number (case-insensitive, matched literally). Trimmed; fewer than 2 characters returns an empty list.
+- **supplierId**: Optional — restrict to one supplier.
+- **limit**: Optional — rows to return (default 10, max 50).
+Side effects:
+- Seccode-scoped exactly like the PO list: supplier users only ever see their own POs.
+Returns: list of PoLookupItemDto, newest PO date first then PO number; status is the PoStatus name. Requires permission **PurchaseOrder.Read**.")]
+    public async Task<Result<IReadOnlyList<PoLookupItemDto>>> Lookup(
+        [FromQuery] string? q = null,
+        [FromQuery] Guid? supplierId = null,
+        [FromQuery] int limit = 10,
+        CancellationToken ct = default)
+    {
+        var data = await _mediator.Send(new LookupPurchaseOrdersQuery(q, supplierId, limit), ct);
+        return Result<IReadOnlyList<PoLookupItemDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
     [HttpGet("{id:guid}/history")]
     [Authorize(Policy = Perm.PurchaseOrderRead)]
     [EndpointSummary("Purchase order change history")]
