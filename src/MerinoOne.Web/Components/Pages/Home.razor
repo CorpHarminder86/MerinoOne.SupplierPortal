@@ -79,7 +79,7 @@
                             <td style="padding:10px 14px;">
                                 @if (!string.IsNullOrEmpty(a.Status))
                                 {
-                                    <span class="tlg-status @StatusClass(a.Status)">@a.Status</span>
+                                    <span class="tlg-status @StatusClass(a.Status)">@(a.Module == "PurchaseOrder" ? PoStatusLabels.Label(a.Status) : a.Status)</span>
                                 }
                             </td>
                         </tr>
@@ -135,13 +135,15 @@
         _ => string.Empty
     };
 
+    // Whole numbers (the counts) print grouped with no decimals; a fractional value is an amount (Payments), so it goes
+    // through the money-display authority.
     private static string FormatValue(decimal v)
     {
         if (Math.Abs(v - Math.Truncate(v)) < 0.005m)
         {
             return v.ToString("N0");
         }
-        return v.ToString("N2");
+        return AppMoney.Format(v);
     }
 
     private static string DeltaLabel(DashboardKpiDto k)

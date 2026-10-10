@@ -34,7 +34,7 @@
                         </div>
                         @if (!string.IsNullOrEmpty(r.Status))
                         {
-                            <span class="tlg-status @StatusClass(r.Status)" style="font-size:10.5px;">@r.Status</span>
+                            <span class="tlg-status @StatusClass(r.Status)" style="font-size:10.5px;">@(r.Module == "PurchaseOrder" ? PoStatusLabels.Label(r.Status) : r.Status)</span>
                         }
                     </div>
                 }

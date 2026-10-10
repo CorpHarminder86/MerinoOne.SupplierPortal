@@ -68,7 +68,7 @@
                     <div class="tlg-col tlg-code" style="font-weight:600;color:var(--mer-blue-darker);">@row.ErpStatus</div>
                     <div class="tlg-col tlg-desc">
                         <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;color:var(--mer-ink-400);">arrow_forward</span>
-                        @row.PoStatus
+                        @PoStatusLabels.Label(row.PoStatus)
                     </div>
                     <div class="tlg-col"><span class="tlg-status @(row.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(row.IsActive ? "Yes" : "No")</span></div>
                     <div class="tlg-col tlg-col--actions">
@@ -123,7 +123,7 @@
                         <select class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="formPoStatus">
                             @foreach (var s in ErpDrivenTargets)
                             {
-                                <option value="@s">@s</option>
+                                <option value="@s">@PoStatusLabels.Label(s)</option>
                             }
                         </select>
                         <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Only the ERP-driven targets are selectable (§11.2). Supplier-driven statuses are excluded.</div>
