@@ -47,7 +47,7 @@ else
                 <dt style="color:var(--mer-ink-500);">Type</dt><dd>@(detail.NoteType == "CN" ? "Credit Note" : "Debit Note")</dd>
                 <dt style="color:var(--mer-ink-500);">Against invoice</dt><dd><a href="invoices/@detail.InvoiceId" style="color:var(--mer-blue);font-family:Inter,monospace;">@detail.InvoiceNumber</a></dd>
                 <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName</dd>
-                <dt style="color:var(--mer-ink-500);">Amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@detail.Amount.ToString("N2")</dd>
+                <dt style="color:var(--mer-ink-500);">Amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@AppMoney.Format(detail.Amount)</dd>
                 <dt style="color:var(--mer-ink-500);">Status</dt><dd><span class="tlg-status @StatusClass(detail.NoteStatus)">@detail.NoteStatus</span></dd>
                 <dt style="color:var(--mer-ink-500);">Created</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.CreatedOn)</dd>
             </dl>

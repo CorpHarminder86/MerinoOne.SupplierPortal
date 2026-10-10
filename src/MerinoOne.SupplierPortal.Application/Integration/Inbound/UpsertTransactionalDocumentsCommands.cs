@@ -78,7 +78,7 @@ public class UpsertPurchaseOrdersCommandHandler(
     public Task<UpsertResultDto> Handle(UpsertPurchaseOrdersCommand request, CancellationToken ct)
     {
         var recs = request.Body.Orders;
-        // Canonical includes a per-line digest (position/item/qty/additionalQty/price/discount) — NOT just Lines.Count
+        // Canonical includes a per-line digest (position/item/qty/additionalQty/price/discount/taxAmount) — NOT just Lines.Count
         // — so a follow-up push that changes a qty or sends a cumulative delta hashes differently and is NOT
         // short-circuited as a duplicate by the no-header idempotency fallback. Storage line key = positionNo (seq is
         // always stored as 1 and is omitted from the digest); additionalQty is included so a changed delta re-processes.
@@ -91,9 +91,13 @@ public class UpsertPurchaseOrdersCommandHandler(
         // most on the very first push that carries it: an otherwise-unchanged PO re-pushed only to deliver the new
         // warehouse would otherwise be deduped away and the warehouse would never land — silent data loss on exactly
         // the backfill push. (The retired header ship-to / header warehouse are no longer in the digest.)
+        // 2026-10-10 — taxAmount (the optional LN-computed line tax amount) sits in the per-line digest segment right
+        // after discountAmount, for the same reason as warehouse: a PO re-pushed only to deliver or correct the tax
+        // amount would otherwise hash identically and be deduped away, so the value would never land. An absent (null)
+        // taxAmount contributes an empty segment, so an unchanged keyless re-push still dedupes.
         var canonical = recs.Select(r =>
             $"{r.PoNumber.Trim().ToUpperInvariant()}|{r.ErpSupplierCode?.Trim()}|{r.SupplierCode?.Trim()}|{r.PoDate:O}|{r.PoStatus}|{r.CurrencyCode}|{r.ErpStatus?.Trim()}|{r.PoOrigin?.Trim()}|" +
-            string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.ItemCode}/{l.OrderQty}/{l.AdditionalQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}/{l.Warehouse?.Trim()}")));
+            string.Join(";", r.Lines.Select(l => $"{l.PositionNo}/{l.ItemCode}/{l.OrderQty}/{l.AdditionalQty}/{l.PriceUnit}/{l.Price}/{l.DiscountAmount}/{l.TaxAmount}/{l.Warehouse?.Trim()}")));
         var codes = recs.Select(r => r.PoNumber.Trim());
         return exec.ExecuteAsync(TransactionalInboundEntity.Po, request.Body.CompanyCode, request.BoundCompanyIds,
             request.IdempotencyKey, recs.Count, canonical, codes, request.Body, Upsert, ct);
@@ -481,7 +485,7 @@ public class UpsertPurchaseOrdersCommandHandler(
                     {
                         var nl = NewLine(last, warehouseByPosition[pos], itemMap, taxMap, now);
                         var rv = resolvedQty[pos];
-                        nl.OrderQty = rv.Qty; nl.Price = rv.Price; nl.DiscountAmount = rv.Discount;
+                        nl.OrderQty = rv.Qty; nl.Price = rv.Price; nl.DiscountAmount = rv.Discount; nl.TaxAmount = rv.Tax;
                         po2.Lines.Add(nl);
                     }
                     db.PurchaseOrders.Add(po2);
@@ -589,13 +593,13 @@ public class UpsertPurchaseOrdersCommandHandler(
             if (byPosition.TryGetValue(pos, out var line))
             {
                 Apply(line, last, whAddr, itemMap, taxMap);
-                line.OrderQty = rv.Qty; line.Price = rv.Price; line.DiscountAmount = rv.Discount;
+                line.OrderQty = rv.Qty; line.Price = rv.Price; line.DiscountAmount = rv.Discount; line.TaxAmount = rv.Tax;
                 line.UpdatedBy = "infor:inbound"; line.UpdatedOn = now;
             }
             else
             {
                 var newLine = NewLine(last, whAddr, itemMap, taxMap, now);
-                newLine.OrderQty = rv.Qty; newLine.Price = rv.Price; newLine.DiscountAmount = rv.Discount;
+                newLine.OrderQty = rv.Qty; newLine.Price = rv.Price; newLine.DiscountAmount = rv.Discount; newLine.TaxAmount = rv.Tax;
                 newLine.PurchaseOrderId = po.Id;
                 db.PurchaseOrderLines.Add(newLine);
             }
@@ -620,13 +624,13 @@ public class UpsertPurchaseOrdersCommandHandler(
         var existingByPos = new Dictionary<int, ResolvedPoLine>();
         if (po != null)
             foreach (var l in po.Lines.Where(l => !l.IsDeleted))
-                existingByPos[l.PositionNo] = new ResolvedPoLine(l.OrderQty, l.Price, l.DiscountAmount);
+                existingByPos[l.PositionNo] = new ResolvedPoLine(l.OrderQty, l.Price, l.DiscountAmount, l.TaxAmount);
 
         var resolved = new Dictionary<int, ResolvedPoLine>();
         foreach (var group in rec.Lines.GroupBy(l => l.PositionNo))
         {
             var pos = group.Key;
-            existingByPos.TryGetValue(pos, out var running);   // default (0,0,0) for a new position
+            existingByPos.TryGetValue(pos, out var running);   // default (0,0,0,null) for a new position
             foreach (var l in group)
             {
                 if (l.OrderQty > 0m && l.AdditionalQty != 0m)
@@ -634,10 +638,16 @@ public class UpsertPurchaseOrdersCommandHandler(
                 // R4 (2026-07-01) — qty, extended Price AND DiscountAmount fold together: orderQty>0 REPLACES all
                 // three with the pushed absolute values; additionalQty≠0 ADDS the pushed values as signed deltas
                 // (Price/DiscountAmount are the incremental amounts for the added qty); 0/0 is a no-op.
+                // 2026-10-10 — TaxAmount (nullable) is an amount field and folds with them: REPLACE takes the pushed value as
+                // received (an omitted taxAmount clears it); ADD adds the pushed taxAmount as a signed delta — a null delta
+                // leaves the running tax unchanged, and nothing stored yet + a delta becomes the delta.
                 if (l.OrderQty > 0m)
-                    running = new ResolvedPoLine(l.OrderQty, l.Price, l.DiscountAmount);
+                    running = new ResolvedPoLine(l.OrderQty, l.Price, l.DiscountAmount, l.TaxAmount);
                 else if (l.AdditionalQty != 0m)
-                    running = new ResolvedPoLine(running.Qty + l.AdditionalQty, running.Price + l.Price, running.Discount + l.DiscountAmount);
+                {
+                    decimal? tax = l.TaxAmount is { } taxDelta ? (running.Tax ?? 0m) + taxDelta : running.Tax;
+                    running = new ResolvedPoLine(running.Qty + l.AdditionalQty, running.Price + l.Price, running.Discount + l.DiscountAmount, tax);
+                }
                 // else 0/0 → no-op (leave the running values unchanged)
             }
             if (running.Qty < 0m)
@@ -655,8 +665,9 @@ public class UpsertPurchaseOrdersCommandHandler(
     }
 
     // Applies an inbound line's attributes onto a stored line. sequenceNo is FORCED to 1 (storage key is positionNo);
-    // additionalQty is echoed for audit. OrderQty, Price and DiscountAmount are NOT set here — the caller sets the
-    // RESOLVED folded values (replace on orderQty>0, signed-add on additionalQty≠0) from ResolvePoLineQuantities.
+    // additionalQty is echoed for audit. OrderQty, Price, DiscountAmount and TaxAmount are NOT set here — the caller sets
+    // the RESOLVED folded values (replace on orderQty>0, signed-add on additionalQty≠0) from ResolvePoLineQuantities.
+    // TaxAmount IS folded with additionalQty exactly like Price / DiscountAmount.
     // R13 — warehouseAddr is the per-line resolved (active, non-base) CompanyAddress; store the raw pushed code, the
     // live FK and a point-in-time snapshot (replaces the retired PO-header ship-to snapshot-on-write).
     private static void Apply(PurchaseOrderLine line, PoLineRecord l, CompanyAddress warehouseAddr, IReadOnlyDictionary<string, (Guid Id, string Desc)> itemMap, IReadOnlyDictionary<string, (Guid Id, string Desc)> taxMap)
@@ -684,6 +695,9 @@ public class UpsertPurchaseOrdersCommandHandler(
         line.OrderUnit = string.IsNullOrWhiteSpace(l.OrderUnit) ? "EA" : l.OrderUnit.Trim();
         line.PriceUnit = l.PriceUnit;               // unit RATE (replaced); the extended Price is folded by the caller.
         line.DiscountPct = l.DiscountPct; line.DeliveryDate = l.DeliveryDate;   // DiscountAmount folded by the caller.
+        // Tax AMOUNT (LN-computed, decimal(18,4)) is NOT assigned here: like Price / DiscountAmount it IS folded with
+        // additionalQty by the caller (orderQty>0 REPLACES it as received — an omitted taxAmount clears it; additionalQty≠0
+        // ADDS the pushed value as a signed delta — a null delta leaves it unchanged). TaxCode/TaxId below stay the master link.
         // Tax snapshot-on-write: resolve the code to the master (id + description). Store the pushed description if
         // the ERP sent one, else the master's (code-only push) — so the read side always shows the line's snapshot
         // with no Tax-master join. An unresolved code keeps whatever the ERP sent (may be null) and no FK.

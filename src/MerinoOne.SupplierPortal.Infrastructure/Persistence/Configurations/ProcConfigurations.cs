@@ -82,6 +82,8 @@ public class PurchaseOrderLineConfiguration : IEntityTypeConfiguration<PurchaseO
         b.Property(x => x.Price).HasColumnName("price").HasColumnType("decimal(18,4)");
         b.Property(x => x.DiscountPct).HasColumnName("discountPct").HasColumnType("decimal(5,2)");
         b.Property(x => x.DiscountAmount).HasColumnName("discountAmount").HasColumnType("decimal(18,4)");
+        // 2026-10-10 — ERP-supplied line tax AMOUNT; nullable, no default (null until LN pushes it).
+        b.Property(x => x.TaxAmount).HasColumnName("taxAmount").HasColumnType("decimal(18,4)");
         b.Property(x => x.DeliveryDate).HasColumnName("deliveryDate").HasColumnType("datetime2");
         b.Property(x => x.TaxCode).HasColumnName("taxCode").HasMaxLength(20);
         b.Property(x => x.TaxDescription).HasColumnName("taxDescription").HasMaxLength(200);

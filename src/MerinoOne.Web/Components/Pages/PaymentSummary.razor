@@ -66,7 +66,7 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 150px 110px 130px 150px 110px 1fr 130px 150px 140px 150px; --tl-min-width: 1500px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 150px 110px 150px 150px 110px 1fr 130px 150px 140px 150px; --tl-min-width: 1520px;">
             <div class="tlg-header">
                 <div class="tlg-col">Invoice No</div>
                 <div class="tlg-col">Date</div>
@@ -84,7 +84,7 @@
                 <div class="tlg-row">
                     <div class="tlg-col tlg-code">@r.InvoiceNumber</div>
                     <div class="tlg-col tlg-code">@AppTime.Date(r.InvoiceDate)</div>
-                    <div class="tlg-col tlg-col--num">@r.InvoiceAmount.ToString("N2")</div>
+                    <div class="tlg-col tlg-col--num">@AppMoney.Format(r.InvoiceAmount)</div>
                     <div class="tlg-col">
                         @if (!string.IsNullOrWhiteSpace(r.GrnNumber))
                         {
@@ -124,8 +124,8 @@
                             <span class="ps-null">—</span>
                         }
                     </div>
-                    <div class="tlg-col tlg-col--num">@r.ReceivedAmount.ToString("N2")</div>
-                    <div class="tlg-col tlg-col--num @(r.BalanceToReceive > 0 ? "ps-balance-due" : null)">@r.BalanceToReceive.ToString("N2")</div>
+                    <div class="tlg-col tlg-col--num">@AppMoney.Format(r.ReceivedAmount)</div>
+                    <div class="tlg-col tlg-col--num @(r.BalanceToReceive > 0 ? "ps-balance-due" : null)">@AppMoney.Format(r.BalanceToReceive)</div>
                 </div>
             }
         </div>

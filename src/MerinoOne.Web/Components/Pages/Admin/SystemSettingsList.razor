@@ -39,6 +39,9 @@
                 <button type="button" class="settings-rail__item @(category == "Fulfilment" ? "active" : null)" @onclick="@(() => SelectCategory("Fulfilment"))">
                     <span class="material-symbols-outlined">local_shipping</span> Fulfilment
                 </button>
+                <button type="button" class="settings-rail__item @(category == "Display" ? "active" : null)" @onclick="@(() => SelectCategory("Display"))">
+                    <span class="material-symbols-outlined">visibility</span> Display
+                </button>
                 <button type="button" class="settings-rail__item @(category == "InforIdm" ? "active" : null)" @onclick="@(() => SelectCategory("InforIdm"))">
                     <span class="material-symbols-outlined">cloud_upload</span> Infor IDM
                 </button>
@@ -139,6 +142,19 @@
                             </button>
                         </div>
                     }
+                    else if (category == DisplayCategory)
+                    {
+                        <h2 class="settings-section__title">Display</h2>
+                        <p class="settings-section__sub">How the portal shows values, for every user. Display only — stored values and what is sent to Infor LN are never rounded.</p>
+
+                        @RenderNumericRow("MoneyDecimalPlaces", "Decimal places shown for prices and money amounts — unit price, line and header amounts, tax and discount amounts (0–6). Quantities and percentages are not affected.", display.MoneyDecimalPlaces, v => display.MoneyDecimalPlaces = v, AppMoney.MinDecimals, AppMoney.MaxDecimals, "MoneyDecimalPlaces")
+
+                        <div class="settings-actions">
+                            <button type="button" class="rz-button rz-primary settings-btn--primary" disabled="@busy" @onclick="SaveDisplay">
+                                <span class="material-symbols-outlined">save</span> @(busy ? "Saving…" : "Save changes")
+                            </button>
+                        </div>
+                    }
                     else if (category == "InforIdm")
                     {
                         <h2 class="settings-section__title">Infor IDM dispatcher</h2>
@@ -224,6 +240,7 @@
     private const string InviteCategory = "SupplierInvite";
     private const string InforCategory = "InforConnection";
     private const string FulfilmentCategory = "Fulfilment";
+    private const string DisplayCategory = "Display";
     private const string InforIdmCategory = "InforIdm";
     private const string KillSwitchCategory = "KillSwitches";
     private const string ConnectionsCategory = "Connections";
@@ -232,7 +249,7 @@
     /// <summary>Categories a deep-link (?category=) may target — guards against arbitrary values.</summary>
     private static readonly HashSet<string> KnownCategories = new(StringComparer.Ordinal)
     {
-        EmailCategory, InviteCategory, InforCategory, FulfilmentCategory, InforIdmCategory, KillSwitchCategory, ConnectionsCategory,
+        EmailCategory, InviteCategory, InforCategory, FulfilmentCategory, DisplayCategory, InforIdmCategory, KillSwitchCategory, ConnectionsCategory,
     };
 
     private string category = EmailCategory;
@@ -245,12 +262,14 @@
     private readonly InviteForm invite = new();
     private readonly InforForm infor = new();
     private readonly FulfilForm fulfil = new();
+    private readonly DisplayForm display = new();
     private readonly IdmForm idm = new();
 
     // Track original values per key so Save only sends changed rows.
     private Dictionary<string, string> originalEmail = new();
     private Dictionary<string, string> originalInvite = new();
     private Dictionary<string, string> originalFulfil = new();
+    private Dictionary<string, string> originalDisplay = new();
     private Dictionary<string, string> originalIdm = new();
 
     protected override async Task OnInitializedAsync()
@@ -319,6 +338,11 @@
             fulfil.OverShipAllowanceRounding = Pick(rows, "OverShipAllowanceRounding", "None");
             originalFulfil = SnapshotFulfil();
         }
+        else if (cat == DisplayCategory)
+        {
+            display.MoneyDecimalPlaces = ParseInt(Pick(rows, "MoneyDecimalPlaces", AppMoney.DefaultDecimals.ToString()), AppMoney.DefaultDecimals);
+            originalDisplay = SnapshotDisplay();
+        }
         else if (cat == InforIdmCategory)
         {
             idm.DispatcherPollSeconds = ParseInt(Pick(rows, "DispatcherPollSeconds", "30"), 30);
@@ -359,6 +383,11 @@
     {
         ["EnforceOverShipGuard"] = fulfil.EnforceOverShipGuard.ToString().ToLowerInvariant(),
         ["OverShipAllowanceRounding"] = fulfil.OverShipAllowanceRounding,
+    };
+
+    private Dictionary<string, string> SnapshotDisplay() => new()
+    {
+        ["MoneyDecimalPlaces"] = display.MoneyDecimalPlaces.ToString(),
     };
 
     private Dictionary<string, string> SnapshotIdm() => new()
@@ -468,6 +497,46 @@
         finally { busy = false; }
     }
 
+    private async Task SaveDisplay()
+    {
+        busy = true; banner = null;
+        try
+        {
+            var current = SnapshotDisplay();
+            var failures = new List<string>();
+            foreach (var (key, value) in current)
+            {
+                if (originalDisplay.TryGetValue(key, out var prev) && prev == value) continue;
+                if (!await SaveOne(DisplayCategory, key, value, failures)) break;
+            }
+
+            if (failures.Count == 0)
+            {
+                await ApplyDisplaySettings();
+                Show("Settings saved.", ok: true);
+                Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+                await LoadCategory(DisplayCategory);
+            }
+            else
+            {
+                Show(string.Join(" ", failures), ok: false);
+            }
+        }
+        finally { busy = false; }
+    }
+
+    /// <summary>
+    /// Display.* feeds the process-wide <see cref="AppMoney"/> formatter of THIS host (the API re-points its own copy
+    /// when the setting is saved). After a successful Save / Reset, re-read the effective value and re-point the
+    /// formatter so money rendered from here on follows the change without a reload.
+    /// </summary>
+    private async Task ApplyDisplaySettings()
+    {
+        var resp = await Api.GetAsync<MerinoOne.SupplierPortal.Contracts.SystemSettings.DisplaySettingsDto>("api/system-settings/display");
+        if (resp?.Success == true && resp.Data is not null)
+            AppMoney.Configure(resp.Data.MoneyDecimalPlaces);
+    }
+
     private async Task SaveInforIdm()
     {
         busy = true; banner = null;
@@ -514,6 +583,7 @@
             var resp = await Api.PostAsync<object, ResetSystemSettingRequest>("api/system-settings/reset", new ResetSystemSettingRequest(category, key));
             if (resp?.Success == true)
             {
+                if (category == DisplayCategory) await ApplyDisplaySettings();
                 Show($"{key} reset to default.", ok: true);
                 await LoadCategory(category);
             }
@@ -775,6 +845,11 @@
     {
         public bool EnforceOverShipGuard { get; set; } = false;
         public string OverShipAllowanceRounding { get; set; } = "None";
+    }
+
+    private class DisplayForm
+    {
+        public int MoneyDecimalPlaces { get; set; } = AppMoney.DefaultDecimals;
     }
 
     private class IdmForm

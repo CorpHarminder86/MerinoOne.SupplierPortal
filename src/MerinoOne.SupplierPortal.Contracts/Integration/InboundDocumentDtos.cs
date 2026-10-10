@@ -42,7 +42,10 @@ public record PoLineRecord(
     decimal AdditionalQty = 0,
     /// <summary>R13 — REQUIRED receiving warehouse ERP code (max 50). Resolves to an active, non-base CompanyAddress
     /// by ErpCode within the PO's company; an unresolved code hard-fails the whole PO row.</summary>
-    string? Warehouse = null);
+    string? Warehouse = null,
+    /// <summary>Optional line tax AMOUNT as computed by LN (in the PO currency). Maps to the PO line's nullable
+    /// <c>taxAmount</c>; omitted/null = LN did not supply one. Default null.</summary>
+    decimal? TaxAmount = null);
 
 /// <summary>
 /// One inbound Purchase Order pushed by Infor LN. <see cref="PoNumber"/> is the natural key within the

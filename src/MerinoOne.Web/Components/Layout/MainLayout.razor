@@ -543,6 +543,7 @@ else
     private bool _signingOut;
     private bool _hydrated;
     private bool _companiesLoaded;
+    private bool _displayLoaded;
 
     // Live RBAC (no relogin): the server enforces permission changes immediately; the client re-fetches its
     // permission VIEW from /me on navigation (throttled) + a 60s interval so menus/buttons update in place.
@@ -670,6 +671,15 @@ else
             Nav.NavigateToRoute("/change-password", forceLoad: false);
         }
 
+        // Money-display precision (Display.MoneyDecimalPlaces). This host is a separate process from the API, so
+        // the static AppMoney the pages format with has to be configured HERE — and only once the session is
+        // validated (_hydrated): the endpoint is authenticated, so calling it on an anonymous page would 401
+        // into the session-expired chain. One fetch per layout instance.
+        if (_hydrated && Token.IsAuthenticated && !Token.MustChangePassword && !_displayLoaded)
+        {
+            await LoadDisplaySettingsAsync();
+        }
+
         // Hydrate the active-company selector once the session is live (skip while a password change is
         // forced, and skip for Platform Admin who has no business-data / company context).
         if (Token.IsAuthenticated && !Token.MustChangePassword && !Token.IsPlatformAdmin && !_companiesLoaded)
@@ -713,6 +723,35 @@ else
         catch
         {
             // Non-fatal: a 403 (e.g. user lacks Settings.Read) just means no selector. Leave empty.
+        }
+    }
+
+    /// <summary>
+    /// Fetch the Display settings and point the process-wide <see cref="AppMoney"/> formatter at them. Open to any
+    /// authenticated user (a supplier's pages format money too). Non-fatal: on any failure the formatter keeps its
+    /// current precision (the default until a fetch succeeds). When the precision actually changes — the first
+    /// circuit after a host start, or a value saved elsewhere — the routed page is re-created (same lever as the
+    /// topbar refresh) so one that already rendered under the old precision does not keep showing it.
+    /// </summary>
+    private async Task LoadDisplaySettingsAsync()
+    {
+        _displayLoaded = true;
+        try
+        {
+            var resp = await Api.GetAsync<MerinoOne.SupplierPortal.Contracts.SystemSettings.DisplaySettingsDto>("api/system-settings/display");
+            if (resp?.Success != true || resp.Data is null) return;
+
+            var before = AppMoney.Decimals;
+            AppMoney.Configure(resp.Data.MoneyDecimalPlaces);
+            if (AppMoney.Decimals != before)
+            {
+                _refreshTick++;
+                StateHasChanged();
+            }
+        }
+        catch
+        {
+            // Non-fatal: keep the current precision.
         }
     }
 
@@ -950,6 +989,7 @@ else
         Token.Clear();
         Company.Clear();
         _companiesLoaded = false;
+        _displayLoaded = false;
         try { await Storage.DeleteAsync("merinoone.token"); } catch { }
         try { await Storage.DeleteAsync(ActiveCompanyStorageKey); } catch { }
         try { await JS.InvokeVoidAsync("sessionStorage.removeItem", "merinoone.tabs"); } catch { }

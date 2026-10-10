@@ -14,6 +14,7 @@ using MerinoOne.SupplierPortal.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using UnitEntity = MerinoOne.SupplierPortal.Domain.Entities.Mdm.Unit;
 
 namespace MerinoOne.SupplierPortal.Tests.Integration;
 
@@ -1254,6 +1255,300 @@ public class PurchaseOrderInboundTests
         var r = await Read<UpsertResultDto>(second);
         r.Data!.Inserted.Should().Be(0, because: "an unchanged keyless re-push short-circuits on the canonical hash");
         r.Data!.Updated.Should().Be(0);
+    }
+
+    // ── F1 (2026-10-10) — PO line taxAmount + unit decimal places ───────────────────────────────────────
+
+    /// <summary>
+    /// F1 — the optional LN-computed line tax AMOUNT is stored exactly as received and the PO detail read returns it on
+    /// the line. Four decimals are pushed (the full precision of the decimal(18,4) column) so a rounding step anywhere on
+    /// the path — column, DTO or JSON — would show. It is informational: the line NetAmount and the PO total stay the
+    /// Price as received.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_line_taxAmount_is_stored_as_received_and_surfaces_on_detail()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poNumber = $"PO-TAXAMT-{tag}";
+        const decimal taxAmount = 18.1234m;
+
+        await PushAsync(OneLinePo(poNumber, supplier.SupplierCode, tag, taxAmount));
+
+        (await StoredTaxAmountAsync(poNumber)).Should().Be(taxAmount,
+            because: "the inbound line's taxAmount is stored exactly as received, at the column's full precision");
+
+        var detail = await GetDetailAsPoSupplierAsync(poNumber);
+        var line = detail.Lines.Single(l => l.PositionNo == 10);
+        line.TaxAmount.Should().Be(taxAmount, because: "the PO detail line surfaces the stored tax amount");
+        line.NetAmount.Should().Be(100m, because: "the tax amount is informational — the net amount stays the Price as received");
+        detail.TotalAmount.Should().Be(100m, because: "the PO total is the sum of line net amounts; tax is not added on top");
+    }
+
+    [SkippableFact] // A push that carries no taxAmount leaves it null — in the table and on the detail line.
+    public async Task Inbound_po_line_without_taxAmount_stores_null_and_surfaces_null_on_detail()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poNumber = $"PO-NOTAX-{tag}";
+
+        await PushAsync(OneLinePo(poNumber, supplier.SupplierCode, tag, taxAmount: null));
+
+        (await StoredTaxAmountAsync(poNumber)).Should().BeNull(
+            because: "LN sent no taxAmount, so nothing is invented — a missing tax amount is not the same as 0");
+
+        var detail = await GetDetailAsPoSupplierAsync(poNumber);
+        detail.Lines.Single(l => l.PositionNo == 10).TaxAmount.Should().BeNull(
+            because: "the detail line reports 'no tax amount supplied' as null, not 0");
+    }
+
+    [SkippableFact] // taxAmount is in the canonical digest: a keyless re-push changing ONLY taxAmount must be processed, not deduped.
+    public async Task Inbound_po_repush_changing_only_taxAmount_is_not_deduped()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-TAXDEDUP-{tag}";
+
+        // NO Idempotency-Key header on either push. The executor prefers the header when present and only falls back to
+        // the canonical digest without one (InboundUpsertExecutor §5), so omitting it is what puts taxAmount's
+        // membership in that digest under test.
+        async Task<UpsertResultDto> PushNoKeyAsync(PushPurchaseOrdersRequest b)
+        {
+            var resp = await _fx.CreateInboundClient().PostAsJsonAsync("/api/integration/inbound/purchase-orders", b);
+            resp.StatusCode.Should().Be(HttpStatusCode.OK);
+            var result = (await Read<UpsertResultDto>(resp)).Data!;
+            result.Failed.Should().Be(0);
+            return result;
+        }
+
+        (await PushNoKeyAsync(OneLinePo(poNumber, supplier.SupplierCode, tag, taxAmount: 1.80m))).Inserted.Should().Be(1);
+        (await StoredTaxAmountAsync(poNumber)).Should().Be(1.80m);
+
+        var second = await PushNoKeyAsync(OneLinePo(poNumber, supplier.SupplierCode, tag, taxAmount: 2.50m));
+        second.Updated.Should().Be(1,
+            because: "taxAmount is part of the canonical digest, so the changed value hashes differently and is processed, not deduped");
+        (await StoredTaxAmountAsync(poNumber)).Should().Be(2.50m,
+            because: "the tax-only re-push landed — the stored value is the new one");
+    }
+
+    [SkippableFact] // A FULL re-push (orderQty>0 = replace) overwrites the line's taxAmount as received, so omitting it clears it.
+    public async Task Inbound_po_repush_omitting_taxAmount_clears_the_stored_value()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-TAXCLR-{tag}";
+
+        await PushAsync(OneLinePo(poNumber, supplier.SupplierCode, tag, taxAmount: 5.25m));
+        (await StoredTaxAmountAsync(poNumber)).Should().Be(5.25m);
+
+        await PushAsync(OneLinePo(poNumber, supplier.SupplierCode, tag, taxAmount: null));
+        (await StoredTaxAmountAsync(poNumber)).Should().BeNull(
+            because: "an orderQty>0 push REPLACES taxAmount as received — a full re-push that omits it leaves null, it does not keep the old value");
+    }
+
+    /// <summary>
+    /// F1 — taxAmount is an AMOUNT field, so it follows Price / DiscountAmount through the additionalQty fold: orderQty>0
+    /// REPLACES it with the pushed value (an omitted taxAmount then clears it); additionalQty≠0 ADDS the pushed value as a
+    /// signed delta (an omitted delta leaves the stored amount unchanged; nothing stored yet + a delta = the delta); 0/0 is a
+    /// no-op. qty, price and discountAmount are asserted alongside so the four amounts are seen folding together.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_additionalQty_folds_taxAmount_delta_like_price_and_discount()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        var poNumber = $"PO-ADDTAX-{tag}";
+
+        PushPurchaseOrdersRequest Body(decimal orderQty, decimal additionalQty, decimal price, decimal discount, decimal? tax) =>
+            new(IntegrationTestFixture.CompanyCode, new[]
+            {
+                new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                    new[] { new PoLineRecord(PositionNo: 10, SequenceNo: 1, ItemCode: $"ITM-{tag}",
+                        OrderUnit: "EA", OrderQty: orderQty, PriceUnit: 10, Price: price,
+                        DiscountAmount: discount, AdditionalQty: additionalQty, TaxAmount: tax,
+                        Warehouse: IntegrationTestFixture.WarehouseCode) },
+                    PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+            });
+
+        async Task ExpectStoredAsync(decimal qty, decimal price, decimal discount, decimal? tax, string because)
+        {
+            using var s = _fx.Factory.Services.CreateScope();
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var line = await db.PurchaseOrderLines.IgnoreQueryFilters()
+                .FirstAsync(l => l.PurchaseOrder!.PoNumber == poNumber && !l.IsDeleted && l.PositionNo == 10);
+            line.OrderQty.Should().Be(qty, because);
+            line.Price.Should().Be(price, because);
+            line.DiscountAmount.Should().Be(discount, because);
+            line.TaxAmount.Should().Be(tax, because);
+        }
+
+        // 1) REPLACE — absolute qty 100 / price 1000 / discount 50 / tax 180.
+        await PushAsync(Body(orderQty: 100, additionalQty: 0, price: 1000, discount: 50, tax: 180));
+        await ExpectStoredAsync(100, 1000, 50, 180, "orderQty>0 replaces qty, price, discountAmount AND taxAmount");
+
+        // 2) ADD with a taxAmount delta — +20 qty, +200 price, +10 discount, +36 tax → 120 / 1200 / 60 / 216.
+        await PushAsync(Body(orderQty: 0, additionalQty: 20, price: 200, discount: 10, tax: 36));
+        await ExpectStoredAsync(120, 1200, 60, 216, "additionalQty adds the delta to qty, price, discountAmount AND taxAmount (old + delta)");
+
+        // 3) ADD WITHOUT a taxAmount — +10 qty, +100 price, +5 discount, no tax → 130 / 1300 / 65 / tax UNCHANGED at 216.
+        await PushAsync(Body(orderQty: 0, additionalQty: 10, price: 100, discount: 5, tax: null));
+        await ExpectStoredAsync(130, 1300, 65, 216,
+            "a top-up push that carries no taxAmount leaves the stored tax unchanged while qty, price and discount still fold");
+
+        // 4) REDUCE — -50 qty, -500 price, -25 discount, -90 tax → 80 / 800 / 40 / 126.
+        await PushAsync(Body(orderQty: 0, additionalQty: -50, price: -500, discount: -25, tax: -90));
+        await ExpectStoredAsync(80, 800, 40, 126, "a negative additionalQty subtracts the taxAmount delta as well");
+
+        // 5) NO-OP — 0/0 leaves all four unchanged even though the push carries values.
+        await PushAsync(Body(orderQty: 0, additionalQty: 0, price: 9999, discount: 9999, tax: 9999));
+        await ExpectStoredAsync(80, 800, 40, 126, "0/0 is a no-op — qty, price, discountAmount and taxAmount are all left unchanged");
+
+        // 6) REPLACE with NO taxAmount — a full re-push overwrites, so the omitted tax clears the stored value.
+        await PushAsync(Body(orderQty: 50, additionalQty: 0, price: 500, discount: 0, tax: null));
+        await ExpectStoredAsync(50, 500, 0, null, "an orderQty>0 push replaces taxAmount as received — omitting it clears the stored value");
+
+        // 7) ADD onto a NULL stored tax — nothing stored + a delta = the delta.
+        await PushAsync(Body(orderQty: 0, additionalQty: 5, price: 50, discount: 0, tax: 9));
+        await ExpectStoredAsync(55, 550, 0, 9, "with no tax stored yet, the top-up's taxAmount becomes the stored amount");
+    }
+
+    [SkippableFact] // F1 — the detail line carries UnitDecimalPlaces; a unit that is in no master falls back to 3 (never an error).
+    public async Task Inbound_po_detail_line_unit_decimal_places_fall_back_to_three_for_an_unknown_unit()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poNumber = $"PO-UDEC3-{tag}";
+
+        // orderUnit is capped at 20; the tagged code exists in no unit master (the push only raises the soft
+        // unresolved-master warning, the PO still saves).
+        await PushAsync(OneLinePo(poNumber, supplier.SupplierCode, tag, taxAmount: null, orderUnit: $"ZZ{tag}"));
+
+        var detail = await GetDetailAsPoSupplierAsync(poNumber);
+        detail.Lines.Single(l => l.PositionNo == 10).UnitDecimalPlaces.Should().Be(3,
+            because: "an order unit that is not in the unit master resolves to the fallback of 3 decimal places");
+    }
+
+    /// <summary>
+    /// Positive control for the fallback test above (which alone would also pass against a hard-coded 3): a REAL unit
+    /// master row with 4 decimal places drives its line's UnitDecimalPlaces, while an unknown unit on a second line of the
+    /// same PO still reads 3 — so the batched resolver is genuinely wired into the detail read.
+    /// </summary>
+    [SkippableFact]
+    public async Task Inbound_po_detail_line_unit_decimal_places_come_from_the_unit_master()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId,
+            grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
+        var poNumber = $"PO-UDEC4-{tag}";
+
+        // A dedicated 4-decimal unit (neither the model default 2 nor the fallback 3), created once under the fixture
+        // company and then LEFT in the persistent test DB: an idempotent create-if-missing on a code no other test reads,
+        // never mutated or removed.
+        const string fourDecimalUnit = "UT-PODETAIL-4";
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            var exists = await db.Units.IgnoreQueryFilters().AnyAsync(u =>
+                u.TenantEntityId == IntegrationTestFixture.CompanyId && u.Code == fourDecimalUnit && !u.IsDeleted);
+            if (!exists)
+            {
+                db.Units.Add(new UnitEntity
+                {
+                    Id = Guid.NewGuid(),
+                    Code = fourDecimalUnit,
+                    Description = "PO detail decimal-places test unit",
+                    UnitType = UnitType.Quantity,
+                    DecimalPlaces = 4,
+                    ConversionFactor = 1m,
+                    IsActive = true,
+                    TenantId = IntegrationTestFixture.TenantId,
+                    TenantEntityId = IntegrationTestFixture.CompanyId,
+                    CreatedBy = "test",
+                    CreatedOn = DateTime.UtcNow,
+                });
+                await db.SaveChangesAsync();
+            }
+        }
+
+        await PushAsync(new PushPurchaseOrdersRequest(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplier.SupplierCode, DateTime.UtcNow.Date,
+                new[]
+                {
+                    new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: fourDecimalUnit, OrderQty: 10, PriceUnit: 1, Price: 10,
+                        Warehouse: IntegrationTestFixture.WarehouseCode),
+                    new PoLineRecord(20, 1, $"ITM-{tag}", OrderUnit: $"ZZ{tag}", OrderQty: 10, PriceUnit: 1, Price: 10,
+                        Warehouse: IntegrationTestFixture.WarehouseCode),
+                },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        }));
+
+        var detail = await GetDetailAsPoSupplierAsync(poNumber);
+        detail.Lines.Single(l => l.PositionNo == 10).UnitDecimalPlaces.Should().Be(4,
+            because: "the line's order unit is a real unit master row with 4 decimal places");
+        detail.Lines.Single(l => l.PositionNo == 20).UnitDecimalPlaces.Should().Be(3,
+            because: "an unknown unit on another line of the same PO still falls back to 3 (one batched lookup serves both)");
+    }
+
+    // One-position PO body for the F1 tests: the only variables are the optional taxAmount and the order unit.
+    private static PushPurchaseOrdersRequest OneLinePo(string poNumber, string supplierCode, string tag, decimal? taxAmount, string orderUnit = "EA")
+        => new(IntegrationTestFixture.CompanyCode, new[]
+        {
+            new PoRecord(poNumber, supplierCode, DateTime.UtcNow.Date,
+                new[] { new PoLineRecord(10, 1, $"ITM-{tag}", OrderUnit: orderUnit, OrderQty: 10, PriceUnit: 10, Price: 100,
+                    Warehouse: IntegrationTestFixture.WarehouseCode, TaxAmount: taxAmount) },
+                PoStatus: nameof(PoStatus.Released), CurrencyCode: "INR"),
+        });
+
+    // The stored taxAmount of the PO's position-10 line, read straight from the table.
+    private async Task<decimal?> StoredTaxAmountAsync(string poNumber)
+    {
+        using var s = _fx.Factory.Services.CreateScope();
+        var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.PurchaseOrderLines.IgnoreQueryFilters()
+            .Where(l => l.PurchaseOrder!.PoNumber == poNumber && !l.IsDeleted && l.PositionNo == 10)
+            .Select(l => l.TaxAmount).FirstAsync();
+    }
+
+    // GET /api/purchase-orders/{id} as the seeded Supplier-role user (the PO's supplier must have granted that user).
+    private async Task<PurchaseOrderDetailDto> GetDetailAsPoSupplierAsync(string poNumber)
+    {
+        Guid poId;
+        using (var s = _fx.Factory.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            poId = (await db.PurchaseOrders.IgnoreQueryFilters()
+                .FirstAsync(p => p.PoNumber == poNumber && p.TenantId == IntegrationTestFixture.TenantId)).Id;
+        }
+
+        var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var resp = await client.GetAsync($"/api/purchase-orders/{poId}");
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        return (await Read<PurchaseOrderDetailDto>(resp)).Data!;
     }
 
     // Pushes a PO body. A fresh Idempotency-Key per push (default a new GUID) ensures a re-push with an

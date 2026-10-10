@@ -52,7 +52,7 @@
         @* R6 — the AsnGenerated origin badge rides the Invoice # cell (no extra column: --tl-cols stays
            six columns; the first is widened to fit the chip). Draft rows carry the stored provisional
            DRAFT-{asn}-{n} number as-is. *@
-        <div class="tl-grid-wrapper" style="--tl-cols: 195px 150px 1.5fr 130px 140px 140px; --tl-min-width: 1135px;">
+        <div class="tl-grid-wrapper" style="--tl-cols: 195px 150px 1.5fr 130px 160px 140px; --tl-min-width: 1155px;">
             <div class="tlg-header">
                 <div class="tlg-col">Invoice #</div>
                 <div class="tlg-col">PO #</div>
@@ -74,7 +74,7 @@
                     <div class="tlg-col tlg-code" title="@inv.PoSummary">@(inv.PoCount > 1 ? $"{inv.PoSummary} ({inv.PoCount})" : inv.PoSummary)</div>
                     <div class="tlg-col tlg-name">@inv.SupplierName</div>
                     <div class="tlg-col tlg-code">@AppTime.Date(inv.InvoiceDate)</div>
-                    <div class="tlg-col tlg-col--num">@inv.CurrencyCode @inv.InvoiceAmount.ToString("N2")</div>
+                    <div class="tlg-col tlg-col--num">@inv.CurrencyCode @AppMoney.Format(inv.InvoiceAmount)</div>
                     <div class="tlg-col"><span class="tlg-status @StatusClass(inv.InvoiceStatus)">@inv.InvoiceStatus</span></div>
                 </div>
             }

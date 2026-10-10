@@ -57,13 +57,13 @@ else
             <div class="rz-card" style="padding:20px;">
                 <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Amounts</h3>
                 <dl style="display:grid;grid-template-columns:140px 1fr;gap:6px 16px;font-size:13px;">
-                    <dt style="color:var(--mer-ink-500);">Gross paid</dt><dd style="font-family:Inter,monospace;text-align:right;">@detail.PaymentAmount.ToString("N2")</dd>
-                    <dt style="color:var(--mer-ink-500);">TDS deducted</dt><dd style="font-family:Inter,monospace;text-align:right;color:var(--mer-amber-800);">@detail.TdsDeducted.ToString("N2")</dd>
+                    <dt style="color:var(--mer-ink-500);">Gross paid</dt><dd style="font-family:Inter,monospace;text-align:right;">@AppMoney.Format(detail.PaymentAmount)</dd>
+                    <dt style="color:var(--mer-ink-500);">TDS deducted</dt><dd style="font-family:Inter,monospace;text-align:right;color:var(--mer-amber-800);">@AppMoney.Format(detail.TdsDeducted)</dd>
                     @if (!string.IsNullOrEmpty(detail.TdsSection))
                     {
                         <dt style="color:var(--mer-ink-500);">TDS section</dt><dd>@detail.TdsSection</dd>
                     }
-                    <dt style="color:var(--mer-ink-500);font-weight:700;">Net paid</dt><dd style="font-family:Inter,monospace;text-align:right;font-weight:700;color:var(--mer-blue-darker);">@detail.NetPaid.ToString("N2")</dd>
+                    <dt style="color:var(--mer-ink-500);font-weight:700;">Net paid</dt><dd style="font-family:Inter,monospace;text-align:right;font-weight:700;color:var(--mer-blue-darker);">@AppMoney.Format(detail.NetPaid)</dd>
                 </dl>
             </div>
         </div>
@@ -83,7 +83,7 @@ else
                 <dl style="display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:13px;margin-bottom:12px;">
                     <dt style="color:var(--mer-ink-500);">Payment reference</dt><dd style="font-family:Inter,monospace;">@remittance.PaymentReference</dd>
                     <dt style="color:var(--mer-ink-500);">Payment date</dt><dd style="font-family:Inter,monospace;">@AppTime.Date(remittance.PaymentDate)</dd>
-                    <dt style="color:var(--mer-ink-500);font-weight:700;">Net paid</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@remittance.NetPaid.ToString("N2")</dd>
+                    <dt style="color:var(--mer-ink-500);font-weight:700;">Net paid</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@AppMoney.Format(remittance.NetPaid)</dd>
                 </dl>
                 @if (!string.IsNullOrEmpty(remittance.RemittancePdfUrl))
                 {

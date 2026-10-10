@@ -7938,6 +7938,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(0m)
                         .HasColumnName("shippedQtyToDate");
 
+                    b.Property<decimal?>("TaxAmount")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("taxAmount");
+
                     b.Property<string>("TaxCode")
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)")

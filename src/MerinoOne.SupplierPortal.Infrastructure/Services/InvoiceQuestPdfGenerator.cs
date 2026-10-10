@@ -126,15 +126,17 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
                     {
                         table.ColumnsDefinition(cd =>
                         {
-                            cd.RelativeColumn(2.0f);   // Item
-                            cd.RelativeColumn(3.0f);   // Description
-                            cd.RelativeColumn(1.6f);   // PO
+                            // Money columns widened for AppMoney's default 4 places (two digits wider than the old
+                            // 2-place layout): the previous weights wrapped most amounts from 1,000 up onto two lines.
+                            cd.RelativeColumn(1.7f);   // Item
+                            cd.RelativeColumn(2.7f);   // Description
+                            cd.RelativeColumn(1.4f);   // PO
                             cd.RelativeColumn(1.1f);   // Qty
-                            cd.RelativeColumn(1.2f);   // Unit price
+                            cd.RelativeColumn(1.5f);   // Unit price
                             cd.RelativeColumn(1.2f);   // Tax code
-                            cd.RelativeColumn(1.0f);   // Tax %
-                            cd.RelativeColumn(1.2f);   // Tax amt
-                            cd.RelativeColumn(1.3f);   // Line amt
+                            cd.RelativeColumn(0.8f);   // Tax %
+                            cd.RelativeColumn(1.5f);   // Tax amt
+                            cd.RelativeColumn(1.7f);   // Line amt
                         });
 
                         table.Header(h =>
@@ -156,11 +158,11 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
                             BodyCell(table.Cell(), line.ItemDescription ?? "—");
                             BodyCell(table.Cell(), line.PoNumber ?? "—");
                             BodyCell(table.Cell(), line.BilledQty.ToString("0.####"), right: true);
-                            BodyCell(table.Cell(), line.UnitPrice.ToString("N2"), right: true);
+                            BodyCell(table.Cell(), AppMoney.Format(line.UnitPrice), right: true);
                             BodyCell(table.Cell(), line.TaxCode ?? "—");
                             BodyCell(table.Cell(), line.TaxRatePct is { } r ? r.ToString("0.##") : "—", right: true);
-                            BodyCell(table.Cell(), line.TaxAmount.ToString("N2"), right: true);
-                            BodyCell(table.Cell(), line.LineAmount.ToString("N2"), right: true);
+                            BodyCell(table.Cell(), AppMoney.Format(line.TaxAmount), right: true);
+                            BodyCell(table.Cell(), AppMoney.Format(line.LineAmount), right: true);
                         }
                     });
 
@@ -173,7 +175,7 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
                         {
                             r.ConstantItem(140).Text("Net amount").SemiBold();
                             r.ConstantItem(120).AlignRight()
-                                .Text($"{invoice.NetAmount:N2} {invoice.CurrencyCode}").SemiBold();
+                                .Text($"{AppMoney.Format(invoice.NetAmount)} {invoice.CurrencyCode}").SemiBold();
                         });
                     });
 
@@ -241,6 +243,6 @@ public sealed class InvoiceQuestPdfGenerator : IInvoicePdfGenerator
         => col.Item().Row(r =>
         {
             r.ConstantItem(140).Text(label).FontColor(Muted);
-            r.ConstantItem(120).AlignRight().Text($"{amount:N2} {currency}");
+            r.ConstantItem(120).AlignRight().Text($"{AppMoney.Format(amount)} {currency}");
         });
 }

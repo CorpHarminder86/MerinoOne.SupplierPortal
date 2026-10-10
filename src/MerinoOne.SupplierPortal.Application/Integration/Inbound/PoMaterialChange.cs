@@ -11,7 +11,7 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 /// (notes / internal ref only), which bumps <c>Version</c> without freezing the supplier mid-fulfilment (UC-PO-07).
 ///
 /// <para><b>Material fields (§6.4):</b> order qty, price (unit price OR extended line amount), delivery date, and
-/// line ADD / REMOVE. Anything else (notes, item description, tax code, discount) is non-material for the purpose
+/// line ADD / REMOVE. Anything else (notes, item description, tax code, discount, tax amount) is non-material for the purpose
 /// of re-confirmation. The diff matches incoming ERP lines to persisted lines on the storage key <c>PositionNo</c>
 /// (seq is always stored as 1; multiple inbound seqs per position are folded). The qty comparison uses the
 /// RESOLVED target qty (replace / signed-add / no-op) — NOT the raw incoming orderQty, which is 0 on an add and
@@ -58,7 +58,7 @@ public static class PoMaterialChange
         {
             var existing = existingByPos[pos];
             var resolved = resolvedByPosition.TryGetValue(pos, out var rl)
-                ? rl : new ResolvedPoLine(existing.OrderQty, existing.Price, existing.DiscountAmount);
+                ? rl : new ResolvedPoLine(existing.OrderQty, existing.Price, existing.DiscountAmount, existing.TaxAmount);
             if (existing.OrderQty != resolved.Qty) return true;
             if (existing.PriceUnit != incoming.PriceUnit) return true;
             if (existing.Price != resolved.Price) return true;
@@ -93,7 +93,7 @@ public static class PoMaterialChange
         foreach (var (pos, incoming) in incomingByPos)
         {
             var resolved = resolvedByPosition.TryGetValue(pos, out var rl)
-                ? rl : new ResolvedPoLine(incoming.OrderQty, incoming.Price, incoming.DiscountAmount);
+                ? rl : new ResolvedPoLine(incoming.OrderQty, incoming.Price, incoming.DiscountAmount, incoming.TaxAmount);
             if (!beforeByPos.TryGetValue(pos, out var before))
             {
                 parts.Add($"Line {pos} added (qty {Fmt(resolved.Qty)})");
@@ -148,5 +148,8 @@ public readonly record struct PoLineChangeSnapshot(
 /// R4 (2026-07-01) — the resolved absolute values for one PO position after folding the inbound push against the
 /// stored line: <see cref="Qty"/>, extended <see cref="Price"/> and <see cref="Discount"/> (DiscountAmount) are each
 /// REPLACED on an <c>orderQty&gt;0</c> line and ADDED on an <c>additionalQty≠0</c> delta line (0/0 = no-op).
+/// 2026-10-10 — <see cref="Tax"/> (the nullable TaxAmount) folds the same way, with null handled explicitly: a REPLACE
+/// takes the pushed value as received (null clears it); an ADD with a null delta leaves it unchanged, and a null stored
+/// value plus a delta becomes the delta. Optional (default null) so older 3-argument callers stay valid.
 /// </summary>
-public readonly record struct ResolvedPoLine(decimal Qty, decimal Price, decimal Discount);
+public readonly record struct ResolvedPoLine(decimal Qty, decimal Price, decimal Discount, decimal? Tax = null);

@@ -143,15 +143,15 @@
                                 <td style="padding:6px 4px;text-align:right;"><input type="number" step="0.01" class="rz-textbox" style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;" @bind="ln.UnitPrice" /></td>
                                 <td style="padding:6px 4px;"><input type="text" class="rz-textbox" style="width:80px;padding:4px 6px;font-family:Inter,monospace;" @bind="ln.TaxCode" placeholder="GST18" /></td>
                                 <td style="padding:6px 4px;text-align:right;"><input type="number" step="0.01" class="rz-textbox" style="width:90px;padding:4px 6px;font-family:Inter,monospace;text-align:right;" @bind="ln.TaxAmount" /></td>
-                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;">@((ln.BilledQty * ln.UnitPrice).ToString("0.00"))</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;">@AppMoney.Plain(ln.BilledQty * ln.UnitPrice)</td>
                             </tr>
                         }
                         </tbody>
                     </table>
                     <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:24px;font-size:13px;">
-                        <div><span style="color:var(--mer-ink-500);">Subtotal:</span> <b style="font-family:Inter,monospace;">@Subtotal.ToString("N2")</b></div>
-                        <div><span style="color:var(--mer-ink-500);">Tax:</span> <b style="font-family:Inter,monospace;">@TaxTotal.ToString("N2")</b></div>
-                        <div><span style="color:var(--mer-blue-darker);font-weight:700;">Net:</span> <b style="font-family:Inter,monospace;color:var(--mer-blue-darker);">@NetTotal.ToString("N2")</b></div>
+                        <div><span style="color:var(--mer-ink-500);">Subtotal:</span> <b style="font-family:Inter,monospace;">@AppMoney.Format(Subtotal)</b></div>
+                        <div><span style="color:var(--mer-ink-500);">Tax:</span> <b style="font-family:Inter,monospace;">@AppMoney.Format(TaxTotal)</b></div>
+                        <div><span style="color:var(--mer-blue-darker);font-weight:700;">Net:</span> <b style="font-family:Inter,monospace;color:var(--mer-blue-darker);">@AppMoney.Format(NetTotal)</b></div>
                     </div>
                 }
             }
@@ -168,9 +168,9 @@
                         <dt style="color:var(--mer-ink-500);">e-Invoice IRN</dt><dd style="font-family:Inter,monospace;font-size:11px;">@eInvoiceIrn</dd>
                     }
                     <dt style="color:var(--mer-ink-500);">Lines being billed</dt><dd>@lines.Count(l => l.BilledQty > 0) of @lines.Count</dd>
-                    <dt style="color:var(--mer-ink-500);">Subtotal</dt><dd style="font-family:Inter,monospace;">@Subtotal.ToString("N2")</dd>
-                    <dt style="color:var(--mer-ink-500);">Tax</dt><dd style="font-family:Inter,monospace;">@TaxTotal.ToString("N2")</dd>
-                    <dt style="color:var(--mer-ink-500);font-weight:700;">Net amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@NetTotal.ToString("N2") @currencyCode</dd>
+                    <dt style="color:var(--mer-ink-500);">Subtotal</dt><dd style="font-family:Inter,monospace;">@AppMoney.Format(Subtotal)</dd>
+                    <dt style="color:var(--mer-ink-500);">Tax</dt><dd style="font-family:Inter,monospace;">@AppMoney.Format(TaxTotal)</dd>
+                    <dt style="color:var(--mer-ink-500);font-weight:700;">Net amount</dt><dd style="font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@AppMoney.Format(NetTotal) @currencyCode</dd>
                 </dl>
                 @if (!string.IsNullOrEmpty(submitError))
                 {

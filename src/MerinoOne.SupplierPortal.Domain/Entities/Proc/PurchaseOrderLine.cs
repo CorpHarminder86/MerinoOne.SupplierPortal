@@ -20,6 +20,9 @@ public class PurchaseOrderLine : AuditableEntity
     public decimal Price { get; set; }
     public decimal DiscountPct { get; set; }
     public decimal DiscountAmount { get; set; }
+    // 2026-10-10 — ERP-supplied line tax AMOUNT, stored as received (decimal(18,4), nullable). Null when LN did not
+    // push one, and on lines that pre-date the column. TaxCode/TaxId remain the link to the proc.Tax master.
+    public decimal? TaxAmount { get; set; }
     public DateTime? DeliveryDate { get; set; }
     public string? TaxCode { get; set; }
     public string? TaxDescription { get; set; }
