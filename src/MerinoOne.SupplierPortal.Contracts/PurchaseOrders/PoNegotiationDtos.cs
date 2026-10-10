@@ -62,7 +62,16 @@ public record PoNegotiationLineDto(
     DateTime? OriginalDeliveryDate,
     DateTime? NegotiatedDeliveryDate,
     decimal OriginalPrice,
-    decimal NegotiatedPrice);
+    decimal NegotiatedPrice,
+    // Display context for the diff grid — the PO line's item description and order unit — plus that unit's decimal
+    // places (resolved server-side via IUnitDecimalsResolver; 3 when unknown/blank) so quantities render at the right
+    // precision. Trailing optionals: existing positional producers stay valid.
+    string? ItemDescription = null,
+    string? OrderUnit = null,
+    int UnitDecimalPlaces = 3,
+    // Whether this line carries a proposed change versus the live PO line. Persisted negotiation lines always do
+    // (no-op lines are dropped at create), hence the default of true.
+    bool IsChanged = true);
 
 /// <summary>Full negotiation detail: header + delta lines (each carrying the original → negotiated diff).</summary>
 public record PoNegotiationDto(

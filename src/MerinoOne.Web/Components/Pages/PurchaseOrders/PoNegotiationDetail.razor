@@ -1,19 +1,35 @@
 @page "/po-negotiation-review/{Id:guid}"
+@page "/po-negotiations/{Id:guid}"
 @inject ApiClient Api
 @inject TokenAccessor Token
 @inject NavigationManager Nav
 @inject NotificationService Notif
 
 @* ------------------------------------------------------------------------------------------------
-   Buyer review detail. Header + a per-line "original → negotiated" diff built from the NEGOTIATION
-   lines (NOT the live PO lines — ERP stays the line master; the negotiated values live only on this
-   record until ERP re-syncs). Changed cells are highlighted. Approve / Reject (reason) are gated on
+   Buyer review detail, also opened READ-ONLY by the supplier (alias route /po-negotiations/{id}, linked
+   from My PO change requests). Header + a per-line "original → negotiated" diff. The API returns ONE line
+   per PO line: the lines the supplier changed carry the stored original → negotiated values (IsChanged),
+   every other line repeats the live PO line on both sides and renders muted — so any "proposed" count
+   filters IsChanged, never Lines.Count. The negotiated values live only on this record until ERP re-syncs
+   (ERP stays the line master). Changed cells are highlighted. Approve / Reject (reason) are gated on
    PurchaseOrder.ApproveNegotiation AND the state machine (only while Submitted). 409 (concurrent
    approve / wrong state) + 403 surface via toast, then reload so the now-stale actions reflect reality.
    Mirrors SupplierChangeRequestDetail.
 ------------------------------------------------------------------------------------------------ *@
 
 <PageTitle>@(detail is null ? "PO negotiation" : $"Negotiation · {detail.PoNumber}")</PageTitle>
+
+@* Per-row treatment for the diff grid: a changed row gets a tint + a "Changed" chip, an unchanged one is muted.
+   A <style> block because the state sits on the <tr> and its cells read --ponego-ink from it. Prefixed
+   ponego- (PO negotiation) so nothing can collide with merino.css. *@
+<style>
+    .ponego-row--changed { background:var(--mer-blue-50); --ponego-ink:var(--mer-ink-700); }
+    .ponego-row--same { color:var(--mer-ink-500); --ponego-ink:var(--mer-ink-500); }
+    .ponego-desc { min-width:160px; overflow-wrap:anywhere; }
+    .ponego-chip { display:inline-block; margin-left:8px; padding:1px 7px; border-radius:999px; vertical-align:middle;
+                   background:var(--mer-surface); color:var(--mer-blue-700); border:1px solid var(--mer-blue);
+                   font:700 10.5px/1.5 'Plus Jakarta Sans', sans-serif; }
+</style>
 
 @if (loading)
 {
@@ -26,9 +42,9 @@ else if (detail == null)
 else
 {
     <div class="tl-page">
-        <a href="po-negotiation-review" class="mer-back-link">
+        <a href="@BackHref" class="mer-back-link">
             <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">arrow_back</span>
-            Back to PO negotiations
+            @BackLabel
         </a>
         <header class="tl-header">
             <div>
@@ -37,8 +53,8 @@ else
                     <span class="tlg-status @PoNegotiationStatus.CssClass(detail.NegotiationStatus)">@PoNegotiationStatus.Label(detail.NegotiationStatus)</span>
                 </div>
                 <p class="tl-sub">
-                    <a href="purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);text-decoration:none;">@detail.SupplierName</a>
-                    · @detail.Lines.Count line@(detail.Lines.Count == 1 ? "" : "s") proposed
+                    <a href="purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);text-decoration:none;">@(string.IsNullOrWhiteSpace(detail.SupplierName) ? "View purchase order" : detail.SupplierName)</a>
+                    · @ChangedCount line@(ChangedCount == 1 ? "" : "s") proposed
                 </p>
             </div>
             @if (CanReview && PoNegotiationStatus.IsReviewable(detail.NegotiationStatus))
@@ -67,8 +83,8 @@ else
         @* ---------------- Header meta ---------------- *@
         <div class="rz-card" style="padding:20px;margin-bottom:16px;">
             <dl style="display:grid;grid-template-columns:150px 1fr 150px 1fr;gap:6px 16px;font-size:13px;">
-                <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@detail.SupplierName</dd>
-                <dt style="color:var(--mer-ink-500);">PO previous status</dt><dd>@detail.PreviousPoStatus</dd>
+                <dt style="color:var(--mer-ink-500);">Supplier</dt><dd>@(string.IsNullOrWhiteSpace(detail.SupplierName) ? "—" : detail.SupplierName)</dd>
+                <dt style="color:var(--mer-ink-500);">PO previous status</dt><dd>@PoStatusLabels.Label(detail.PreviousPoStatus)</dd>
                 <dt style="color:var(--mer-ink-500);">Submitted</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.SubmittedAt)</dd>
                 <dt style="color:var(--mer-ink-500);">Reviewed by</dt><dd>@(string.IsNullOrWhiteSpace(detail.ReviewedBy) ? "—" : detail.ReviewedBy)</dd>
                 <dt style="color:var(--mer-ink-500);">Reviewed at</dt><dd style="font-family:Inter,monospace;">@AppTime.Stamp(detail.ReviewedAt)</dd>
@@ -84,9 +100,9 @@ else
             }
         </div>
 
-        @* ---------------- Diff table (sourced from the negotiation lines, NOT the live PO) ---------------- *@
-        <div class="rz-card" style="padding:20px;">
-            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Proposed changes (@detail.Lines.Count)</h3>
+        @* ---------------- Diff table (one row per PO line; IsChanged marks the ones the supplier proposed a change to) ---------------- *@
+        <div class="rz-card" style="padding:20px;overflow-x:auto;">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)<span style="font-weight:500;color:var(--mer-ink-500);"> · @ChangedCount changed</span></h3>
             @if (detail.Lines.Count == 0)
             {
                 <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">difference</span><div>No lines on this negotiation.</div></div>
@@ -99,6 +115,7 @@ else
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Pos</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Seq</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item</th>
+                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Item Description</th>
                             @* Price columns removed 2026-08-12 (feedback (2)): price is no longer negotiable, so a
                                diff of it is always a no-op. The DTO still carries Original/NegotiatedPrice and the
                                stored history is intact — this is a display change only. *@
@@ -113,16 +130,23 @@ else
                     {
                         var qtyChanged = ln.NegotiatedQty != ln.OriginalQty;
                         var dateChanged = ln.NegotiatedDeliveryDate != ln.OriginalDeliveryDate;
-                        <tr style="border-bottom:1px solid var(--mer-line-soft);">
+                        <tr class="@(ln.IsChanged ? "ponego-row--changed" : "ponego-row--same")" style="border-bottom:1px solid var(--mer-line-soft);">
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PositionNo</td>
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.SequenceNo</td>
-                            <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.ItemCode</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);@(qtyChanged ? "text-decoration:line-through;" : "")">@ln.OriginalQty.ToString("0.###")</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:@(qtyChanged ? "700" : "400");color:@(qtyChanged ? "var(--mer-green-dark)" : "var(--mer-ink-700)");background:@(qtyChanged ? "var(--mer-green-50)" : "transparent");">@ln.NegotiatedQty.ToString("0.###")</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;white-space:nowrap;">
+                                @ln.ItemCode
+                                @if (ln.IsChanged)
+                                {
+                                    <span class="ponego-chip">Changed</span>
+                                }
+                            </td>
+                            <td class="ponego-desc" style="padding:6px 4px;">@(string.IsNullOrWhiteSpace(ln.ItemDescription) ? "—" : ln.ItemDescription)</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);@(qtyChanged ? "text-decoration:line-through;" : "")">@FormatQty(ln.OriginalQty, ln.UnitDecimalPlaces)</td>
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:@(qtyChanged ? "700" : "400");color:@(qtyChanged ? "var(--mer-green-dark)" : "var(--ponego-ink)");background:@(qtyChanged ? "var(--mer-green-50)" : "transparent");">@FormatQty(ln.NegotiatedQty, ln.UnitDecimalPlaces)</td>
                             @* To the minute: the supplier can now propose a TIME, and a date-only cell would show
                                an 09:00 → 17:00 move as two identical values. *@
                             <td style="padding:6px 4px;font-family:Inter,monospace;color:var(--mer-ink-500);@(dateChanged ? "text-decoration:line-through;" : "")">@AppTime.Stamp(ln.OriginalDeliveryDate)</td>
-                            <td style="padding:6px 4px;font-family:Inter,monospace;font-weight:@(dateChanged ? "700" : "400");color:@(dateChanged ? "var(--mer-green-dark)" : "var(--mer-ink-700)");background:@(dateChanged ? "var(--mer-green-50)" : "transparent");">@AppTime.Stamp(ln.NegotiatedDeliveryDate)</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;font-weight:@(dateChanged ? "700" : "400");color:@(dateChanged ? "var(--mer-green-dark)" : "var(--ponego-ink)");background:@(dateChanged ? "var(--mer-green-50)" : "transparent");">@AppTime.Stamp(ln.NegotiatedDeliveryDate)</td>
                         </tr>
                     }
                     </tbody>
@@ -170,7 +194,7 @@ else
                     <div class="merino-dialog__head-text">
                         <div class="merino-dialog__eyebrow">PO negotiation</div>
                         <h2 class="merino-dialog__title">Reject negotiation on @detail.PoNumber?</h2>
-                        <p class="merino-dialog__subtitle">No changes are applied. The PO reverts to <b>@detail.PreviousPoStatus</b> and the supplier can respond again.</p>
+                        <p class="merino-dialog__subtitle">No changes are applied. The PO reverts to <b>@PoStatusLabels.Label(detail.PreviousPoStatus)</b> and the supplier can respond again.</p>
                     </div>
                     <button class="merino-dialog__close" @onclick="() => showReject = false"><span class="material-symbols-outlined">close</span></button>
                 </header>
@@ -203,6 +227,20 @@ else
     private string actionError = string.Empty;
 
     private bool CanReview => Token.HasPermission("PurchaseOrder.ApproveNegotiation");
+
+    // The DTO lists EVERY PO line (so the grid shows the whole order); only the ones the supplier actually changed are
+    // IsChanged. Every "proposed" / "changed" count on this page comes from here, never from Lines.Count.
+    private int ChangedCount => detail?.Lines.Count(l => l.IsChanged) ?? 0;
+
+    // A reviewer arrives from the review queue; a supplier (no ApproveNegotiation) from its own change-request list.
+    private string BackHref => CanReview ? "po-negotiation-review" : "po-negotiations";
+    private string BackLabel => CanReview ? "Back to PO negotiations" : "Back to PO change requests";
+
+    // Quantity at the line's unit precision (mdm.Unit.decimalPlaces, carried on the line), trailing zeros trimmed. Never
+    // fewer than the 3 places this grid always showed: with a 4-6 dp unit, two different quantities would otherwise print
+    // identically beside a "changed" highlight (which compares the raw decimals).
+    private static string FormatQty(decimal qty, int unitDecimalPlaces)
+        => qty.ToString("0." + new string('#', Math.Max(unitDecimalPlaces, 3)));
 
     // Why a reviewer sees no Approve/Reject buttons for a non-reviewable negotiation (only Submitted acts).
     private static string ReviewHint(string status) => status switch

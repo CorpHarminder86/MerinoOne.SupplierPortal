@@ -5,8 +5,8 @@ using Xunit;
 namespace MerinoOne.SupplierPortal.Tests.Unit;
 
 /// <summary>
-/// Mirrors <c>PurchaseOrderDetail.OnDeliveryChanged</c> — the parse behind the negotiation delivery
-/// <c>&lt;input type="datetime-local"&gt;</c>.
+/// Historical: mirrors the parse that sat behind the negotiation delivery <c>&lt;input type="datetime-local"&gt;</c>
+/// until 2026-10-10, when <c>PurchaseOrderDetail</c> moved to a <c>RadzenDatePicker</c>. Kept for the native control's hazards.
 ///
 /// <para><b>Why this parse is hand-written rather than <c>@bind:format</c>.</b> The control originally used
 /// <c>@bind</c> with <c>@bind:format="yyyy-MM-ddTHH:mm"</c>. In the running app that silently failed to parse
@@ -21,7 +21,7 @@ namespace MerinoOne.SupplierPortal.Tests.Unit;
 /// </summary>
 public class DateTimeLocalBindFormatTests
 {
-    /// <summary>Must stay in step with <c>PurchaseOrderDetail.DeliveryInputFormats</c>.</summary>
+    /// <summary>The formats the retired native control used — kept for the record.</summary>
     private static readonly string[] Formats = { "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss" };
 
     private static bool TryParse(string raw, out DateTime value) =>
@@ -51,7 +51,7 @@ public class DateTimeLocalBindFormatTests
     [Fact]
     public void Parsing_is_culture_independent()
     {
-        // Blazor's own binding parses with CurrentCulture. OnDeliveryChanged pins InvariantCulture precisely so a
+        // Blazor's own binding parses with CurrentCulture. The retired parser pinned InvariantCulture precisely so a
         // server whose locale formats dates differently cannot make the picker stop accepting input.
         var original = CultureInfo.CurrentCulture;
         try
@@ -72,7 +72,7 @@ public class DateTimeLocalBindFormatTests
     [Fact]
     public void Rejects_values_the_handler_must_ignore_rather_than_treat_as_a_clear()
     {
-        // OnDeliveryChanged leaves the model untouched on an unparseable value. Blanking it instead would
+        // The retired parser left the model untouched on an unparseable value. Blanking it instead would
         // silently drop a date the supplier still believes is set.
         TryParse("2026-08-20", out _).Should().BeFalse();
         TryParse("20/08/2026 09:30", out _).Should().BeFalse();

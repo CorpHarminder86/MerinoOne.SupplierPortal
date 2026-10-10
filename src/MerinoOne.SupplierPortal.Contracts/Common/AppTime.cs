@@ -33,8 +33,8 @@ public static class AppTime
     ///
     /// <para><b>Display only.</b> Two other formats in the codebase look similar and must stay 24-hour, because
     /// they are wire formats rather than something a person reads: <c>PoLineDocumentAssembler.FormatUtc</c> (the
-    /// LN payload) and <c>PurchaseOrderDetail.DeliveryInputFormats</c> (an <c>&lt;input type="datetime-local"&gt;</c>
-    /// only accepts ISO 24-hour, whatever the browser chooses to SHOW the user). Changing either to 12-hour
+    /// LN payload) and the negotiation delivery picker in <c>PurchaseOrderDetail</c> (a <c>RadzenDatePicker</c> whose
+    /// <c>DateFormat</c> is 24-hour so a typed value parses unambiguously). Changing either to 12-hour
     /// breaks the integration or the picker.</para>
     ///
     /// <para><c>hh</c> rather than <c>h</c>: these values sit in tabular, tabular-nums columns, and a

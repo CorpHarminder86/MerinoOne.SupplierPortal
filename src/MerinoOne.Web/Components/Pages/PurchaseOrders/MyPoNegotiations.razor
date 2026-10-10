@@ -6,8 +6,9 @@
 @* ------------------------------------------------------------------------------------------------
    Supplier-facing list of the caller's OWN PO negotiations ("PO Change Requests"). The list endpoint
    is seccode-scoped, so a supplier principal already only sees its own negotiations — no supplierId
-   filter needed here. Every row opens the source PO detail (the negotiation diff lives there + on the
-   buyer review screen). Status filter mirrors MyChangeRequests.
+   filter needed here. Every row opens the negotiation itself (/po-negotiations/{id} — the read-only
+   original → negotiated diff, PoNegotiationDetail), which links on to the PO. Status filter mirrors
+   MyChangeRequests.
 ------------------------------------------------------------------------------------------------ *@
 
 <PageTitle>My PO change requests</PageTitle>
@@ -90,11 +91,7 @@
         loading = false;
     }
 
-    // Supplier rows open the source PO (the negotiation status + Cancel affordance live on that detail).
-    private async Task Open(PoNegotiationListItemDto r)
-    {
-        var detail = await Api.GetAsync<PoNegotiationDto>($"api/purchase-orders/negotiations/{r.Id}");
-        var poId = detail?.Data?.PurchaseOrderId;
-        if (poId is { } id) Nav.NavigateToRoute($"/purchase-orders/{id}");
-    }
+    // Supplier rows open the negotiation (the supplier alias route of PoNegotiationDetail). The row's own id is all the
+    // route needs, so there is no pre-fetch; the detail page reports a missing / foreign negotiation itself.
+    private void Open(PoNegotiationListItemDto r) => Nav.NavigateToRoute($"/po-negotiations/{r.Id}");
 }

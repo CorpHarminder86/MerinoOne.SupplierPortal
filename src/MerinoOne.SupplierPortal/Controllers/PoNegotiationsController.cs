@@ -49,7 +49,7 @@ Returns: List<PoNegotiationListItemDto> ordered by submittedAt desc. Requires **
     [HttpGet("{id:guid}")]
     [Authorize(Policy = Perm.PurchaseOrderRead)]
     [EndpointSummary("PO negotiation detail")]
-    [EndpointDescription(@"Full negotiation detail for the diff view: header + delta lines (original → negotiated qty / delivery date per changed PO line).
+    [EndpointDescription(@"Full negotiation detail for the diff view: header + one line per PO line (original → negotiated qty / delivery date; isChanged marks the lines the supplier changed, the rest echo the PO). Each line carries itemDescription, orderUnit and unitDecimalPlaces.
 Filters / params:
 - **id**: Required — negotiation GUID.
 Returns: PoNegotiationDto; 404 if not found / not visible (seccode). Requires **PurchaseOrder.Read**.")]
@@ -65,7 +65,7 @@ Returns: PoNegotiationDto; 404 if not found / not visible (seccode). Requires **
     [EndpointDescription(@"Supplier raises a negotiation proposing revised qty / delivery date on PO lines. The live PO lines are NOT mutated.
 Body: CreatePoNegotiationRequest (purchaseOrderId, notes?, lines[]). Each line: purchaseOrderLineId, negotiatedQty (>0), negotiatedDeliveryDate?.
 Side effects: only lines that actually differ are persisted (delta); captures PreviousPoStatus; flips PO.PoStatus -> Negotiation; stamps Owner = supplier G-seccode. Authorization: PurchaseOrder.Negotiate permission + verified SupplierUserMap membership (403 otherwise).
-Returns: PoNegotiationDto; 404 if PO/supplier not found; 409 if PO not Released/Acknowledged; 400 if no line differs / bad input. Requires **PurchaseOrder.Negotiate**.")]
+Returns: PoNegotiationDto; 404 if PO/supplier not found; 409 if PO not Released/Acknowledged; 400 if no line differs / bad input / a changed negotiatedQty has more decimals than the line's unit allows. Requires **PurchaseOrder.Negotiate**.")]
     public async Task<Result<PoNegotiationDto>> Create([FromBody] CreatePoNegotiationRequest body, CancellationToken ct)
     {
         var data = await _mediator.Send(new CreatePoNegotiationCommand(body), ct);

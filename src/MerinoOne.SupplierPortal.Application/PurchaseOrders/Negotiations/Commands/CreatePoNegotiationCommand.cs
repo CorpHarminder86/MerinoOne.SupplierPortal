@@ -3,6 +3,7 @@ using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Security;
+using MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
 using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
@@ -20,6 +21,12 @@ namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Negotiations.Comma
 /// differ from the live line are persisted (delta); at least one must differ (else 400). The PO's current status
 /// is captured into <c>PreviousPoStatus</c> (the revert target for cancel/reject) and the PO is flipped to
 /// <see cref="PoStatus.Negotiation"/>. The negotiation aggregate's Owner is the supplier's G-seccode (seccode RLS).
+///
+/// <para><b>Quantity scale:</b> a PROPOSED quantity (one that differs from the live line) may not carry more decimal
+/// places than the line's unit of measure allows (<c>mdm.Unit.decimalPlaces</c>, resolved in one batch through
+/// <see cref="IUnitDecimalsResolver"/>; an unknown or blank unit allows 3) — else 400, keyed
+/// <c>lines[i].negotiatedQty</c>, with a message that names the PO line. A quantity the supplier did not change is
+/// never judged.</para>
 ///
 /// <para><b>Supplier write path:</b> a supplier user has <c>SecRight.canWrite=false</c> on its G-seccode. The
 /// write of THIS portal-originated aggregate is authorized through <see cref="SupplierWriteGuard"/> with the
@@ -49,10 +56,12 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly SupplierWriteGuard _guard;
+    private readonly IUnitDecimalsResolver _units;
 
-    public CreatePoNegotiationCommandHandler(IAppDbContext db, ICurrentUser user, SupplierWriteGuard guard)
+    public CreatePoNegotiationCommandHandler(
+        IAppDbContext db, ICurrentUser user, SupplierWriteGuard guard, IUnitDecimalsResolver units)
     {
-        _db = db; _user = user; _guard = guard;
+        _db = db; _user = user; _guard = guard; _units = units;
     }
 
     public async Task<PoNegotiationDto> Handle(CreatePoNegotiationCommand request, CancellationToken ct)
@@ -79,6 +88,13 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
         // Permission-based supplier write-path authorization (see XML doc). Throws ForbiddenException (403).
         await _guard.EnsureCanWriteAsync(supplier.Id, po.SeccodeId, "PurchaseOrder.Negotiate", ct);
 
+        // Decimal places each of the PO's units allows — ONE batched lookup, read by the quantity-scale rule below.
+        // Only after the authorization check: an unauthorized caller costs no extra query.
+        var unitPlaces = await _units.ResolveAsync(
+            po.Lines.Where(l => !l.IsDeleted).Select(l => (string?)l.OrderUnit), ct);
+        int PlacesFor(string? unit)
+            => !string.IsNullOrWhiteSpace(unit) && unitPlaces.TryGetValue(unit, out var known) ? known : _units.Fallback;
+
         var now = DateTime.UtcNow;
         var actor = Actor();
 
@@ -101,8 +117,9 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
 
         // Build only the CHANGED delta lines (qty OR delivery date differs from the live PO line), snapshotting the
         // original. The live PO lines are NOT mutated — ERP stays the line master.
-        foreach (var input in request.Body.Lines)
+        for (var index = 0; index < request.Body.Lines.Count; index++)
         {
+            var input = request.Body.Lines[index];
             var poLine = po.Lines.FirstOrDefault(l => l.Id == input.PurchaseOrderLineId && !l.IsDeleted)
                          ?? throw new ValidationException(new Dictionary<string, string[]>
                          {
@@ -134,6 +151,27 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
                         $"({AppTime.Stamp(po.PoDate)})."
                     }
                 });
+
+            // Quantity scale — a PROPOSED quantity may not carry more decimal places than the line's unit allows. Gated
+            // on qtyChanged for the same reason the date floor is gated on dateChanged, and likewise placed AFTER it
+            // is computed: the client re-sends an untouched quantity verbatim, and an ERP-fed order quantity is not
+            // guaranteed to fit the unit master, so judging every submitted line would fault a quantity the supplier
+            // never edited (and one such line fails the whole submission). Keyed to the line's index in the REQUEST,
+            // not its position among the persisted delta lines. The 400 body carries only the message, never the key, so
+            // the message names the PO line (position/sequence) the way the delivery-date floor above does.
+            if (qtyChanged)
+            {
+                var places = PlacesFor(poLine.OrderUnit);
+                if (HasMoreDecimalsThan(input.NegotiatedQty, places))
+                    throw new ValidationException(new Dictionary<string, string[]>
+                    {
+                        [$"lines[{index}].negotiatedQty"] = new[]
+                        {
+                            $"Quantity on line {poLine.PositionNo}/{poLine.SequenceNo} for unit " +
+                            $"{UnitLabel(poLine.OrderUnit)} allows at most {places} decimal places."
+                        }
+                    });
+            }
 
             negotiation.Lines.Add(new PurchaseOrderNegotiationLine
             {
@@ -175,4 +213,15 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
     }
 
     private string Actor() => string.IsNullOrEmpty(_user.UserCode) ? "system" : _user.UserCode;
+
+    /// <summary>
+    /// True when <paramref name="value"/> has a non-zero digit beyond <paramref name="places"/> decimal places. Trailing
+    /// zeros are not digits (1.50 fits a one-place unit, 1.55 does not), which is why this rounds and compares rather
+    /// than reading the decimal's scale — a client binding "7.00" sends a scale-2 decimal that is still a whole number.
+    /// A decimal holds at most 28 fractional digits, so a scale of 28 or more can never be exceeded.
+    /// </summary>
+    private static bool HasMoreDecimalsThan(decimal value, int places)
+        => places is >= 0 and < 28 && decimal.Round(value, places) != value;
+
+    private static string UnitLabel(string? unit) => string.IsNullOrWhiteSpace(unit) ? "(none)" : unit.Trim();
 }
