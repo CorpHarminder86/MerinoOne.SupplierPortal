@@ -270,9 +270,10 @@ public class IdmDispatchTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            IdmDocumentOutbox NewRow(Guid docId, IdmOutboxOperation op, IdmOutboxStatus status) => new()
+            IdmDocumentOutbox NewRow(Guid docId, IdmOutboxOperation op, IdmOutboxStatus status,
+                string entityType = "InforInvoice") => new()
             {
-                Id = Guid.NewGuid(), DocumentUploadId = docId, IdmEntityType = "InforInvoice",
+                Id = Guid.NewGuid(), DocumentUploadId = docId, IdmEntityType = entityType,
                 OwnerEntityId = Guid.NewGuid(), FileName = $"head-{tag}.pdf",
                 Operation = op, Status = status,
                 SeccodeId = IntegrationTestFixture.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
@@ -296,6 +297,10 @@ public class IdmDispatchTests
                 return docId;
             }
 
+            // These partitions use an entity type nothing serves: the live worker's promotion scan picks Blocked rows by
+            // idmEntityType, so a resolvable head is promoted or terminated mid-test, freeing its held successor.
+            var unservedType = $"NoProvider-{tag}";
+
             // Two partitions whose HEAD is a Blocked Create with a due Pending DELETE queued behind it — the real
             // shape of "the document was deleted while its create was still gated". Seq is assigned in insert
             // order, so the head must be saved first. (A second Create would be the shape migration 0061 forbids;
@@ -303,9 +308,9 @@ public class IdmDispatchTests
             foreach (var suffix in new[] { "blocked1", "blocked2" })
             {
                 var docId = NewDoc(suffix);
-                db.IdmDocumentOutboxes.Add(NewRow(docId, IdmOutboxOperation.Create, IdmOutboxStatus.Blocked));
+                db.IdmDocumentOutboxes.Add(NewRow(docId, IdmOutboxOperation.Create, IdmOutboxStatus.Blocked, unservedType));
                 await db.SaveChangesAsync();
-                var successor = NewRow(docId, IdmOutboxOperation.Delete, IdmOutboxStatus.Pending);
+                var successor = NewRow(docId, IdmOutboxOperation.Delete, IdmOutboxStatus.Pending, unservedType);
                 db.IdmDocumentOutboxes.Add(successor);
                 await db.SaveChangesAsync();
                 heldSuccessorIds.Add(successor.Id);
