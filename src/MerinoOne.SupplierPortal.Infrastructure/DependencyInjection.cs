@@ -1,6 +1,7 @@
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Application.SystemSettings;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Display;
 using MerinoOne.SupplierPortal.Application.SystemSettings.EmailConfig;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Application.SystemSettings.InforIdm;
@@ -21,6 +22,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace MerinoOne.SupplierPortal.Infrastructure;
@@ -74,6 +76,14 @@ public static class DependencyInjection
         else
             services.AddScoped<IInforIntegrationService, MockInforIntegrationService>();
 
+        // BackgroundWorkers:Enabled (default true) switches EVERY hosted worker below on/off in one place, so a local run
+        // against the shared dev DB can turn them off and not become a second dispatcher draining the same outbox.
+        var workersEnabled = cfg.GetValue<bool>("BackgroundWorkers:Enabled", true);
+        void AddWorker<TWorker>() where TWorker : class, IHostedService
+        {
+            if (workersEnabled) services.AddHostedService<TWorker>();
+        }
+
         // ── Outbound transactional outbox (Increment 0) ────────────────────────────────────────
         // EnqueueAsync adds a Pending OutboxMessage in the caller's unit of work; the post-commit
         // OutboxDispatcherWorker drains it (no ERP HTTP call ever inside a DB txn — fixes D1/D2/D3).
@@ -81,7 +91,7 @@ public static class DependencyInjection
         // Scoped so the dispatcher (and RetryIntegrationErrorCommand) can thread the deterministic key into the
         // Live service without changing the IInforIntegrationService interface. Replayed as the ERP idempotency key.
         services.AddScoped<IOutboundIdempotencyContext, Integration.Outbox.OutboundIdempotencyContext>();
-        services.AddHostedService<Integration.Outbox.OutboxDispatcherWorker>();
+        AddWorker<Integration.Outbox.OutboxDispatcherWorker>();
 
         // File storage (Mock-then-Live). Stage 1 = local disk under {ContentRoot}/uploads.
         // Stage 2 will swap to Azure Blob behind the same IFileStorageService interface.
@@ -112,7 +122,7 @@ public static class DependencyInjection
             services.AddScoped<IIdmClient, MockIdmClient>();
         services.AddHttpClient("idm");
         // The dispatcher (per-document FIFO, gate promotion, backoff, reap). Reads InforIdm settings each drain.
-        services.AddHostedService<IdmDocumentOutboxWorker>();
+        AddWorker<IdmDocumentOutboxWorker>();
 
         // ── R9 (2026-07-06) — Config-driven LN outbound posting (TSD R9) ───────────────────────────
         // Engine parts: the shared JSONata service (singleton, bounded compiled-expression cache), the repo
@@ -141,8 +151,8 @@ public static class DependencyInjection
         // The ONE scanner sweep + backfill share (O-R9-9), the low-frequency reconciliation sweep, and the
         // held-inbound FIFO replay (accept-and-hold under the InboundErpAck kill, D-R9-11).
         services.AddScoped<Application.Integration.Ln.ILnGateScanner, Integration.Ln.LnGateScanner>();
-        services.AddHostedService<Integration.Ln.LnGateReconciliationWorker>();
-        services.AddHostedService<Integration.Inbound.HeldInboundReplayWorker>();
+        AddWorker<Integration.Ln.LnGateReconciliationWorker>();
+        AddWorker<Integration.Inbound.HeldInboundReplayWorker>();
 
         // R6 (plan D13) — invoice PDF rendering (QuestPDF). The Community license is asserted ONCE here (both
         // hosts call AddInfrastructure). NOTE: Community licensing is revenue-gated (<$1M USD/yr) — flagged to
@@ -189,13 +199,13 @@ public static class DependencyInjection
         services.AddScoped<IEmailService, TemplateAwareEmailService>();
 
         // Async drain. Hosted service so it starts with the host and stops cleanly on shutdown.
-        services.AddHostedService<EmailOutboxWorker>();
+        AddWorker<EmailOutboxWorker>();
 
         // R4 (2026-06-26) — Phase 6 / UC-PO-04: 48h negotiation-SLA buyer nudge. BackgroundService (mirrors
         // EmailOutboxWorker) — polls Fulfilment:SlaNudgeIntervalMinutes (default 30), finds Submitted negotiations
         // older than Fulfilment:SlaNudgeHours (default 48) with NudgeSentAt null, enqueues a buyer reminder + stamps
         // NudgeSentAt to dedupe.
-        services.AddHostedService<SlaNudgeWorker>();
+        AddWorker<SlaNudgeWorker>();
 
         // Cryptographically-strong numeric OTP generator (invite + MFA flows).
         services.AddSingleton<IOtpCodeGenerator, OtpCodeGenerator>();
@@ -230,11 +240,13 @@ public static class DependencyInjection
         services.AddSingleton<FulfilmentSeed>();
         services.AddSingleton<InvoicingSeed>();
         services.AddSingleton<InforIdmSeed>();
+        services.AddSingleton<DisplaySeed>();
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<EmailConfigSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<SupplierInviteSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<FulfilmentSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<InvoicingSeed>());
         services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<InforIdmSeed>());
+        services.AddSingleton<ISettingsCategorySeed>(sp => sp.GetRequiredService<DisplaySeed>());
         services.AddSingleton<SettingsSeedRegistry>();
 
         // Cached readers — singleton so the cache persists across requests; expose both the
@@ -261,6 +273,12 @@ public static class DependencyInjection
         services.AddSingleton<InforIdmSettingsService>();
         services.AddSingleton<IInforIdmSettings>(sp => sp.GetRequiredService<InforIdmSettingsService>());
         services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<InforIdmSettingsService>());
+
+        // Display preferences (Display.MoneyDecimalPlaces) — read by the API host's AppMoney configure, the post-Save/Reset
+        // refresh, and GET api/system-settings/display.
+        services.AddSingleton<DisplaySettingsService>();
+        services.AddSingleton<IDisplaySettings>(sp => sp.GetRequiredService<DisplaySettingsService>());
+        services.AddSingleton<ISettingsCacheInvalidator>(sp => sp.GetRequiredService<DisplaySettingsService>());
 
         // R5 (TSD R5 Addendum §11 / Component 7) — cached ERP→portal PO-status map (per tenant). Singleton so the
         // map persists across requests with zero DB I/O on the inbound hot path; invalidated like the other cached

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text;
 using MerinoOne.SupplierPortal.Application;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Display;
 using MerinoOne.SupplierPortal.Identity;
 using MerinoOne.SupplierPortal.Infrastructure;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
@@ -240,6 +241,24 @@ if (app.Environment.IsDevelopment())
             "IntegrationCatalog scopes are out of sync with ApiKeyScopes.Allowed. " +
             $"Catalog-only: [{string.Join(", ", catalogScopes.Except(allowedScopes))}]; " +
             $"Allowed-only: [{string.Join(", ", allowedScopes.Except(catalogScopes))}].");
+}
+
+// Money display precision. AppMoney is process-wide (like AppTime) and starts at its default; seed it from the
+// Display settings now, AFTER the Development migrate above so a fresh dev DB has its tables, so server-composed
+// text matches the screens. Best-effort BY DESIGN: a display preference must never stop the host booting, so on ANY
+// failure (no user context, DB down, schema not there yet) it is logged and the default of 4 stands.
+try
+{
+    using var displayScope = app.Services.CreateScope();
+    var display = displayScope.ServiceProvider.GetRequiredService<IDisplaySettings>();
+    MerinoOne.SupplierPortal.Contracts.Common.AppMoney.Configure(
+        await display.GetMoneyDecimalPlacesAsync(CancellationToken.None));
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex,
+        "Could not read the Display settings at startup; AppMoney keeps {Decimals} decimal places.",
+        MerinoOne.SupplierPortal.Contracts.Common.AppMoney.Decimals);
 }
 
 // OpenAPI + Scalar exposed in every environment — protected endpoints still require a

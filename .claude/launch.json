@@ -22,6 +22,13 @@
       "runtimeArgs": ["run", "--project", "src/MerinoOne.SupplierPortal", "--launch-profile", "https", "--no-build"],
       "port": 5186,
       "autoPort": false
+    },
+    {
+      "name": "api-noworkers",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/MerinoOne.SupplierPortal", "--launch-profile", "https", "--no-build", "--", "--BackgroundWorkers:Enabled=false"],
+      "port": 5186,
+      "autoPort": false
     }
   ]
 }

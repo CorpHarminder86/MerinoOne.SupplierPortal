@@ -2,8 +2,10 @@ using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Security;
+using MerinoOne.SupplierPortal.Application.SystemSettings.Display;
 using MerinoOne.SupplierPortal.Application.SystemSettings.EmailConfig;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Registry;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Contracts.SystemSettings;
 using MerinoOne.SupplierPortal.Domain.Entities.Settings;
 using Microsoft.EntityFrameworkCore;
@@ -32,19 +34,22 @@ public class SaveSystemSettingCommandHandler : IRequestHandler<SaveSystemSetting
     private readonly SettingsSeedRegistry _registry;
     private readonly ISettingProtector _protector;
     private readonly IEnumerable<ISettingsCacheInvalidator> _invalidators;
+    private readonly IDisplaySettings _display;
 
     public SaveSystemSettingCommandHandler(
         IAppDbContext db,
         ICurrentUser user,
         SettingsSeedRegistry registry,
         ISettingProtector protector,
-        IEnumerable<ISettingsCacheInvalidator> invalidators)
+        IEnumerable<ISettingsCacheInvalidator> invalidators,
+        IDisplaySettings display)
     {
         _db = db;
         _user = user;
         _registry = registry;
         _protector = protector;
         _invalidators = invalidators;
+        _display = display;
     }
 
     public async Task<Unit> Handle(SaveSystemSettingCommand request, CancellationToken ct)
@@ -150,6 +155,7 @@ public class SaveSystemSettingCommandHandler : IRequestHandler<SaveSystemSetting
 
         await _db.SaveChangesAsync(ct);
         Invalidate(category);
+        await DisplaySettingsRefresh.ApplyAsync(category, _display);
         return Unit.Value;
     }
 
@@ -178,19 +184,22 @@ public class ResetSystemSettingCommandHandler : IRequestHandler<ResetSystemSetti
     private readonly SettingsSeedRegistry _registry;
     private readonly ISettingProtector _protector;
     private readonly IEnumerable<ISettingsCacheInvalidator> _invalidators;
+    private readonly IDisplaySettings _display;
 
     public ResetSystemSettingCommandHandler(
         IAppDbContext db,
         ICurrentUser user,
         SettingsSeedRegistry registry,
         ISettingProtector protector,
-        IEnumerable<ISettingsCacheInvalidator> invalidators)
+        IEnumerable<ISettingsCacheInvalidator> invalidators,
+        IDisplaySettings display)
     {
         _db = db;
         _user = user;
         _registry = registry;
         _protector = protector;
         _invalidators = invalidators;
+        _display = display;
     }
 
     public async Task<Unit> Handle(ResetSystemSettingCommand request, CancellationToken ct)
@@ -238,6 +247,23 @@ public class ResetSystemSettingCommandHandler : IRequestHandler<ResetSystemSetti
 
         await _db.SaveChangesAsync(ct);
         foreach (var inv in _invalidators) inv.InvalidateCategory(category);
+        await DisplaySettingsRefresh.ApplyAsync(category, _display);
         return Unit.Value;
+    }
+}
+
+// ─── Display refresh ─────────────────────────────────────────────────────────
+/// <summary>
+/// Display.* feeds the process-wide <see cref="AppMoney"/> formatter. After a Save/Reset of that category has
+/// committed and the cache has been invalidated, re-read the effective value and re-point the formatter, so the API's
+/// own text follows the change without a restart. A no-op for every other category. <c>CancellationToken.None</c> on
+/// purpose: the write is already committed, and the formatter must follow it even if the caller has gone away.
+/// </summary>
+internal static class DisplaySettingsRefresh
+{
+    public static async Task ApplyAsync(string category, IDisplaySettings display)
+    {
+        if (!string.Equals(category, DisplayKeys.Category, StringComparison.Ordinal)) return;
+        AppMoney.Configure(await display.GetMoneyDecimalPlacesAsync(CancellationToken.None));
     }
 }
