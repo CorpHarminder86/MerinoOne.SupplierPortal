@@ -11,9 +11,9 @@
      · CreateDate → ASNCreationDate, ShipmentDate → ShippingDate;
      · numerics ship as STRINGS ("40", "1"), as they do on PO_Update;
      · ShippedQty_InvUnit and InvoiceNo are GONE — neither exists in the LN contract. The portal still
-       captures InvoiceNo (the supplier's own commercial invoice reference); it simply has no wire slot.
-       PackingSlip is the mirror gap: LN accepts it, the portal has no field to fill it from, so the key
-       is not emitted.
+       captures InvoiceNo (the supplier's own commercial invoice reference); it has no wire slot of its
+       own, so its value is sent as PackingSlip — a key LN accepts (confirmed by a Postman run, 200 OK),
+       emitted right after PackingList. There is still no InvoiceNo key on the wire.
 
    !! SequenceNo is the CONSTANT "0", never the PO line's sequence. Two live probes on 2026-08-10 pinned it
    from both sides, and LN's own two layers disagree in wording:
@@ -45,6 +45,7 @@
         "ASNCreationDate": createDate != null ? createDate,
         "BillOfLading": billOfLading != null ? billOfLading,
         "PackingList": packingList != null ? packingList,
+        "PackingSlip": invoiceNo != null ? invoiceNo,
         "Notes": notes != null ? notes,
         "Lines": [lines.{
             "PoNumber": poNumber != null ? poNumber,

@@ -118,11 +118,48 @@ public class AsnUpdateExpressionTests
     {
         var d = Request(Doc(Line()));
 
-        // InvoiceNo is captured by the portal but LN's ASN header has no such node.
+        // InvoiceNo is captured by the portal but LN's ASN header has no such node (its value travels as
+        // PackingSlip instead).
         d.TryGetProperty("InvoiceNo", out _).Should().BeFalse();
-        // The mirror gap: LN accepts PackingSlip, the portal has nothing to fill it from.
-        d.TryGetProperty("PackingSlip", out _).Should().BeFalse();
         d.GetProperty("Lines")[0].TryGetProperty("ShippedQty_InvUnit", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void PackingSlip_carries_the_ASN_invoice_number_right_after_PackingList()
+    {
+        // LN has no InvoiceNo node, but it accepts PackingSlip (confirmed by a Postman run, 200 OK), so the
+        // supplier's invoice number rides there — in the position that run used, immediately after PackingList.
+        var d = Request(Doc(Line()));
+
+        d.GetProperty("PackingSlip").ValueKind.Should().Be(JsonValueKind.String);
+        d.GetProperty("PackingSlip").GetString().Should().Be("INV-1");
+
+        var keys = d.EnumerateObject().Select(p => p.Name).ToList();
+        var packingList = keys.IndexOf("PackingList");
+        packingList.Should().BeGreaterThanOrEqualTo(0);
+        keys[packingList + 1].Should().Be("PackingSlip");
+    }
+
+    [Fact]
+    public void PackingSlip_is_omitted_not_nulled_when_the_invoice_number_is_absent()
+    {
+        // Input documents keep nulls (LnJson.InputDocOptions), so this is an explicit `"invoiceNo": null` —
+        // the same case the sibling optionals below cover.
+        var d = Request(Doc(Line()) with { InvoiceNo = null });
+
+        d.TryGetProperty("PackingSlip", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void No_InvoiceNo_key_is_emitted_under_any_casing()
+    {
+        // Case-insensitive on purpose: LN's driver block is lower camel on the way in, so a stray `invoiceNo`
+        // would breach the contract exactly as `InvoiceNo` would.
+        var d = Request(Doc(Line()));
+
+        d.EnumerateObject().Select(p => p.Name)
+            .Where(name => string.Equals(name, "InvoiceNo", StringComparison.OrdinalIgnoreCase))
+            .Should().BeEmpty();
     }
 
     [Fact]
