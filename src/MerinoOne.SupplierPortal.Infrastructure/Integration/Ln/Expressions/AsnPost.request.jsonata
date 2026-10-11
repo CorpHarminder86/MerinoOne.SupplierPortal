@@ -15,15 +15,15 @@
        own, so its value is sent as PackingSlip — a key LN accepts (confirmed by a Postman run, 200 OK),
        emitted right after PackingList. There is still no InvoiceNo key on the wire.
 
-   !! SequenceNo is the CONSTANT "0", never the PO line's sequence. Two live probes on 2026-08-10 pinned it
-   from both sides, and LN's own two layers disagree in wording:
-     · with "1", the business layer refused the line — "Error In whinh301 Updaton: :The Sequence field must
-       be empty in ASN Lines." (the header was created as INB00063; only the LINE was rejected);
-     · with "", request validation refused the whole message — "Attr. 'SequenceNo', Value '': the value must
-       be numeric."
-   "0" is the only value that satisfies both: numeric for the schema, and LN-"empty" for whinh301 (a line
-   that belongs to no delivery schedule). The portal's own sequenceNo is the PO line sequence, a different
-   thing entirely, and is not what this field means.
+   !! SequenceNo is the CONSTANT "1", never the PO line's sequence. History of the value:
+     · 2026-08-10, two live probes. With "1" the business layer refused the line (the header was created as
+       INB00063; only the LINE was rejected): "Error In whinh301 Updaton: :The Sequence field must be empty
+       in ASN Lines." With "" request validation refused the whole message: "Attr. 'SequenceNo', Value '':
+       the value must be numeric." So "0" was chosen.
+     · 2026-10-11, the live Dynamic row was changed to "1" (together with the PackingSlip key) and the user
+       confirmed that LN accepts the message, header and lines. "1" is the value shipped now.
+   The portal's own sequenceNo is the PO line sequence, a different thing entirely, and is still not what
+   this field means.
 
    `x != null ? x` omits the key when the value is null (the legacy WhenWritingNull behaviour).
    Array constructors are mandatory for collection outputs (D-R9-13 singleton-collapse guard); `serials ?
@@ -57,7 +57,7 @@
                the literal is correct today; if schedules/contracts ever ship, this becomes a real projection. */
             "PoOrigin": "purchase",
             "PositionNo": positionNo != null ? $string(positionNo),
-            "SequenceNo": "0",
+            "SequenceNo": "1",
             "ItemCode": itemCode != null ? itemCode,
             /* `* 1` is load-bearing, not noise: proc.AsnLine.shippedQty is decimal(18,4), so the input document
                carries "2.0000" and $string() of that literal would put "2.0000" on the wire where LN's sample

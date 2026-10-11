@@ -81,8 +81,8 @@ public sealed class LnDefaultExpressions : ILnExpressionCatalog
     /// <summary>
     /// R16 (2026-08-10) — seeded onto <c>responseSampleJson</c> for the AsnPost config. Captured from the LN
     /// ASN_Update probe of the same day with ONE correction: the probe's line came back <c>Status: "fail"</c>
-    /// ("The Sequence field must be empty in ASN Lines"), which the request mapping now avoids by sending an
-    /// empty SequenceNo. The sample carries the all-green shape so save-time validation exercises the normal
+    /// ("The Sequence field must be empty in ASN Lines"), which the request mapping avoided with SequenceNo "0" (2026-08-10) and, since 2026-10-11, sends as
+    /// "1" — the value the live row was verified with. The sample carries the all-green shape so save-time validation exercises the normal
     /// path; the failure path is covered by unit tests over the same envelope.
     /// </summary>
     public string AsnUpdateResponseSample { get; }

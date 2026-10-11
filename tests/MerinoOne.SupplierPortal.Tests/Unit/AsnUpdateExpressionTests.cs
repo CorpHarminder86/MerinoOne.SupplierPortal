@@ -196,14 +196,17 @@ public class AsnUpdateExpressionTests
     }
 
     [Fact]
-    public void SequenceNo_is_always_zero_never_the_po_line_sequence()
+    public void SequenceNo_is_always_one_never_the_po_line_sequence()
     {
-        // Pinned by two live probes on 2026-08-10, each refuting one of the alternatives:
-        //   "1" -> whinh301: "The Sequence field must be empty in ASN Lines." (header created, LINE refused)
-        //   ""  -> request validation: "Attr. 'SequenceNo', Value '': the value must be numeric."
-        // "0" is the only value both layers accept.
-        Request(Doc(Line(seq: 7))).GetProperty("Lines")[0].GetProperty("SequenceNo").GetString().Should().Be("0");
-        Request(Doc(Line(seq: null))).GetProperty("Lines")[0].GetProperty("SequenceNo").GetString().Should().Be("0");
+        // History of the constant (the !! SequenceNo note in AsnPost.request.jsonata has the full text):
+        //   2026-08-10  "1" -> whinh301: "The Sequence field must be empty in ASN Lines." (header created, LINE refused)
+        //   2026-08-10  ""  -> request validation: "Attr. 'SequenceNo', Value '': the value must be numeric."
+        //               so "0" was chosen.
+        //   2026-10-11  the live row was changed to "1" (with PackingSlip) and the user confirmed LN accepts the
+        //               message, header and lines; "1" is the value shipped now.
+        // The value is a constant: whatever the PO line's own sequence is (7, or null here), the wire carries "1".
+        Request(Doc(Line(seq: 7))).GetProperty("Lines")[0].GetProperty("SequenceNo").GetString().Should().Be("1");
+        Request(Doc(Line(seq: null))).GetProperty("Lines")[0].GetProperty("SequenceNo").GetString().Should().Be("1");
     }
 
     [Fact]
