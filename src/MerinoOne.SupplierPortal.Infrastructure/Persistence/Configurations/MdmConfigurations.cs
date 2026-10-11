@@ -134,7 +134,14 @@ public class UnitConfiguration : IEntityTypeConfiguration<Unit>
     public void Configure(EntityTypeBuilder<Unit> b)
     {
         b.ApplyBaseEntityConvention("Unit", "mdm", "unit");
-        b.Property(x => x.Code).HasColumnName("code").HasMaxLength(20).IsRequired();
+        // A unit code is CASE-SENSITIVE: "PCS" and "pcs" are two different units. The database collation is case-insensitive
+        // (SQL_Latin1_General_CP1_CI_AS), under which they would collide in UQ_Unit_company_code and in every `code = @x`
+        // comparison, so this column carries a case-sensitive collation of its own (migration 0063). The comparisons that
+        // should stay forgiving say so explicitly: the list search and UnitDecimalsResolver's fallback upper-case BOTH sides.
+        // Never join or compare mdm.Unit.code to a column of another table in SQL: two columns with different collations
+        // raise error 468 (collation conflict) — compare against a parameter instead, as every query today does.
+        b.Property(x => x.Code).HasColumnName("code").HasMaxLength(20).IsRequired()
+            .UseCollation("SQL_Latin1_General_CP1_CS_AS");
         b.Property(x => x.Description).HasColumnName("description").HasMaxLength(150).IsRequired();
         b.Property(x => x.UnitType).HasColumnName("unitType").HasConversion<int>().IsRequired();
         b.Property(x => x.IsoCode).HasColumnName("isoCode").HasMaxLength(10);

@@ -13,6 +13,10 @@ namespace MerinoOne.SupplierPortal.Application.Integration.Inbound;
 // share-group source by InboundUpsertExecutor; parents are resolved by (sourceId, code).
 
 // ----------------------------------- Unit -----------------------------------
+// Unit codes are CASE-SENSITIVE (mdm.Unit.code carries a case-sensitive collation since migration 0063): "PCS" and "pcs" are two
+// units. The lookups below therefore match in SQL (which follows the column) AND in memory with StringComparer.Ordinal — a
+// case-insensitive dictionary would fold the two spellings into one (or throw on the duplicate key). The same goes for the
+// unit-code lookup in the Item upsert further down.
 public record UpsertUnitsCommand(PushUnitsRequest Body, IReadOnlySet<Guid> BoundCompanyIds, string? IdempotencyKey) : IRequest<UpsertResultDto>;
 public class UpsertUnitsCommandValidator : AbstractValidator<UpsertUnitsCommand>
 {
@@ -32,7 +36,9 @@ public class UpsertUnitsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
     public Task<UpsertResultDto> Handle(UpsertUnitsCommand request, CancellationToken ct)
     {
         var recs = request.Body.Units;
-        var canonical = recs.Select(r => $"{r.Code.Trim().ToUpperInvariant()}|{(r.Description ?? "").Trim()}|{r.UnitType}|{r.IsoCode}|{r.DecimalPlaces}|{r.ConversionFactor}|{r.BaseUnitCode}|{r.IsActive}");
+        // The code is NOT upper-cased here (unlike the case-insensitive masters): "PCS" and "pcs" are different units, so they must hash
+        // differently — otherwise a push of "pcs" identical to an earlier push of "PCS" would be replayed as an idempotent no-op.
+        var canonical = recs.Select(r => $"{r.Code.Trim()}|{(r.Description ?? "").Trim()}|{r.UnitType}|{r.IsoCode}|{r.DecimalPlaces}|{r.ConversionFactor}|{r.BaseUnitCode}|{r.IsActive}");
         var codes = recs.Select(r => r.Code.Trim());
         return exec.ExecuteAsync(SharedEndpoint.Unit, request.Body.CompanyCode, request.BoundCompanyIds, request.IdempotencyKey,
             recs.Count, canonical, codes, request.Body, Upsert, ct);
@@ -42,12 +48,12 @@ public class UpsertUnitsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
             var codeList = recs.Select(r => r.Code.Trim()).ToList();
             var existing = (await db.Units.IgnoreQueryFilters()
                 .Where(u => u.TenantEntityId == sourceId && !u.IsDeleted && codeList.Contains(u.Code)).ToListAsync(token))
-                .ToDictionary(u => u.Code, StringComparer.OrdinalIgnoreCase);
+                .ToDictionary(u => u.Code, StringComparer.Ordinal);
             // Base-unit codes may reference rows already in this batch or pre-existing under the source.
-            var baseCodes = recs.Where(r => !string.IsNullOrWhiteSpace(r.BaseUnitCode)).Select(r => r.BaseUnitCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            var baseMap = baseCodes.Count == 0 ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
+            var baseCodes = recs.Where(r => !string.IsNullOrWhiteSpace(r.BaseUnitCode)).Select(r => r.BaseUnitCode!.Trim()).Distinct(StringComparer.Ordinal).ToList();
+            var baseMap = baseCodes.Count == 0 ? new Dictionary<string, Guid>(StringComparer.Ordinal)
                 : (await db.Units.IgnoreQueryFilters().Where(u => u.TenantEntityId == sourceId && !u.IsDeleted && baseCodes.Contains(u.Code))
-                    .Select(u => new { u.Code, u.Id }).ToListAsync(token)).ToDictionary(u => u.Code, u => u.Id, StringComparer.OrdinalIgnoreCase);
+                    .Select(u => new { u.Code, u.Id }).ToListAsync(token)).ToDictionary(u => u.Code, u => u.Id, StringComparer.Ordinal);
             var now = DateTime.UtcNow;
             var results = new List<RowResult>(recs.Count);
             foreach (var rec in recs)
@@ -186,10 +192,11 @@ public class UpsertItemsCommandHandler(InboundUpsertExecutor exec) : IRequestHan
                 .Where(i => i.TenantEntityId == sourceId && !i.IsDeleted && codeList.Contains(i.Code)).ToListAsync(token))
                 .ToDictionary(i => i.Code, StringComparer.OrdinalIgnoreCase);
 
-            var unitCodes = recs.Where(r => !string.IsNullOrWhiteSpace(r.UnitCode)).Select(r => r.UnitCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            var unitMap = unitCodes.Count == 0 ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
+            // Unit codes are case-sensitive (see the Unit section): the item's unit is the one spelled EXACTLY like this.
+            var unitCodes = recs.Where(r => !string.IsNullOrWhiteSpace(r.UnitCode)).Select(r => r.UnitCode!.Trim()).Distinct(StringComparer.Ordinal).ToList();
+            var unitMap = unitCodes.Count == 0 ? new Dictionary<string, Guid>(StringComparer.Ordinal)
                 : (await db.Units.IgnoreQueryFilters().Where(u => u.TenantEntityId == sourceId && !u.IsDeleted && unitCodes.Contains(u.Code))
-                    .Select(u => new { u.Code, u.Id }).ToListAsync(token)).ToDictionary(u => u.Code, u => u.Id, StringComparer.OrdinalIgnoreCase);
+                    .Select(u => new { u.Code, u.Id }).ToListAsync(token)).ToDictionary(u => u.Code, u => u.Id, StringComparer.Ordinal);
             var groupCodes = recs.Where(r => !string.IsNullOrWhiteSpace(r.ItemGroupCode)).Select(r => r.ItemGroupCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var groupMap = groupCodes.Count == 0 ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
                 : (await db.ItemGroups.IgnoreQueryFilters().Where(g => g.TenantEntityId == sourceId && !g.IsDeleted && groupCodes.Contains(g.Code))

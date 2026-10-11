@@ -5489,7 +5489,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)")
-                        .HasColumnName("code");
+                        .HasColumnName("code")
+                        .UseCollation("SQL_Latin1_General_CP1_CS_AS");
 
                     b.Property<decimal>("ConversionFactor")
                         .ValueGeneratedOnAdd()

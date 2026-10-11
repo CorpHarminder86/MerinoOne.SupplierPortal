@@ -5,7 +5,7 @@ namespace MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
 /// the <c>mdm.Unit</c> master defines for it, so the read DTOs can carry <c>UnitDecimalPlaces</c> and the UI can format
 /// and validate quantities at the right precision.
 ///
-/// <para>Codes match case-insensitively. An unknown, null or blank code resolves to <see cref="Fallback"/> (3) — never an
+/// <para>Codes match exactly first, then by a unique case-insensitive match. An unknown, null or blank code resolves to <see cref="Fallback"/> (3) — never an
 /// error. Prefer the batch overload for any list/detail projection: it costs ONE query however many lines or codes are
 /// passed. (A bare <c>null</c> literal is ambiguous between the two overloads — pass a typed <c>string?</c>.)</para>
 /// </summary>
@@ -18,7 +18,7 @@ public interface IUnitDecimalsResolver
     Task<int> ResolveAsync(string? unitCode, CancellationToken ct);
 
     /// <summary>
-    /// Decimal places for many unit codes in ONE query. The returned dictionary has case-insensitive keys and holds an
+    /// Decimal places for many unit codes in ONE query. The returned dictionary has ordinal keys (exact match first, then a unique case-insensitive match) and holds an
     /// entry for every distinct non-blank requested code (an unknown code maps to <see cref="Fallback"/>); null/blank
     /// codes are omitted — use <see cref="Fallback"/> for those.
     /// </summary>

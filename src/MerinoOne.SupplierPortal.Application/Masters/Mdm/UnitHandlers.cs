@@ -13,6 +13,10 @@ using ValidationException = MerinoOne.SupplierPortal.Application.Common.Exceptio
 namespace MerinoOne.SupplierPortal.Application.Masters.Mdm;
 
 // Unit — company-scoped master CRUD. UnitType is the enum name (string) on the wire.
+//
+// The CODE is case-sensitive (mdm.Unit.code carries a case-sensitive collation since migration 0063): "PCS" and "pcs" are two
+// units. So a code is only ever Trim()med here — never upper- or lower-cased — and the duplicate check stays a plain SQL
+// equality, which follows the column. Only the list SEARCH is forgiving about case.
 
 internal static class UnitProjection
 {
@@ -35,7 +39,11 @@ public class GetUnitsQueryHandler(IAppDbContext db) : IRequestHandler<GetUnitsQu
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
             var t = request.Search.Trim();
-            q = q.Where(x => x.Code.Contains(t) || x.Description.Contains(t));
+            // The code column is case-SENSITIVE, so a bare Contains/LIKE on it would only find the exact spelling typed. Upper-case
+            // BOTH sides for the code (the search is a convenience, not an identity check: "pc" finds PCS and pcs). The description
+            // keeps the database's own (case-insensitive) collation, as before.
+            var tUpper = t.ToUpperInvariant();
+            q = q.Where(x => x.Code.ToUpper().Contains(tUpper) || x.Description.Contains(t));
         }
         return await q.OrderBy(x => x.Code)
             .Select(x => new UnitDto(x.Id, x.Seq, x.Code, x.Description, x.UnitType.ToString(), x.IsoCode,

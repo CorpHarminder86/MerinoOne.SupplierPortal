@@ -16,8 +16,10 @@ namespace MerinoOne.SupplierPortal.Tests.Integration;
 /// create-if-missing that never mutates or removes anything, on codes no other test reads.
 ///
 /// <para>The resolver is resolved from a fresh scope, i.e. under the system principal (filters bypassed), exactly like the
-/// other DB-backed tests; the contract under test is the code-to-decimals mapping: case-insensitive match, fallback 3 for an
-/// unknown/blank code, and the batch overload's case-insensitive result keys.</para>
+/// other DB-backed tests; the contract under test is the code-to-decimals mapping. Unit codes are case-sensitive (migration
+/// 0063), so a code resolves EXACT-first; a code with no unit spelled exactly like it but exactly ONE case-variant in the master
+/// falls back to that unit; unknown/blank codes (and ambiguous ones) get the fallback 3; and the batch overload's result keys are
+/// the codes AS REQUESTED, ordinal. The two-spellings and ambiguous cases live in <see cref="UnitCodeCaseTests"/>.</para>
 /// </summary>
 [Collection(IntegrationCollection.Name)]
 public class UnitDecimalsResolverTests
@@ -67,7 +69,7 @@ public class UnitDecimalsResolverTests
     }
 
     [SkippableFact]
-    public async Task Seeded_unit_resolves_to_its_decimal_places_matching_the_code_case_insensitively()
+    public async Task Seeded_unit_resolves_to_its_decimal_places_by_exact_code_then_by_its_only_case_variant()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
         await SeedUnitsAsync();
@@ -79,8 +81,10 @@ public class UnitDecimalsResolverTests
         (await resolver.ResolveAsync(ZeroDecimalsCode, ct)).Should().Be(0, "a 0-decimal unit must read 0, not the fallback");
         (await resolver.ResolveAsync(FiveDecimalsCode, ct)).Should().Be(5);
 
-        (await resolver.ResolveAsync(ZeroDecimalsCode.ToLowerInvariant(), ct)).Should().Be(0, "the code match is case-insensitive");
-        (await resolver.ResolveAsync("Ut-Decimals-5", ct)).Should().Be(5, "mixed case still matches");
+        // No unit is spelled like these, but each master code has exactly ONE case-variant, so that unit answers.
+        (await resolver.ResolveAsync(ZeroDecimalsCode.ToLowerInvariant(), ct)).Should().Be(0,
+            "with no exact match, the code's only case-variant in the master answers");
+        (await resolver.ResolveAsync("Ut-Decimals-5", ct)).Should().Be(5, "mixed case falls back to the only case-variant too");
         (await resolver.ResolveAsync($"  {ZeroDecimalsCode.ToLowerInvariant()}  ", ct)).Should().Be(0, "surrounding blanks are ignored");
     }
 
@@ -102,7 +106,7 @@ public class UnitDecimalsResolverTests
     }
 
     [SkippableFact]
-    public async Task Batch_overload_maps_every_requested_code_with_case_insensitive_keys()
+    public async Task Batch_overload_maps_every_requested_code_under_the_spelling_it_was_requested_with()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
         await SeedUnitsAsync();
@@ -114,11 +118,14 @@ public class UnitDecimalsResolverTests
             new string?[] { ZeroDecimalsCode, FiveDecimalsCode.ToLowerInvariant(), UnknownCode, null, "", ZeroDecimalsCode.ToLowerInvariant() },
             CancellationToken.None);
 
-        map[ZeroDecimalsCode].Should().Be(0);
-        map[FiveDecimalsCode].Should().Be(5, "the key is found whatever case it is looked up in");
+        map[ZeroDecimalsCode].Should().Be(0, "an exact match");
+        map[FiveDecimalsCode.ToLowerInvariant()].Should().Be(5, "no unit is spelled like this, so the code's only case-variant answers");
         map[ZeroDecimalsCode.ToLowerInvariant()].Should().Be(0);
         map[UnknownCode].Should().Be(3, "an unknown code maps to the fallback");
-        map.Should().HaveCount(3, "null/blank codes are omitted and the two spellings of one code share a key");
+        map.Should().HaveCount(4, "null/blank codes are omitted, and every distinct spelling of a code is its own entry");
+
+        // The keys are ordinal: a spelling that was not requested is not there, even though its case-variant is.
+        map.ContainsKey(FiveDecimalsCode).Should().BeFalse("only the lower-case spelling of the five-decimal unit was requested");
     }
 
     [SkippableFact]

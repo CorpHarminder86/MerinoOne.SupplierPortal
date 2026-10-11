@@ -578,8 +578,16 @@ public class InboundUpsertExecutor
     {
         var idx = -1;
         if (!string.IsNullOrWhiteSpace(code))
+        {
+            // The exact spelling first: unit codes are case-sensitive, so one batch can carry "PCS" and "pcs" as two rows and a
+            // case-insensitive match alone could fail the wrong one. Every other master's codes are case-insensitive at the
+            // database, where the second pass still finds them.
             idx = rows.FindIndex(r => r.Outcome != RowOutcome.Failed
-                                      && string.Equals(r.Code, code, StringComparison.OrdinalIgnoreCase));
+                                      && string.Equals(r.Code, code, StringComparison.Ordinal));
+            if (idx < 0)
+                idx = rows.FindIndex(r => r.Outcome != RowOutcome.Failed
+                                          && string.Equals(r.Code, code, StringComparison.OrdinalIgnoreCase));
+        }
         if (idx < 0)
             idx = rows.FindIndex(r => r.Outcome != RowOutcome.Failed);
         if (idx < 0) return; // every row already Failed — nothing left to flip.
