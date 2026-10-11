@@ -236,6 +236,9 @@
     font-family: 'Plus Jakarta Sans','Segoe UI',system-ui,sans-serif;
     border-radius: var(--mer-radius-lg);
 }
+/* OnDemand popup: Radzen picks above/below BEFORE Blazor renders the calendar into it, so it measures an empty box and a picker low on the page opened off-screen.
+   Prop the empty box up to the full date+time popup: 328.75 content-box = 48 header + 23.75 weekdays + 6 x 32 days (Radzen always draws 6 rows) + 8 + 57 time row, +2 border; not while closing. */
+.rz-datepicker-popup-container:not(.rz-close) { min-height: 328.75px; }
 .rz-datepicker-popup-container .rz-calendar-prev,
 .rz-datepicker-popup-container .rz-calendar-next { width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; border: 0; background: transparent !important; color: var(--mer-ink-600) !important; }
 .rz-datepicker-popup-container .rz-button.rz-calendar-prev:hover:not(:disabled),
