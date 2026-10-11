@@ -206,6 +206,61 @@
 .rz-card { background: var(--mer-surface); border: 1px solid var(--mer-line); border-radius: var(--mer-radius-lg); box-shadow: var(--mer-shadow-sm); }
 .rz-textbox, .rz-password, .rz-spinner, .rz-dropdown, .rz-datepicker { border-radius: var(--mer-radius); border: 1px solid var(--mer-ink-300); background: var(--mer-surface); }
 .rz-textbox:focus-within, .rz-password:focus-within, .rz-spinner:focus-within, .rz-dropdown:focus-within, .rz-datepicker:focus-within { border-color: var(--mer-blue); box-shadow: 0 0 0 3px rgba(46,91,183,.12); outline: 0; }
+/* RadzenDatePicker popup, Merino theme. Radzen appends the popup to <body>, so only global rules reach it, and it declares its datepicker
+   tokens on :root already resolved to its SECONDARY (our green); they are re-pointed here, scoped to the popup, rather than changing
+   --rz-secondary app-wide. Compact: 32px days, 36px time row; blue selected day / today / OK. The !importants answer .rz-button.rz-secondary above. */
+.rz-datepicker-popup-container {
+    --rz-datepicker-popup-width: 17.5rem;
+    --rz-datepicker-panel-background-color: var(--mer-surface);
+    --rz-datepicker-panel-border: 1px solid var(--mer-line);
+    --rz-datepicker-panel-shadow: var(--mer-shadow-lg);
+    --rz-datepicker-header-background-color: transparent;
+    --rz-datepicker-header-padding-block: .5rem;
+    --rz-datepicker-header-padding-inline: .5rem;
+    --rz-datepicker-month-dropdown-width: 6.5rem;
+    --rz-datepicker-year-dropdown-width: 5.5rem;
+    --rz-datepicker-prev-next-icon-size: 1.25rem;
+    --rz-datepicker-calendar-padding-block: 0 .5rem;
+    --rz-datepicker-calendar-padding-inline: .5rem;
+    --rz-datepicker-calendar-font-size: 12.5px;
+    --rz-datepicker-calendar-header-font-size: 10.5px;
+    --rz-datepicker-calendar-item-padding: .5rem 0;
+    --rz-datepicker-calendar-hover-background-color: rgba(46,91,183,.12);
+    --rz-datepicker-calendar-hover-color: var(--mer-ink-900);
+    --rz-datepicker-calendar-selected-background-color: var(--mer-blue);
+    --rz-datepicker-calendar-selected-color: #fff;
+    --rz-datepicker-calendar-selected-hover-background-color: var(--mer-blue);
+    --rz-datepicker-calendar-selected-hover-color: #fff;
+    --rz-datepicker-calendar-today-color: var(--mer-blue);
+    --rz-datepicker-calendar-today-box-shadow: inset 0 0 0 1px var(--mer-blue);
+    font-family: 'Plus Jakarta Sans','Segoe UI',system-ui,sans-serif;
+    border-radius: var(--mer-radius-lg);
+}
+.rz-datepicker-popup-container .rz-calendar-prev,
+.rz-datepicker-popup-container .rz-calendar-next { width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; border: 0; background: transparent !important; color: var(--mer-ink-600) !important; }
+.rz-datepicker-popup-container .rz-button.rz-calendar-prev:hover:not(:disabled),
+.rz-datepicker-popup-container .rz-button.rz-calendar-next:hover:not(:disabled) { background: var(--mer-ink-100) !important; border-color: transparent; }
+.rz-datepicker-popup-container .rz-calendar-title .rz-dropdown { height: 32px; padding: 0 0 0 10px; font-size: 12.5px; line-height: 30px; }
+.rz-datepicker-popup-container .rz-calendar-title .rz-dropdown-label { padding: 0 20px 0 0; }
+.rz-datepicker-popup-container .rz-calendar-title .rz-dropdown-trigger .rzi { width: 20px; height: 20px; font-size: 20px; margin: 0 4px 0 0; }
+.rz-datepicker-popup-container .rz-calendar-month-dropdown,
+.rz-datepicker-popup-container .rz-calendar-year-dropdown { min-width: 5.5rem; }
+.rz-datepicker-popup-container .rz-calendar-view th { padding: 4px 0; font-weight: 600; letter-spacing: .04em; }
+.rz-datepicker-popup-container .rz-calendar-view td span.rz-state-default,
+.rz-datepicker-popup-container .rz-calendar-view td a.rz-state-default { width: 32px; height: 32px; }
+.rz-datepicker-popup-container .rz-calendar-view td .rz-state-active,
+.rz-datepicker-popup-container .rz-calendar-view td .rz-calendar-today { font-weight: 600; }
+.rz-datepicker-popup-container .rz-timepicker { justify-content: flex-start; gap: 6px; padding: 8px 12px 12px; border-top: 1px solid var(--mer-line-soft); }
+.rz-datepicker-popup-container .rz-timepicker .rz-numeric { flex: 0 0 auto; width: 4.5rem; height: 36px; border: 1px solid var(--mer-ink-300); border-radius: var(--mer-radius); background: var(--mer-surface); }
+.rz-datepicker-popup-container .rz-timepicker .rz-numeric:focus-within { border-color: var(--mer-blue); box-shadow: 0 0 0 3px rgba(46,91,183,.12); }
+.rz-datepicker-popup-container .rz-timepicker .rz-numeric input { padding: 0 22px 0 10px; font-size: 13px; line-height: 34px; }
+.rz-datepicker-popup-container .rz-numeric-button { padding: 0; border: 0; color: var(--mer-ink-600); }
+.rz-datepicker-popup-container .rz-timepicker > .rz-button { flex: none; height: 36px; margin-inline-start: auto; padding: 0 18px; font-size: 12px; letter-spacing: .06em; background: var(--mer-blue) !important; border-color: var(--mer-blue); color: #fff !important; }
+.rz-datepicker-popup-container .rz-timepicker > .rz-button:hover:not(:disabled) { background: var(--mer-blue-bright) !important; border-color: var(--mer-blue-bright); }
+/* The month/year pick lists are plain .rz-dropdown-panel elements that Radzen also moves to <body>, so ancestry cannot scope them to the
+   popup; :has() limits them to while a date picker popup is open (the app has no other RadzenDropDown). */
+body:has(.rz-datepicker-popup-container.rz-open) .rz-dropdown-panel .rz-dropdown-item { padding: 6px 12px; font-size: 12.5px; }
+body:has(.rz-datepicker-popup-container.rz-open) .rz-dropdown-panel .rz-dropdown-item.rz-state-highlight { color: var(--mer-blue); font-weight: 600; }
 .rz-data-grid { border: 1px solid var(--mer-line); border-radius: var(--mer-radius-lg); overflow: hidden; background: var(--mer-surface); }
 .rz-data-grid thead th { background: var(--mer-ink-50); color: var(--mer-ink-700); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .rz-data-grid tbody tr:hover { background: var(--mer-ink-50); }

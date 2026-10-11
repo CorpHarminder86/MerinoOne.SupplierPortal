@@ -90,7 +90,8 @@
     /* Negotiation delivery picker (RadzenDatePicker), dressed to match the .rz-textbox qty input beside it. Three
        global rules fight it: merino.css boxes the .rz-datepicker WRAPPER too, which doubles up with the border Radzen
        draws on the input inside; its .rz-button rule turns the calendar trigger into a boxed button; and that
-       trigger then overlaps the clear icon. The popup needed no override. */
+       trigger then overlaps the clear icon. The popup is appended to the page body, out of this page's reach, so
+       merino.css themes it globally (the .rz-datepicker-popup-container block). */
     .podt-dt { width:216px; border:0; background:transparent; box-shadow:none; }
     .podt-dt:focus-within { border:0; box-shadow:none; }
     .podt-dt > .rz-inputtext { border:1px solid var(--mer-ink-300); border-radius:var(--mer-radius);
@@ -419,7 +420,7 @@ else
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@AppMoney.Plain(line.NetAmount)</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountPct == 0 ? "—" : line.DiscountPct.ToString("0.##"))</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : AppMoney.Plain(line.DiscountAmount))</td>
-                                <td style="padding:6px 4px;" title="@line.TaxCode">@(string.IsNullOrEmpty(line.TaxDescription) ? (string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode) : line.TaxDescription)</td>
+                                <td style="padding:6px 4px;" title="@line.TaxDescription">@(string.IsNullOrEmpty(line.TaxCode) ? (string.IsNullOrEmpty(line.TaxDescription) ? "—" : line.TaxDescription) : line.TaxCode)</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.TaxAmount.GetValueOrDefault() == 0 ? "—" : AppMoney.Plain(line.TaxAmount))</td>
                                 @* Editable Delivery date AND time (feedback 2026-08-12 (3)). A RadzenDatePicker, replacing
                                    a native datetime-local whose popup had no OK button. Here OK closes the popup (so does
@@ -476,7 +477,7 @@ else
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@AppMoney.Plain(line.NetAmount)</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountPct == 0 ? "—" : line.DiscountPct.ToString("0.##"))</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.DiscountAmount == 0 ? "—" : AppMoney.Plain(line.DiscountAmount))</td>
-                                <td style="padding:6px 4px;" title="@line.TaxCode">@(string.IsNullOrEmpty(line.TaxDescription) ? (string.IsNullOrEmpty(line.TaxCode) ? "—" : line.TaxCode) : line.TaxDescription)</td>
+                                <td style="padding:6px 4px;" title="@line.TaxDescription">@(string.IsNullOrEmpty(line.TaxCode) ? (string.IsNullOrEmpty(line.TaxDescription) ? "—" : line.TaxDescription) : line.TaxCode)</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(line.TaxAmount.GetValueOrDefault() == 0 ? "—" : AppMoney.Plain(line.TaxAmount))</td>
                                 @* Shown to the minute since the negotiation editor can now set a time — a
                                    date-only column would make a 09:00 → 17:00 change look like no change. *@
@@ -756,6 +757,15 @@ else
     /// An HTML attribute, so always dot-decimal whatever the culture of the server.</summary>
     private static string QtyStep(int places) => places <= 0 ? "1" : "0." + new string('0', places - 1) + "1";
 
+    /// <summary>
+    /// A stored quantity is decimal(18,4) and the value binding renders a decimal at its own scale, so a quantity of 14
+    /// opened as "14.0000". Dividing by a 1 that carries many trailing zeros is the standard way to normalise a decimal's
+    /// scale (14.0000 → 14, 12.5000 → 12.5, 15.8 → 15.8). It never changes the VALUE, only its representation, so a
+    /// stored 15.8 on a 0-decimal unit still shows 15.8 and still trips <see cref="QtyTooPrecise"/>, and the decimal
+    /// comparison behind <see cref="LineEdit.Changed"/> is unaffected.
+    /// </summary>
+    private static decimal TrimScale(decimal v) => v / 1.000000000000000000000000000000m;
+
     private void TabOverview() => tab = "overview";
     private void TabHistory() => tab = "history";
 
@@ -850,7 +860,9 @@ else
                     OriginalQty = l.OrderQty,
                     OriginalDate = l.DeliveryDate,
                     PriceUnit = l.PriceUnit,
-                    Qty = l.OrderQty,
+                    // The input opens at the quantity's natural scale ("14", not "14.0000"). OriginalQty stays verbatim:
+                    // Changed compares decimals by value, so an untouched line is still not submitted.
+                    Qty = TrimScale(l.OrderQty),
                     UnitDecimalPlaces = l.UnitDecimalPlaces,
                     SeededLocalDate = seeded,
                     LocalDeliveryDate = seeded,

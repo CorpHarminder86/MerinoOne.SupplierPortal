@@ -1687,6 +1687,12 @@
     // The browser step for the Ship Qty input: 1, 0.1, 0.01, 0.001 for 0, 1, 2, 3+ decimals.
     private static string QtyStep(int places) => places switch { <= 0 => "1", 1 => "0.1", 2 => "0.01", _ => "0.001" };
 
+    // 2026-10-11 — a stored quantity is decimal(18,4) and the Ship Qty and lot Qty inputs bind the decimal as-is, so a quantity of 14 opened as
+    // "14.0000". Dividing by a 1 that carries many trailing zeros is the standard way to normalise a decimal's scale (14.0000 → 14,
+    // 12.5000 → 12.5, 15.8 → 15.8). It never changes the VALUE, only its representation — so a stored 15.8 on a 0-decimal
+    // unit still shows 15.8 and still trips QtyDecimalsInvalid.
+    private static decimal TrimScale(decimal v) => v / 1.000000000000000000000000000000m;
+
     // "at most 0 decimals (EA)" — the rule, worded to read after "Allows" in the inline message and in the dialog.
     private static string QtyDecimalsRule(LineRow l) =>
         $"at most {l.UnitDecimalPlaces} decimal{(l.UnitDecimalPlaces == 1 ? "" : "s")}"
@@ -1798,7 +1804,7 @@
                     OrderUnit = l.OrderUnit,
                     UnitDecimalPlaces = l.UnitDecimalPlaces,
                     OrderQty = l.OrderQty,
-                    ShippedQty = l.ShippedQty,
+                    ShippedQty = TrimScale(l.ShippedQty),
                     BatchNumber = l.BatchNumber,
                     ExpiryDate = l.ExpiryDate,
                     // R15 — schedule provenance (null on legacy PO-picked lines): drives the step-1 pre-check and
@@ -1810,7 +1816,7 @@
                     IsSerialized = l.Serials is { Count: > 0 },
                     IsLotControlled = l.Lots is { Count: > 0 },
                     Serials = l.Serials?.Select(s => new SerialRow { Serial = s.SerialNumber, Expiry = s.ExpiryDate }).ToList() ?? new(),
-                    Lots = l.Lots?.Select(x => new LotRow { LotNo = x.LotNo, Qty = x.Qty, ExpiryDate = x.ExpiryDate }).ToList() ?? new(),
+                    Lots = l.Lots?.Select(x => new LotRow { LotNo = x.LotNo, Qty = TrimScale(x.Qty), ExpiryDate = x.ExpiryDate }).ToList() ?? new(),
                     // R4 (2026-06-26) — §7.3 / DI-04: ship-tracking from the ASN line (EnrichLinesAsync re-merges the
                     // PO line's authoritative figures for editable drafts; the locked read-only view uses these).
                     ShippedQtyToDate = l.ShippedQtyToDate,
@@ -2056,7 +2062,7 @@
                 OrderQty = s.OrderQty,
                 DeliveryDate = s.DeliveryDate,
                 ScheduledQty = s.ScheduledQty,
-                ShippedQty = Math.Max(0m, Math.Min(s.ScheduledQty, s.RemainingToShip)),
+                ShippedQty = TrimScale(Math.Max(0m, Math.Min(s.ScheduledQty, s.RemainingToShip))),
                 ShippedQtyToDate = s.ShippedQtyToDate,
                 Balance = s.RemainingToShip,
                 // Provisional until EnrichLinesAsync merges the tolerance-adjusted ceiling off the PO line.
