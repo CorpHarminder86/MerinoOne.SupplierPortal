@@ -160,6 +160,9 @@ else
                                 <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
                                     <input type="checkbox" @bind="scopeCarrier" /> Carriers <code style="font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-500);">Integration.Inbound.Carrier</code>
                                 </label>
+                                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                    <input type="checkbox" @bind="scopeAsnUpdate" /> ASN updates <code style="font-family:Inter,monospace;font-size:11px;color:var(--mer-ink-500);">Integration.Inbound.AsnUpdate</code>
+                                </label>
                             </div>
                         </div>
                         <div>
@@ -244,6 +247,7 @@ else
     private bool scopePaymentTerm;
     private bool scopeDeliveryTerm;
     private bool scopeCarrier;
+    private bool scopeAsnUpdate;
     private DateTime? formExpiry;
     private string newError = string.Empty;
 
@@ -275,6 +279,7 @@ else
         scopePaymentTerm = false;
         scopeDeliveryTerm = false;
         scopeCarrier = false;
+        scopeAsnUpdate = false;
         formExpiry = null;
         newError = string.Empty;
         showNew = true;
@@ -295,6 +300,7 @@ else
         if (scopePaymentTerm) scopes.Add("Integration.Inbound.PaymentTerm");
         if (scopeDeliveryTerm) scopes.Add("Integration.Inbound.DeliveryTerm");
         if (scopeCarrier) scopes.Add("Integration.Inbound.Carrier");
+        if (scopeAsnUpdate) scopes.Add("Integration.Inbound.AsnUpdate");
         if (scopes.Count == 0) { newError = "Select at least one scope."; return; }
         busy = true;
         // date-only input → end-of-day UTC so the key is valid through the chosen day.
@@ -356,6 +362,7 @@ else
         "Integration.Inbound.PaymentTerm" => "PaymentTerm",
         "Integration.Inbound.DeliveryTerm" => "DeliveryTerm",
         "Integration.Inbound.Carrier" => "Carrier",
+        "Integration.Inbound.AsnUpdate" => "AsnUpdate",
         _ => scope
     };
 
