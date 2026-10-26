@@ -199,48 +199,101 @@ public static class TenantSeeder
             SharedEndpoint.Unit, SharedEndpoint.ItemGroup, SharedEndpoint.Item
         };
 
-        var existingGroupIds = await ctx.CompanyShareGroups.IgnoreQueryFilters()
+        // R17 (2026-10-26) — the deterministic Ids alone are NOT a sufficient idempotency key. Adding
+        // SharedEndpoint.Carrier to the list above made `seed` insert Carrier groups for a tenant where an admin had
+        // ALREADY created a Carrier group for the same source company through the Share Groups UI (a random Guid Id);
+        // the Id check missed it and the unique indexes rejected the insert. So the seeder checks the NATURAL keys the
+        // indexes actually enforce, matching each index's filter exactly, and respects whatever an admin configured
+        // (an admin-created or admin-deleted group for a source is left completely alone — no insert, no members added):
+        //   UQ_CompanyShareGroup_tenant_endpoint_source   (TenantId, Endpoint, SourceTenantEntityId) — NOT filtered →
+        //                                                 soft-deleted groups still block, so they are loaded too.
+        //   UQ_CompanyShareGroupMember_group_member       (CompanyShareGroupId, MemberTenantEntityId) — NOT filtered.
+        //   UQ_CompanyShareGroupMember_endpoint_member    (Endpoint, MemberTenantEntityId) WHERE isDeleted = 0 → a company
+        //                                                 sits in at most ONE LIVE group per endpoint.
+        // Everything is loaded once and every row added in this pass is folded back into the sets, so two topology
+        // entries can never collide inside the single SaveChanges below.
+        var groups = await ctx.CompanyShareGroups.IgnoreQueryFilters()
             .Where(g => g.TenantId == tenantId)
-            .Select(g => g.Id)
+            .Select(g => new { g.Id, g.Endpoint, g.SourceTenantEntityId, g.IsDeleted })
             .ToListAsync(ct);
-        var existingMemberIds = await ctx.CompanyShareGroupMembers.IgnoreQueryFilters()
-            .Select(m => m.Id)
+        var groupIds = groups.Select(g => g.Id).ToHashSet();
+        var groupByNaturalKey = groups.ToDictionary(g => (g.Endpoint, g.SourceTenantEntityId), g => (g.Id, g.IsDeleted));
+
+        // Members are bounded by the tenant's own companies — both member indexes key on the member company, so this is
+        // exactly the set a seeded row could collide with (and it does not depend on a hand-made row carrying a TenantId).
+        var companyIds = CompanyCodes.Select(CompanyId).ToList();
+        var members = await ctx.CompanyShareGroupMembers.IgnoreQueryFilters()
+            .Where(m => companyIds.Contains(m.MemberTenantEntityId))
+            .Select(m => new { m.Id, m.CompanyShareGroupId, m.MemberTenantEntityId, m.Endpoint, m.IsDeleted })
             .ToListAsync(ct);
+        var memberIds = members.Select(m => m.Id).ToHashSet();
+        var groupMemberKeys = members.Select(m => (m.CompanyShareGroupId, m.MemberTenantEntityId)).ToHashSet();
+        var liveEndpointMembers = members.Where(m => !m.IsDeleted).Select(m => (m.Endpoint, m.MemberTenantEntityId)).ToHashSet();
 
         foreach (var endpoint in endpoints)
         {
             foreach (var (sourceCode, memberCodes) in ShareTopology)
             {
-                var groupId = DeterministicId.From("CompanyShareGroup", $"{TenantName}|{endpoint}|{sourceCode}");
-                if (!existingGroupIds.Contains(groupId))
+                var sourceId = CompanyId(sourceCode);
+                var deterministicGroupId = DeterministicId.From("CompanyShareGroup", $"{TenantName}|{endpoint}|{sourceCode}");
+
+                Guid groupId;
+                if (groupByNaturalKey.TryGetValue((endpoint, sourceId), out var found))
                 {
+                    // A group for this (tenant, endpoint, source) already exists, whoever created it. An admin who
+                    // deleted it did so deliberately — leave this source's topology for this endpoint alone. A live group
+                    // that is NOT the seeder's own (its Id is not the deterministic one) was built by an admin: it is
+                    // theirs, so the seeder neither duplicates it nor adds members to it.
+                    if (found.IsDeleted || found.Id != deterministicGroupId) continue;
+                    groupId = found.Id;
+                }
+                else if (groupIds.Contains(deterministicGroupId))
+                {
+                    // The deterministic Id is taken by a group an admin has since re-pointed at another source; adding
+                    // here would violate the primary key. Respect their topology.
+                    continue;
+                }
+                else
+                {
+                    groupId = deterministicGroupId;
                     ctx.CompanyShareGroups.Add(new CompanyShareGroup
                     {
                         Id = groupId,
                         TenantId = tenantId,
                         Endpoint = endpoint,
-                        SourceTenantEntityId = CompanyId(sourceCode),
+                        SourceTenantEntityId = sourceId,
                         Name = $"{endpoint} share — source {sourceCode}",
                         IsEnabled = true,
                         CreatedBy = "seed",
                         CreatedOn = now
                     });
+                    groupIds.Add(groupId);
+                    groupByNaturalKey[(endpoint, sourceId)] = (groupId, false);
                 }
 
                 foreach (var memberCode in memberCodes)
                 {
+                    var memberCompanyId = CompanyId(memberCode);
                     var memberId = DeterministicId.From("CompanyShareGroupMember", $"{TenantName}|{endpoint}|{sourceCode}|{memberCode}");
-                    if (existingMemberIds.Contains(memberId)) continue;
+                    if (memberIds.Contains(memberId)) continue;
+                    // Already a member of this group (live or soft-deleted: group_member is unfiltered), or already in a
+                    // different LIVE group for this endpoint (endpoint_member) — either way the admin's choice stands.
+                    if (groupMemberKeys.Contains((groupId, memberCompanyId))) continue;
+                    if (liveEndpointMembers.Contains((endpoint, memberCompanyId))) continue;
+
                     ctx.CompanyShareGroupMembers.Add(new CompanyShareGroupMember
                     {
                         Id = memberId,
                         TenantId = tenantId,
                         CompanyShareGroupId = groupId,
-                        MemberTenantEntityId = CompanyId(memberCode),
+                        MemberTenantEntityId = memberCompanyId,
                         Endpoint = endpoint,
                         CreatedBy = "seed",
                         CreatedOn = now
                     });
+                    memberIds.Add(memberId);
+                    groupMemberKeys.Add((groupId, memberCompanyId));
+                    liveEndpointMembers.Add((endpoint, memberCompanyId));
                 }
             }
         }
