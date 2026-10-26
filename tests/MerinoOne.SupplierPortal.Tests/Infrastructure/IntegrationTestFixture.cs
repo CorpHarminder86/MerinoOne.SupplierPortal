@@ -81,6 +81,20 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     public const string PoNumber    = "PO-INT-0001";
     public const string InvoiceNumber = "INV-INT-0001";
 
+    /// <summary>Scopes the shared fixture key carries (the seed tops an older persisted key up to this set).</summary>
+    private static readonly string[] FixtureKeyScopes =
+    {
+        "Integration.Inbound.Grn",
+        "Integration.Inbound.GrnReceipt",
+        "Integration.Inbound.Po",
+        "Integration.Inbound.Payment",
+        "Integration.Inbound.InvoiceStatus",
+        "Integration.Inbound.ErpAck",
+        // R17
+        "Integration.Inbound.Carrier",
+        "Integration.Inbound.AsnUpdate",
+    };
+
     public async Task InitializeAsync()
     {
         Factory = new CustomWebApplicationFactory();
@@ -126,6 +140,39 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     {
         var client = Factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-APIKey", ApiKeyPlaintext);
+        return client;
+    }
+
+    /// <summary>
+    /// An HttpClient carrying a freshly minted X-APIKey that holds EXACTLY <paramref name="scopes"/> and is bound to the
+    /// fixture company — for "this key lacks scope X" tests (the shared fixture key carries the full R17 set). The key row is
+    /// tagged and unique per call, so nothing is shared with, or mutated on, the fixture key.
+    /// </summary>
+    public async Task<HttpClient> CreateScopedInboundClientAsync(params string[] scopes)
+    {
+        var keyTag = Guid.NewGuid().ToString("N")[..8];
+        var plaintext = $"mok_{keyTag}scopedtestsecretkey000000000000";
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var now = DateTime.UtcNow;
+            var keyId = Guid.NewGuid();
+            db.ApiKeys.Add(new ApiKey
+            {
+                Id = keyId, TenantId = TenantId, Label = $"Scoped test key {keyTag}",
+                KeyPrefix = plaintext[..ApiKeyPrefixLength], KeyHash = ApiKeyHasher.Hash(plaintext),
+                Scopes = string.Join(' ', scopes), IsActive = true, CreatedBy = "seed", CreatedOn = now
+            });
+            db.ApiKeyCompanies.Add(new ApiKeyCompany
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, ApiKeyId = keyId, TenantEntityId = CompanyId,
+                CreatedBy = "seed", CreatedOn = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-APIKey", plaintext);
         return client;
     }
 
@@ -176,6 +223,9 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
             nameof(TransactionalInboundEntity.Payment),
             nameof(TransactionalInboundEntity.InvoiceStatus),
             nameof(TransactionalInboundEntity.ErpAck),
+            // R17 — the carrier master push and the LN ASN receipt update.
+            nameof(SharedEndpoint.Carrier),
+            nameof(TransactionalInboundEntity.AsnUpdate),
         };
         var existingMaps = await db.InforEndpointMaps.IgnoreQueryFilters()
             .Where(m => m.TenantId == TenantId && m.Direction == SyncDirection.Inbound)
@@ -202,13 +252,7 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
                 Label = "IntTest inbound key",
                 KeyPrefix = ApiKeyPlaintext[..ApiKeyPrefixLength],
                 KeyHash = ApiKeyHasher.Hash(ApiKeyPlaintext),
-                Scopes = string.Join(' ',
-                    "Integration.Inbound.Grn",
-                    "Integration.Inbound.GrnReceipt",
-                    "Integration.Inbound.Po",
-                    "Integration.Inbound.Payment",
-                    "Integration.Inbound.InvoiceStatus",
-                    "Integration.Inbound.ErpAck"),
+                Scopes = string.Join(' ', FixtureKeyScopes),
                 IsActive = true,
                 CreatedBy = "seed",
                 CreatedOn = now
@@ -219,6 +263,20 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
                 CreatedBy = "seed", CreatedOn = now
             });
             await db.SaveChangesAsync();
+        }
+        else
+        {
+            // The test DB is persistent, so the key may pre-date a newly added scope (R17: Carrier, AsnUpdate). The create
+            // block above only runs once ever; top the existing key up in place. Bulk update: no change tracker, no audit.
+            var held = await db.ApiKeys.IgnoreQueryFilters().Where(k => k.Id == ApiKeyId).Select(k => k.Scopes).FirstAsync();
+            var have = held.Split(new[] { ' ', ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var missing = FixtureKeyScopes.Where(s => !have.Contains(s, StringComparer.Ordinal)).ToList();
+            if (missing.Count > 0)
+            {
+                var topped = string.Join(' ', have.Concat(missing));
+                await db.ApiKeys.IgnoreQueryFilters().Where(k => k.Id == ApiKeyId)
+                    .ExecuteUpdateAsync(s => s.SetProperty(k => k.Scopes, topped));
+            }
         }
 
         // --- Seccode (type G) for the supplier's RLS owner ------------------------------------------------

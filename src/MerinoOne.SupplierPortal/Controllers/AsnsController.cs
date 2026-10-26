@@ -81,6 +81,9 @@ Returns: AsnDetailDto on success; 404 if not found; 403 if seccode mismatch. Req
     [EndpointDescription(@"Supplier creates a DRAFT ASN spanning one or more POs. NO ERP post on create.
 Body:
 - **body**: CreateAsnRequest — PurchaseOrderId (single) or PurchaseOrderIds (multi), ship lines, carrier metadata.
+  R17 — **carrierCode** picks a carrier from the Carrier master (max 9; must be an active carrier of the company, else
+  400). Its description is snapshotted onto the ASN as carrierName. A blank carrierCode keeps the legacy free-text
+  carrierName, but the carrier is MANDATORY at Post (a blank one fails POST /post with 400).
   R15 — each line may carry an optional **deliveryScheduleId** back-link; when supplied it must reference a live
   delivery schedule of the SAME purchaseOrderLineId (else 400), and each schedule may appear on at most one line.
 Side effects:
@@ -170,8 +173,9 @@ Requires **Asn.Approve**.")]
 From-state: **Approved** (for a supplier with ASN Confirmation Required = Yes) or **Draft** (for one with No,
 which has no approval step at all). Approved is postable in both modes so flipping the flag never strands an ASN.
 
-Enforced here (both moved from send-for-approval): invoiceNo / billOfLading / packingList are MANDATORY (400,
-shipmentReferences); and the attachment policy — a missing MANDATORY attachment blocks (400, names the types),
+Enforced here (both moved from send-for-approval): carrierCode (R17 — a Carrier master pick) / invoiceNo /
+billOfLading / packingList are MANDATORY (400, shipmentReferences); and the attachment policy — a missing
+MANDATORY attachment blocks (400, names the types),
 a missing WARNING attachment on the first call returns 200 with **confirmationRequired=true** + missingAttachments
 and commits nothing (re-send with AcknowledgeMissingAttachments=true to proceed; the skip is audited).
 

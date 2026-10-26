@@ -82,10 +82,14 @@ public enum DeliveryScheduleStatus { Approved }
 /// not required:  Draft ─────────────────────────────(Post) → Submitted → …
 /// Any active state → Cancelled.
 /// </code>
-/// Persisted as the enum name (string), no DB CHECK — the C# enum is the guard. APPEND-ONLY (Approved is
-/// appended last for exactly that reason; the string value, not the ordinal, is what is stored).
+///
+/// <para>R17 (2026-10-26) adds <b>Received</b> — terminal and ERP-driven. No portal user action reaches it: it is set
+/// only when LN reports the shipment received through <c>/inbound/asn-update</c> (a Received status carrying the
+/// per-line received quantities).</para>
+/// Persisted as the enum name (string), no DB CHECK — the C# enum is the guard. APPEND-ONLY (Approved and Received
+/// are appended last for exactly that reason; the string value, not the ordinal, is what is stored).
 /// </summary>
-public enum AsnStatus { Draft, Submitted, InTransit, Delivered, Cancelled, PendingApproval, Rejected, Approved }
+public enum AsnStatus { Draft, Submitted, InTransit, Delivered, Cancelled, PendingApproval, Rejected, Approved, Received }
 
 /// <summary>
 /// R5 (TSD R5 Addendum §4.6 / Component 6) — lifecycle of a single <c>proc.AsnApproval</c> session.
@@ -249,8 +253,9 @@ public enum IdmOutboxStatus { Blocked, Pending, InFlight, Success, Failed, Unres
 /// <summary>
 /// Master-data endpoints that participate in company-wise table sharing. Persisted as a
 /// string (enum name) so the value is stable across reordering. APPEND-ONLY.
+/// R17 (2026-10-26) — Carrier appended: the LN-fed carrier master shares like DeliveryTerm.
 /// </summary>
-public enum SharedEndpoint { PaymentTerm, DeliveryTerm, Unit, ItemGroup, Item, Tax }
+public enum SharedEndpoint { PaymentTerm, DeliveryTerm, Unit, ItemGroup, Item, Tax, Carrier }
 
 /// <summary>
 /// Tenant-scoped reference masters fed by Infor LN that do NOT participate in company sharing. Drives the
@@ -269,7 +274,9 @@ public enum TenantInboundEntity { Currency, Country, State, City, PostalCode }
 // R4 (2026-06-23) — APPENDED: Po / DeliverySchedule / GrnReceipt are the transactional DOCUMENT-ingestion
 // entities (CREATE/UPSERT the live PO + delivery schedule + goods-receipt rows; the existing Grn entry is the
 // status-UPDATE path). Each drives its own InforEndpointMap gate + Integration.Inbound.* scope.
-public enum TransactionalInboundEntity { Grn, Payment, InvoiceStatus, ErpAck, Po, DeliverySchedule, GrnReceipt }
+// R17 (2026-10-26) — APPENDED: AsnUpdate is the LN-pushed ASN receipt update (/inbound/asn-update): shipment status
+// + per-line received quantity / actual delivery date on an ASN the portal already posted.
+public enum TransactionalInboundEntity { Grn, Payment, InvoiceStatus, ErpAck, Po, DeliverySchedule, GrnReceipt, AsnUpdate }
 
 /// <summary>Unit dimension / quantity type (INFOR LN unit type).</summary>
 public enum UnitType { Quantity, Length, Area, Volume, Mass, Time, Other }

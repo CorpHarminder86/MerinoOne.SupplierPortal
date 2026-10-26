@@ -315,6 +315,12 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         // R16 (2026-08-10) — LN ASN_Update verdict (Success | PartialFailure); same shape as PurchaseOrder.erpStatus.
         b.Property(x => x.ErpStatus).HasColumnName("erpStatus").HasMaxLength(50);
 
+        // R17 (2026-10-26) — carrierCode: Carrier.code snapshot (same 9 width as the master column, no FK so a deactivated
+        // or re-synced master row never orphans the ASN). erpShipmentStatus: LN's shipment status verbatim from
+        // /inbound/asn-update. Both nullable.
+        b.Property(x => x.CarrierCode).HasColumnName("carrierCode").HasMaxLength(9);
+        b.Property(x => x.ErpShipmentStatus).HasColumnName("erpShipmentStatus").HasMaxLength(30);
+
         // R14 (2026-08-05) — D9: the shipping date = the instant the supplier posted. Same width/shape as the
         // submittedAt/By pair it runs alongside.
         b.Property(x => x.PostedAt).HasColumnName("postedAt").HasColumnType("datetime2");
@@ -404,6 +410,10 @@ public class AsnLineConfiguration : IEntityTypeConfiguration<AsnLine>
         // R5 (TSD R5 Addendum §4.5 / §9.2) — back-link to the originating Delivery Schedule line.
         // Nullable: legacy lines (pre-R5 PO-picker flow) have no schedule; R5 lines carry the scheduleId.
         b.Property(x => x.DeliveryScheduleId).HasColumnName("deliveryScheduleId").HasColumnType("uniqueidentifier");
+
+        // R17 (2026-10-26) — LN-pushed receipt facts (/inbound/asn-update). Both nullable: null until LN reports a receipt.
+        b.Property(x => x.ReceivedQty).HasColumnName("receivedQty").HasColumnType("decimal(18,4)");
+        b.Property(x => x.ActualDeliveryDate).HasColumnName("actualDeliveryDate").HasColumnType("date");
 
         b.HasOne(x => x.Asn).WithMany(a => a.Lines).HasForeignKey(x => x.AsnId)
             .HasConstraintName("FK_AsnLine_Asn_AsnId").OnDelete(DeleteBehavior.Cascade);

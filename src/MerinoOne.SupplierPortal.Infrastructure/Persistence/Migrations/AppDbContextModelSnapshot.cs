@@ -5626,6 +5626,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("billOfLading");
 
+                    b.Property<string>("CarrierCode")
+                        .HasMaxLength(9)
+                        .HasColumnType("nvarchar(9)")
+                        .HasColumnName("carrierCode");
+
                     b.Property<string>("CarrierName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)")
@@ -5666,6 +5671,11 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("erpCode");
+
+                    b.Property<string>("ErpShipmentStatus")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("erpShipmentStatus");
 
                     b.Property<string>("ErpStatus")
                         .HasMaxLength(50)
@@ -5962,6 +5972,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnName("asnLineId")
                         .HasDefaultValueSql("NEWID()");
 
+                    b.Property<DateTime?>("ActualDeliveryDate")
+                        .HasColumnType("date")
+                        .HasColumnName("actualDeliveryDate");
+
                     b.Property<Guid>("AsnId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("asnId");
@@ -6017,6 +6031,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("PurchaseOrderLineId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("purchaseOrderLineId");
+
+                    b.Property<decimal?>("ReceivedQty")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("receivedQty");
 
                     b.Property<int>("Seq")
                         .ValueGeneratedOnAdd()
@@ -6334,6 +6352,104 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasFilter("[isDeleted] = 0");
 
                     b.ToTable("AsnPurchaseOrder", "proc");
+                });
+
+            modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.Carrier", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("carrierId")
+                        .HasDefaultValueSql("NEWID()");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(9)
+                        .HasColumnType("nvarchar(9)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("createdBy");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("createdOn")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("deletedBy");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("deletedOn");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("isActive");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isDeleted");
+
+                    b.Property<int>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("carrierSeq");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Seq"));
+
+                    b.Property<Guid?>("TenantEntityId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantEntityId");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("tenantId");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("updatedBy");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updatedOn");
+
+                    b.HasKey("Id")
+                        .HasName("PK_Carrier");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Carrier_carrierSeq");
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Seq"));
+
+                    b.HasIndex("TenantEntityId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_Carrier_company_code")
+                        .HasFilter("[tenantEntityId] IS NOT NULL AND [isDeleted] = 0");
+
+                    b.HasIndex("TenantId", "TenantEntityId")
+                        .HasDatabaseName("IX_Carrier_tenant_company");
+
+                    b.ToTable("Carrier", "proc");
                 });
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.CreditDebitNote", b =>

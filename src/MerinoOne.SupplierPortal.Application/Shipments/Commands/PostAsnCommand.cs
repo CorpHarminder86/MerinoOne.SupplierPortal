@@ -71,6 +71,9 @@ public class PostAsnCommandHandler : IRequestHandler<PostAsnCommand, SubmitOutco
         // This is now the last point before the ASN leaves the supplier's hands: the LN payload forwards all
         // three verbatim, and nothing after this is editable. D8 — no grandfathering.
         var missingRefs = new List<string>();
+        // R17 — the carrier (picked from the Carrier master) is mandatory at Post too; listed first so the message reads
+        // "Fill in carrier, invoice no., … on the ASN before posting it." Same key + same 400 as the three refs.
+        if (string.IsNullOrWhiteSpace(asn.CarrierCode)) missingRefs.Add("carrier");
         if (string.IsNullOrWhiteSpace(asn.InvoiceNo)) missingRefs.Add("invoice no.");
         if (string.IsNullOrWhiteSpace(asn.BillOfLading)) missingRefs.Add("bill of lading");
         if (string.IsNullOrWhiteSpace(asn.PackingList)) missingRefs.Add("packing list");

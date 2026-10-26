@@ -45,6 +45,10 @@ public class CreateAsnFromScheduleCommandValidator : AbstractValidator<CreateAsn
         RuleFor(x => x.Body.ExpectedDeliveryDate).NotEmpty();
         RuleFor(x => x.Body.ScheduleIds).NotNull().NotEmpty()
             .WithMessage("At least one delivery schedule must be selected.");
+        // R17 — header length caps (this validator had none; an over-long carrier reached SQL as a 500). Same widths as
+        // Create/Update via AsnHeaderRules.
+        RuleFor(x => x.Body.CarrierName).MaximumLength(AsnHeaderRules.CarrierName);
+        RuleFor(x => x.Body.CarrierCode).MaximumLength(AsnHeaderRules.CarrierCode).WithName("carrierCode");
     }
 }
 
@@ -173,6 +177,10 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
                 .ToListAsync(ct))
             .ToDictionary(i => i.Code, i => i, StringComparer.OrdinalIgnoreCase);
 
+        // R17 — the picked carrier, validated against the Carrier master and snapshotted (code + description) onto the
+        // ASN; a blank code keeps the legacy free-text name. Mandatory only at Post.
+        var (carrierCode, carrierName) = await CarrierSnapshot.ResolveAsync(_db, body.CarrierCode, body.CarrierName, ct);
+
         var now = DateTime.UtcNow;
         var asnId = Guid.NewGuid();
         var asnNumber = $"ASN-{supplier.SupplierCode}-{now:yyyyMMddHHmmssfff}";
@@ -190,7 +198,8 @@ public class CreateAsnFromScheduleCommandHandler : IRequestHandler<CreateAsnFrom
             SupplierId = supplierId,
             ExpectedDeliveryDate = body.ExpectedDeliveryDate,
             TimeWindow = body.TimeWindow,
-            CarrierName = body.CarrierName,
+            CarrierCode = carrierCode,
+            CarrierName = carrierName,
             TrackingNumber = body.TrackingNumber,
             VehicleNumber = body.VehicleNumber,
             DriverName = body.DriverName,

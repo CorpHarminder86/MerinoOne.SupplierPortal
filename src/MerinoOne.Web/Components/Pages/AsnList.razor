@@ -36,6 +36,8 @@
             <option value="Submitted">Submitted</option>
             <option value="InTransit">In Transit</option>
             <option value="Delivered">Delivered</option>
+            @* R17 — set by LN's /inbound/asn-update receipt push; no portal action reaches it. *@
+            <option value="Received">Received</option>
             <option value="Cancelled">Cancelled</option>
         </select>
     </div>
@@ -71,7 +73,8 @@
                     <div class="tlg-col tlg-code">@AppTime.Date(a.ExpectedDeliveryDate)</div>
                     @* R11 (D4) — the receiving warehouse; an ASN never spans two. *@
                     <div class="tlg-col tlg-code">@(string.IsNullOrWhiteSpace(a.Warehouse) ? "—" : a.Warehouse)</div>
-                    <div class="tlg-col">@a.CarrierName</div>
+                    @* R17 — "CODE — Name" once a carrier is picked from the master; the legacy free-text name alone before that. *@
+                    <div class="tlg-col" title="@CarrierLabel(a)">@CarrierLabel(a)</div>
                     <div class="tlg-col tlg-code">@a.TrackingNumber</div>
                     <div class="tlg-col"><span class="tlg-status @StatusClass(a.AsnStatus)">@a.AsnStatus</span></div>
                 </div>
@@ -106,10 +109,18 @@
     private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/asns/{id}");
     private void NewAsn() => Nav.NavigateToRoute("/asns/new");
 
+    private static string CarrierLabel(AsnListItemDto a)
+    {
+        var hasName = !string.IsNullOrWhiteSpace(a.CarrierName);
+        if (string.IsNullOrWhiteSpace(a.CarrierCode)) return hasName ? a.CarrierName! : "—";
+        return hasName ? $"{a.CarrierCode} — {a.CarrierName}" : a.CarrierCode!;
+    }
+
     private string StatusClass(string status) => status switch
     {
         // R14 — Approved (buyer-confirmed, awaiting post) reads as a positive milestone, like Delivered.
-        "Delivered" or "Approved" => "tlg-status--active",
+        // R17 — Received (LN confirmed receipt) is the terminal positive state, styled like Delivered.
+        "Delivered" or "Approved" or "Received" => "tlg-status--active",
         // R5 (§10.1) — PendingApproval is in-flight like Submitted/InTransit; Rejected is a danger state like Cancelled.
         "Submitted" or "InTransit" or "PendingApproval" => "tlg-status--pending",
         "Cancelled" or "Rejected" => "tlg-status--danger",

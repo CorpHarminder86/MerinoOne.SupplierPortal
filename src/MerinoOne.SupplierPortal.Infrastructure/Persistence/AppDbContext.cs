@@ -73,6 +73,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<ItemGroup> ItemGroups => Set<ItemGroup>();
     public DbSet<Unit> Units => Set<Unit>();
     public DbSet<DeliveryTerm> DeliveryTerms => Set<DeliveryTerm>();
+    public DbSet<Carrier> Carriers => Set<Carrier>();
     public DbSet<PaymentTerm> PaymentTerms => Set<PaymentTerm>();
 
     public DbSet<Currency> Currencies => Set<Currency>();
@@ -260,6 +261,9 @@ public class AppDbContext : DbContext, IAppDbContext
     public Guid? DeliveryTermSourceCompanyId =>
         _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.DeliveryTerm, _currentCompany.ActiveCompanyId);
 
+    public Guid? CarrierSourceCompanyId =>
+        _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.Carrier, _currentCompany.ActiveCompanyId);
+
     public Guid? UnitSourceCompanyId =>
         _currentCompany?.ResolveSource(Domain.Enums.SharedEndpoint.Unit, _currentCompany.ActiveCompanyId);
 
@@ -282,6 +286,7 @@ public class AppDbContext : DbContext, IAppDbContext
     {
         [typeof(PaymentTerm)]  = nameof(PaymentTermSourceCompanyId),
         [typeof(DeliveryTerm)] = nameof(DeliveryTermSourceCompanyId),
+        [typeof(Carrier)]      = nameof(CarrierSourceCompanyId),
         [typeof(Unit)]         = nameof(UnitSourceCompanyId),
         [typeof(ItemGroup)]    = nameof(ItemGroupSourceCompanyId),
         [typeof(Item)]         = nameof(ItemSourceCompanyId),

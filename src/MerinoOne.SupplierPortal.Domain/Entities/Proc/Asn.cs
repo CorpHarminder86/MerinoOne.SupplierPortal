@@ -82,6 +82,15 @@ public class Asn : BaseAggregateRoot
     // nothing ever landed in LN. ERP truth, never the portal workflow status.
     public string? ErpStatus { get; set; }
 
+    // R17 (2026-10-26) — the carrier picked from the Carrier master (Carrier.Code snapshot, nvarchar(9)). A snapshot,
+    // not an FK: the code stays readable on the ASN if the master row is later deactivated or re-synced. CarrierName
+    // above stays the free-text carrier for ASNs that predate the master.
+    public string? CarrierCode { get; set; }
+
+    // R17 (2026-10-26) — the shipment status exactly as LN reported it on /inbound/asn-update (nvarchar(30)). ERP
+    // truth shown verbatim next to the portal AsnStatus; never mapped or interpreted, never written by the portal.
+    public string? ErpShipmentStatus { get; set; }
+
     // R11.2 (2026-07-29) — the R8 LN composite key (ErpCompany/ErpTransactionType/ErpDocumentNo) was REMOVED
     // from the ASN (migration 0055; Invoice keeps its trio). User decision: erpCompany always equals the
     // company code already held via TenantEntityId, and the IDM ASN mapping that consumed the other two was

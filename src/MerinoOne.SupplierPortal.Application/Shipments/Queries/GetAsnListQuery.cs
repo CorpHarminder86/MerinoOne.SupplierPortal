@@ -60,6 +60,7 @@ public class GetAsnListQueryHandler : IRequestHandler<GetAsnListQuery, PagedResu
                 x.a.SupplierId, SupplierName = x.s.LegalName,
                 x.a.ExpectedDeliveryDate, x.a.CarrierName, x.a.TrackingNumber,
                 Status = x.a.AsnStatus.ToString(), x.a.SubmittedAt, x.a.CreatedOn,
+                x.a.CarrierCode, x.a.ErpShipmentStatus,   // R17
             })
             .ToListAsync(ct);
 
@@ -89,7 +90,8 @@ public class GetAsnListQueryHandler : IRequestHandler<GetAsnListQuery, PagedResu
                 summary, nums.Count,
                 x.SupplierId, x.SupplierName,
                 x.ExpectedDeliveryDate, x.CarrierName, x.TrackingNumber,
-                x.Status, x.SubmittedAt, x.CreatedOn);
+                x.Status, x.SubmittedAt, x.CreatedOn,
+                CarrierCode: x.CarrierCode, ErpShipmentStatus: x.ErpShipmentStatus);   // R17 (Warehouse stays at its default)
         }).ToList();
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling((double)total / pageSize);

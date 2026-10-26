@@ -47,11 +47,12 @@ Tenant-scoped admin features under `api/integration`. Reads require the `Integra
 
 External master-data ingestion is exposed under `api/integration/inbound`. These endpoints are authenticated by the non-default `ApiKey` scheme (the `X-APIKey` header — JWT stays the default scheme for everything else), authorized per-endpoint by an `Integration.Inbound.*` scope policy, and rate-limited via the named `inbound` policy (fixed window, partitioned on the key prefix with an IP fallback). An optional `Idempotency-Key` header makes replays a no-op; when absent the handler hashes the canonical payload.
 
-Two endpoint families are supported:
+Three endpoint families are supported:
 
 - Company-scoped (body carries a `CompanyCode`, resolved and normalized to its share-group source; the key must be bound to that source company):
   - `POST api/integration/inbound/payment-terms`
   - `POST api/integration/inbound/delivery-terms`
+  - `POST api/integration/inbound/carriers`
   - `POST api/integration/inbound/units`
   - `POST api/integration/inbound/item-groups`
   - `POST api/integration/inbound/items`
@@ -61,6 +62,8 @@ Two endpoint families are supported:
   - `POST api/integration/inbound/states`
   - `POST api/integration/inbound/cities`
   - `POST api/integration/inbound/postal-codes`
+- Transactional (body carries a `CompanyCode`, resolved to the literal company — no share-group normalization):
+  - `POST api/integration/inbound/asn-update` — Infor LN reports the shipment status and the received quantities of an ASN the portal already posted (scope `Integration.Inbound.AsnUpdate`). Business failures come back as `Failed` rows in the 200 response, never a 4xx; the update is atomic per ASN.
 
 Each call returns an `UpsertResultDto` with per-row outcomes; partial failures are flagged and raise an integration error for operator retry. The endpoint kill-switch (disabled endpoint) rejects pushes with 403; an invalid key returns a single generic 401; spoofed/unknown companies are rejected.
 

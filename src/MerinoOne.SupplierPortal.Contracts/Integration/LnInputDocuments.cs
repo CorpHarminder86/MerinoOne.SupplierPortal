@@ -112,6 +112,9 @@ public sealed record AsnInputDoc(
     [property: JsonPropertyName("supplierBp")] string? SupplierBp,
     [property: JsonPropertyName("expectedDeliveryDate")] string ExpectedDeliveryDate,
     [property: JsonPropertyName("timeWindow")] string? TimeWindow,
+    // R17 — despite the name, this carries the carrier CODE (asn.CarrierCode, falling back to the legacy free-text name
+    // only for a pre-R17 ASN): LN's ASNDetail.carrierName key takes the code. The key name and contract version are
+    // unchanged on purpose — no wire change, so no expression/seeder-hash churn.
     [property: JsonPropertyName("carrierName")] string? CarrierName,
     [property: JsonPropertyName("trackingNumber")] string? TrackingNumber,
     [property: JsonPropertyName("vehicleNumber")] string? VehicleNumber,

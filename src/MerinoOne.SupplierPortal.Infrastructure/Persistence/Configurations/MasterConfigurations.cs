@@ -97,6 +97,33 @@ public class DeliveryTermConfiguration : IEntityTypeConfiguration<DeliveryTerm>
     }
 }
 
+// R17 (2026-10-26) — Carrier master (LN-fed, company-shared; cloned from DeliveryTerm). code nvarchar(9) and
+// description nvarchar(50) follow the LN carrier field widths; description is OPTIONAL (LN may omit the name).
+public class CarrierConfiguration : IEntityTypeConfiguration<Carrier>
+{
+    public void Configure(EntityTypeBuilder<Carrier> b)
+    {
+        b.ApplyBaseEntityConvention("Carrier", "proc", "carrier");
+        b.Property(x => x.Code).HasColumnName("code").HasMaxLength(9).IsRequired();
+        b.Property(x => x.Description).HasColumnName("description").HasMaxLength(50);
+        // HasSentinel(true): with HasDefaultValue(true) alone EF treats the CLR default (false) as "not set" and OMITS the
+        // column from the INSERT, so the database default (1) landed instead — a carrier created inactive was stored active
+        // (the open isActive defect on the other masters). Pointing the sentinel at true makes false an ordinary value that
+        // is written, while true is omitted and the column default (1) supplies the same true. Not schema: the column
+        // default stays 1 and no migration is involved.
+        b.Property(x => x.IsActive).HasColumnName("isActive").HasDefaultValue(true).HasSentinel(true);
+
+        // Per-company (source) uniqueness, soft-delete-aware — same key shape as DeliveryTerm.
+        b.HasIndex(x => new { x.TenantEntityId, x.Code })
+            .HasDatabaseName("UQ_Carrier_company_code")
+            .IsUnique()
+            .HasFilter("[tenantEntityId] IS NOT NULL AND [isDeleted] = 0");
+        // Composite scope index for the always-on tenant + (sharing-aware) company read filter.
+        b.HasIndex(x => new { x.TenantId, x.TenantEntityId })
+            .HasDatabaseName("IX_Carrier_tenant_company");
+    }
+}
+
 public class PaymentTermConfiguration : IEntityTypeConfiguration<PaymentTerm>
 {
     public void Configure(EntityTypeBuilder<PaymentTerm> b)

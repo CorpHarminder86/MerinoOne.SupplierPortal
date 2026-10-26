@@ -44,6 +44,9 @@ public static class IntegrationCatalog
         new IntegrationEndpointDocDto("Delivery terms", "Integration.Inbound.DeliveryTerm", "POST", $"{Base}/delivery-terms", true,
             "Upsert Delivery Term master rows for the resolved source company.",
             Json(new { companyCode = "3000", terms = new[] { new { code = "FOB", description = "Free on board", isActive = true } } })),
+        new IntegrationEndpointDocDto("Carriers", "Integration.Inbound.Carrier", "POST", $"{Base}/carriers", true,
+            "Upsert Carrier master rows for the resolved source company (the carrier the supplier picks on an ASN). code is required (<=9); description is optional (<=50) - LN may push a carrier with no name; isActive defaults to true. Upsert key is (source company, code), case-insensitive; an unchanged row is reported Skipped.",
+            Json(new { companyCode = "2000", carriers = new[] { new { code = "DHL", description = "DHL Express", isActive = true } } })),
         new IntegrationEndpointDocDto("Units", "Integration.Inbound.Unit", "POST", $"{Base}/units", true,
             "Upsert unit-of-measure master rows for the resolved source company.",
             Json(new { companyCode = "3000", units = new[] { new { code = "KG", description = "Kilogram", unitType = "Mass", isoCode = "KGM", decimalPlaces = 3, conversionFactor = 1, baseUnitCode = (string?)null, isActive = true } } })),
@@ -100,5 +103,26 @@ public static class IntegrationCatalog
         new IntegrationEndpointDocDto("Goods receipts", "Integration.Inbound.GrnReceipt", "POST", $"{Base}/goods-receipts", true,
             "Create/upsert goods-receipt (GRN) rows against PO lines (resolved by poNumber + poPositionNo). New rows land GrnNotApproved; /grn-status then advances them.",
             Json(new { companyCode = "3000", receipts = new[] { new { grnNumber = "GRN-3000-000001", poNumber = "PO-3000-000001", poPositionNo = 10, receivedQty = 100.0, shortQty = 0.0, rejectedQty = 0.0, grnDate = "2026-07-16", asnNumber = (string?)null, erpSyncId = "LN-GRN-1" } } })),
+        new IntegrationEndpointDocDto("ASN update", "Integration.Inbound.AsnUpdate", "POST", $"{Base}/asn-update", true,
+            "LN reports the shipment status and the received quantities of an ASN the portal already POSTED. Body key names are `ASN` (the array) and `supplierASN`. erpSupplierCode resolves the supplier (Supplier.ErpCode); supplierASN is the portal's ASN number; shipment is LN's own shipment number - stamped on the ASN when it has none, otherwise it must match (a mismatch FAILS the record, never overwritten). status is stored verbatim as the ASN's ERP shipment status, and when it reads InTransit / Delivered / Received (case-insensitive, spaces/hyphens/underscores ignored) the portal ASN status moves to it too (backward moves allowed); any other status leaves the portal status unchanged. Only a posted ASN (Submitted / InTransit / Delivered / Received) can be updated. Lines are optional; each matches the ASN line at positionNo, and poNumber (optional) disambiguates when one ASN spans several POs that reuse a position. receivedQty is an absolute replacement (not a delta); null leaves the stored value unchanged; actualDeliveryDate is a date. Atomic per ASN: one bad line fails that whole ASN record and writes nothing for it; other records in the batch are independent. Business failures are Failed rows in the 200 response (Code = supplierASN), never a 4xx.",
+            Json(new Dictionary<string, object?>
+            {
+                ["companyCode"] = "2000",
+                ["ASN"] = new[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["erpSupplierCode"] = "BUS000048",
+                        ["supplierASN"] = "ASN-S0013-20261006115014829",
+                        ["shipment"] = "INB00169",
+                        ["status"] = "Received",
+                        ["lines"] = new[]
+                        {
+                            new { positionNo = 10, receivedQty = 20, actualDeliveryDate = "2026-07-15" },
+                            new { positionNo = 20, receivedQty = 10, actualDeliveryDate = "2026-07-15" },
+                        },
+                    },
+                },
+            })),
     };
 }

@@ -115,7 +115,8 @@ internal static class AsnOutboundPayloadBuilder
             AsnNumber = asn.AsnNumber,
             ExpectedDeliveryDate = asn.ExpectedDeliveryDate.ToString("o"),
             TimeWindow = asn.TimeWindow,
-            CarrierName = asn.CarrierName,
+            // R17 — LN's carrierName key carries the carrier CODE; kept in lockstep with AsnInputDocumentBuilder.
+            CarrierName = asn.CarrierCode ?? asn.CarrierName,
             TrackingNo = asn.TrackingNumber,
             VehicleNo = asn.VehicleNumber,
             DriverName = asn.DriverName,

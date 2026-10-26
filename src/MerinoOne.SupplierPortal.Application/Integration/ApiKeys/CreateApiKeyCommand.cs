@@ -131,6 +131,8 @@ public static class ApiKeyScopes
     {
         "Integration.Inbound." + nameof(SharedEndpoint.PaymentTerm),
         "Integration.Inbound." + nameof(SharedEndpoint.DeliveryTerm),
+        // R17 (2026-10-26) — the LN-fed Carrier master.
+        "Integration.Inbound." + nameof(SharedEndpoint.Carrier),
         "Integration.Inbound." + nameof(SharedEndpoint.Unit),
         "Integration.Inbound." + nameof(SharedEndpoint.ItemGroup),
         "Integration.Inbound." + nameof(SharedEndpoint.Item),
@@ -149,6 +151,8 @@ public static class ApiKeyScopes
         "Integration.Inbound." + nameof(TransactionalInboundEntity.Po),
         "Integration.Inbound." + nameof(TransactionalInboundEntity.DeliverySchedule),
         "Integration.Inbound." + nameof(TransactionalInboundEntity.GrnReceipt),
+        // R17 (2026-10-26) — LN-pushed ASN shipment status + received quantities.
+        "Integration.Inbound." + nameof(TransactionalInboundEntity.AsnUpdate),
     };
 
     public static List<string> Normalize(IEnumerable<string>? scopes) =>

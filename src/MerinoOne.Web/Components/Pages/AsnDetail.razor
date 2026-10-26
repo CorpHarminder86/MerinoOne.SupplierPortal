@@ -38,14 +38,16 @@
     .asnro-pill { display:inline-block; padding:2px 8px; border-radius:999px;
                   font:700 10.5px/1.5 'Plus Jakarta Sans', sans-serif; }
 
-    .asnro-lines { padding:0; margin-top:12px; overflow:hidden; }
+    /* R17 — two receipt columns (Received qty, Actual delivery) joined the line grid, so it now has a floor width at
+       every viewport and scrolls sideways inside its card (also when the 360px document rail is open). */
+    .asnro-lines { padding:0; margin-top:12px; overflow-x:auto; }
     .asnro-lines__head { display:flex; align-items:baseline; gap:10px; padding:12px 18px;
                          border-bottom:1px solid var(--mer-line); }
     .asnro-lines__head h3 { margin:0; font:700 13.5px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-blue-darker); }
     .asnro-lines__totals { font:400 12px/1 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-500); }
 
-    .asnro-grid { display:grid; align-items:center; gap:0 10px; padding:0 18px;
-                  grid-template-columns:118px 42px 42px minmax(0,1fr) 88px 90px 172px 104px 96px 28px; }
+    .asnro-grid { display:grid; align-items:center; gap:0 10px; padding:0 18px; min-width:1240px;
+                  grid-template-columns:118px 42px 42px minmax(0,1fr) 88px 90px 88px 100px 172px 104px 96px 28px; }
     .asnro-grid--head { height:32px; background:var(--mer-ink-50); border-bottom:1px solid var(--mer-line);
                         font:700 9.5px/1 'Plus Jakarta Sans', sans-serif; letter-spacing:.07em;
                         text-transform:uppercase; color:var(--mer-ink-500); }
@@ -68,7 +70,7 @@
     .asnro-chev { justify-self:end; color:var(--mer-ink-400); display:inline-flex; }
     .asnro-chev .material-symbols-outlined { font-size:17px; }
 
-    .asnro-detail { padding:10px 18px 12px 136px; background:var(--mer-ink-50);
+    .asnro-detail { padding:10px 18px 12px 136px; background:var(--mer-ink-50); min-width:1240px;
                     border-bottom:1px solid var(--mer-line-soft); }
     .asnro-detail__head { font:700 9.5px/1 'Plus Jakarta Sans', sans-serif; letter-spacing:.09em;
                           text-transform:uppercase; color:var(--mer-ink-500); margin-bottom:7px; }
@@ -77,16 +79,12 @@
                   background:var(--mer-surface); border:1px solid var(--mer-line); color:var(--mer-ink-700); }
     .asnro-chip--lot { background:var(--mer-green-soft); border-color:var(--mer-green); }
 
-    /* Below ~1180px the ten-column line grid and the three fact columns both stop fitting: stack the facts,
-       drop the column rules that would then read as stray vertical lines, and let the table scroll sideways
-       inside its own card rather than widening the page. */
+    /* Below ~1180px the three fact columns stop fitting: stack them and drop the column rules that would then
+       read as stray vertical lines. (The line grid scrolls sideways inside its own card at every width — above.) */
     @@media (max-width: 1180px) {
         .asnro-facts { grid-template-columns:1fr; gap:14px; }
         .asnro-facts > div + div { border-left:0; padding-left:0; margin-left:0;
                                    border-top:1px solid var(--mer-line-soft); padding-top:14px; }
-        .asnro-lines { overflow-x:auto; }
-        .asnro-grid { min-width:1060px; }
-        .asnro-detail { min-width:1060px; }
     }
 </style>
 
@@ -232,7 +230,7 @@
         }
         @* Posted note — provenance for a shipment that has reached the ERP. The confirmation half only renders when
            there WAS a confirmation (a No-confirmation supplier's ASN has no approval session at all). *@
-        else if (detail.AsnStatus is "Submitted" or "InTransit" or "Delivered")
+        else if (detail.AsnStatus is "Submitted" or "InTransit" or "Delivered" or "Received")
         {
             <div class="rz-card" style="padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;background:var(--mer-green-50);border:1px solid var(--mer-green);">
                 <span class="material-symbols-outlined" style="font-size:18px;color:var(--mer-green-dark);">verified</span>
@@ -345,7 +343,8 @@
                     <dt>Expected delivery</dt><dd class="asnro-mono">@AppTime.Date(detail.ExpectedDeliveryDate)</dd>
                     @* R11 (D12) — warehouse is the D4 grouping key, derived from the covered PO. *@
                     @if (!string.IsNullOrEmpty(detail.Warehouse)) { <dt>Warehouse</dt><dd class="asnro-mono">@detail.Warehouse</dd> }
-                    @if (!string.IsNullOrEmpty(detail.CarrierName)) { <dt>Carrier</dt><dd>@detail.CarrierName</dd> }
+                    @* R17 — "CODE — Name" once a carrier master row was picked; the legacy free-text name alone before that. *@
+                    @if (!string.IsNullOrEmpty(detail.CarrierCode) || !string.IsNullOrEmpty(detail.CarrierName)) { <dt>Carrier</dt><dd id="asn-carrier-summary">@CarrierSummary(detail)</dd> }
                     @if (!string.IsNullOrEmpty(detail.TrackingNumber)) { <dt>Tracking</dt><dd class="asnro-mono">@detail.TrackingNumber</dd> }
                     @if (!string.IsNullOrEmpty(detail.TimeWindow)) { <dt>Time window</dt><dd>@detail.TimeWindow</dd> }
                     @if (!string.IsNullOrEmpty(detail.VehicleNumber)) { <dt>Vehicle</dt><dd class="asnro-mono">@detail.VehicleNumber</dd> }
@@ -387,6 +386,13 @@
                         <dt>ERP status</dt>
                         <dd><span class="asnro-pill" style="background:@(detail.ErpStatus == "Success" ? "var(--mer-green-soft)" : "var(--mer-amber-50)");color:@(detail.ErpStatus == "Success" ? "var(--mer-green-darker, #3b6d11)" : "var(--mer-amber-800)");">@detail.ErpStatus</span></dd>
                     }
+                    @* R17 — LN's own shipment status, verbatim from /inbound/asn-update (any text LN sends). Distinct
+                       from the ERP status verdict above: this one tracks the shipment, not the ASN_Update outcome. *@
+                    @if (!string.IsNullOrWhiteSpace(detail.ErpShipmentStatus))
+                    {
+                        <dt>ERP shipment status</dt>
+                        <dd><span id="asn-erp-shipment-status" class="asnro-pill" style="background:var(--mer-blue-50);color:var(--mer-blue-darker);">@detail.ErpShipmentStatus</span></dd>
+                    }
                 </dl>
             </div>
         </div>
@@ -407,7 +413,8 @@
 
             <div class="asnro-grid asnro-grid--head">
                 <span>PO</span><span class="asnro-r">Pos</span><span class="asnro-r">Seq</span><span>Item</span>
-                <span class="asnro-r">Order qty</span><span class="asnro-r">Ship qty</span><span>Balance / allowance</span>
+                <span class="asnro-r">Order qty</span><span class="asnro-r">Ship qty</span>
+                <span class="asnro-r">Received qty</span><span>Actual delivery</span><span>Balance / allowance</span>
                 <span>Batch</span><span>Expiry</span><span></span>
             </div>
 
@@ -439,6 +446,9 @@
                     </span>
                     <span class="asnro-r asnro-mono">@line.OrderQty.ToString("0.###")</span>
                     <span class="asnro-r asnro-ship">@line.ShippedQty.ToString("0.###")</span>
+                    @* R17 — receipt facts LN pushed on /inbound/asn-update; "—" until LN reports a receipt. *@
+                    <span class="asnro-r asnro-mono">@(line.ReceivedQty.HasValue ? line.ReceivedQty.Value.ToString("0.###") : "—")</span>
+                    <span class="asnro-mono asnro-dim">@AppTime.Date(line.ActualDeliveryDate)</span>
                     <span class="asnro-bal">@DetailBalanceCell(line)</span>
                     <span class="asnro-mono asnro-dim">@Dash(line.BatchNumber)</span>
                     <span class="asnro-mono asnro-dim">@AppTime.Date(line.ExpiryDate)</span>
@@ -916,8 +926,25 @@
                         <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;" placeholder="e.g., 09:00–11:00" @bind="timeWindow" />
                     </div>
                     <div>
-                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Carrier name</label>
-                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="carrierName" />
+                        @* R17 — carrier is picked from the Carrier master (LN-fed) instead of typed. The code is snapshotted
+                           onto the ASN server-side; a legacy free-text name survives until a carrier is picked. *@
+                        <label for="asn-carrier" style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Carrier</label>
+                        <select id="asn-carrier" class="rz-dropdown" style="width:100%;padding:8px 10px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="carrierCode">
+                            <option value="">— Select carrier —</option>
+                            @foreach (var c in carriers)
+                            {
+                                <option value="@c.Code">@CarrierOptionLabel(c)</option>
+                            }
+                            @if (InactiveCarrierOption is { } inactiveCarrier)
+                            {
+                                <option value="@inactiveCarrier.Code">@inactiveCarrier.Label</option>
+                            }
+                        </select>
+                        <div style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Required before Post.</div>
+                        @if (!string.IsNullOrWhiteSpace(legacyCarrierName) && string.IsNullOrWhiteSpace(carrierCode))
+                        {
+                            <div id="asn-carrier-legacy" style="font-size:11px;color:var(--mer-ink-500);margin-top:2px;">Previously entered: @legacyCarrierName — pick a carrier from the list before posting.</div>
+                        }
                     </div>
                     <div>
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Tracking number</label>
@@ -984,6 +1011,12 @@
                 @* R7 — the R5 §13 Attachment Panel that used to be embedded here (step 3 only) moved into the
                    DocumentRail beside the wizard, where it is reachable from EVERY step. All its semantics
                    (thin client, "save the draft to attach" hint, Draft/Rejected editability) are unchanged. *@
+
+                @* A Post pre-check that jumps here (missing carrier/reference) must show its reason on this step. *@
+                @if (!string.IsNullOrEmpty(submitError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;white-space:pre-wrap;">@submitError</div>
+                }
             }
             else if (currentStep == 4)
             {
@@ -991,7 +1024,7 @@
                 <dl style="display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:13px;">
                     <dt style="color:var(--mer-ink-500);">Purchase order(s)</dt><dd style="font-family:Inter,monospace;">@string.Join(", ", SelectedPoNumbers)</dd>
                     <dt style="color:var(--mer-ink-500);">Expected delivery</dt><dd style="font-family:Inter,monospace;">@expectedDeliveryDate?.ToString("yyyy-MM-dd")</dd>
-                    <dt style="color:var(--mer-ink-500);">Carrier</dt><dd>@(string.IsNullOrEmpty(carrierName) ? "—" : carrierName)</dd>
+                    <dt style="color:var(--mer-ink-500);">Carrier</dt><dd id="asn-review-carrier">@CarrierReviewLabel</dd>
                     <dt style="color:var(--mer-ink-500);">Tracking</dt><dd style="font-family:Inter,monospace;">@(string.IsNullOrEmpty(trackingNumber) ? "—" : trackingNumber)</dd>
                     <dt style="color:var(--mer-ink-500);">Vehicle</dt><dd style="font-family:Inter,monospace;">@(string.IsNullOrEmpty(vehicleNumber) ? "—" : vehicleNumber)</dd>
                     <dt style="color:var(--mer-ink-500);">Lines</dt><dd>@lines.Count(l => l.ShippedQty > 0) of @lines.Count being shipped</dd>
@@ -1411,7 +1444,13 @@
     private bool linesLoading = false;
     private DateTime? expectedDeliveryDate;
     private string? timeWindow;
-    private string? carrierName;
+    // R17 — carrierCode is the Carrier-master pick (the select's value). legacyCarrierName is the pre-master free-text
+    // name of a loaded ASN that has NO code: it is still sent while no code is picked, so saving does not wipe it.
+    // When a code IS set the server snapshots the description itself, so CarrierName on the request is advisory.
+    private string? carrierCode;
+    private string? legacyCarrierName;
+    private List<CarrierDto> carriers = new();
+    private bool _carriersLoaded;
     private string? trackingNumber;
     private string? vehicleNumber;
     private string? driverName;
@@ -1548,6 +1587,55 @@
     private string Step1HelperText =>
         (suppliers.Count > 1 ? "Choose the supplier, then pick" : "Pick")
         + " the approved delivery-schedule lines to ship — one warehouse per ASN; the first line you pick locks it. Lines may span multiple POs.";
+
+    // ---- R17 carrier select helpers ----
+    private static string CarrierOptionLabel(CarrierDto c) =>
+        string.IsNullOrWhiteSpace(c.Description) ? c.Code : $"{c.Code} — {c.Description}";
+
+    // The loaded ASN's carrier when it is NOT in the active list any more (deactivated since it was picked): still offered
+    // as an option so opening + saving the ASN does not silently clear it.
+    private (string Code, string Label)? InactiveCarrierOption
+    {
+        get
+        {
+            var code = detail?.CarrierCode;
+            if (string.IsNullOrWhiteSpace(code) || carriers.Any(c => c.Code == code)) return null;
+            var name = detail!.CarrierName;
+            return (code, string.IsNullOrWhiteSpace(name) ? $"{code} (inactive)" : $"{code} — {name} (inactive)");
+        }
+    }
+
+    // Request CarrierName: the picked carrier's description (the server re-snapshots it anyway), or — while no code is
+    // picked — the legacy free-text name so a pre-master ASN keeps it until the supplier chooses from the list.
+    private string? CarrierNameForRequest
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(carrierCode)) return string.IsNullOrWhiteSpace(legacyCarrierName) ? null : legacyCarrierName;
+            var desc = carriers.FirstOrDefault(c => c.Code == carrierCode)?.Description;
+            if (string.IsNullOrWhiteSpace(desc) && detail is not null && detail.CarrierCode == carrierCode) desc = detail.CarrierName;
+            return string.IsNullOrWhiteSpace(desc) ? null : desc;
+        }
+    }
+
+    // "CODE — Name" for a picked carrier, the legacy name when only that exists, else "—".
+    private string CarrierReviewLabel
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(carrierCode)) return string.IsNullOrWhiteSpace(legacyCarrierName) ? "—" : legacyCarrierName;
+            var name = CarrierNameForRequest;
+            return string.IsNullOrWhiteSpace(name) ? carrierCode : $"{carrierCode} — {name}";
+        }
+    }
+
+    // Read-only view: AsnDetailDto.CarrierName is the description snapshot (or the legacy name when there is no code).
+    private static string CarrierSummary(AsnDetailDto d)
+    {
+        var hasName = !string.IsNullOrWhiteSpace(d.CarrierName);
+        if (string.IsNullOrWhiteSpace(d.CarrierCode)) return hasName ? d.CarrierName! : "—";
+        return hasName ? $"{d.CarrierCode} — {d.CarrierName}" : d.CarrierCode!;
+    }
 
     // R11 (D6/D7) — true while any of the three shipment refs is blank. The SERVER is the authority (it hard-
     // blocks Send-For-Approval); this only lets the UI say so before the round-trip. Deliberately NOT wired into
@@ -1727,6 +1815,7 @@
             _loadedId = Id;
             _loadedNew = IsNew;
             currentStep = 1;
+            await LoadCarriersAsync();
             await Reload();
         }
     }
@@ -1740,6 +1829,19 @@
         attachments.Clear();
         if (resp?.Data is { } docs) attachments.AddRange(docs);
         StateHasChanged();
+    }
+
+    // R17 — the ACTIVE Carrier master rows for the shipment-step select, fetched once per component lifetime (the list
+    // is company-scoped and changes only through the master / LN sync, never mid-edit).
+    private async Task LoadCarriersAsync()
+    {
+        if (_carriersLoaded) return;
+        var resp = await Api.GetAsync<List<CarrierDto>>("api/masters/carriers?isActive=true");
+        if (resp?.Success == true)
+        {
+            carriers = resp.Data ?? new();
+            _carriersLoaded = true;
+        }
     }
 
     private async Task Reload()
@@ -1765,7 +1867,8 @@
                 attachSupplierId = detail.SupplierId;
                 expectedDeliveryDate = detail.ExpectedDeliveryDate;
                 timeWindow = detail.TimeWindow;
-                carrierName = detail.CarrierName;
+                carrierCode = detail.CarrierCode;
+                legacyCarrierName = string.IsNullOrWhiteSpace(detail.CarrierCode) ? detail.CarrierName : null;
                 trackingNumber = detail.TrackingNumber;
                 vehicleNumber = detail.VehicleNumber;
                 driverName = detail.DriverName;
@@ -2140,8 +2243,8 @@
         }
         else
         {
-            var req = new UpdateAsnRequest(expectedDeliveryDate.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
-                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList);
+            var req = new UpdateAsnRequest(expectedDeliveryDate.Value, timeWindow, CarrierNameForRequest, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
+                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList, CarrierCode: carrierCode);
             var resp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", req);
             if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft saved" }); await Reload(); }
             else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed to save (the ASN may no longer be Draft)."; }
@@ -2188,9 +2291,10 @@
             busy = false; currentStep = ClampStep(2); return;
         }
 
-        // Client-side pre-check on the three references so the supplier is sent straight to the field that is
-        // missing rather than bouncing off a 400. The server enforces them regardless.
+        // Client-side pre-check on the carrier and the three references so the supplier is sent straight to the
+        // field that is missing rather than bouncing off a 400. The server enforces them regardless.
         var missingRefs = new List<string>();
+        if (string.IsNullOrWhiteSpace(carrierCode)) missingRefs.Add("carrier");
         if (string.IsNullOrWhiteSpace(invoiceNo)) missingRefs.Add("invoice no.");
         if (string.IsNullOrWhiteSpace(billOfLading)) missingRefs.Add("bill of lading");
         if (string.IsNullOrWhiteSpace(packingList)) missingRefs.Add("packing list");
@@ -2213,8 +2317,8 @@
     private async Task<bool> SavePendingEditsAsync(string actionLabel)
     {
         var lineReqs = BuildLineRequests();
-        var upd = new UpdateAsnRequest(expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
-                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList);
+        var upd = new UpdateAsnRequest(expectedDeliveryDate!.Value, timeWindow, CarrierNameForRequest, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
+                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList, CarrierCode: carrierCode);
         var saveResp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", upd);
         if (saveResp?.Success == true) return true;
         submitError = saveResp?.Errors?.FirstOrDefault() ?? $"Could not save before {actionLabel}.";
@@ -2229,10 +2333,10 @@
         var req = new CreateAsnRequest(
             poList.Count == 1 ? poList[0] : (Guid?)null,
             poList.Count > 1 ? poList : null,
-            expectedDeliveryDate!.Value, timeWindow, carrierName, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
+            expectedDeliveryDate!.Value, timeWindow, CarrierNameForRequest, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
             StagingKey: _stagingKey,
             OverrideReason: string.IsNullOrWhiteSpace(overrideReason) ? null : overrideReason.Trim(),
-            InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList);
+            InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList, CarrierCode: carrierCode);
         var resp = await Api.PostAsync<AsnDetailDto, CreateAsnRequest>("api/asns", req);
         if (resp?.Success == true && resp.Data != null)
         {
@@ -2464,7 +2568,8 @@
     {
         // R14 — Approved reads as a positive milestone (the buyer confirmed), distinct from the in-flight
         // "waiting on someone" states; it still needs the supplier's Post to become Submitted.
-        "Delivered" or "Approved" => "tlg-status--active",
+        // R17 — Received (LN confirmed the goods arrived) is the terminal positive state, styled like Delivered.
+        "Delivered" or "Approved" or "Received" => "tlg-status--active",
         // R5 (§10.1) — PendingApproval sits between Draft and Approved; treated like the other in-flight states.
         "Submitted" or "InTransit" or "PendingApproval" => "tlg-status--pending",
         "Cancelled" or "Rejected" => "tlg-status--danger",

@@ -307,6 +307,10 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">local_shipping</span>
                         <span class="mer-nav-item__label">Delivery Terms</span>
                     </NavLink>
+                    <NavLink class="mer-nav-item" href="admin/carriers" ActiveClass="active">
+                        <span class="mer-nav-item__icon material-symbols-outlined">airport_shuttle</span>
+                        <span class="mer-nav-item__label">Carriers</span>
+                    </NavLink>
                     <NavLink class="mer-nav-item" href="admin/payment-terms" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">savings</span>
                         <span class="mer-nav-item__label">Payment Terms</span>
@@ -591,7 +595,7 @@ else
         ("Communication",  new[] { "messages", "documents" }),
         ("Integrations",   new[] { "integrations" }),
         ("System",         new[] { "admin/settings", "settings", "admin/email-templates", "admin/diagnostics" }),
-        ("Master Data",    new[] { "admin/item-groups", "admin/units", "admin/currencies", "admin/countries", "admin/states", "admin/cities", "admin/postal-codes" }),
+        ("Master Data",    new[] { "admin/item-groups", "admin/units", "admin/currencies", "admin/countries", "admin/states", "admin/cities", "admin/postal-codes", "admin/carriers" }),
         ("Administration", new[] { "admin/users", "admin/companies", "admin/roles", "admin/permissions", "admin/supplier-invites", "admin/delivery-terms", "admin/payment-terms", "admin/taxes", "admin/items" }),
         ("Platform",       new[] { "platform" }),
     };

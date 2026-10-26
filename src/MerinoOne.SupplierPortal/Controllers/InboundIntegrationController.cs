@@ -69,6 +69,27 @@ Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed 
         return Result<UpsertResultDto>.Ok(data, HttpContext.TraceIdentifier);
     }
 
+    [HttpPost("carriers")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundCarrier)]
+    [EndpointSummary("Push carriers (Infor LN)")]
+    [EndpointDescription(@"Upserts Carrier master rows pushed by Infor LN. The portal's ASN screen offers these as the shipment carrier; the ASN snapshots the carrier code.
+Auth: X-APIKey scheme; the key must carry the `Integration.Inbound.Carrier` scope and be bound to the source company the body resolves to.
+Headers:
+- **Idempotency-Key**: Optional — a replay with the same key (or identical body) is a no-op.
+Body:
+- **CompanyCode**: Infor LN logistic company; resolved + normalized to its share-group source.
+- **Carriers**: 1..1000 records { code, description?, isActive } (Code REQUIRED <=9, Description OPTIONAL <=50 — LN may push a carrier with no name, isActive defaults to true, no duplicate Code in a batch).
+Upsert key = (source company, code), case-insensitive; only description and isActive are updated on an existing row. An unchanged row is reported Skipped.
+Behaviour: 200 + UpsertResultDto (per-row Inserted/Updated/Skipped/Failed); 400 unknown company / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertResultDto>> Carriers([FromBody] PushCarriersRequest body, CancellationToken ct)
+    {
+        var bound = BoundCompanyIds();
+        var key = IdempotencyKey();
+        var data = await _mediator.Send(new UpsertCarriersCommand(body, bound, key), ct);
+        return Result<UpsertResultDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
     // ---------------- Reference masters — tenant-scoped (no CompanyCode) ----------------
 
     [HttpPost("currencies")]
@@ -255,6 +276,27 @@ Body: { companyCode, receipts:[{ grnNumber, poNumber, poPositionNo, receivedQty,
 Behaviour: 200 + UpsertResultDto; 400 unknown company / unknown PO line (per-row) / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
     public async Task<Result<UpsertResultDto>> GoodsReceipts([FromBody] PushGoodsReceiptsRequest body, CancellationToken ct)
         => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertGoodsReceiptsCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
+
+    [HttpPost("asn-update")]
+    [RequestSizeLimit(2_000_000)]
+    [Authorize(AuthenticationSchemes = "ApiKey", Policy = Perm.IntegrationInboundAsnUpdate)]
+    [EndpointSummary("Push ASN shipment status + received quantities (Infor LN)")]
+    [EndpointDescription(@"Infor LN reports back on an ASN the portal already POSTED: LN's own shipment number, the shipment status, and per line the quantity LN received and the actual delivery date.
+Auth: X-APIKey scheme; the key must carry the `Integration.Inbound.AsnUpdate` scope and be bound to the resolved company.
+Headers:
+- **Idempotency-Key**: Optional — a replay with the same key (or identical body) is a no-op.
+Body (note the upper-case `ASN` array and the `supplierASN` key): { companyCode, ASN:[{ erpSupplierCode, supplierASN, shipment, status, lines?:[{ positionNo, receivedQty?, actualDeliveryDate?, poNumber? }] }] }. 1..1000 ASN records; erpSupplierCode/supplierASN/shipment <=50, status <=30, all required; positionNo > 0; receivedQty >= 0; no two lines of one ASN record may share the same (positionNo, poNumber).
+- **CompanyCode**: Infor LN logistic company, resolved to the literal company in the key's tenant (no share-group normalization — an ASN belongs to its own company).
+Matching: erpSupplierCode resolves the supplier (matched on Supplier.ErpCode, as for purchase orders); supplierASN is the portal's ASN number for that supplier in that company; the shipment is LN's own number for it.
+- **shipment**: stamped onto the ASN's ERP code when the ASN has none yet (this makes the ASN's documents eligible for IDM sync). If the ASN already carries a different code the record FAILS with a shipment-mismatch error — it is never overwritten.
+- **status**: stored VERBATIM as the ASN's ERP shipment status. When it reads InTransit, Delivered or Received (case-insensitive; spaces, hyphens and underscores ignored, so ""In Transit"" matches) the ASN's portal status is also set to that state; backward moves are allowed (ERP is the truth). Any other status (e.g. ""Closed"") is stored but leaves the portal status unchanged.
+- **Posted ASNs only**: the ASN must be Submitted, InTransit, Delivered or Received; a Draft/Approved/Cancelled/etc. ASN FAILS the record.
+- **lines**: optional (omit for a status-only update). Each line matches the ASN line at positionNo (the PO line position the ASN snapshotted). When one ASN spans several POs that reuse a position, send **poNumber** to disambiguate; without it an ambiguous position FAILS the record. receivedQty is an ABSOLUTE replacement (not a delta, rounded to 4 decimals); actualDeliveryDate is a date (any time part is dropped). An omitted (null) receivedQty/actualDeliveryDate leaves the stored value unchanged.
+Atomic per ASN: every check for an ASN record (supplier, ASN, state, shipment, every line) is made before anything is written, so one bad line fails that whole ASN record and writes nothing for it. Other ASN records in the batch are independent. Records are applied in array order.
+Failed rows: a business failure is a Failed row in the 200 response (RowResult.Code = supplierASN, Error = the reason), never a 4xx. Outcome is Updated when anything changed, otherwise Skipped.
+Behaviour: 200 + UpsertResultDto; 400 unknown company / validation; 403 spoofed company or disabled endpoint; 401 invalid key.")]
+    public async Task<Result<UpsertResultDto>> AsnUpdate([FromBody] PushAsnUpdatesRequest body, CancellationToken ct)
+        => Result<UpsertResultDto>.Ok(await _mediator.Send(new UpsertAsnUpdatesCommand(body, BoundCompanyIds(), IdempotencyKey()), ct), HttpContext.TraceIdentifier);
 
     /// <summary>
     /// The key's bound source companies — every "tenantEntityId" claim minted by the API-key auth handler

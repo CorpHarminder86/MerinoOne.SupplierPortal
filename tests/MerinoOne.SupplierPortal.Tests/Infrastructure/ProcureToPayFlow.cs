@@ -65,6 +65,9 @@ public static class ProcureToPayFlow
         decimal orderQty, decimal priceUnit, bool confirm, decimal? taxRate, bool seedTax, string currencyCode,
         string? itemCodeSuffix)
     {
+        // R17 — SimpleAsn() picks TestCarrierCode, which the create handler validates against the Carrier master.
+        await EnsureTestCarrierAsync(fx);
+
         // A plain item (no serial/lot) so the ASN happy path needs no per-line capture.
         var item = await fx.CreateItemAsync($"P2P-{itemCodeSuffix ?? tag}");
 
@@ -135,6 +138,63 @@ public static class ProcureToPayFlow
             orderQty, priceUnit, confirm, taxRate, seedTax, currencyCode, itemCodeSuffix);
     }
 
+    /// <summary>
+    /// R17 — the carrier every <see cref="SimpleAsn"/> picks. A real, ACTIVE <c>proc.Carrier</c> row of the fixture company,
+    /// seeded once per run by <see cref="EnsureTestCarrierAsync"/> (the create handler validates the code against the master,
+    /// and a carrier is mandatory at Post — so an ASN built by this helper can be posted without further set-up).
+    /// </summary>
+    public const string TestCarrierCode = "CAR-T1";
+
+    private static readonly SemaphoreSlim TestCarrierGate = new(1, 1);
+    private static bool _testCarrierSeeded;
+
+    /// <summary>
+    /// Idempotently seeds <see cref="TestCarrierCode"/> into the fixture company's Carrier master (check-then-insert; the DB is
+    /// persistent, so a previous run's row is reused and re-activated if something deactivated it). Serialised in-process and
+    /// tolerant of losing the insert race to another test process (the unique index rejects the duplicate — the row exists, which
+    /// is all this needs).
+    /// </summary>
+    public static async Task EnsureTestCarrierAsync(IntegrationTestFixture fx)
+    {
+        if (_testCarrierSeeded) return;
+        await TestCarrierGate.WaitAsync();
+        try
+        {
+            if (_testCarrierSeeded) return;
+
+            using var scope = fx.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var existing = await db.Carriers.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.TenantEntityId == IntegrationTestFixture.CompanyId
+                                          && c.Code == TestCarrierCode && !c.IsDeleted);
+            if (existing is null)
+            {
+                db.Carriers.Add(new Domain.Entities.Proc.Carrier
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = IntegrationTestFixture.TenantId,
+                    TenantEntityId = IntegrationTestFixture.CompanyId,
+                    Code = TestCarrierCode,
+                    Description = "Test Carrier",
+                    IsActive = true,
+                    CreatedBy = "seed",
+                    CreatedOn = DateTime.UtcNow,
+                });
+                try { await db.SaveChangesAsync(); }
+                catch (DbUpdateException) { /* another process inserted the same (company, code) first — it exists now. */ }
+            }
+            else if (!existing.IsActive)
+            {
+                existing.IsActive = true;
+                await db.SaveChangesAsync();
+            }
+
+            _testCarrierSeeded = true;
+        }
+        finally { TestCarrierGate.Release(); }
+    }
+
     /// <summary>A single-line ASN against the seeded PO line, shipping the full ordered qty.</summary>
     public static CreateAsnRequest SimpleAsn(Setup s, decimal? shippedQty = null)
         => new(
@@ -145,7 +205,8 @@ public static class ProcureToPayFlow
             Lines: new List<CreateAsnLineRequest>
             {
                 new(s.PoLineId, ShippedQty: shippedQty ?? s.OrderQty, BatchNumber: null, ExpiryDate: null),
-            });
+            },
+            CarrierCode: TestCarrierCode);
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════
     // R5 (TSD R5 Addendum §10) — ASN approval-lifecycle test helpers. The supplier-only `/submit` is gone;
@@ -249,8 +310,8 @@ public static class ProcureToPayFlow
     }
 
     /// <summary>
-    /// R11 (D6/D7) — fills the three mandatory shipment references on an ASN if the test has not set them, so
-    /// the Send-For-Approval gate does not fail tests that are about something else. Only fills BLANKS, so a test
+    /// R11 (D6/D7) — fills the three mandatory shipment references (and, since R17, the carrier code) on an ASN if the
+    /// test has not set them, so the Post gate does not fail tests that are about something else. Only fills BLANKS, so a test
     /// that set its own values (or deliberately left one blank to exercise the gate via the endpoint directly)
     /// is not overwritten.
     /// </summary>
@@ -262,6 +323,9 @@ public static class ProcureToPayFlow
         if (asn is null) return;
 
         var changed = false;
+        // R17 — the carrier is mandatory at Post as well. Written straight onto the ASN (asn.carrierCode has no FK to the
+        // Carrier master and a snapshot needs no master row), so the helper needs no seeded carrier. Only a blank is filled.
+        if (string.IsNullOrWhiteSpace(asn.CarrierCode)) { asn.CarrierCode = "CAR-T1"; changed = true; }
         if (string.IsNullOrWhiteSpace(asn.InvoiceNo)) { asn.InvoiceNo = "INV-TEST-1"; changed = true; }
         if (string.IsNullOrWhiteSpace(asn.BillOfLading)) { asn.BillOfLading = "BOL-TEST-1"; changed = true; }
         if (string.IsNullOrWhiteSpace(asn.PackingList)) { asn.PackingList = "PL-TEST-1"; changed = true; }

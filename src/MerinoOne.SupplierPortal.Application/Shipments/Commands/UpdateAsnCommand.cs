@@ -32,6 +32,7 @@ public class UpdateAsnCommandValidator : AbstractValidator<UpdateAsnCommand>
         // R11 (D16) — header length caps, identical to CreateAsnCommandValidator (see AsnHeaderRules).
         RuleFor(x => x.Body.TimeWindow).MaximumLength(AsnHeaderRules.TimeWindow);
         RuleFor(x => x.Body.CarrierName).MaximumLength(AsnHeaderRules.CarrierName);
+        RuleFor(x => x.Body.CarrierCode).MaximumLength(AsnHeaderRules.CarrierCode).WithName("carrierCode");
         RuleFor(x => x.Body.TrackingNumber).MaximumLength(AsnHeaderRules.TrackingNumber);
         RuleFor(x => x.Body.VehicleNumber).MaximumLength(AsnHeaderRules.VehicleNumber);
         RuleFor(x => x.Body.DriverName).MaximumLength(AsnHeaderRules.DriverName);
@@ -176,6 +177,11 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         // R5 (TSD R5 Addendum §10.4) — NO over-ship tolerance resolution / no balance delta at update; a Draft (or
         // Rejected→Draft) ASN does NOT consume shippedQtyToDate. The atomic guard moved to final Submit.
 
+        // R17 — resolve the picked carrier BEFORE any mutation (an unknown/inactive code is a 400 that must leave the ASN
+        // untouched). Full-overwrite like the other header fields: a blank code clears CarrierCode and keeps the
+        // supplied free-text name (the pre-R17 behaviour).
+        var (carrierCode, carrierName) = await CarrierSnapshot.ResolveAsync(_db, body.CarrierCode, body.CarrierName, ct);
+
         // R5 (§10.1) — editing a Rejected ASN returns it to Draft (must be re-sent for approval afterwards).
         // An Approved ASN is deliberately NOT reset here — see the AssertCanEdit note above.
         if (asn.AsnStatus == AsnStatus.Rejected)
@@ -201,7 +207,8 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         // Header fields.
         asn.ExpectedDeliveryDate = body.ExpectedDeliveryDate;
         asn.TimeWindow = body.TimeWindow;
-        asn.CarrierName = body.CarrierName;
+        asn.CarrierCode = carrierCode;
+        asn.CarrierName = carrierName;
         asn.TrackingNumber = body.TrackingNumber;
         asn.VehicleNumber = body.VehicleNumber;
         asn.DriverName = body.DriverName;

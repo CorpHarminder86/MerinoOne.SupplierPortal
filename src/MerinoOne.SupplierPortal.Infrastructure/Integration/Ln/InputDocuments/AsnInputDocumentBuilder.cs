@@ -66,7 +66,10 @@ public sealed class AsnInputDocumentBuilder : ILnInputDocumentBuilder
             SupplierBp: facts.SupplierBp,
             ExpectedDeliveryDate: asn.ExpectedDeliveryDate.ToString("o"),
             TimeWindow: asn.TimeWindow,
-            CarrierName: asn.CarrierName,
+            // R17 (2026-10-26) — LN's ASNDetail.carrierName key carries the carrier CODE (user decision): the supplier now
+            // picks from the Carrier master and the ASN snapshots Carrier.Code into CarrierCode. The legacy free-text name
+            // is only the fallback for a pre-R17 ASN, which cannot reach Post anyway (a carrier is mandatory there).
+            CarrierName: asn.CarrierCode ?? asn.CarrierName,
             TrackingNumber: asn.TrackingNumber,
             VehicleNumber: asn.VehicleNumber,
             DriverName: asn.DriverName,

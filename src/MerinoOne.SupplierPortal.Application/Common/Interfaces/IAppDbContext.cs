@@ -48,6 +48,7 @@ public interface IAppDbContext
     DbSet<ItemGroup> ItemGroups { get; }
     DbSet<Unit> Units { get; }
     DbSet<DeliveryTerm> DeliveryTerms { get; }
+    DbSet<Carrier> Carriers { get; }
     DbSet<PaymentTerm> PaymentTerms { get; }
 
     DbSet<Currency> Currencies { get; }

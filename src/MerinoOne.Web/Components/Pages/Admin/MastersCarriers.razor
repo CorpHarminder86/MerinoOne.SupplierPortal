@@ -1,0 +1,198 @@
+@page "/admin/carriers"
+@inject ApiClient Api
+@inject TokenAccessor Token
+@inject NotificationService Notif
+@inject DialogService Dialog
+
+<PageTitle>Carriers</PageTitle>
+
+<div class="tl-page">
+    <header class="tl-header">
+        <div>
+            <div class="tl-title-row">
+                <h1 class="tl-title">Carriers</h1>
+                <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
+            </div>
+            <p class="tl-sub">Shipping carrier master</p>
+        </div>
+        <div class="tl-header__actions">
+            @if (Token.HasPermission("Settings.Write"))
+            {
+                <button class="mbtn mbtn--primary" @onclick="OpenNew">
+                    <span class="material-symbols-outlined">add</span> Add
+                </button>
+            }
+        </div>
+    </header>
+
+    @if (loading)
+    {
+        <div class="tl-empty">Loading…</div>
+    }
+    else if (rows == null || rows.Count == 0)
+    {
+        <div class="tl-empty">
+            <span class="material-symbols-outlined" style="font-size:32px;">airport_shuttle</span>
+            <div>No carriers defined.</div>
+        </div>
+    }
+    else
+    {
+        <div class="tl-grid-wrapper" style="--tl-cols: 160px 1.5fr 90px 150px; --tl-min-width: 740px;">
+            <div class="tlg-header">
+                <div class="tlg-col">Code</div>
+                <div class="tlg-col">Description</div>
+                <div class="tlg-col">Active</div>
+                <div class="tlg-col tlg-col--actions">Actions</div>
+            </div>
+            @foreach (var r in rows)
+            {
+                <div class="tlg-row">
+                    <div class="tlg-col tlg-code">@r.Code</div>
+                    <div class="tlg-col tlg-desc">@(string.IsNullOrWhiteSpace(r.Description) ? "—" : r.Description)</div>
+                    <div class="tlg-col"><span class="tlg-status @(r.IsActive ? "tlg-status--active" : "tlg-status--danger")">@(r.IsActive ? "Yes" : "No")</span></div>
+                    <div class="tlg-col tlg-col--actions">
+                        @if (Token.HasPermission("Settings.Write"))
+                        {
+                            <button class="mbtn mbtn--row mbtn--accent" @onclick="() => OpenEdit(r)" title="Edit">
+                                <span class="material-symbols-outlined">edit</span> Edit
+                            </button>
+                            @if (r.IsActive)
+                            {
+                                <button class="mbtn mbtn--row mbtn--danger" @onclick="() => Deactivate(r.Id, r.Code)" title="Deactivate">
+                                    <span class="material-symbols-outlined">block</span> Off
+                                </button>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showDialog)
+{
+    <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="merino-dialog" data-variant="info" style="width:480px;">
+            <div class="merino-dialog__accent"></div>
+            <header class="merino-dialog__header">
+                <div class="merino-dialog__icon merino-dialog__icon--info"><span class="material-symbols-outlined">airport_shuttle</span></div>
+                <div class="merino-dialog__head-text">
+                    <div class="merino-dialog__eyebrow">Master</div>
+                    <h2 class="merino-dialog__title">@(editingId.HasValue ? "Edit carrier" : "New carrier")</h2>
+                </div>
+                <button class="merino-dialog__close" @onclick="() => showDialog = false"><span class="material-symbols-outlined">close</span></button>
+            </header>
+            <div class="merino-dialog__body">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Code @(editingId.HasValue ? "(immutable)" : "*")</label>
+                        <input id="carrier-code" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" maxlength="9" @bind="formCode" disabled="@editingId.HasValue" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Description</label>
+                        <input id="carrier-description" class="rz-textbox" style="width:100%;padding:8px 10px;" maxlength="50" @bind="formDescription" />
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                        <input type="checkbox" @bind="formIsActive" />
+                        Active
+                    </label>
+                </div>
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@formError</div>
+                }
+            </div>
+            <footer class="merino-dialog__footer">
+                <div class="merino-dialog__actions">
+                    <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showDialog = false">Cancel</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="Save" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private List<CarrierDto>? rows;
+    private bool loading = true;
+    private bool busy;
+    private bool showDialog;
+    private Guid? editingId;
+    private string formCode = string.Empty;
+    private string? formDescription;
+    private bool formIsActive = true;
+    private string formError = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        var resp = await Api.GetAsync<List<CarrierDto>>("api/masters/carriers");
+        rows = resp?.Data ?? new();
+        loading = false;
+    }
+
+    private void OpenNew()
+    {
+        editingId = null;
+        formCode = string.Empty;
+        formDescription = null;
+        formIsActive = true;
+        formError = string.Empty;
+        showDialog = true;
+    }
+
+    private void OpenEdit(CarrierDto r)
+    {
+        editingId = r.Id;
+        formCode = r.Code;
+        formDescription = r.Description;
+        formIsActive = r.IsActive;
+        formError = string.Empty;
+        showDialog = true;
+    }
+
+    private async Task Save()
+    {
+        if (!editingId.HasValue && string.IsNullOrWhiteSpace(formCode)) { formError = "Code required."; return; }
+        // Description is optional — LN may send a carrier code with no name; blank saves as null.
+        var description = string.IsNullOrWhiteSpace(formDescription) ? null : formDescription.Trim();
+        busy = true;
+        ApiResult<CarrierDto>? resp;
+        if (editingId.HasValue)
+        {
+            var req = new UpdateCarrierRequest(description, formIsActive);
+            resp = await Api.PutAsync<CarrierDto, UpdateCarrierRequest>($"api/masters/carriers/{editingId}", req);
+        }
+        else
+        {
+            var req = new CreateCarrierRequest(formCode.Trim(), description, formIsActive);
+            resp = await Api.PostAsync<CarrierDto, CreateCarrierRequest>("api/masters/carriers", req);
+        }
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Saved" });
+            showDialog = false;
+            await Load();
+        }
+        else { formError = resp?.Errors?.FirstOrDefault() ?? "Failed."; }
+        busy = false;
+    }
+
+    private async Task Deactivate(Guid id, string label)
+    {
+        if (!await Dialog.ConfirmDeactivateAsync(label, "CARRIER")) return;
+        busy = true;
+        var resp = await Api.PostAsync<object>($"api/masters/carriers/{id}/deactivate", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Deactivated" });
+            await Load();
+        }
+        else { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Failed", Detail = resp?.Errors?.FirstOrDefault() ?? "" }); }
+        busy = false;
+    }
+}

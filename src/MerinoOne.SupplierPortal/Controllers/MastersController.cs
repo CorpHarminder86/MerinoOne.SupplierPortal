@@ -87,6 +87,79 @@ Returns: empty success; 404 if not found. Requires permission **Settings.Write**
         return Result.Ok(HttpContext.TraceIdentifier);
     }
 
+    // ---------------- Carriers (R17) ----------------
+
+    // Read side is any-authenticated (like taxes): supplier users load the list for the ASN Carrier dropdown, and the row set
+    // is already tenant/company-scoped (share-group aware) by the global filters. Writes need Settings.Write.
+    [HttpGet("carriers")]
+    [Authorize]
+    [EndpointSummary("Carrier master list")]
+    [EndpointDescription(@"All carriers (company-shared master, LN-fed; the supplier picks one on the ASN).
+Rows are company-scoped and share-group aware (same sharing as delivery terms).
+Filters / params:
+- **isActive**: Optional — true active only, false inactive only, omit for all.
+Returns: List<CarrierDto> ordered by code. Requires an authenticated user (rows are tenant/company-scoped).")]
+    public async Task<Result<List<CarrierDto>>> ListCarriers([FromQuery] bool? isActive, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetCarriersQuery(isActive), ct);
+        return Result<List<CarrierDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpGet("carriers/{id:guid}")]
+    [Authorize]
+    [EndpointSummary("Carrier detail")]
+    [EndpointDescription(@"Single carrier by GUID (company-scoped and share-group aware).
+Filters / params:
+- **id**: Required — carrier GUID.
+Returns: CarrierDto on success; 404 if not found. Requires an authenticated user (rows are tenant/company-scoped).")]
+    public async Task<Result<CarrierDto>> GetCarrier(Guid id, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new GetCarrierByIdQuery(id), ct);
+        return Result<CarrierDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("carriers")]
+    [Authorize(Policy = Perm.SettingsWrite)]
+    [EndpointSummary("Create carrier")]
+    [EndpointDescription(@"Creates a new carrier row in the active company (company-scoped, share-group aware).
+Body:
+- **body**: CreateCarrierRequest — Code (required, max 9, immutable once created), optional Description (max 50), IsActive (default true).
+Returns: CarrierDto on success; 400 on validation; 409 if the code already exists in the company. Requires permission **Settings.Write**.")]
+    public async Task<Result<CarrierDto>> CreateCarrier([FromBody] CreateCarrierRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new CreateCarrierCommand(body), ct);
+        return Result<CarrierDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPut("carriers/{id:guid}")]
+    [Authorize(Policy = Perm.SettingsWrite)]
+    [EndpointSummary("Update carrier")]
+    [EndpointDescription(@"Updates an existing carrier (Code immutable).
+Filters / params:
+- **id**: Required — carrier GUID.
+- **body**: UpdateCarrierRequest with revised optional Description (max 50; blank clears it) / IsActive.
+Returns: CarrierDto on success; 400 on validation; 404 if not found. Requires permission **Settings.Write**.")]
+    public async Task<Result<CarrierDto>> UpdateCarrier(Guid id, [FromBody] UpdateCarrierRequest body, CancellationToken ct)
+    {
+        var data = await _mediator.Send(new UpdateCarrierCommand(id, body), ct);
+        return Result<CarrierDto>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    [HttpPost("carriers/{id:guid}/deactivate")]
+    [Authorize(Policy = Perm.SettingsWrite)]
+    [EndpointSummary("Deactivate carrier")]
+    [EndpointDescription(@"Marks a carrier inactive; preserved on historical ASNs (the ASN keeps its carrierCode snapshot).
+Filters / params:
+- **id**: Required — carrier GUID.
+Side effects:
+- Flips IsActive=false; rows remain queryable for historical records.
+Returns: empty success; 404 if not found. Requires permission **Settings.Write**.")]
+    public async Task<Result> DeactivateCarrier(Guid id, CancellationToken ct)
+    {
+        await _mediator.Send(new DeactivateCarrierCommand(id), ct);
+        return Result.Ok(HttpContext.TraceIdentifier);
+    }
+
     // ---------------- Payment Terms ----------------
 
     [HttpGet("payment-terms")]

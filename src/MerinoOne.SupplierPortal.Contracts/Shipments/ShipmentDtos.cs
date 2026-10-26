@@ -89,7 +89,10 @@ public record AsnListItemDto(
     DateTime? SubmittedAt,
     DateTime CreatedOn,
     // R11 (D4) — the receiving warehouse, so the list reads as "which dock is this going to" at a glance.
-    string? Warehouse = null);
+    string? Warehouse = null,
+    // R17 — the carrier code picked from the Carrier master, and LN's own shipment status verbatim (/inbound/asn-update).
+    string? CarrierCode = null,
+    string? ErpShipmentStatus = null);
 
 // R5 (review gap C2) — one row in the buyer-facing ASN approval queue (GET /api/asns/pending-approvals). Lists
 // PendingApproval ASNs routed to the calling buyer (via any covered PO's BuyerUserId), or ALL PendingApproval
@@ -185,7 +188,11 @@ public record AsnDetailDto(
     // R16 (2026-08-10) — the LN ASN_Update verdict (Success | PartialFailure), mirroring the PO's ErpStatus.
     // PartialFailure means LN holds an ASN header for this record while ErpCode is deliberately NULL (the IDM
     // gate must not open for a broken ASN) — the one state where "no erpCode" does NOT mean "not in LN".
-    string? ErpStatus = null);
+    string? ErpStatus = null,
+    // R17 — CarrierCode: the Carrier master code snapshot (display label resolved client-side from the master).
+    // ErpShipmentStatus: LN's shipment status verbatim from /inbound/asn-update, shown beside the portal AsnStatus.
+    string? CarrierCode = null,
+    string? ErpShipmentStatus = null);
 
 /// <summary>One covered PO on a (possibly multi-PO) ASN.</summary>
 public record AsnPurchaseOrderDto(
@@ -240,7 +247,10 @@ public record AsnLineDto(
     DateTime? ScheduleDeliveryDate = null,
     // mdm.Unit.decimalPlaces for OrderUnit, resolved server-side (IUnitDecimalsResolver); 3 when unknown/blank. The
     // wizard/detail format and validate OrderQty/ShippedQty/Balance to this precision.
-    int UnitDecimalPlaces = 3);
+    int UnitDecimalPlaces = 3,
+    // R17 — receipt facts LN pushed on /inbound/asn-update for this line (null until LN reports a receipt).
+    decimal? ReceivedQty = null,
+    DateTime? ActualDeliveryDate = null);
 
 // R4 (2026-06-22) — Module 3: ASN attachments reuse the existing Contracts.Suppliers.DocumentAttachmentDto
 // (structurally identical; ownerEntityType='Asn', DocumentType.AsnAttachment). No duplicate type introduced
@@ -287,7 +297,9 @@ public record CreateAsnRequest(
     // without them. Trailing optional → source-compatible.
     string? InvoiceNo = null,
     string? BillOfLading = null,
-    string? PackingList = null);
+    string? PackingList = null,
+    // R17 — Carrier master code (max 9), snapshotted onto the ASN; null = no carrier picked.
+    string? CarrierCode = null);
 
 // R4 (2026-06-23) — Serial/Lot capture: Serials (serialized item) + Lots (lot-controlled item) — at most one
 // populated per line. The other is ignored by the handler based on the line's Item flag. Used by BOTH Create
@@ -317,7 +329,9 @@ public record UpdateAsnRequest(
     // so a caller that omits one wipes it. The Blazor form always sends its current values.
     string? InvoiceNo = null,
     string? BillOfLading = null,
-    string? PackingList = null);
+    string? PackingList = null,
+    // R17 — see CreateAsnRequest. Same full-overwrite semantics as the three references above.
+    string? CarrierCode = null);
 
 // R4 (2026-06-26) — §6.5 / UC-PO-09: optional submit-time admin gate-override reason. When the PO confirmation
 // gate would BLOCK draft submission, a caller holding PurchaseOrder.OverrideGate may supply a non-empty reason to
@@ -344,7 +358,9 @@ public record CreateAsnFromScheduleRequest(
     string? DriverPhone = null,
     string? Notes = null,
     IReadOnlyDictionary<Guid, decimal>? ShipQtyByScheduleId = null,
-    Guid? StagingKey = null);
+    Guid? StagingKey = null,
+    // R17 — see CreateAsnRequest.
+    string? CarrierCode = null);
 
 // R5 (TSD R5 Addendum §10.2) — supplier sends a Draft ASN for buyer approval.
 // R14 — AcknowledgeMissingAttachments is now VESTIGIAL on this request: the attachment check moved to Post, so

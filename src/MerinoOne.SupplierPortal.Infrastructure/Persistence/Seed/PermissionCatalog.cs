@@ -88,6 +88,9 @@ public static class PermissionCatalog
         new PermissionSeed(Perm.IntegrationInboundUnit,         "Inbound: units",            "Integration", "Inbound /units: ERP pushes unit-of-measure master"),
         new PermissionSeed(Perm.IntegrationInboundItemGroup,    "Inbound: item groups",      "Integration", "Inbound /item-groups: ERP pushes item-group master"),
         new PermissionSeed(Perm.IntegrationInboundItem,         "Inbound: items",            "Integration", "Inbound /items: ERP pushes company-scoped item master"),
+        // R17 (2026-10-26) — carrier master + LN ASN receipt update.
+        new PermissionSeed(Perm.IntegrationInboundCarrier,      "Inbound: carriers",         "Integration", "Inbound /carriers: ERP pushes Carrier master"),
+        new PermissionSeed(Perm.IntegrationInboundAsnUpdate,    "Inbound: ASN updates",      "Integration", "Inbound /asn-update: ERP pushes ASN shipment status + received quantities"),
         // Platform-tier permissions — held ONLY by the cross-tenant PlatformAdmin (separation of duties:
         // a Platform Admin onboards tenants/companies/first-admins but reads NO business data).
         new PermissionSeed(Perm.PlatformTenants,             "Manage tenants",            "Platform",       "View and manage tenants and their companies (cross-tenant)"),

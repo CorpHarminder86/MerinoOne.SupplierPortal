@@ -109,6 +109,9 @@ public static class Perm
     public const string IntegrationInboundUnit = "Integration.Inbound.Unit";
     public const string IntegrationInboundItemGroup = "Integration.Inbound.ItemGroup";
     public const string IntegrationInboundItem = "Integration.Inbound.Item";
+    // R17 (2026-10-26) — carrier master push + LN ASN receipt update.
+    public const string IntegrationInboundCarrier = "Integration.Inbound.Carrier";
+    public const string IntegrationInboundAsnUpdate = "Integration.Inbound.AsnUpdate";
 
     // Platform (cross-tenant PlatformAdmin only)
     public const string PlatformTenants = "Platform.Tenants";
@@ -139,7 +142,7 @@ public static class Perm
         IntegrationInboundPaymentTerm, IntegrationInboundDeliveryTerm, IntegrationInboundCurrency,
         IntegrationInboundCountry, IntegrationInboundState, IntegrationInboundCity,
         IntegrationInboundPostalCode, IntegrationInboundUnit, IntegrationInboundItemGroup,
-        IntegrationInboundItem,
+        IntegrationInboundItem, IntegrationInboundCarrier, IntegrationInboundAsnUpdate,
         PlatformTenants, PlatformOnboard, PlatformPermissions,
     };
 }

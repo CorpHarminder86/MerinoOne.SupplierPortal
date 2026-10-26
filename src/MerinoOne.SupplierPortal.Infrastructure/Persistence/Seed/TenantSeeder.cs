@@ -42,6 +42,7 @@ public static class TenantSeeder
     {
         (nameof(SharedEndpoint.PaymentTerm),       "payment-terms"),
         (nameof(SharedEndpoint.DeliveryTerm),      "delivery-terms"),
+        (nameof(SharedEndpoint.Carrier),           "carriers"),
         (nameof(SharedEndpoint.Unit),              "units"),
         (nameof(SharedEndpoint.ItemGroup),         "item-groups"),
         (nameof(SharedEndpoint.Item),              "items"),
@@ -61,6 +62,8 @@ public static class TenantSeeder
         (nameof(TransactionalInboundEntity.Po),              "purchase-orders"),
         (nameof(TransactionalInboundEntity.DeliverySchedule),"delivery-schedules"),
         (nameof(TransactionalInboundEntity.GrnReceipt),      "goods-receipts"),
+        // R17 (2026-10-26) — LN-pushed ASN shipment status + received quantities.
+        (nameof(TransactionalInboundEntity.AsnUpdate),       "asn-update"),
     };
 
     public static Guid TenantId => DeterministicId.From("Tenant", TenantName);
@@ -192,7 +195,7 @@ public static class TenantSeeder
         // Tenant-scoped masters (Currency/Country/State/City/PostalCode) do NOT share company-wise.
         var endpoints = new[]
         {
-            SharedEndpoint.PaymentTerm, SharedEndpoint.DeliveryTerm,
+            SharedEndpoint.PaymentTerm, SharedEndpoint.DeliveryTerm, SharedEndpoint.Carrier,
             SharedEndpoint.Unit, SharedEndpoint.ItemGroup, SharedEndpoint.Item
         };
 

@@ -106,6 +106,9 @@ public static class AsnDtoBuilder
                                   al.ExpiryDate,
                                   al.DeliveryScheduleId,
                                   ScheduleDeliveryDate = sch != null ? (DateTime?)sch.DeliveryDate : null,
+                                  // R17 — receipt facts LN pushed on /inbound/asn-update (null until a receipt is reported).
+                                  al.ReceivedQty,
+                                  al.ActualDeliveryDate,
                               }).ToListAsync(ct);
 
         // R4 (2026-06-26) — resolve the per-line over-ship tolerance (§7.1 SupplierItem ?? Item) so the derived
@@ -203,7 +206,8 @@ public static class AsnDtoBuilder
                     r.ShippedQtyToDate, balance, overShipAllowance,
                     r.DeliveryScheduleId, r.ScheduleDeliveryDate,
                     !string.IsNullOrWhiteSpace(r.OrderUnit) && unitPlaces.TryGetValue(r.OrderUnit, out var places)
-                        ? places : unitResolver.Fallback);
+                        ? places : unitResolver.Fallback,
+                    r.ReceivedQty, r.ActualDeliveryDate);
             })
             .ToList();
 
@@ -268,7 +272,9 @@ public static class AsnDtoBuilder
             // Post is the next legal action.
             a.PostedAt, a.PostedBy, asnConfirmationRequired, canPost,
             // R16 — the LN ASN_Update verdict (Success | PartialFailure; null = never landed in LN).
-            a.ErpStatus);
+            a.ErpStatus,
+            // R17 — the Carrier master code snapshot, and LN's own shipment status verbatim (/inbound/asn-update).
+            a.CarrierCode, a.ErpShipmentStatus);
     }
 
     public static async Task<IReadOnlyList<DocumentAttachmentDto>> BuildAttachmentsAsync(

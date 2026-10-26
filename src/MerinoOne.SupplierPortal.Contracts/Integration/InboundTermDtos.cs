@@ -20,6 +20,15 @@ public record DeliveryTermRecord(
     bool IsActive = true);
 
 /// <summary>
+/// R17 — one inbound Carrier record pushed by Infor LN. <see cref="Code"/> (max 9) is the natural key (upsert key
+/// together with the resolved source company); <see cref="Description"/> (max 50) is optional.
+/// </summary>
+public record CarrierRecord(
+    string Code,
+    string? Description,
+    bool IsActive = true);
+
+/// <summary>
 /// Inbound Payment Term push body. <see cref="CompanyCode"/> is the Infor LN logistic company code
 /// (e.g. "3000"); it is resolved to a TenantEntity within the key's tenant and then normalized to its
 /// share-group source company before the upsert. Unknown company ⇒ 400; resolves to a different source
@@ -33,6 +42,11 @@ public record PushPaymentTermsRequest(
 public record PushDeliveryTermsRequest(
     string CompanyCode,
     IReadOnlyList<DeliveryTermRecord> Terms);
+
+/// <summary>R17 — inbound Carrier push body. See <see cref="PushPaymentTermsRequest"/> for the company semantics.</summary>
+public record PushCarriersRequest(
+    string CompanyCode,
+    IReadOnlyList<CarrierRecord> Carriers);
 
 /// <summary>Per-row outcome of an inbound upsert. Serialized as its string name.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]

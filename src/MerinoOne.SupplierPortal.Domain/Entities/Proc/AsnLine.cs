@@ -27,6 +27,11 @@ public class AsnLine : AuditableEntity
     public Guid? DeliveryScheduleId { get; set; }
     public DeliverySchedule? DeliverySchedule { get; set; }
 
+    // R17 (2026-10-26) — receipt facts pushed by LN on /inbound/asn-update, matched to this line by (asn, positionNo
+    // [, poNumber]). ERP-owned: the portal never writes them from a user action. Null until LN reports a receipt.
+    public decimal? ReceivedQty { get; set; }
+    public DateTime? ActualDeliveryDate { get; set; }
+
     // R4 (2026-06-23) — Serial/Lot capture. CHILD collections of the ASN aggregate (reached via this line):
     // populated only for a serialized item (Serials) or a lot-controlled item (Lots) — mutually exclusive
     // per item, enforced by the Item XOR guard. CASCADE-deleted with the line.

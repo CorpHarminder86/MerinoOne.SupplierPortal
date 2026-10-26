@@ -29,6 +29,16 @@ public record PaymentTermDto(
     bool IsActive,
     DateTime CreatedOn);
 
+// ---- Carrier (R17) — company-shared (ICompanyScoped) master, cloned from DeliveryTerm. Description is OPTIONAL
+// (LN may send a carrier code with no name), so it is nullable here unlike DeliveryTermDto. ----
+public record CarrierDto(
+    Guid Id,
+    int Seq,
+    string Code,
+    string? Description,
+    bool IsActive,
+    DateTime CreatedOn);
+
 // ---- Tax (R4 Module 6) — company-shared (ICompanyScoped) master, cloned from DeliveryTerm. ----
 // R6 (2026-07-02) — IsRateOverridden: an admin rate edit pins the rate (the LN tax sync then skips writing
 // TaxRate); LastSyncedRate always tracks the latest inbound value so the drift is visible + resettable.
@@ -71,12 +81,15 @@ public record ItemDto(
 // Create requests
 public record CreateDeliveryTermRequest(string Code, string Description, bool IsActive = true);
 public record CreatePaymentTermRequest(string Code, string Description, int NetDays, bool IsActive = true);
+// R17 — Description optional (max 50); Code max 9 (the column widths).
+public record CreateCarrierRequest(string Code, string? Description, bool IsActive = true);
 // R4 (2026-06-26) — §7.4: OverShipTolerancePct optional (trailing); null → defaults to the entity default (0).
 public record CreateItemRequest(string Code, string Description, string? HsnCode, Guid? ItemGroupId = null, Guid? UnitId = null, bool IsActive = true, decimal? OverShipTolerancePct = null);
 
 // Update requests (Code remains immutable to keep it stable for FK lookups; rest editable)
 public record UpdateDeliveryTermRequest(string Description, bool IsActive);
 public record UpdatePaymentTermRequest(string Description, int NetDays, bool IsActive);
+public record UpdateCarrierRequest(string? Description, bool IsActive);
 // R4 (2026-06-26) — §7.4: OverShipTolerancePct optional (trailing); null leaves the stored value unchanged.
 public record UpdateItemRequest(string Description, string? HsnCode, Guid? ItemGroupId, Guid? UnitId, bool IsActive, decimal? OverShipTolerancePct = null);
 

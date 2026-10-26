@@ -36,6 +36,7 @@ public class CreateAsnCommandValidator : AbstractValidator<CreateAsnCommand>
         // parked with them blank; SendForApproval is where they become mandatory.
         RuleFor(x => x.Body.TimeWindow).MaximumLength(AsnHeaderRules.TimeWindow);
         RuleFor(x => x.Body.CarrierName).MaximumLength(AsnHeaderRules.CarrierName);
+        RuleFor(x => x.Body.CarrierCode).MaximumLength(AsnHeaderRules.CarrierCode).WithName("carrierCode");
         RuleFor(x => x.Body.TrackingNumber).MaximumLength(AsnHeaderRules.TrackingNumber);
         RuleFor(x => x.Body.VehicleNumber).MaximumLength(AsnHeaderRules.VehicleNumber);
         RuleFor(x => x.Body.DriverName).MaximumLength(AsnHeaderRules.DriverName);
@@ -74,6 +75,8 @@ internal static class AsnHeaderRules
 {
     public const int TimeWindow = 50;
     public const int CarrierName = 200;
+    // R17 — width of proc.Carrier.code (and of asn.carrierCode, its snapshot).
+    public const int CarrierCode = 9;
     public const int TrackingNumber = 100;
     public const int VehicleNumber = 50;
     public const int DriverName = 100;
@@ -298,6 +301,10 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
         // authoritative atomic guard (which needs the tolerance factor) now runs ONCE at final Submit
         // (AsnSubmitExecutor). The create path only persists the Draft + its serial/lot capture.
 
+        // R17 — the picked carrier, validated against the Carrier master and snapshotted (code + description) onto the
+        // ASN. Blank code keeps the legacy free-text name. Mandatory only at Post, so a Draft may park without one.
+        var (carrierCode, carrierName) = await CarrierSnapshot.ResolveAsync(_db, body.CarrierCode, body.CarrierName, ct);
+
         var now = DateTime.UtcNow;
         var asnId = Guid.NewGuid();
         var asnNumber = $"ASN-{supplier.SupplierCode}-{now:yyyyMMddHHmmssfff}";
@@ -330,7 +337,8 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
             SupplierId = supplierId,
             ExpectedDeliveryDate = body.ExpectedDeliveryDate,
             TimeWindow = body.TimeWindow,
-            CarrierName = body.CarrierName,
+            CarrierCode = carrierCode,
+            CarrierName = carrierName,
             TrackingNumber = body.TrackingNumber,
             VehicleNumber = body.VehicleNumber,
             DriverName = body.DriverName,
