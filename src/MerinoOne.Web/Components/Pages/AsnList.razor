@@ -24,23 +24,50 @@
         </div>
     </header>
 
-    <div class="tl-filter-bar" style="display:flex;gap:8px;align-items:center;">
-        <select class="rz-dropdown" style="padding:8px 12px;border:1px solid var(--mer-ink-300);border-radius:6px;background:var(--mer-surface);" @bind="statusFilter" @bind:after="Reload">
-            <option value="">All statuses</option>
-            <option value="Draft">Draft</option>
-            @* R5 (§10.1) — the two new approval-flow states surfaced in the list filter. *@
-            <option value="PendingApproval">Pending Approval</option>
-            @* R14 — confirmed by the buyer, awaiting the supplier's Post. *@
-            <option value="Approved">Approved — awaiting post</option>
-            <option value="Rejected">Rejected</option>
-            <option value="Submitted">Submitted</option>
-            <option value="InTransit">In Transit</option>
-            <option value="Delivered">Delivered</option>
-            @* R17 — set by LN's /inbound/asn-update receipt push; no portal action reaches it. *@
-            <option value="Received">Received</option>
-            <option value="Cancelled">Cancelled</option>
-        </select>
+    @* R18 (2026-11-04) — the search card replaces the status-only filter bar (design mock signed off 2026-11-04). It sits outside the
+       loading / empty / grid branches below, so it stays mounted — and the search box keeps focus — while a reload is in flight. *@
+    <div class="asnl-search">
+        <label class="asnl-field">
+            <span class="asnl-label">Expected from</span>
+            <input type="date" class="asnl-input" @bind="expectedFrom" @bind:after="Reload" />
+        </label>
+        <label class="asnl-field">
+            <span class="asnl-label">To</span>
+            <input type="date" class="asnl-input" @bind="expectedTo" @bind:after="Reload" />
+        </label>
+        <label class="asnl-field asnl-field--grow">
+            <span class="asnl-label">ASN / PO number</span>
+            @* Applies on Enter and on change (blur), like the Purchase Orders search box: Enter always reloads (OnSearchKeyup); change goes
+               through ApplySearch, which drops a repeat of the text already applied. *@
+            <input type="search" class="asnl-input" placeholder="e.g. ASN-S0013… or PUR000381"
+                   @bind="search" @bind:event="oninput" @onkeyup="OnSearchKeyup" @onchange="ApplySearch" />
+        </label>
+        <label class="asnl-field">
+            <span class="asnl-label">Status</span>
+            <select class="asnl-input" @bind="statusFilter" @bind:after="Reload">
+                <option value="">All statuses</option>
+                <option value="Draft">Draft</option>
+                @* R5 (§10.1) — the two new approval-flow states surfaced in the list filter. *@
+                <option value="PendingApproval">Pending Approval</option>
+                @* R14 — confirmed by the buyer, awaiting the supplier's Post. *@
+                <option value="Approved">Approved — awaiting post</option>
+                <option value="Rejected">Rejected</option>
+                <option value="Submitted">Submitted</option>
+                <option value="InTransit">In Transit</option>
+                <option value="Delivered">Delivered</option>
+                @* R17 — set by LN's /inbound/asn-update receipt push; no portal action reaches it. *@
+                <option value="Received">Received</option>
+                <option value="Cancelled">Cancelled</option>
+            </select>
+        </label>
+        <button type="button" class="mbtn mbtn--outline asnl-clear" @onclick="ClearFilters">Clear</button>
     </div>
+    @if (rangeError != null)
+    {
+        <div class="asnl-error" role="alert">
+            <span class="material-symbols-outlined">error</span> @rangeError
+        </div>
+    }
 
     @if (loading)
     {
@@ -50,12 +77,15 @@
     {
         <div class="tl-empty">
             <span class="material-symbols-outlined" style="font-size:32px;">local_shipping</span>
-            <div>No ASNs.</div>
+            <div>No ASNs match these filters.</div>
         </div>
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 150px 150px 140px 120px 1fr 130px 130px; --tl-min-width: 1170px;">
+        @* R18 (2026-11-04) — opted into the frozen header + column resize (shared core: GridResizeHint, tl-grid--sticky, merino-grid.js).
+           The ASN # column is 230px (was 150px) so the whole number shows; --tl-min-width grows by the same 80px. *@
+        <GridResizeHint GridKey="asn-list" />
+        <div class="tl-grid-wrapper tl-grid--sticky" data-grid="asn-list" style="--tl-cols: 230px 150px 140px 120px 1fr 130px 130px; --tl-min-width: 1250px;">
             <div class="tlg-header">
                 <div class="tlg-col">ASN #</div>
                 <div class="tlg-col">PO #</div>
@@ -68,7 +98,7 @@
             @foreach (var a in paged.Items)
             {
                 <div class="tlg-row" @onclick="() => OpenDetail(a.Id)" style="cursor:pointer">
-                    <div class="tlg-col tlg-code">@a.AsnNumber</div>
+                    <div class="tlg-col tlg-code" title="@a.AsnNumber">@a.AsnNumber</div>
                     <div class="tlg-col tlg-code" title="@a.PoSummary">@(a.PoCount > 1 ? $"{a.PoSummary} ({a.PoCount})" : a.PoSummary)</div>
                     <div class="tlg-col tlg-code">@AppTime.Date(a.ExpectedDeliveryDate)</div>
                     @* R11 (D4) — the receiving warehouse; an ASN never spans two. *@
@@ -85,6 +115,23 @@
     }
 </div>
 
+@* R18 (2026-11-04) — the search card. A <style> block rather than inline styles because the controls need :focus; every class is
+   prefixed asnl- (ASN list) so it cannot collide with merino.css. *@
+<style>
+    .asnl-search { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; padding:14px 16px; margin-bottom:12px;
+                   background:var(--mer-surface); border:1px solid var(--mer-line); border-radius:10px; }
+    .asnl-field { display:flex; flex-direction:column; gap:5px; min-width:0; }
+    .asnl-field--grow { flex:1 1 260px; }
+    .asnl-label { font:600 11px/1.2 'Plus Jakarta Sans', sans-serif; text-transform:uppercase; letter-spacing:.04em; color:var(--mer-ink-600); }
+    .asnl-input { box-sizing:border-box; min-height:40px; padding:9px 10px; border:1px solid var(--mer-ink-300); border-radius:6px;
+                  background:var(--mer-surface); color:var(--mer-ink-900); font:400 13px 'Inter', sans-serif; }
+    .asnl-input:focus { outline:none; border-color:var(--mer-blue); box-shadow:var(--mer-focus-ring); }
+    .asnl-field--grow .asnl-input { width:100%; }
+    .asnl-clear { min-height:40px; }
+    .asnl-error { display:flex; align-items:center; gap:6px; margin:-4px 0 12px; font:500 12.5px/1.35 'Plus Jakarta Sans', sans-serif; color:var(--mer-danger); }
+    .asnl-error .material-symbols-outlined { font-size:16px; }
+</style>
+
 @code {
     private PagedResult<AsnListItemDto>? paged;
     private bool loading = true;
@@ -92,19 +139,73 @@
     private int page = 1;
     private const int PageSize = 50;
 
+    // R18 (2026-11-04) — Expected-date window + number search. The list opens on the CURRENT MONTH (1st → last day, display zone), the
+    // same window AsnDetail's step-1 grid opens on; either date can be cleared (an empty input sends no parameter).
+    private DateOnly? expectedFrom = MonthStart();
+    private DateOnly? expectedTo = MonthEnd();
+    private string search = string.Empty;
+    private string appliedSearch = string.Empty;   // the trimmed search the newest request carried — lets ApplySearch drop a repeat
+    private string? rangeError;                    // set while From is after To: no request is made and the last results stay
+    private int _loadSeq;                          // newest-wins guard: a slower, older response never overwrites a newer one
+
+    private static DateOnly MonthStart() { var t = DateOnly.FromDateTime(AppTime.Now); return new DateOnly(t.Year, t.Month, 1); }
+    private static DateOnly MonthEnd() => MonthStart().AddMonths(1).AddDays(-1);
+
     protected override async Task OnInitializedAsync() => await Reload();
 
-    private async Task Reload()
+    // Every filter edit lands on page 1; only the pager asks for another page.
+    private Task Reload() => LoadAsync(1);
+
+    private async Task LoadAsync(int targetPage)
     {
+        if (expectedFrom > expectedTo)
+        {
+            rangeError = "To must be on or after From";
+            return;
+        }
+        rangeError = null;
+        page = targetPage;
+        var mine = ++_loadSeq;
         loading = true;
+        appliedSearch = search.Trim();
         var url = $"api/asns?page={page}&pageSize={PageSize}";
         if (!string.IsNullOrWhiteSpace(statusFilter)) url += $"&status={Uri.EscapeDataString(statusFilter)}";
+        if (expectedFrom is { } from) url += $"&expectedFrom={from.ToString(AppTime.DateFormat, System.Globalization.CultureInfo.InvariantCulture)}";
+        if (expectedTo is { } to) url += $"&expectedTo={to.ToString(AppTime.DateFormat, System.Globalization.CultureInfo.InvariantCulture)}";
+        if (appliedSearch.Length > 0) url += $"&search={Uri.EscapeDataString(appliedSearch)}";
         var resp = await Api.GetAsync<PagedResult<AsnListItemDto>>(url);
+        if (mine != _loadSeq) return;     // a newer filter change superseded this one
         paged = resp?.Data;
         loading = false;
     }
 
-    private async Task OnPageChanged(int newPage) { page = newPage; await Reload(); }
+    // The change event (blur, or Enter in a changed box) lands here; text that is already applied is not sent again.
+    private async Task ApplySearch()
+    {
+        if (search.Trim() != appliedSearch) await Reload();
+    }
+
+    // Enter always applies, as on the Purchase Orders box: it returns to page 1 and re-runs a request that failed (paged is null once the
+    // load has finished). The one Enter it skips is the keyup after the change event that same Enter already raised — appliedSearch then
+    // matches, the page is 1 and the load is still running or has returned data.
+    private async Task OnSearchKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && (search.Trim() != appliedSearch || page != 1 || (paged == null && !loading))) await Reload();
+    }
+
+    // Decision D19 — Clear goes back to the list's opening state: the current month, no search, every status.
+    private async Task ClearFilters()
+    {
+        expectedFrom = MonthStart();
+        expectedTo = MonthEnd();
+        search = string.Empty;
+        statusFilter = string.Empty;
+        await Reload();
+    }
+
+    // A pager click that arrives while a load is running is stale — the grid it came from is already being replaced (typically the
+    // blur that applied a typed search, whose Reload reset the page to 1) — so it is dropped rather than paging the new search.
+    private Task OnPageChanged(int newPage) => loading ? Task.CompletedTask : LoadAsync(newPage);
 
     private void OpenDetail(Guid id) => Nav.NavigateToRoute($"/asns/{id}");
     private void NewAsn() => Nav.NavigateToRoute("/asns/new");

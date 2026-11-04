@@ -8,6 +8,10 @@ namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Negotiations;
 /// the freshly-built aggregate) and the by-id query. Lines are projected from the parent's <c>Lines</c>
 /// collection (there is intentionally no root DbSet for lines). Soft-deleted lines are excluded. Mirrors
 /// <c>SupplierChangeRequestMapper</c>.
+///
+/// <para>R18 (2026-11-03): the DTO also names the round (RoundNo / ProposedBy / ParentNegotiationId). The round passed in is the
+/// one an action just produced or resolved, which is the head of its chain, so <c>HeadNegotiationId</c> is its own id; the
+/// by-id query, which maps any round of a chain, overrides it with the real head and adds the chain's <c>Rounds</c>.</para>
 /// </summary>
 public static class PoNegotiationMapper
 {
@@ -31,7 +35,11 @@ public static class PoNegotiationMapper
                 .Where(l => !l.IsDeleted)
                 .OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo)
                 .Select(ToLineDto)
-                .ToList());
+                .ToList(),
+            RoundNo: n.RoundNo,
+            ProposedBy: n.ProposedBy.ToString(),
+            ParentNegotiationId: n.ParentNegotiationId,
+            HeadNegotiationId: n.Id);
 
     public static PoNegotiationLineDto ToLineDto(PurchaseOrderNegotiationLine l)
         => new(

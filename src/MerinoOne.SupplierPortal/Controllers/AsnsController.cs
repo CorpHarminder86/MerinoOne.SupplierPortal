@@ -30,10 +30,11 @@ Filters / params:
 - **status**: Optional — ASN lifecycle status filter.
 - **supplierId**: Optional — restrict to one supplier.
 - **purchaseOrderId**: Optional — restrict to one PO.
-- **search**: Optional — free-text on ASN number / reference.
+- **search**: Optional — free text (trimmed, contains-match) on the ASN number, the supplier's legal name, or the number of any PO the ASN covers (its header PO, or any PO of a multi-PO ASN). An ASN appears once however many of its POs match.
+- **expectedFrom / expectedTo**: Optional — inclusive calendar-day range on the ASN's expected delivery date. Send each as yyyy-MM-dd; the value is read culture-invariantly, so a slash-separated date is read month first: 03/04/2027 is 4 March (not 3 April), and 15/06/2027, with no month 15, is a 400. Days are read on the portal display clock, i.e. the day the list's Expected column shows: an ASN showing the expectedTo day is included, one showing the next day is not. Either bound may be sent alone, and expectedTo=9999-12-31 is open-ended. expectedFrom later than expectedTo is a 400.
 Side effects:
 - Seccode-scoped: non-privileged users see only their suppliers' ASNs.
-Returns: PagedResult<AsnListItemDto>. Requires permission **Asn.Read**.")]
+Returns: PagedResult<AsnListItemDto>; 400 if expectedFrom is later than expectedTo or either cannot be read as a date. Requires permission **Asn.Read**.")]
     public async Task<Result<ContractsPagedResult>> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
@@ -41,9 +42,12 @@ Returns: PagedResult<AsnListItemDto>. Requires permission **Asn.Read**.")]
         [FromQuery] Guid? supplierId = null,
         [FromQuery] Guid? purchaseOrderId = null,
         [FromQuery] string? search = null,
+        [FromQuery] DateOnly? expectedFrom = null,
+        [FromQuery] DateOnly? expectedTo = null,
         CancellationToken ct = default)
     {
-        var data = await _mediator.Send(new GetAsnListQuery(page, pageSize, status, supplierId, purchaseOrderId, search), ct);
+        var data = await _mediator.Send(
+            new GetAsnListQuery(page, pageSize, status, supplierId, purchaseOrderId, search, expectedFrom, expectedTo), ct);
         return Result<ContractsPagedResult>.Ok(data, HttpContext.TraceIdentifier);
     }
 
@@ -86,6 +90,10 @@ Body:
   carrierName, but the carrier is MANDATORY at Post (a blank one fails POST /post with 400).
   R15 — each line may carry an optional **deliveryScheduleId** back-link; when supplied it must reference a live
   delivery schedule of the SAME purchaseOrderLineId (else 400), and each schedule may appear on at most one line.
+  R18 — four optional header references for the India statutory documents: **ewayBillNo** (max 20), **ewayBillDate**
+  (yyyy-MM-dd), **irnNo** (max 64) and **irnDate** (yyyy-MM-dd). The numbers are trimmed and a blank one is stored as
+  null; a number over its length is a 400. They are read back on the ASN detail and printed on the Packing List; they
+  are portal-only and are NEVER sent to LN or IDM.
 Side effects:
 - Creates the ASN in Draft, populates the AsnPurchaseOrder junction, snapshots each line's PositionNo/SequenceNo.
 Returns: AsnDetailDto (Draft) on success; 400 on validation; 403 if seccode mismatch. Requires **Asn.Write**.")]
@@ -102,6 +110,11 @@ Returns: AsnDetailDto (Draft) on success; 400 on validation; 403 if seccode mism
 (lock-on-submit). Replaces the line set, re-snapshots PositionNo/SequenceNo, rebuilds the multi-PO junction.
 R15 — each line may carry an optional **deliveryScheduleId** back-link (validated like Create: live schedule of the
 same PO line, unique per request); the replace-set persists it, so draft saves no longer wipe schedule provenance.
+R18 — the optional e-way bill / IRN header references (**ewayBillNo** max 20, **ewayBillDate** yyyy-MM-dd, **irnNo** max
+64, **irnDate** yyyy-MM-dd) follow the same rules as on create (numbers trimmed, blank stored as null, over-length is a
+400, portal + Packing List only, never sent to LN or IDM). Like the rest of the header they are FULL-OVERWRITE: all four
+are assigned as sent, so a body that omits one clears it. They are editable in the same statuses as the other header
+references (Draft, Rejected, and Approved — where only the shipment references, not lines or quantities, may change).
 Returns: AsnDetailDto on success; 404 if not found; 409 if not Draft. Requires **Asn.Write**.")]
     public async Task<Result<AsnDetailDto>> Update(Guid id, [FromBody] UpdateAsnRequest body, CancellationToken ct)
     {

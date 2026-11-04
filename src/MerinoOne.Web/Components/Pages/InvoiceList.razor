@@ -49,10 +49,12 @@
     }
     else
     {
+        @* R18 (2026-11-04) — frozen header + resizable columns (merino-grid.js, grid key "invoice-list"). *@
+        <GridResizeHint GridKey="invoice-list" />
         @* R6 — the AsnGenerated origin badge rides the Invoice # cell (no extra column: --tl-cols stays
            six columns; the first is widened to fit the chip). Draft rows carry the stored provisional
            DRAFT-{asn}-{n} number as-is. *@
-        <div class="tl-grid-wrapper" style="--tl-cols: 195px 150px 1.5fr 130px 160px 140px; --tl-min-width: 1155px;">
+        <div class="tl-grid-wrapper tl-grid--sticky" data-grid="invoice-list" style="--tl-cols: 195px 150px 1.5fr 130px 160px 140px; --tl-min-width: 1155px;">
             <div class="tlg-header">
                 <div class="tlg-col">Invoice #</div>
                 <div class="tlg-col">PO #</div>

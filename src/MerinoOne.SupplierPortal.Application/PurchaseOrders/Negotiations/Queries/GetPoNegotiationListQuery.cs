@@ -1,6 +1,7 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
+using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using MerinoOne.SupplierPortal.Contracts.Authorization;
 
@@ -12,6 +13,10 @@ namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Negotiations.Queri
 /// otherwise show a buyer an empty queue (they hold no SecRight on supplier G-seccodes, and the negotiations live
 /// under the supplier's company, not the reviewer's). Bypass the filters but re-apply the tenant predicate so it
 /// never crosses tenants. Suppliers stay seccode-scoped to their own. Optional status filter.
+///
+/// <para>R18 (2026-11-03): every row is one ROUND (<c>RoundNo</c>, <c>ProposedBy</c>). A superseded round (Countered) is history,
+/// not work — the round that replaced it is the live row — so it is left out unless the caller asks for it explicitly with
+/// <c>status=Countered</c>.</para>
 /// </summary>
 public record GetPoNegotiationListQuery(string? Status = null) : IRequest<List<PoNegotiationListItemDto>>;
 
@@ -32,8 +37,9 @@ public class GetPoNegotiationListQueryHandler
             ? _db.Suppliers.IgnoreQueryFilters().Where(s => !s.IsDeleted && s.TenantId == _user.TenantId)
             : _db.Suppliers.AsQueryable();
 
-        if (!string.IsNullOrEmpty(request.Status))
-            q = q.Where(n => n.NegotiationStatus.ToString() == request.Status);
+        q = !string.IsNullOrEmpty(request.Status)
+            ? q.Where(n => n.NegotiationStatus.ToString() == request.Status)
+            : q.Where(n => n.NegotiationStatus != PoNegotiationStatus.Countered);
 
         return await (
             from n in q
@@ -45,7 +51,9 @@ public class GetPoNegotiationListQueryHandler
                 s.LegalName,
                 n.NegotiationStatus.ToString(),
                 n.Lines.Count(l => !l.IsDeleted),
-                n.SubmittedAt))
+                n.SubmittedAt,
+                n.RoundNo,
+                n.ProposedBy.ToString()))
             .ToListAsync(ct);
     }
 }

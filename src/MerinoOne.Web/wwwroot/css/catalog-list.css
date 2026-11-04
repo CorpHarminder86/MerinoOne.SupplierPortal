@@ -96,3 +96,27 @@
 .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
 .badge--ok { background: var(--mer-green-soft); color: var(--mer-green-dark); }
 .badge--off { background: var(--mer-ink-100); color: var(--mer-ink-500); }
+
+/* R18 (2026-11-04) — resizable + frozen-header list grids. Declared after the list-grid rules above so they win on
+   equal specificity. A page opts in with <GridResizeHint GridKey="x" /> and
+   <div class="tl-grid-wrapper tl-grid--sticky" data-grid="x" ...>; merino-grid.js (also R18) does the dragging,
+   persists the widths per grid key in this browser and drives the transient hover/drag visuals. */
+
+/* Frozen header: the grid box scrolls vertically (and still horizontally) and the header row stays at its top.
+   --tl-sticky-offset is the vertical space the page spends above/below the grid; a page may override it inline. */
+.tl-grid--sticky { max-height: max(360px, calc(100vh - var(--tl-sticky-offset, 260px))); overflow: auto; }
+.tl-grid--sticky > .tlg-header { position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 var(--mer-line); }
+
+/* Resize handle: a col-resize hit zone on each opted-in header cell's right edge with a centred 2px bar that is
+   invisible until the cell is hovered. merino-grid.js raises the bar to full opacity while the pointer is over the
+   hit zone itself (a pseudo-element cannot be hovered on its own) and for the column being dragged. */
+.tl-grid-wrapper[data-grid] > .tlg-header > .tlg-col { position: relative; }
+.tl-grid-wrapper[data-grid] > .tlg-header > .tlg-col::after { content: ""; position: absolute; top: 0; right: 0; width: 9px; height: 100%; cursor: col-resize; background: linear-gradient(var(--mer-blue), var(--mer-blue)) no-repeat center / 2px 100%; opacity: 0; transition: opacity .12s ease; }
+.tl-grid-wrapper[data-grid] > .tlg-header > .tlg-col:hover::after { opacity: .35; }
+
+/* Hint line above the grid; the right-hand note is revealed by merino-grid.js only while this grid has saved widths. */
+.tl-grid-hint { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 8px; font-size: 12px; color: var(--mer-ink-500); }
+.tl-grid-hint__saved { display: none; font: 600 12px 'Plus Jakarta Sans', sans-serif; color: var(--mer-blue-deep); }
+
+/* Live width read-out during a drag; merino-grid.js appends it to <body> and sets left/top (the cell's right edge less 12px, vertically centred). */
+.tl-grid-badge { position: fixed; z-index: 10000; pointer-events: none; transform: translate(-100%, -50%); padding: 4px 7px; border-radius: var(--mer-radius-sm); background: var(--mer-blue-darker); color: #fff; font: 700 11px/1 'Inter', sans-serif; white-space: nowrap; }

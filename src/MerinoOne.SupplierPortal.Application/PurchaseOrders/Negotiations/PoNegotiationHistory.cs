@@ -17,6 +17,9 @@ namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Negotiations;
 /// mutation. The <c>AuditableEntityInterceptor</c> only audits <c>AuditableEntity</c> instances and
 /// <see cref="AuditEntry"/> is a plain <c>BaseEntity</c>, so this does NOT recurse. Id/Seq are DB-generated —
 /// we mirror the interceptor and leave them unset.</para>
+///
+/// <para>R18 (2026-11-03): a PO can carry several rounds of one negotiation, so every label names its round from round 2 on —
+/// see <see cref="Stem"/>.</para>
 /// </summary>
 internal static class PoNegotiationHistory
 {
@@ -27,12 +30,21 @@ internal static class PoNegotiationHistory
     // audit.AuditEntry.fieldName is nvarchar(100).
     private const int FieldMax = 100;
 
+    /// <summary>
+    /// What every row of a negotiation's label starts with. Round 1 — the supplier's opening proposal, and every pre-R18
+    /// negotiation — keeps the original stem, "Negotiation", byte for byte; a later round names itself and its author
+    /// ("Negotiation R2 (Buyer)") so the History tab tells the rounds apart.
+    /// </summary>
+    private static string Stem(PurchaseOrderNegotiation negotiation)
+        => negotiation.RoundNo <= 1 ? "Negotiation" : $"Negotiation R{negotiation.RoundNo} ({negotiation.ProposedBy})";
+
     /// <summary>One row per CHANGED line (qty and/or delivery date), with the original → negotiated values.</summary>
     public static void RecordSubmitted(IAppDbContext db, PurchaseOrder po, PurchaseOrderNegotiation negotiation, string actor, DateTime now)
     {
+        var stem = Stem(negotiation);
         foreach (var line in negotiation.Lines)
         {
-            var label = $"Negotiation · Line {line.PositionNo}/{line.SequenceNo} {line.ItemCode}".TrimEnd();
+            var label = $"{stem} · Line {line.PositionNo}/{line.SequenceNo} {line.ItemCode}".TrimEnd();
 
             if (line.OriginalQty != line.NegotiatedQty)
                 db.AuditEntries.Add(Row(po, $"{label} · Qty", Num(line.OriginalQty), Num(line.NegotiatedQty), actor, now));
@@ -45,9 +57,13 @@ internal static class PoNegotiationHistory
         }
     }
 
-    /// <summary>A single row marking the negotiation outcome (approved / rejected / cancelled); detail → New column.</summary>
-    public static void RecordOutcome(IAppDbContext db, PurchaseOrder po, string outcome, string? detail, string actor, DateTime now)
-        => db.AuditEntries.Add(Row(po, $"Negotiation {outcome}", null, string.IsNullOrWhiteSpace(detail) ? null : detail, actor, now));
+    /// <summary>
+    /// A single row marking what became of the round (approved / accepted / rejected / declined / cancelled / countered); detail →
+    /// New column.
+    /// </summary>
+    public static void RecordOutcome(
+        IAppDbContext db, PurchaseOrder po, PurchaseOrderNegotiation negotiation, string outcome, string? detail, string actor, DateTime now)
+        => db.AuditEntries.Add(Row(po, $"{Stem(negotiation)} {outcome}", null, string.IsNullOrWhiteSpace(detail) ? null : detail, actor, now));
 
     private static AuditEntry Row(PurchaseOrder po, string field, string? oldValue, string? newValue, string actor, DateTime now) => new()
     {

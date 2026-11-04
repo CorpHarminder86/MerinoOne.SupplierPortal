@@ -41,6 +41,9 @@ public class UpdateAsnCommandValidator : AbstractValidator<UpdateAsnCommand>
         RuleFor(x => x.Body.InvoiceNo).MaximumLength(AsnHeaderRules.InvoiceNo).WithName("invoiceNo");
         RuleFor(x => x.Body.BillOfLading).MaximumLength(AsnHeaderRules.BillOfLading).WithName("billOfLading");
         RuleFor(x => x.Body.PackingList).MaximumLength(AsnHeaderRules.PackingList).WithName("packingList");
+        // R18 (2026-11-03) — optional e-way bill / IRN numbers, identical caps to CreateAsnCommandValidator.
+        RuleFor(x => x.Body.EwayBillNo).MaximumLength(AsnHeaderRules.EwayBillNo).WithName("ewayBillNo");
+        RuleFor(x => x.Body.IrnNo).MaximumLength(AsnHeaderRules.IrnNo).WithName("irnNo");
 
         RuleFor(x => x.Body.Lines).NotNull().NotEmpty().WithMessage("At least one ASN line is required.");
         // R15 — a delivery schedule may back one line at most (mirrors CreateAsnCommandValidator).
@@ -223,6 +226,12 @@ public class UpdateAsnCommandHandler : IRequestHandler<UpdateAsnCommand, AsnDeta
         asn.InvoiceNo = AsnHeaderRules.NullIfBlank(body.InvoiceNo);
         asn.BillOfLading = AsnHeaderRules.NullIfBlank(body.BillOfLading);
         asn.PackingList = AsnHeaderRules.NullIfBlank(body.PackingList);
+        // R18 (2026-11-03) — e-way bill + IRN refs follow the same full-overwrite: assigned as sent (null clears), numbers
+        // trimmed blank-as-null. They ride the same edit gates as the refs above — Draft / Rejected / Approved.
+        asn.EwayBillNo = AsnHeaderRules.NullIfBlank(body.EwayBillNo);
+        asn.EwayBillDate = body.EwayBillDate;
+        asn.IrnNo = AsnHeaderRules.NullIfBlank(body.IrnNo);
+        asn.IrnDate = body.IrnDate;
         asn.UpdatedBy = _user.UserCode;
         asn.UpdatedOn = now;
 

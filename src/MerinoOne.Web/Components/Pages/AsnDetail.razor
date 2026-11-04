@@ -5,6 +5,7 @@
 @inject TokenAccessor Token
 @inject NotificationService Notif
 @inject IJSRuntime JS
+@inject CompanyState Company
 
 <PageTitle>@(IsNew ? "New ASN" : detail?.AsnNumber)</PageTitle>
 
@@ -124,6 +125,16 @@
                 <DocumentRailPill Open="@railOpen" OpenChanged="OnRailOpenChanged"
                                   Satisfied="@(railSummary?.SatisfiedSlots ?? 0)"
                                   Total="@(railSummary?.TotalSlots ?? 0)" />
+            }
+            @* R18 (AC7) — the Packing List PDF of an existing ASN, offered only where PackingListRules says it is available (the same
+               rule the API's 409 guard applies, so the button and the endpoint cannot disagree). A same-origin download link through
+               the /files/packing-list proxy (the API answers with Content-Disposition: attachment, so — like the invoice PDF — it is
+               a <a download>, not a new tab); the active company rides ?company= as on the invoice PDF link. *@
+            @if (!IsNew && detail != null && PackingListRules.IsAvailable(detail.AsnStatus, detail.AsnConfirmationRequired))
+            {
+                <a class="mbtn mbtn--outline" href="@PackingListHref" download title="Download the packing list (PDF)">
+                    <span class="material-symbols-outlined">description</span> Packing List
+                </a>
             }
             @* R5 (§10.2) — buyer decision actions on a PendingApproval ASN. Any mapped PO buyer may decide (Phase 1);
                the server gate (AsnApprovalGate) is authoritative, so we only gate the affordance on Asn.Approve. *@
@@ -352,14 +363,20 @@
                 </dl>
             </div>
 
-            @* R11 (D12) — the three shipment references the supplier entered before sending, plus the document
-               count the rail owns: together they answer "is this shipment papered". *@
+            @* R11 (D12) — the three shipment references the supplier entered before sending (R18 adds the optional
+               e-way bill + IRN pairs), plus the document count the rail owns: together they answer "is this shipment papered". *@
             <div>
                 <div class="asnro-facts__head">References</div>
                 <dl class="asnro-kv">
                     <dt>Invoice no.</dt><dd class="asnro-mono">@Dash(detail.InvoiceNo)</dd>
                     <dt>Bill of lading</dt><dd class="asnro-mono">@Dash(detail.BillOfLading)</dd>
                     <dt>Packing list</dt><dd class="asnro-mono">@Dash(detail.PackingList)</dd>
+                    @* R18 (AC2) — optional e-way bill / e-invoice IRN references. The 64-char IRN wraps inside its column
+                       (.asnro-kv dd carries overflow-wrap:anywhere + min-width:0); dates are plain calendar dates, not UTC instants. *@
+                    <dt>E-way Bill no.</dt><dd class="asnro-mono">@Dash(detail.EwayBillNo)</dd>
+                    <dt>E-way Bill date</dt><dd class="asnro-mono">@IsoDate(detail.EwayBillDate)</dd>
+                    <dt>IRN no.</dt><dd class="asnro-mono">@Dash(detail.IrnNo)</dd>
+                    <dt>IRN date</dt><dd class="asnro-mono">@IsoDate(detail.IrnDate)</dd>
                     @if (railSummary is { TotalSlots: > 0 } rs)
                     {
                         <dt>Documents</dt><dd>@rs.SatisfiedSlots of @rs.TotalSlots uploaded</dd>
@@ -582,11 +599,23 @@
                     }
                     else
                     {
+                        // R18 (2026-11-04) — one derivation per render: the rows the grid shows, the pickable subset of them (what the header
+                        // checkbox and the lock banner's "Select all" act on — the Item / date filters are respected on purpose, decision D1),
+                        // and how many pickable lines those filters are hiding.
+                        var visibleRows = VisibleScheduleRows.ToList();
+                        var pickable = PickableOf(visibleRows);
+                        var pickableUnselected = pickable.Count(r => !selectedSchedules.ContainsKey(r.Id));
+                        var allShownSelected = pickable.Count > 0 && pickableUnselected == 0;
+                        var severalWarehouses = SpansSeveralWarehouses(pickable);
+                        var hiddenByFilter = HiddenByFilterCount;
+
                         @* Filter row — warehouse (hidden when ≤1 distinct), PO type-ahead + item search, delivery-date range,
                            and the static hard-gate chip (Design 1a; D2 locked it to Approved with no toggle).
                            2026-10-10 — the warehouse has NO "All" entry (the grid opens on the first by code) and, like the PO
                            pick, is a SERVER filter (&warehouse= / &purchaseOrderId=). While lines are picked the select is
-                           locked to their warehouse (§9.1) — Clear unlocks it. *@
+                           locked to their warehouse (§9.1) — Clear unlocks it.
+                           R18 (2026-11-04) — picking a PO clears the date window (D1) so all of its open lines show; clearing the PO
+                           restores the default month window (D16, OnGridPoChanged). *@
                         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
                             @if (gridWarehouseOptions.Count > 1)
                             {
@@ -627,14 +656,27 @@
                                     Warehouse locked to <b>@(lockedWarehouseLabel ?? "—")</b>
                                     <span style="color:var(--mer-ink-500);"> — lines in other warehouses stay unselectable until you clear.</span>
                                 </div>
-                                <button type="button" @onclick="SelectAllInLockedWarehouse"
-                                        style="display:inline-flex;align-items:center;gap:5px;background:var(--mer-surface);border:1px solid var(--mer-blue);border-radius:6px;padding:5px 10px;color:var(--mer-blue);cursor:pointer;font-size:12px;font-weight:600;">
-                                    Select all @LockedWarehousePool.Count() in this warehouse
+                                @* R18 (2026-11-04) — acts on the lines the grid SHOWS (filters respected), not on every loaded line of the warehouse. *@
+                                <button type="button" @onclick="SelectAllShown" disabled="@(pickableUnselected == 0)"
+                                        style="display:inline-flex;align-items:center;gap:5px;background:var(--mer-surface);border:1px solid var(--mer-blue);border-radius:6px;padding:5px 10px;color:var(--mer-blue);cursor:@(pickableUnselected == 0 ? "default" : "pointer");opacity:@(pickableUnselected == 0 ? ".5" : "1");font-size:12px;font-weight:600;">
+                                    Select all @pickableUnselected shown
                                 </button>
                                 <button type="button" @onclick="ClearScheduleSelection"
                                         style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--mer-blue);border-radius:6px;padding:5px 10px;color:var(--mer-blue);cursor:pointer;font-size:12px;">
                                     <span class="material-symbols-outlined" style="font-size:14px;">close</span> Clear
                                 </button>
+                            </div>
+                        }
+
+                        @* R18 (2026-11-04) — the Item / date filters are client-side, so they can hide pickable lines with no other sign
+                           (a PO's lines outside the date window simply are not there). Say so, with a way out. Absent when nothing is hidden. *@
+                        @if (hiddenByFilter > 0)
+                        {
+                            <div style="padding:6px 12px;margin-bottom:8px;display:flex;align-items:center;gap:8px;background:var(--mer-ink-50);border:1px solid var(--mer-line);border-radius:6px;font-size:12px;color:var(--mer-ink-700);">
+                                <span class="material-symbols-outlined" style="font-size:16px;color:var(--mer-ink-500);">filter_alt</span>
+                                <span>@hiddenByFilter more line(s) hidden by the item / date filter</span>
+                                <button type="button" @onclick="ShowAllFilteredLines"
+                                        style="background:transparent;border:0;padding:0;color:var(--mer-blue);cursor:pointer;font-size:12px;font-weight:600;">Show all</button>
                             </div>
                         }
 
@@ -644,9 +686,11 @@
                                     <thead>
                                         <tr style="border-bottom:1px solid var(--mer-line);background:var(--mer-ink-50);position:sticky;top:0;z-index:1;">
                                             <th style="width:30px;padding:8px 4px;text-align:center;">
-                                                <input type="checkbox" checked="@AllLockedSelected" disabled="@(selectedSchedules.Count == 0)"
-                                                       title="@(selectedSchedules.Count == 0 ? "Pick one line first — that fixes the warehouse" : AllLockedSelected ? "Clear all lines in this warehouse" : "Select all lines in this warehouse")"
-                                                       @onchange="ToggleAllInLockedWarehouse" />
+                                                @* R18 — usable from ZERO picks: it selects every shown, pickable line (which then locks the warehouse). Disabled
+                                                   only when there is nothing to pick, or — with nothing picked yet — the shown lines span several warehouses (D17). *@
+                                                <input type="checkbox" checked="@allShownSelected" disabled="@(pickable.Count == 0 || severalWarehouses)"
+                                                       title="@(pickable.Count == 0 ? "No selectable lines in view" : severalWarehouses ? "Lines span several warehouses — pick one line first" : allShownSelected ? "Clear the selection" : $"Select all {pickable.Count} lines shown")"
+                                                       @onchange="ToggleAllShown" />
                                             </th>
                                             <th style="text-align:left;padding:8px 4px 8px 0;color:var(--mer-ink-700);">PO #</th>
                                             <th style="text-align:right;padding:8px 4px;color:var(--mer-ink-700);">Ln</th>
@@ -663,7 +707,6 @@
                                     @{
                                         // Design 1a PO banding: alternate tint per PO block. The PO number is emphasized on EVERY row
                                         // (2026-10-10 — the muted repeats made rows 2..n of a PO read as disabled).
-                                        var visibleRows = VisibleScheduleRows.ToList();
                                         var _prevPo = (string?)null;
                                         var _poIdx = -1;
                                     }
@@ -680,7 +723,7 @@
                                         var isSelected = selectedSchedules.ContainsKey(r.Id);
                                         var warehouseBlocked = selectedSchedules.Count > 0 && r.WarehouseAddressId != lockedWarehouseId;
                                         var noBalance = r.RemainingToShip <= 0;
-                                        var selectable = !noBalance && !warehouseBlocked && r.IsShippable;
+                                        var selectable = IsPickable(r);   // = !noBalance && !warehouseBlocked && r.IsShippable
                                         var rowBg = isSelected ? "var(--mer-blue-50)" : band ? "var(--mer-ink-50)" : "var(--mer-surface)";
                                         <tr style="border-bottom:1px solid var(--mer-line-soft);@(first && _poIdx > 0 ? "border-top:1px solid var(--mer-line);" : "")background:@rowBg;@(!selectable && !isSelected ? "opacity:.55;" : "")">
                                             <td style="padding:6px 4px;text-align:center;">
@@ -979,6 +1022,25 @@
                         <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Packing list *</label>
                         <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" maxlength="50" @bind="packingList" />
                     </div>
+                    @* R18 (AC2) — optional e-way bill / e-invoice IRN references (no *: not part of the save / send / post requirements).
+                       The maxlength mirrors the server caps (20 / 64), so an over-long value cannot be typed rather than bouncing off a 400.
+                       The E-way Bill No starts a new row so each number sits beside its date (E-way No | Date, IRN No | Date). *@
+                    <div style="grid-column:1;">
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">E-way Bill No</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" maxlength="20" @bind="ewayBillNo" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">E-way Bill Date</label>
+                        <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="ewayBillDate" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">IRN No</label>
+                        <input type="text" class="rz-textbox" style="width:100%;padding:8px 10px;font-family:Inter,monospace;" maxlength="64" @bind="irnNo" />
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">IRN Date</label>
+                        <input type="date" class="rz-textbox" style="width:100%;padding:8px 10px;" @bind="irnDate" />
+                    </div>
                 </div>
                 @if (ShipmentRefsMissing)
                 {
@@ -1027,6 +1089,9 @@
                     <dt style="color:var(--mer-ink-500);">Carrier</dt><dd id="asn-review-carrier">@CarrierReviewLabel</dd>
                     <dt style="color:var(--mer-ink-500);">Tracking</dt><dd style="font-family:Inter,monospace;">@(string.IsNullOrEmpty(trackingNumber) ? "—" : trackingNumber)</dd>
                     <dt style="color:var(--mer-ink-500);">Vehicle</dt><dd style="font-family:Inter,monospace;">@(string.IsNullOrEmpty(vehicleNumber) ? "—" : vehicleNumber)</dd>
+                    @* R18 (AC2) — min-width:0 + overflow-wrap so the 64-char IRN wraps inside its 1fr column instead of widening the grid. *@
+                    <dt style="color:var(--mer-ink-500);">E-way Bill</dt><dd style="font-family:Inter,monospace;min-width:0;overflow-wrap:anywhere;">@NumberAndDate(ewayBillNo, ewayBillDate)</dd>
+                    <dt style="color:var(--mer-ink-500);">IRN</dt><dd style="font-family:Inter,monospace;min-width:0;overflow-wrap:anywhere;">@NumberAndDate(irnNo, irnDate)</dd>
                     <dt style="color:var(--mer-ink-500);">Lines</dt><dd>@lines.Count(l => l.ShippedQty > 0) of @lines.Count being shipped</dd>
                     <dt style="color:var(--mer-ink-500);">Attachments</dt><dd>@attachments.Count</dd>
                 </dl>
@@ -1355,6 +1420,20 @@
 
     private static string Dash(string? s) => string.IsNullOrWhiteSpace(s) ? "—" : s;
 
+    // R18 (2026-11-04) — the e-way bill / IRN dates are plain calendar dates (DateOnly), not UTC instants, so AppTime does not apply:
+    // yyyy-MM-dd with the invariant culture, "—" when empty.
+    private static string IsoDate(DateOnly? d) =>
+        d is { } v ? v.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : "—";
+
+    // "number · date" for the review step; a half that is blank is left out, "—" when both are.
+    private static string NumberAndDate(string? number, DateOnly? date)
+    {
+        var parts = new List<string>(2);
+        if (!string.IsNullOrWhiteSpace(number)) parts.Add(number.Trim());
+        if (date.HasValue) parts.Add(IsoDate(date));
+        return parts.Count == 0 ? "—" : string.Join(" · ", parts);
+    }
+
     /// <summary>First 8 / last 6 of the sync id — enough to match against a log line; the full value copies.</summary>
     private static string ShortSyncId(string id) => id.Length <= 18 ? id : $"{id[..8]}…{id[^6..]}";
 
@@ -1436,6 +1515,8 @@
 
     private static DateTime MonthStart() { var t = DateTime.Today; return new DateTime(t.Year, t.Month, 1); }
     private static DateTime MonthEnd() { var s = MonthStart(); return s.AddMonths(1).AddDays(-1); }
+    // R18 (2026-11-04) — the window the grid opens with, as one call: a supplier switch and clearing the PO both go back to it.
+    private void ResetGridDateWindow() { gridDateFrom = MonthStart(); gridDateTo = MonthEnd(); }
     // Per-supplier PO-detail cache for line enrichment (serial/lot flags + over-ship allowance come off the PO
     // line, not the schedule row). One fetch per covered PO, reused across selection changes.
     private readonly Dictionary<Guid, PurchaseOrderDetailDto> poDetailCache = new();
@@ -1463,6 +1544,13 @@
     private string? invoiceNo;
     private string? billOfLading;
     private string? packingList;
+    // R18 (2026-11-04) — AC2: optional India e-way bill (number ≤20) and e-invoice IRN (number ≤64) references, each with a plain
+    // calendar date. Portal + packing list only (never sent to LN); optional everywhere — NOT part of ShipmentRefsMissing or of the
+    // Post pre-check. Same editability as the three references above, same full-overwrite semantics on update.
+    private string? ewayBillNo;
+    private DateOnly? ewayBillDate;
+    private string? irnNo;
+    private DateOnly? irnDate;
 
     // R11 (D4/D12) — derived, read-only. Warehouse is snapshotted from the covered PO; created/shipment dates
     // come off the ASN itself (shipment date is the buyer-approval instant, so it is null until approved).
@@ -1564,6 +1652,14 @@
     // Submitted/InTransit/Delivered/Cancelled are terminal-for-cancel here (the read-only view hides it via this flag).
     private bool CanCancel => detail?.AsnStatus is "Draft" or "Rejected" or "PendingApproval" or "Approved";
 
+    // R18 (AC7) — same-origin packing-list PDF href, built like InvoiceDetail.InvoicePdfHref: a plain link bypasses ApiClient (which
+    // stamps X-Active-Company per call), so the active company rides a ?company= query param that the /files/packing-list proxy turns
+    // back into the header. No selection => no param => the proxy behaves as before.
+    private string PackingListHref =>
+        Company.ActiveCompanyId is { } c && c != Guid.Empty
+            ? $"files/packing-list/{Id}?company={c}"
+            : $"files/packing-list/{Id}";
+
     // The gate block message names the required action; the API stamps it under the "poStatus" error key. Match the
     // stable prefix so we route it to the override dialog rather than the generic error banner.
     private static bool IsGateBlock(string? msg) =>
@@ -1662,16 +1758,28 @@
         }
     }
 
-    // The selectable universe inside the locked warehouse (balance left + shippable), across ALL loaded rows —
-    // "Select all in this warehouse" deliberately ignores the client-side filters (item text, date window). 2026-10-10 — the
-    // warehouse and PO are SERVER filters, so the loaded rows are that warehouse's (narrowed to the picked PO, when there is one).
-    private IEnumerable<DeliveryScheduleDto> LockedWarehousePool =>
-        selectedSchedules.Count == 0
-            ? Enumerable.Empty<DeliveryScheduleDto>()
-            : scheduleRows.Where(r => r.WarehouseAddressId == lockedWarehouseId && r.RemainingToShip > 0 && r.IsShippable);
+    // R18 (2026-11-04) — a row the supplier could tick RIGHT NOW: balance left, PO shippable and — once a line is picked — in the
+    // locked warehouse (§9.1). One rule for the per-row checkbox in the grid body, the header checkbox, the lock banner's "Select all"
+    // and the hidden-lines hint, so the four can never disagree about what is pickable.
+    private bool IsPickable(DeliveryScheduleDto r) =>
+        r.RemainingToShip > 0 && r.IsShippable && (selectedSchedules.Count == 0 || r.WarehouseAddressId == lockedWarehouseId);
 
-    private bool AllLockedSelected =>
-        LockedWarehousePool.Any() && LockedWarehousePool.All(r => selectedSchedules.ContainsKey(r.Id));
+    // R18 (2026-11-04) — the pickable subset of the rows the grid SHOWS. This replaces LockedWarehousePool, which counted every loaded
+    // row of the locked warehouse and so ignored the Item / date filters: "Select all 5 in this warehouse" ticked lines that were not
+    // on screen. The filters are respected on purpose now (decision D1) — what is selected is what the supplier can see — and the
+    // hidden-lines bar says what the filters are holding back. The warehouse and PO stay SERVER filters (LoadGridRowsAsync).
+    private List<DeliveryScheduleDto> PickableOf(IEnumerable<DeliveryScheduleDto> shown) => shown.Where(IsPickable).ToList();
+
+    // R18 — with nothing picked, selecting the shown lines locks the warehouse to THEIRS, so they must share one (decision D17): the
+    // header checkbox stays disabled when they do not (rare — the warehouse filter is server-side). Once a line is picked every
+    // pickable row is in the locked warehouse by definition, so this is false.
+    private bool SpansSeveralWarehouses(List<DeliveryScheduleDto> pickable) =>
+        selectedSchedules.Count == 0 && pickable.Select(r => r.WarehouseAddressId).Distinct().Count() > 1;
+
+    // R18 — pickable lines the Item / date filters are hiding: loaded, not already picked, pickable, yet failing PassesGridFilters.
+    // (A picked row is never filtered out — see VisibleScheduleRows — and a row with no balance is not pickable, so neither counts.)
+    private int HiddenByFilterCount =>
+        scheduleRows.Count(r => !selectedSchedules.ContainsKey(r.Id) && IsPickable(r) && !PassesGridFilters(r));
 
     // Grid rows after the client-side filters, sorted PO → position → delivery date so the PO banding groups.
     //
@@ -1877,6 +1985,10 @@
                 invoiceNo = detail.InvoiceNo;
                 billOfLading = detail.BillOfLading;
                 packingList = detail.PackingList;
+                ewayBillNo = detail.EwayBillNo;
+                ewayBillDate = detail.EwayBillDate;
+                irnNo = detail.IrnNo;
+                irnDate = detail.IrnDate;
                 asnWarehouse = detail.Warehouse;
                 asnCreatedOn = detail.CreatedOn;
                 // R14 — the shipping date is the post date.
@@ -1889,6 +2001,7 @@
                 selectedSchedules.Clear();
                 scheduleRows = new();
                 gridWarehouseOptions = new(); gridWarehouse = string.Empty; gridPoId = null;
+                ResetGridDateWindow();   // R18 (2026-11-04) — no PO pick => the default month window (a PO pick had blanked it)
                 poDetailCache.Clear();
                 selectedSupplierId = detail.SupplierId;
                 selectedSupplierName = detail.SupplierName;
@@ -1981,7 +2094,7 @@
         // Switching supplier resets the grid (an ASN ships from a single supplier).
         selectedSchedules.Clear(); lines.Clear(); poDetailCache.Clear();
         lineSearch = string.Empty; gridWarehouse = string.Empty; gridPoId = null;
-        gridDateFrom = MonthStart(); gridDateTo = MonthEnd();   // back to the default window, not to unbounded
+        ResetGridDateWindow();   // back to the default window, not to unbounded
         await LoadSchedulesAsync(anchor);
     }
 
@@ -2039,10 +2152,24 @@
 
     private Task OnGridWarehouseChanged() => LoadGridRowsAsync();
 
+    // R18 (2026-11-04) — decision D1: picking a PO asks for THAT PO, so its date window is cleared and every open Approved schedule line
+    // shows (the month window used to hide most of them — a PO's lines are rarely all due this month). Clearing the PO goes back to the
+    // default window the grid opens with (decision D16). The window is reset before the reload so the rows and the filter bar change together.
     private async Task OnGridPoChanged(Guid? poId)
     {
         gridPoId = poId;
+        if (poId.HasValue) { gridDateFrom = null; gridDateTo = null; }
+        else ResetGridDateWindow();
         await LoadGridRowsAsync();
+    }
+
+    // R18 (2026-11-04) — the hidden-lines bar's "Show all": drop the client-side Item text and the date window (the warehouse and PO
+    // are server filters and stay as picked).
+    private void ShowAllFilteredLines()
+    {
+        lineSearch = string.Empty;
+        gridDateFrom = null;
+        gridDateTo = null;
     }
 
     // Edit mode — reflect the ASN's saved lines in the step-1 grid: check each line's schedule row (by the
@@ -2116,22 +2243,29 @@
         await EnrichLinesAsync();
     }
 
-    private async Task SelectAllInLockedWarehouse()
+    // R18 (2026-11-04) — select every shown, pickable line (the lock banner's button and the header checkbox share this). With nothing
+    // picked yet this is what locks the warehouse — to the shown lines' own, so they must share one (D17); the same guard the header
+    // checkbox's disabled state expresses, repeated here so a stale event can never lock two warehouses at once.
+    private async Task SelectAllShown()
     {
-        foreach (var r in LockedWarehousePool) selectedSchedules[r.Id] = r;
+        var pickable = PickableOf(VisibleScheduleRows);
+        if (SpansSeveralWarehouses(pickable)) return;
+        foreach (var r in pickable) selectedSchedules[r.Id] = r;
         RebuildLinesFromSelection();
         await EnrichLinesAsync();
     }
 
-    private async Task ToggleAllInLockedWarehouse()
+    // R18 — the header checkbox: every shown, pickable line already selected → clear the selection; otherwise select them all.
+    private async Task ToggleAllShown()
     {
-        if (selectedSchedules.Count == 0) return;
-        if (AllLockedSelected)
+        var pickable = PickableOf(VisibleScheduleRows);
+        if (pickable.Count == 0) return;
+        if (pickable.All(r => selectedSchedules.ContainsKey(r.Id)))
         {
             ClearScheduleSelection();
             return;
         }
-        await SelectAllInLockedWarehouse();
+        await SelectAllShown();
     }
 
     private void ClearScheduleSelection()
@@ -2244,7 +2378,8 @@
         else
         {
             var req = new UpdateAsnRequest(expectedDeliveryDate.Value, timeWindow, CarrierNameForRequest, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
-                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList, CarrierCode: carrierCode);
+                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList, CarrierCode: carrierCode,
+                EwayBillNo: ewayBillNo, EwayBillDate: ewayBillDate, IrnNo: irnNo, IrnDate: irnDate);
             var resp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", req);
             if (resp?.Success == true) { Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Draft saved" }); await Reload(); }
             else { submitError = resp?.Errors?.FirstOrDefault() ?? "Failed to save (the ASN may no longer be Draft)."; }
@@ -2318,7 +2453,8 @@
     {
         var lineReqs = BuildLineRequests();
         var upd = new UpdateAsnRequest(expectedDeliveryDate!.Value, timeWindow, CarrierNameForRequest, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
-                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList, CarrierCode: carrierCode);
+                InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList, CarrierCode: carrierCode,
+                EwayBillNo: ewayBillNo, EwayBillDate: ewayBillDate, IrnNo: irnNo, IrnDate: irnDate);
         var saveResp = await Api.PutAsync<AsnDetailDto, UpdateAsnRequest>($"api/asns/{Id}", upd);
         if (saveResp?.Success == true) return true;
         submitError = saveResp?.Errors?.FirstOrDefault() ?? $"Could not save before {actionLabel}.";
@@ -2336,7 +2472,8 @@
             expectedDeliveryDate!.Value, timeWindow, CarrierNameForRequest, trackingNumber, vehicleNumber, driverName, driverPhone, notes, lineReqs,
             StagingKey: _stagingKey,
             OverrideReason: string.IsNullOrWhiteSpace(overrideReason) ? null : overrideReason.Trim(),
-            InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList, CarrierCode: carrierCode);
+            InvoiceNo: invoiceNo, BillOfLading: billOfLading, PackingList: packingList, CarrierCode: carrierCode,
+            EwayBillNo: ewayBillNo, EwayBillDate: ewayBillDate, IrnNo: irnNo, IrnDate: irnDate);
         var resp = await Api.PostAsync<AsnDetailDto, CreateAsnRequest>("api/asns", req);
         if (resp?.Success == true && resp.Data != null)
         {

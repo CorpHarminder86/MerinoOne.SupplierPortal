@@ -50,7 +50,9 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 80px 110px 1.4fr 130px 70px 130px 175px 175px; --tl-min-width: 1270px;">
+        @* R18 (2026-11-04) — frozen header + resizable columns (merino-grid.js, grid key "supplier-change-request-list"). *@
+        <GridResizeHint GridKey="supplier-change-request-list" />
+        <div class="tl-grid-wrapper tl-grid--sticky" data-grid="supplier-change-request-list" style="--tl-cols: 80px 110px 1.4fr 130px 70px 130px 175px 175px; --tl-min-width: 1270px;">
             <div class="tlg-header">
                 <div class="tlg-col">Ref</div>
                 <div class="tlg-col">Supplier</div>

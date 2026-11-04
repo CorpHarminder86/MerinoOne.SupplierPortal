@@ -274,7 +274,9 @@ public static class AsnDtoBuilder
             // R16 — the LN ASN_Update verdict (Success | PartialFailure; null = never landed in LN).
             a.ErpStatus,
             // R17 — the Carrier master code snapshot, and LN's own shipment status verbatim (/inbound/asn-update).
-            a.CarrierCode, a.ErpShipmentStatus);
+            a.CarrierCode, a.ErpShipmentStatus,
+            // R18 (2026-11-03) — the optional e-way bill / e-invoice IRN refs, read back exactly as stored.
+            EwayBillNo: a.EwayBillNo, EwayBillDate: a.EwayBillDate, IrnNo: a.IrnNo, IrnDate: a.IrnDate);
     }
 
     public static async Task<IReadOnlyList<DocumentAttachmentDto>> BuildAttachmentsAsync(

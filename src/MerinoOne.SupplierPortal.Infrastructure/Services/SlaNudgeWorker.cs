@@ -15,6 +15,8 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Services;
 /// <see cref="Domain.Entities.Proc.PurchaseOrderNegotiation"/> sits <c>Submitted</c> until the buyer approves/rejects.
 /// When a buyer leaves a Submitted negotiation un-actioned for the SLA window (default 48h) this worker enqueues a
 /// ONE-TIME reminder e-mail to that buyer and stamps <c>NudgeSentAt</c> so the same negotiation is never nudged twice.
+/// R18 (2026-11-03): a negotiation is a chain of rounds and only a round the SUPPLIER proposed waits on the buyer — a buyer
+/// counter waits on the supplier, so nudging the buyer about it would chase the wrong party; those rounds are never selected.
 ///
 /// <para><b>Why a BackgroundService (mirrors <see cref="EmailOutboxWorker"/> / OutboxDispatcherWorker):</b> no scheduler
 /// existed in the repo (plan D4). This polls on <c>Fulfilment:SlaNudgeIntervalMinutes</c> (default 30) and on each pass,
@@ -112,11 +114,13 @@ internal sealed class SlaNudgeWorker : BackgroundService
         var enqueued = 0;
 
         // SELECTION PREDICATE (UC-PO-04): Submitted negotiations whose SubmittedAt is older than the SLA window and
-        // that have never been nudged. IgnoreQueryFilters (system scope, no ambient tenant) + explicit !IsDeleted.
+        // that have never been nudged. Only a round the SUPPLIER proposed (R18) — it is the buyer who owes the answer.
+        // IgnoreQueryFilters (system scope, no ambient tenant) + explicit !IsDeleted.
         var overdue = await db.PurchaseOrderNegotiations
             .IgnoreQueryFilters()
             .Where(n => !n.IsDeleted
                         && n.NegotiationStatus == PoNegotiationStatus.Submitted
+                        && n.ProposedBy == NegotiationParty.Supplier
                         && n.SubmittedAt <= cutoff
                         && n.NudgeSentAt == null)
             .OrderBy(n => n.SubmittedAt)

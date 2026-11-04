@@ -175,12 +175,29 @@ public class PurchaseOrderNegotiationConfiguration : IEntityTypeConfiguration<Pu
         b.Property(x => x.RejectionReason).HasColumnName("rejectionReason").HasMaxLength(1000);
         b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
 
+        // R18 (2026-11-03) — re-negotiation rounds. parentNegotiationId = the round this counter-offer answered (NULL on
+        // round 1). roundNo / proposedBy are NOT NULL with column defaults (1 / 'Supplier', EF auto-named — no explicit DF_
+        // name) so every pre-R18 row reads as round 1 proposed by the Supplier. NOTE HasDefaultValue makes EF treat the CLR
+        // default (0 / the first enum member) as "unset" and OMIT it from the INSERT; that is harmless here ONLY because the
+        // column default equals that value (roundNo is always >= 1 in code; Supplier is the first member AND the default).
+        b.Property(x => x.ParentNegotiationId).HasColumnName("parentNegotiationId").HasColumnType("uniqueidentifier");
+        b.Property(x => x.RoundNo).HasColumnName("roundNo").HasColumnType("int").HasDefaultValue(1);
+        b.Property(x => x.ProposedBy).HasColumnName("proposedBy").HasConversion<string>().HasMaxLength(10)
+            .HasDefaultValue(NegotiationParty.Supplier).IsRequired();
+
         b.HasOne(x => x.PurchaseOrder).WithMany().HasForeignKey(x => x.PurchaseOrderId)
             .HasConstraintName("FK_PurchaseOrderNegotiation_PurchaseOrder_PurchaseOrderId").OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.SeccodeId)
             .HasConstraintName("FK_PurchaseOrderNegotiation_Seccode_SeccodeId").OnDelete(DeleteBehavior.Restrict);
+        // R18 — self FK: a counter-offer round points at the round it answered. NO ACTION (SQL Server forbids a cascading
+        // self-reference, and negotiations are only ever soft-deleted). No navigation property — rounds are walked by id.
+        b.HasOne<PurchaseOrderNegotiation>().WithMany().HasForeignKey(x => x.ParentNegotiationId)
+            .HasConstraintName("FK_PurchaseOrderNegotiation_PurchaseOrderNegotiation_parentNegotiationId")
+            .OnDelete(DeleteBehavior.NoAction);
 
         b.HasIndex(x => x.NegotiationStatus).HasDatabaseName("IX_PurchaseOrderNegotiation_negotiationStatus");
+        // R18 — supports walking a round chain (children of a round) without scanning the table.
+        b.HasIndex(x => x.ParentNegotiationId).HasDatabaseName("IX_PurchaseOrderNegotiation_parentNegotiationId");
         // Composite scope index — the always-on tenant + company business-data filter scans this path.
         b.HasIndex("TenantId", "TenantEntityId").HasDatabaseName("IX_PurchaseOrderNegotiation_tenant_company");
         // One OPEN (Submitted) negotiation per PO. Filtered on isDeleted=0 so a resolved/soft-deleted negotiation
@@ -305,6 +322,14 @@ public class AsnConfiguration : IEntityTypeConfiguration<Asn>
         b.Property(x => x.InvoiceNo).HasColumnName("invoiceNo").HasMaxLength(50);
         b.Property(x => x.BillOfLading).HasColumnName("billOfLading").HasMaxLength(50);
         b.Property(x => x.PackingList).HasColumnName("packingList").HasMaxLength(50);
+
+        // R18 (2026-11-03) — optional statutory shipment refs (India e-way bill + e-invoice IRN); portal + packing list only,
+        // NOT sent to LN/IDM. The numbers are ASCII identifiers (varchar, not nvarchar: e-way bill no. 20, IRN = 64-char
+        // hash); the dates are document dates with no time of day (SQL `date`, CLR DateOnly). All four nullable.
+        b.Property(x => x.EwayBillNo).HasColumnName("ewayBillNo").HasMaxLength(20).IsUnicode(false);
+        b.Property(x => x.EwayBillDate).HasColumnName("ewayBillDate").HasColumnType("date");
+        b.Property(x => x.IrnNo).HasColumnName("irnNo").HasMaxLength(64).IsUnicode(false);
+        b.Property(x => x.IrnDate).HasColumnName("irnDate").HasColumnType("date");
 
         // R4 (2026-06-22) — Module 3: draft/submit lifecycle + ERP ack write-back. erpCode populated via
         // /inbound/erp-ack (the ASNNo). PurchaseOrderId is now NULLABLE (multi-PO via the junction below).

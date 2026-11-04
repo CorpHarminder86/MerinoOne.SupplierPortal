@@ -11,6 +11,10 @@ namespace MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 //
 // All enum-valued fields serialize as the enum NAME (string) — the same convention the entity uses
 // (no DB CHECK; the C# enum is the guard) — so the UI binds against stable string values.
+//
+// R18 (2026-11-03) — re-negotiation rounds. The buyer may counter a supplier's round, and the supplier may accept,
+// decline or counter a buyer's round; the number of rounds is unlimited. Each counter is a NEW round row (its parent
+// round → Countered), numbered by RoundNo and linked by ParentNegotiationId / HeadNegotiationId.
 // ============================================================================================
 
 // ---------------- Request bodies ----------------
@@ -37,6 +41,18 @@ public record CreatePoNegotiationRequest(
 /// <summary>Buyer rejects a submitted negotiation (→ Rejected; PO reverts to its previous status). Reason required.</summary>
 public record RejectPoNegotiationRequest(string Reason);
 
+/// <summary>
+/// R18 (2026-11-03) — a counter-party's counter to a negotiation round: its desired values per proposed line, in the
+/// same <see cref="PoNegotiationLineInput"/> shape as a create. Used by the buyer (<c>/counter</c>, against a
+/// supplier round) and by the supplier (<c>/supplier-counter</c>, against a buyer round).
+/// </summary>
+public record CounterPoNegotiationRequest(
+    string? Notes,
+    List<PoNegotiationLineInput> Lines);
+
+/// <summary>R18 (2026-11-03) — supplier declines a buyer's counter. Reason required.</summary>
+public record DeclinePoNegotiationRequest(string Reason);
+
 // ---------------- Read models ----------------
 
 /// <summary>One row in the negotiation list grid (supplier's own / buyer review queue).</summary>
@@ -46,7 +62,11 @@ public record PoNegotiationListItemDto(
     string SupplierName,
     string NegotiationStatus,
     int LineCount,
-    DateTime SubmittedAt);
+    DateTime SubmittedAt,
+    // R18 (2026-11-03) — which round of its chain this row is (1 = the supplier's original proposal) and which side
+    // submitted it ("Supplier" | "Buyer"). Trailing optionals: existing positional producers stay valid.
+    int RoundNo = 1,
+    string ProposedBy = "Supplier");
 
 /// <summary>
 /// A single negotiation line for the buyer diff view: the original snapshot (qty + delivery date at submit)
@@ -71,7 +91,27 @@ public record PoNegotiationLineDto(
     int UnitDecimalPlaces = 3,
     // Whether this line carries a proposed change versus the live PO line. Persisted negotiation lines always do
     // (no-op lines are dropped at create), hence the default of true.
-    bool IsChanged = true);
+    bool IsChanged = true,
+    // R18 (2026-11-03) — the PARENT round's effective qty / delivery date for this line, so a counter round's diff can
+    // show what it moved from. Null on round 1 (no parent round).
+    decimal? PreviousRoundQty = null,
+    DateTime? PreviousRoundDeliveryDate = null);
+
+/// <summary>
+/// R18 (2026-11-03) — one round in a negotiation's re-negotiation history: who proposed it, where it stands, and its
+/// submit / review audit. Header-level only (no lines); the round's own lines come from its <see cref="PoNegotiationDto"/>.
+/// </summary>
+public record PoNegotiationRoundDto(
+    Guid Id,
+    int RoundNo,
+    string ProposedBy,
+    string NegotiationStatus,
+    DateTime SubmittedAt,
+    string? SubmittedBy,
+    DateTime? ReviewedAt,
+    string? ReviewedBy,
+    string? Notes,
+    string? RejectionReason);
 
 /// <summary>Full negotiation detail: header + delta lines (each carrying the original → negotiated diff).</summary>
 public record PoNegotiationDto(
@@ -89,4 +129,14 @@ public record PoNegotiationDto(
     DateTime? ReviewedAt,
     string? ReviewedBy,
     DateTime CreatedOn,
-    List<PoNegotiationLineDto> Lines);
+    List<PoNegotiationLineDto> Lines,
+    // R18 (2026-11-03) — re-negotiation chain. RoundNo / ProposedBy as on the list row; ParentNegotiationId is the round
+    // this one countered (null on round 1); HeadNegotiationId is the id of the chain's LATEST round (the one where the
+    // next action happens): it equals Id when this round is itself the head, and a superseded (Countered) round points
+    // at the head so the UI can link "Superseded by round N"; Rounds is the chain's round history for the timeline
+    // (null when the producer does not load it).
+    int RoundNo = 1,
+    string ProposedBy = "Supplier",
+    Guid? ParentNegotiationId = null,
+    Guid? HeadNegotiationId = null,
+    IReadOnlyList<PoNegotiationRoundDto>? Rounds = null);

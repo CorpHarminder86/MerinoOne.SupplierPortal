@@ -1,5 +1,7 @@
+using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using MerinoOne.SupplierPortal.Contracts.Shipments;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +12,9 @@ namespace MerinoOne.SupplierPortal.Application.Shipments.Queries;
 /// R4 (2026-06-22) — Module 3. Paged ASN list. Multi-PO-aware (Q1): the header PO may be null, so PO display is
 /// derived from the AsnPurchaseOrder junction (PoSummary = comma-joined PO numbers, PoCount = covered-PO count).
 /// The <c>?? Guid.Empty</c> shim is removed; <c>PurchaseOrderId</c> filter matches the header PO OR any junction PO.
+///
+/// <para>R18 (2026-11-03) — <c>Search</c> also matches the number of any PO the ASN covers (header PO or junction PO), and
+/// <c>ExpectedFrom</c>/<c>ExpectedTo</c> bound the Expected-delivery column by calendar day, both ends inclusive.</para>
 /// </summary>
 public record GetAsnListQuery(
     int Page = 1,
@@ -17,7 +22,19 @@ public record GetAsnListQuery(
     string? Status = null,
     Guid? SupplierId = null,
     Guid? PurchaseOrderId = null,
-    string? Search = null) : IRequest<PagedResult<AsnListItemDto>>;
+    string? Search = null,
+    DateOnly? ExpectedFrom = null,
+    DateOnly? ExpectedTo = null) : IRequest<PagedResult<AsnListItemDto>>;
+
+public class GetAsnListQueryValidator : AbstractValidator<GetAsnListQuery>
+{
+    public GetAsnListQueryValidator()
+    {
+        // R18 (2026-11-03) — a range that ends before it starts can never match a row; a 400 beats a silently empty list.
+        RuleFor(x => x).Must(x => !x.ExpectedFrom.HasValue || !x.ExpectedTo.HasValue || x.ExpectedFrom <= x.ExpectedTo)
+            .WithMessage("Expected to must be on or after Expected from.");
+    }
+}
 
 public class GetAsnListQueryHandler : IRequestHandler<GetAsnListQuery, PagedResult<AsnListItemDto>>
 {
@@ -46,7 +63,27 @@ public class GetAsnListQueryHandler : IRequestHandler<GetAsnListQuery, PagedResu
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
             var t = request.Search.Trim();
-            q = q.Where(x => x.a.AsnNumber.Contains(t) || x.s.LegalName.Contains(t));
+            // R18 (2026-11-03) — also the number of any PO the ASN covers: the header PO, or a live junction PO (a multi-PO ASN
+            // carries only those). Existence probes rather than a join, so an ASN covering several matching POs is still one row.
+            q = q.Where(x => x.a.AsnNumber.Contains(t) || x.s.LegalName.Contains(t)
+                             || _db.PurchaseOrders.Any(po => po.Id == x.a.PurchaseOrderId && po.PoNumber.Contains(t))
+                             || _db.AsnPurchaseOrders.Any(j => j.AsnId == x.a.Id && !j.IsDeleted
+                                    && _db.PurchaseOrders.Any(po => po.Id == j.PurchaseOrderId && po.PoNumber.Contains(t))));
+        }
+        // R18 (2026-11-03) — Expected-delivery day range, both ends inclusive. The same half-open window as the delivery-schedule
+        // grid (>= from 00:00, < to + 1 day 00:00), except the day edges are display-zone midnights run through AppTime: the
+        // Expected column renders AppTime.Date(utc), so a row showing the 'to' day must be IN and the next day's row OUT.
+        if (request.ExpectedFrom is { } fromDay)
+        {
+            var fromUtc = StartOfDayUtc(fromDay);
+            q = q.Where(x => x.a.ExpectedDeliveryDate >= fromUtc);
+        }
+        // 9999-12-31 is the last day the calendar has: it has no next midnight to cut at (DateOnly.AddDays would throw) and nothing
+        // the store can hold lies after it, so as a 'to' it is open-ended. The first day needs no such care — AppTime.ToUtc clamps.
+        if (request.ExpectedTo is { } toDay && toDay < DateOnly.MaxValue)
+        {
+            var beforeUtc = StartOfDayUtc(toDay.AddDays(1));
+            q = q.Where(x => x.a.ExpectedDeliveryDate < beforeUtc);
         }
 
         var total = await q.CountAsync(ct);
@@ -97,4 +134,7 @@ public class GetAsnListQueryHandler : IRequestHandler<GetAsnListQuery, PagedResu
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling((double)total / pageSize);
         return new PagedResult<AsnListItemDto>(items, page, pageSize, total, totalPages);
     }
+
+    /// <summary>The UTC instant at which <paramref name="day"/> begins on the display clock (<see cref="AppTime.Zone"/>).</summary>
+    private static DateTime StartOfDayUtc(DateOnly day) => AppTime.ToUtc(day.ToDateTime(TimeOnly.MinValue));
 }

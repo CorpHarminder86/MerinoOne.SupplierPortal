@@ -87,7 +87,9 @@ else
         }
         else
         {
-            <div class="tl-grid-wrapper" style="--tl-cols: @GridCols; --tl-min-width: @GridMinWidth;">
+            @* R18 (2026-11-04) — frozen header + resizable columns (merino-grid.js, grid key "documents"). *@
+            <GridResizeHint GridKey="documents" />
+            <div class="tl-grid-wrapper tl-grid--sticky" data-grid="documents" style="--tl-cols: @GridCols; --tl-min-width: @GridMinWidth;">
                 <div class="tlg-header">
                     <div class="tlg-col">File name</div>
                     <div class="tlg-col">Document type</div>

@@ -13,6 +13,9 @@ namespace MerinoOne.SupplierPortal.Domain.Entities.Proc;
 /// gives optimistic concurrency on approve (concurrent approve → DbUpdateConcurrencyException → 409).
 /// On buyer approval the negotiated terms are pushed to ERP (outbox) and the local <c>PurchaseOrderLine</c>
 /// rows are NOT mutated — ERP re-syncs the revised PO inbound (preserves the ERP-master / read-only-line invariant).
+/// R18 (2026-11-03): a negotiation is now a chain of ROUNDS (one row each, linked by <see cref="ParentNegotiationId"/>,
+/// numbered by <see cref="RoundNo"/>, authored by <see cref="ProposedBy"/>); whichever party accepts the open round last
+/// triggers the ERP push for that round.
 /// </summary>
 public class PurchaseOrderNegotiation : BaseAggregateRoot
 {
@@ -26,6 +29,22 @@ public class PurchaseOrderNegotiation : BaseAggregateRoot
 
     /// <summary>Lifecycle state. Persisted as the enum name (string), no DB CHECK — the C# enum is the guard.</summary>
     public PoNegotiationStatus NegotiationStatus { get; set; } = PoNegotiationStatus.Submitted;
+
+    /// <summary>
+    /// R18 (2026-11-03) — re-negotiation rounds: each counter-offer is a NEW round row linked to its parent (the round it
+    /// answered, which flips to <see cref="PoNegotiationStatus.Countered"/>). Null on round 1. Self FK, NO ACTION on delete.
+    /// </summary>
+    public Guid? ParentNegotiationId { get; set; }
+
+    /// <summary>R18 — 1-based position in the round chain (parent's RoundNo + 1). Every pre-R18 row is round 1.</summary>
+    public int RoundNo { get; set; } = 1;
+
+    /// <summary>
+    /// R18 — which party authored this round. <see cref="NegotiationStatus"/> = Submitted together with ProposedBy decides
+    /// who must act next: the OTHER party. Every pre-R18 row (and every opening round) is Supplier. Persisted as the enum
+    /// name (string), no DB CHECK.
+    /// </summary>
+    public NegotiationParty ProposedBy { get; set; } = NegotiationParty.Supplier;
 
     /// <summary>
     /// The PO status captured at create — the revert target for cancel/reject (avoid hardcoding Acknowledged).

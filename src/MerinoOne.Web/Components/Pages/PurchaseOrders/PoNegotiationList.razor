@@ -5,8 +5,14 @@
 
 @* ------------------------------------------------------------------------------------------------
    Buyer/admin review queue — all in-tenant PO negotiations visible to the caller's seccode. Default
-   filter is Submitted (the actionable queue). Free-text refines PO number / supplier client-side so
+   filter is Submitted (the open rounds). Free-text refines PO number / supplier client-side so
    toggling stays instant. Each row opens the diff/detail view. Mirrors SupplierChangeRequestList.
+
+   R18 (2026-11-04) — rounds. The endpoint returns each negotiation's HEAD (latest) round only, so one row = one
+   negotiation; a superseded (Countered) round never appears here and is reached through the round history on the
+   detail page. Round shows where the chain stands and Awaiting whose move it is: an open round the supplier
+   proposed awaits the Buyer (this queue's work), one the buyer proposed (a counter-offer) awaits the Supplier.
+   Opted into the shared frozen header + column resize (GridResizeHint / merino-grid.js).
 ------------------------------------------------------------------------------------------------ *@
 
 <PageTitle>PO negotiations</PageTitle>
@@ -18,7 +24,7 @@
                 <h1 class="tl-title">PO negotiations</h1>
                 <span class="tl-count-chip">@(filtered?.Count ?? 0)</span>
             </div>
-            <p class="tl-sub">Revised quantity / delivery-date proposals raised by suppliers, awaiting review or already actioned.</p>
+            <p class="tl-sub">Revised quantity / delivery-date proposals from suppliers and your counter-offers, awaiting a response or already actioned.</p>
         </div>
     </header>
 
@@ -46,11 +52,14 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 1fr 1fr 120px 90px 160px; --tl-min-width: 880px;">
+        <GridResizeHint GridKey="po-negotiation-list" />
+        <div class="tl-grid-wrapper tl-grid--sticky" data-grid="po-negotiation-list" style="--tl-cols: 1fr 1fr 70px 120px 110px 80px 160px; --tl-min-width: 1040px;">
             <div class="tlg-header">
                 <div class="tlg-col">PO Number</div>
                 <div class="tlg-col">Supplier</div>
+                <div class="tlg-col">Round</div>
                 <div class="tlg-col">Status</div>
+                <div class="tlg-col">Awaiting</div>
                 <div class="tlg-col">Lines</div>
                 <div class="tlg-col">Submitted</div>
             </div>
@@ -60,7 +69,9 @@
                 <div class="tlg-row" @onclick="() => Open(row.Id)" style="cursor:pointer">
                     <div class="tlg-col tlg-code">@row.PoNumber</div>
                     <div class="tlg-col tlg-name">@row.SupplierName</div>
+                    <div class="tlg-col tlg-code">@($"R{row.RoundNo}")</div>
                     <div class="tlg-col"><span class="tlg-status @PoNegotiationStatus.CssClass(row.NegotiationStatus)">@PoNegotiationStatus.Label(row.NegotiationStatus)</span></div>
+                    <div class="tlg-col">@(PoNegotiationStatus.AwaitingParty(row.NegotiationStatus, row.ProposedBy) ?? "—")</div>
                     <div class="tlg-col">@row.LineCount</div>
                     <div class="tlg-col tlg-code">@AppTime.Date(row.SubmittedAt)</div>
                 </div>
@@ -74,7 +85,7 @@
     private List<PoNegotiationListItemDto>? filtered;
     private bool loading = true;
     private string search = string.Empty;
-    private string statusFilter = "Submitted";   // default to the actionable queue
+    private string statusFilter = "Submitted";   // default to the open rounds (Awaiting tells the buyer's turn from the supplier's)
 
     private static readonly string[] StatusFilterOptions =
         { "Submitted", "Approved", "Rejected", "Cancelled" };

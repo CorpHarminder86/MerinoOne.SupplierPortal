@@ -6,9 +6,14 @@
 @* ------------------------------------------------------------------------------------------------
    Supplier-facing list of the caller's OWN PO negotiations ("PO Change Requests"). The list endpoint
    is seccode-scoped, so a supplier principal already only sees its own negotiations — no supplierId
-   filter needed here. Every row opens the negotiation itself (/po-negotiations/{id} — the read-only
-   original → negotiated diff, PoNegotiationDetail), which links on to the PO. Status filter mirrors
-   MyChangeRequests.
+   filter needed here. Every row opens the negotiation itself (/po-negotiations/{id} — the original →
+   negotiated diff, PoNegotiationDetail, where the supplier answers a buyer's counter-offer), which links
+   on to the PO. Status filter mirrors MyChangeRequests.
+
+   R18 (2026-11-04) — rounds. The endpoint returns each negotiation's HEAD (latest) round only, so the list
+   also holds the buyer's counter-offers: Awaiting = Supplier marks the ones that need the caller's response,
+   Awaiting = Buyer the caller's own rounds under review. Round shows where the chain stands. Opted into the
+   shared frozen header + column resize (GridResizeHint / merino-grid.js).
 ------------------------------------------------------------------------------------------------ *@
 
 <PageTitle>My PO change requests</PageTitle>
@@ -20,7 +25,7 @@
                 <h1 class="tl-title">My PO change requests</h1>
                 <span class="tl-count-chip">@(rows?.Count ?? 0)</span>
             </div>
-            <p class="tl-sub">Negotiations you raised on released purchase orders. Approved changes are pushed to ERP; rejected ones revert the PO.</p>
+            <p class="tl-sub">Negotiations you raised on released purchase orders, and the buyer's counter-offers awaiting your response. Approved changes are pushed to ERP; rejected ones revert the PO.</p>
         </div>
     </header>
 
@@ -48,11 +53,14 @@
     }
     else
     {
-        <div class="tl-grid-wrapper" style="--tl-cols: 1fr 1fr 120px 90px 160px; --tl-min-width: 880px;">
+        <GridResizeHint GridKey="my-po-negotiations" />
+        <div class="tl-grid-wrapper tl-grid--sticky" data-grid="my-po-negotiations" style="--tl-cols: 1fr 1fr 70px 120px 110px 80px 160px; --tl-min-width: 1040px;">
             <div class="tlg-header">
                 <div class="tlg-col">PO Number</div>
                 <div class="tlg-col">Supplier</div>
+                <div class="tlg-col">Round</div>
                 <div class="tlg-col">Status</div>
+                <div class="tlg-col">Awaiting</div>
                 <div class="tlg-col">Lines</div>
                 <div class="tlg-col">Submitted</div>
             </div>
@@ -62,7 +70,9 @@
                 <div class="tlg-row" @onclick="() => Open(row)" style="cursor:pointer">
                     <div class="tlg-col tlg-code">@row.PoNumber</div>
                     <div class="tlg-col tlg-name">@row.SupplierName</div>
+                    <div class="tlg-col tlg-code">@($"R{row.RoundNo}")</div>
                     <div class="tlg-col"><span class="tlg-status @PoNegotiationStatus.CssClass(row.NegotiationStatus)">@PoNegotiationStatus.Label(row.NegotiationStatus)</span></div>
+                    <div class="tlg-col">@(PoNegotiationStatus.AwaitingParty(row.NegotiationStatus, row.ProposedBy) ?? "—")</div>
                     <div class="tlg-col">@row.LineCount</div>
                     <div class="tlg-col tlg-code">@AppTime.Date(row.SubmittedAt)</div>
                 </div>

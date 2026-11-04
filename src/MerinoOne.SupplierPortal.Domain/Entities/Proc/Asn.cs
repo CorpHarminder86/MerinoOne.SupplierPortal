@@ -55,6 +55,14 @@ public class Asn : BaseAggregateRoot
     public string? BillOfLading { get; set; }
     public string? PackingList { get; set; }
 
+    // R18 (2026-11-03) — optional statutory shipment refs (India e-way bill + e-invoice IRN); portal + packing list
+    // only, NOT sent to LN/IDM. Supplier-entered free text, editable while the ASN itself is editable; all four
+    // nullable. The dates are document dates (no time of day), hence DateOnly / SQL `date`, not an AppTime instant.
+    public string? EwayBillNo { get; set; }
+    public DateOnly? EwayBillDate { get; set; }
+    public string? IrnNo { get; set; }
+    public DateOnly? IrnDate { get; set; }
+
     public AsnStatus AsnStatus { get; set; } = AsnStatus.Draft;
     public string? Notes { get; set; }
 

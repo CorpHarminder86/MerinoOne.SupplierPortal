@@ -192,7 +192,13 @@ public record AsnDetailDto(
     // R17 — CarrierCode: the Carrier master code snapshot (display label resolved client-side from the master).
     // ErpShipmentStatus: LN's shipment status verbatim from /inbound/asn-update, shown beside the portal AsnStatus.
     string? CarrierCode = null,
-    string? ErpShipmentStatus = null);
+    string? ErpShipmentStatus = null,
+    // R18 (2026-11-03) — the optional India e-way bill (number max 20) + e-invoice IRN (number max 64) references,
+    // read back as entered. Portal + packing list only; never sent to LN. All null when the supplier left them blank.
+    string? EwayBillNo = null,
+    DateOnly? EwayBillDate = null,
+    string? IrnNo = null,
+    DateOnly? IrnDate = null);
 
 /// <summary>One covered PO on a (possibly multi-PO) ASN.</summary>
 public record AsnPurchaseOrderDto(
@@ -299,7 +305,13 @@ public record CreateAsnRequest(
     string? BillOfLading = null,
     string? PackingList = null,
     // R17 — Carrier master code (max 9), snapshotted onto the ASN; null = no carrier picked.
-    string? CarrierCode = null);
+    string? CarrierCode = null,
+    // R18 (2026-11-03) — optional India e-way bill (number max 20) + e-invoice IRN (number max 64) references.
+    // Portal + packing list only; NOT sent to LN. Trailing optional → source-compatible.
+    string? EwayBillNo = null,
+    DateOnly? EwayBillDate = null,
+    string? IrnNo = null,
+    DateOnly? IrnDate = null);
 
 // R4 (2026-06-23) — Serial/Lot capture: Serials (serialized item) + Lots (lot-controlled item) — at most one
 // populated per line. The other is ignored by the handler based on the line's Item flag. Used by BOTH Create
@@ -331,7 +343,13 @@ public record UpdateAsnRequest(
     string? BillOfLading = null,
     string? PackingList = null,
     // R17 — see CreateAsnRequest. Same full-overwrite semantics as the three references above.
-    string? CarrierCode = null);
+    string? CarrierCode = null,
+    // R18 (2026-11-03) — see CreateAsnRequest. Update keeps the same FULL-OVERWRITE semantics: all four values are
+    // assigned as sent, so a caller that omits one clears it.
+    string? EwayBillNo = null,
+    DateOnly? EwayBillDate = null,
+    string? IrnNo = null,
+    DateOnly? IrnDate = null);
 
 // R4 (2026-06-26) — §6.5 / UC-PO-09: optional submit-time admin gate-override reason. When the PO confirmation
 // gate would BLOCK draft submission, a caller holding PurchaseOrder.OverrideGate may supply a non-empty reason to

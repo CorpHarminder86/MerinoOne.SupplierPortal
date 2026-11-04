@@ -4,13 +4,11 @@ using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
-using MerinoOne.SupplierPortal.Contracts.Common;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
-using ValidationException = MerinoOne.SupplierPortal.Application.Common.Exceptions.ValidationException;
 
 namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Negotiations.Commands;
 
@@ -22,11 +20,13 @@ namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Negotiations.Comma
 /// is captured into <c>PreviousPoStatus</c> (the revert target for cancel/reject) and the PO is flipped to
 /// <see cref="PoStatus.Negotiation"/>. The negotiation aggregate's Owner is the supplier's G-seccode (seccode RLS).
 ///
-/// <para><b>Quantity scale:</b> a PROPOSED quantity (one that differs from the live line) may not carry more decimal
-/// places than the line's unit of measure allows (<c>mdm.Unit.decimalPlaces</c>, resolved in one batch through
-/// <see cref="IUnitDecimalsResolver"/>; an unknown or blank unit allows 3) — else 400, keyed
-/// <c>lines[i].negotiatedQty</c>, with a message that names the PO line. A quantity the supplier did not change is
-/// never judged.</para>
+/// <para><b>Rounds (R18):</b> this is round 1 of a negotiation, proposed by the supplier. The buyer may counter it
+/// (<see cref="CounterPoNegotiationCommand"/>) and the supplier may counter back, any number of times.</para>
+///
+/// <para><b>Per-line rules:</b> a PROPOSED delivery instant may not predate the PO, and a PROPOSED quantity may not carry
+/// more decimal places than the line's unit of measure allows (<c>mdm.Unit.decimalPlaces</c>; an unknown or blank unit
+/// allows 3) — else 400. A value the supplier did not change is never judged. The rules are shared with the counter-offer
+/// commands: <see cref="PoNegotiationLineRules"/>.</para>
 ///
 /// <para><b>Supplier write path:</b> a supplier user has <c>SecRight.canWrite=false</c> on its G-seccode. The
 /// write of THIS portal-originated aggregate is authorized through <see cref="SupplierWriteGuard"/> with the
@@ -40,14 +40,7 @@ public class CreatePoNegotiationCommandValidator : AbstractValidator<CreatePoNeg
     public CreatePoNegotiationCommandValidator()
     {
         RuleFor(x => x.Body.PurchaseOrderId).NotEmpty();
-        RuleFor(x => x.Body.Notes).MaximumLength(1000);
-        RuleFor(x => x.Body.Lines).NotEmpty().WithMessage("At least one line is required.");
-        RuleForEach(x => x.Body.Lines).ChildRules(line =>
-        {
-            line.RuleFor(l => l.PurchaseOrderLineId).NotEmpty();
-            line.RuleFor(l => l.NegotiatedQty).GreaterThan(0).WithMessage("Negotiated quantity must be greater than zero.");
-            line.RuleFor(l => l.NegotiatedPrice).GreaterThanOrEqualTo(0).WithMessage("Negotiated price cannot be negative.");
-        });
+        this.AddProposalRules(x => x.Body.Notes, x => x.Body.Lines);
     }
 }
 
@@ -66,10 +59,7 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
 
     public async Task<PoNegotiationDto> Handle(CreatePoNegotiationCommand request, CancellationToken ct)
     {
-        var po = await _db.PurchaseOrders
-            .Include(p => p.Lines)
-            .FirstOrDefaultAsync(p => p.Id == request.Body.PurchaseOrderId, ct)
-            ?? throw new NotFoundException("PurchaseOrder", request.Body.PurchaseOrderId);
+        var po = await PoNegotiationRounds.LoadPoAsync(_db, request.Body.PurchaseOrderId, includeLines: true, ct);
 
         // Eligible only while the PO is open for a response (mirrors the AcknowledgeBefore/Accept gate).
         if (po.PoStatus is not (PoStatus.Released or PoStatus.Acknowledged))
@@ -79,24 +69,16 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
         var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == po.SupplierId, ct)
                        ?? throw new NotFoundException("Supplier", po.SupplierId);
 
-        // R4 (2026-06-26) — D1: the negotiate entry-point is gated on the supplier's AllowNegotiate toggle. A
-        // supplier configured no-negotiate cannot raise a counter-proposal (UC-PO-04). 409 (conflicting config),
-        // mirrors the AllowReject gate on /reject.
-        if (!supplier.AllowNegotiate)
-            throw new ConflictException("This supplier is not permitted to negotiate purchase orders.");
+        PoNegotiationRounds.EnsureSupplierMayNegotiate(supplier);
 
         // Permission-based supplier write-path authorization (see XML doc). Throws ForbiddenException (403).
-        await _guard.EnsureCanWriteAsync(supplier.Id, po.SeccodeId, "PurchaseOrder.Negotiate", ct);
+        await PoNegotiationRounds.EnsureSupplierCanWriteAsync(_guard, supplier.Id, po.SeccodeId, ct);
 
-        // Decimal places each of the PO's units allows — ONE batched lookup, read by the quantity-scale rule below.
-        // Only after the authorization check: an unauthorized caller costs no extra query.
-        var unitPlaces = await _units.ResolveAsync(
-            po.Lines.Where(l => !l.IsDeleted).Select(l => (string?)l.OrderUnit), ct);
-        int PlacesFor(string? unit)
-            => !string.IsNullOrWhiteSpace(unit) && unitPlaces.TryGetValue(unit, out var known) ? known : _units.Fallback;
+        // Only after the authorization check: an unauthorized caller costs no extra query (the unit lookup).
+        var rules = await PoNegotiationLineRules.ForAsync(po, _units, ct);
 
         var now = DateTime.UtcNow;
-        var actor = Actor();
+        var actor = PoNegotiationRounds.ActorOf(_user);
 
         var negotiation = new PurchaseOrderNegotiation
         {
@@ -107,7 +89,7 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
             NegotiationStatus = PoNegotiationStatus.Submitted,
             PreviousPoStatus = po.PoStatus,           // revert target for cancel/reject (never hardcode Acknowledged).
             SubmittedAt = now,
-            Notes = string.IsNullOrWhiteSpace(request.Body.Notes) ? null : request.Body.Notes.Trim(),
+            Notes = PoNegotiationRounds.NotesOf(request.Body.Notes),
             SeccodeId = po.SeccodeId,                 // Owner = PO/supplier G-seccode (seccode RLS).
             TenantId = po.TenantId,
             TenantEntityId = po.TenantEntityId,
@@ -120,82 +102,18 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
         for (var index = 0; index < request.Body.Lines.Count; index++)
         {
             var input = request.Body.Lines[index];
-            var poLine = po.Lines.FirstOrDefault(l => l.Id == input.PurchaseOrderLineId && !l.IsDeleted)
-                         ?? throw new ValidationException(new Dictionary<string, string[]>
-                         {
-                             ["lines"] = new[] { $"PO line {input.PurchaseOrderLineId} does not belong to this PO." }
-                         });
+            var poLine = rules.Line(input.PurchaseOrderLineId);
 
-            var qtyChanged = poLine.OrderQty != input.NegotiatedQty;
-            var dateChanged = poLine.DeliveryDate != input.NegotiatedDeliveryDate;
-            var priceChanged = poLine.PriceUnit != input.NegotiatedPrice;
-            if (!qtyChanged && !dateChanged && !priceChanged) continue;   // no-op line — drop it.
+            var live = PoLineTerms.Of(poLine);
+            var proposed = new PoLineTerms(input.NegotiatedQty, input.NegotiatedDeliveryDate, input.NegotiatedPrice);
+            rules.Judge(poLine, index, live, proposed);
+            if (proposed == live) continue;   // no-op line — drop it.
 
-            // Feedback 2026-08-12 (3) — a PROPOSED delivery instant may not predate the order itself. Both sides
-            // are UTC (PoDate arrives from LN in UTC; the client converts the picker's wall-clock time before
-            // POSTing), so this is a straight comparison. Enforced HERE and not in the validator because the rule
-            // needs the PO, and mirrored in the UI only as a courtesy — this is the authority.
-            //
-            // Gated on dateChanged, and deliberately placed AFTER it is computed. The client re-sends the line's
-            // EXISTING delivery instant verbatim on a line where only the quantity moved, so validating every
-            // submitted line would reject a pure qty proposal because of a stored date the supplier never touched —
-            // and one such line would fail the whole submission. The rule constrains what a supplier PROPOSES,
-            // not what the ERP already sent.
-            if (dateChanged && input.NegotiatedDeliveryDate is { } proposed && proposed < po.PoDate)
-                throw new ValidationException(new Dictionary<string, string[]>
-                {
-                    ["lines"] = new[]
-                    {
-                        $"Line {poLine.PositionNo}/{poLine.SequenceNo}: the delivery date and time " +
-                        $"({AppTime.Stamp(proposed)}) cannot be earlier than the PO date " +
-                        $"({AppTime.Stamp(po.PoDate)})."
-                    }
-                });
-
-            // Quantity scale — a PROPOSED quantity may not carry more decimal places than the line's unit allows. Gated
-            // on qtyChanged for the same reason the date floor is gated on dateChanged, and likewise placed AFTER it
-            // is computed: the client re-sends an untouched quantity verbatim, and an ERP-fed order quantity is not
-            // guaranteed to fit the unit master, so judging every submitted line would fault a quantity the supplier
-            // never edited (and one such line fails the whole submission). Keyed to the line's index in the REQUEST,
-            // not its position among the persisted delta lines. The 400 body carries only the message, never the key, so
-            // the message names the PO line (position/sequence) the way the delivery-date floor above does.
-            if (qtyChanged)
-            {
-                var places = PlacesFor(poLine.OrderUnit);
-                if (HasMoreDecimalsThan(input.NegotiatedQty, places))
-                    throw new ValidationException(new Dictionary<string, string[]>
-                    {
-                        [$"lines[{index}].negotiatedQty"] = new[]
-                        {
-                            $"Quantity on line {poLine.PositionNo}/{poLine.SequenceNo} for unit " +
-                            $"{UnitLabel(poLine.OrderUnit)} allows at most {places} decimal places."
-                        }
-                    });
-            }
-
-            negotiation.Lines.Add(new PurchaseOrderNegotiationLine
-            {
-                Id = Guid.NewGuid(),
-                PurchaseOrderLineId = poLine.Id,
-                PositionNo = poLine.PositionNo,
-                SequenceNo = poLine.SequenceNo,
-                ItemCode = poLine.ItemCode,
-                OriginalQty = poLine.OrderQty,
-                NegotiatedQty = input.NegotiatedQty,
-                OriginalDeliveryDate = poLine.DeliveryDate,
-                NegotiatedDeliveryDate = input.NegotiatedDeliveryDate,
-                OriginalPrice = poLine.PriceUnit,
-                NegotiatedPrice = input.NegotiatedPrice,
-                CreatedBy = actor,
-                CreatedOn = now,
-            });
+            negotiation.Lines.Add(PoNegotiationLineRules.StoredLine(poLine, proposed, actor, now));
         }
 
         if (negotiation.Lines.Count == 0)
-            throw new ValidationException(new Dictionary<string, string[]>
-            {
-                ["lines"] = new[] { "No line differs from the purchase order — nothing to negotiate." }
-            });
+            throw PoNegotiationLineRules.LinesInvalid("No line differs from the purchase order — nothing to negotiate.");
 
         // Flip the PO to Negotiation in the SAME transaction as the negotiation insert.
         po.PoStatus = PoStatus.Negotiation;
@@ -211,17 +129,4 @@ public class CreatePoNegotiationCommandHandler : IRequestHandler<CreatePoNegotia
 
         return PoNegotiationMapper.ToDto(negotiation, supplier.LegalName);
     }
-
-    private string Actor() => string.IsNullOrEmpty(_user.UserCode) ? "system" : _user.UserCode;
-
-    /// <summary>
-    /// True when <paramref name="value"/> has a non-zero digit beyond <paramref name="places"/> decimal places. Trailing
-    /// zeros are not digits (1.50 fits a one-place unit, 1.55 does not), which is why this rounds and compares rather
-    /// than reading the decimal's scale — a client binding "7.00" sends a scale-2 decimal that is still a whole number.
-    /// A decimal holds at most 28 fractional digits, so a scale of 28 or more can never be exceeded.
-    /// </summary>
-    private static bool HasMoreDecimalsThan(decimal value, int places)
-        => places is >= 0 and < 28 && decimal.Round(value, places) != value;
-
-    private static string UnitLabel(string? unit) => string.IsNullOrWhiteSpace(unit) ? "(none)" : unit.Trim();
 }

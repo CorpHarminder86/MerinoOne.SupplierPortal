@@ -5687,6 +5687,16 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("erpSyncId");
 
+                    b.Property<DateOnly?>("EwayBillDate")
+                        .HasColumnType("date")
+                        .HasColumnName("ewayBillDate");
+
+                    b.Property<string>("EwayBillNo")
+                        .HasMaxLength(20)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("ewayBillNo");
+
                     b.Property<DateTime>("ExpectedDeliveryDate")
                         .HasColumnType("datetime2")
                         .HasColumnName("expectedDeliveryDate");
@@ -5705,6 +5715,16 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("invoiceNo");
+
+                    b.Property<DateOnly?>("IrnDate")
+                        .HasColumnType("date")
+                        .HasColumnName("irnDate");
+
+                    b.Property<string>("IrnNo")
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("irnNo");
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -8168,6 +8188,10 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("nudgeSentAt");
 
+                    b.Property<Guid?>("ParentNegotiationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("parentNegotiationId");
+
                     b.Property<string>("PoNumber")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -8179,6 +8203,14 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)")
                         .HasColumnName("previousPoStatus");
+
+                    b.Property<string>("ProposedBy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)")
+                        .HasDefaultValue("Supplier")
+                        .HasColumnName("proposedBy");
 
                     b.Property<Guid>("PurchaseOrderId")
                         .HasColumnType("uniqueidentifier")
@@ -8197,6 +8229,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("reviewedBy");
+
+                    b.Property<int>("RoundNo")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1)
+                        .HasColumnName("roundNo");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -8248,6 +8286,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("NegotiationStatus")
                         .HasDatabaseName("IX_PurchaseOrderNegotiation_negotiationStatus");
+
+                    b.HasIndex("ParentNegotiationId")
+                        .HasDatabaseName("IX_PurchaseOrderNegotiation_parentNegotiationId");
 
                     b.HasIndex("PurchaseOrderId")
                         .IsUnique()
@@ -10854,6 +10895,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderNegotiation", b =>
                 {
+                    b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrderNegotiation", null)
+                        .WithMany()
+                        .HasForeignKey("ParentNegotiationId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .HasConstraintName("FK_PurchaseOrderNegotiation_PurchaseOrderNegotiation_parentNegotiationId");
+
                     b.HasOne("MerinoOne.SupplierPortal.Domain.Entities.Proc.PurchaseOrder", "PurchaseOrder")
                         .WithMany()
                         .HasForeignKey("PurchaseOrderId")

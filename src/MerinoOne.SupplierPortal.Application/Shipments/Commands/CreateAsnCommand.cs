@@ -45,6 +45,10 @@ public class CreateAsnCommandValidator : AbstractValidator<CreateAsnCommand>
         RuleFor(x => x.Body.InvoiceNo).MaximumLength(AsnHeaderRules.InvoiceNo).WithName("invoiceNo");
         RuleFor(x => x.Body.BillOfLading).MaximumLength(AsnHeaderRules.BillOfLading).WithName("billOfLading");
         RuleFor(x => x.Body.PackingList).MaximumLength(AsnHeaderRules.PackingList).WithName("packingList");
+        // R18 (2026-11-03) — optional India e-way bill / e-invoice IRN numbers, capped at their column widths so an
+        // over-long value is a 400 rather than a SQL truncation 500. The two dates are optional DateOnly and need no rule.
+        RuleFor(x => x.Body.EwayBillNo).MaximumLength(AsnHeaderRules.EwayBillNo).WithName("ewayBillNo");
+        RuleFor(x => x.Body.IrnNo).MaximumLength(AsnHeaderRules.IrnNo).WithName("irnNo");
 
         RuleFor(x => x.Body.Lines).NotNull().NotEmpty()
             .WithMessage("At least one ASN line is required.");
@@ -88,9 +92,15 @@ internal static class AsnHeaderRules
     public const int BillOfLading = 50;
     public const int PackingList = 50;
 
+    // R18 (2026-11-03) — widths of asn.ewayBillNo (the 20-character India e-way bill number) and asn.irnNo (the
+    // 64-character e-invoice IRN hash).
+    public const int EwayBillNo = 20;
+    public const int IrnNo = 64;
+
     /// <summary>
     /// Trims and collapses blank/whitespace to null. Used on the three R11 shipment refs so a whitespace-only
     /// value cannot satisfy the Send-For-Approval mandatory gate, and so "cleared" and "never set" persist alike.
+    /// R18 (2026-11-03) — the e-way bill / IRN numbers go through it too, for that same cleared == never-set rule.
     /// </summary>
     public static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 }
@@ -334,6 +344,12 @@ public class CreateAsnCommandHandler : IRequestHandler<CreateAsnCommand, AsnDeta
             InvoiceNo = AsnHeaderRules.NullIfBlank(body.InvoiceNo),
             BillOfLading = AsnHeaderRules.NullIfBlank(body.BillOfLading),
             PackingList = AsnHeaderRules.NullIfBlank(body.PackingList),
+            // R18 (2026-11-03) — optional India e-way bill + e-invoice IRN refs: numbers trimmed blank-as-null like the refs
+            // above, dates stored as sent. Portal + packing list only; never part of the LN/IDM payload.
+            EwayBillNo = AsnHeaderRules.NullIfBlank(body.EwayBillNo),
+            EwayBillDate = body.EwayBillDate,
+            IrnNo = AsnHeaderRules.NullIfBlank(body.IrnNo),
+            IrnDate = body.IrnDate,
             SupplierId = supplierId,
             ExpectedDeliveryDate = body.ExpectedDeliveryDate,
             TimeWindow = body.TimeWindow,

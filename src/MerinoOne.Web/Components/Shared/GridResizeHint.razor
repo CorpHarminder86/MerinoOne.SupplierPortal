@@ -1,0 +1,21 @@
+@*
+    R18 (2026-11-04) — hint line that sits directly above a resizable list grid. Pair it with the opted-in
+    grid wrapper that carries the same key:
+
+        <GridResizeHint GridKey="asn-list" />
+        <div class="tl-grid-wrapper tl-grid--sticky" data-grid="asn-list" style="--tl-cols: ...; --tl-min-width: ...;">
+
+    Static markup only — no state, no interop. merino-grid.js reveals the "Custom widths saved for this page" note
+    (a stylesheet rule keyed on data-grid-hint) while that grid has widths stored in this browser, and hides it again
+    after a reset, so Blazor never has to know whether the user has resized the grid.
+*@
+
+<div class="tl-grid-hint" data-grid-hint="@GridKey">
+    <span>Drag a column edge in the header to resize · double-click an edge to reset all widths</span>
+    <span class="tl-grid-hint__saved">Custom widths saved for this page</span>
+</div>
+
+@code {
+    /// <summary>The grid's <c>data-grid</c> key (lowercase letters, digits and hyphens, e.g. "asn-list").</summary>
+    [Parameter, EditorRequired] public string GridKey { get; set; } = "";
+}

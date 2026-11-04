@@ -145,7 +145,9 @@
     else
     {
         var gridStyle = $"--tl-cols: {(CanCreateAsn ? "44px " : "")}140px 70px 1.4fr 130px 100px 110px 110px 1fr 130px 110px; --tl-min-width: {(CanCreateAsn ? "1324px" : "1280px")};";
-        <div class="tl-grid-wrapper" style="@gridStyle">
+        @* R18 (2026-11-04) — frozen header + resizable columns (merino-grid.js, grid key "delivery-schedules"). *@
+        <GridResizeHint GridKey="delivery-schedules" />
+        <div class="tl-grid-wrapper tl-grid--sticky" data-grid="delivery-schedules" style="@gridStyle">
             <div class="tlg-header">
                 @if (CanCreateAsn)
                 {

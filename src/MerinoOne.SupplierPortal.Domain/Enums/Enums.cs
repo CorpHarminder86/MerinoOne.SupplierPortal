@@ -56,8 +56,22 @@ public enum PoStatus
 /// R4 (2026-06-24) — PO Negotiation lifecycle. Submitted = supplier raised the negotiation (open); the buyer
 /// resolves it to Approved or Rejected, or the supplier withdraws it to Cancelled. Persisted as the enum name
 /// (string), no DB CHECK — the C# enum is the guard. APPEND-ONLY.
+///
+/// <para>R18 (2026-11-03) adds <b>Countered</b> — the round was superseded by the OTHER party's counter-offer
+/// (re-negotiation rounds). Terminal for that row; the counter is a new Submitted row linked back through
+/// <c>PurchaseOrderNegotiation.ParentNegotiationId</c>. Submitted now means "the open round": its
+/// <see cref="NegotiationParty"/> (ProposedBy) says who authored it, and the OTHER party must act on it.
+/// Appended last so every persisted enum-name string keeps its meaning.</para>
 /// </summary>
-public enum PoNegotiationStatus { Submitted, Approved, Rejected, Cancelled }
+public enum PoNegotiationStatus { Submitted, Approved, Rejected, Cancelled, Countered }
+
+/// <summary>
+/// R18 (2026-11-03) — which side authored a PO negotiation round (<c>PurchaseOrderNegotiation.ProposedBy</c>). The
+/// supplier opens every negotiation (round 1); the buyer and supplier then alternate counter-offers, so the open
+/// (Submitted) round is always answered by the party that did NOT propose it. Persisted as the enum name (string)
+/// via HasConversion&lt;string&gt;, no DB CHECK — the C# enum is the guard. APPEND-ONLY.
+/// </summary>
+public enum NegotiationParty { Supplier, Buyer }
 
 public enum ScheduleStatus { Proposed, Approved, Rejected, Cancelled }
 

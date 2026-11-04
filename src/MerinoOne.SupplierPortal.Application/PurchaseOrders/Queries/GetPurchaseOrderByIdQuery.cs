@@ -4,6 +4,7 @@ using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Masters.UnitDecimals;
 using MerinoOne.SupplierPortal.Application.SystemSettings.Fulfilment;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
+using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace MerinoOne.SupplierPortal.Application.PurchaseOrders.Queries;
@@ -70,6 +71,22 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
         // missing from the master resolves to the resolver's fallback (3). Feeds each line's UnitDecimalPlaces below.
         var unitDecimals = await _units.ResolveAsync(lineRows.Select(r => (string?)r.Line.OrderUnit), ct);
 
+        // R18 (2026-11-03) — "ASN received" per PO line: Σ AsnLine.ReceivedQty (the figure LN reports on
+        // /inbound/asn-update) over the line's ASN lines, skipping Cancelled ASNs, in ONE grouped query for the whole PO
+        // (no per-line round trip). It reads THROUGH the ASN root, so the root's soft-delete / tenant / company / seccode
+        // filters apply exactly as they do to the PO read above (AsnLine carries only soft-delete itself) — deliberately
+        // NO IgnoreQueryFilters. A line with no reported figure is simply absent from the map => null (unknown), kept
+        // distinct from a reported 0.
+        var poLineIds = lineRows.Select(r => r.Line.Id).ToList();
+        var asnReceived = await (from al in _db.AsnLines
+                                 join a in _db.Asns on al.AsnId equals a.Id
+                                 where poLineIds.Contains(al.PurchaseOrderLineId)
+                                       && al.ReceivedQty != null
+                                       && a.AsnStatus != AsnStatus.Cancelled
+                                 group al by al.PurchaseOrderLineId into g
+                                 select new { PoLineId = g.Key, Received = g.Sum(x => x.ReceivedQty!.Value) })
+                                .ToDictionaryAsync(x => x.PoLineId, x => x.Received, ct);
+
         var lines = lineRows.Select(r =>
         {
             var l = r.Line;
@@ -111,7 +128,9 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
                 // part of NetAmount / TotalAmount (those stay the line Price as received).
                 l.TaxAmount,
                 // Decimal places of the line's OrderUnit from the unit master (batched above); 3 when unknown/blank.
-                unitDecimals.TryGetValue(l.OrderUnit, out var unitPlaces) ? unitPlaces : _units.Fallback);
+                unitDecimals.TryGetValue(l.OrderUnit, out var unitPlaces) ? unitPlaces : _units.Fallback,
+                // R18 — Σ ASN received qty from the map above; null when LN has reported no receipt against this line.
+                asnReceived.TryGetValue(l.Id, out var received) ? received : null);
         }).ToList();
 
         // PO header total = sum of line net amounts (Price as received — ERP-net). Derived, not persisted.

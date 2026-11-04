@@ -24,8 +24,9 @@ if (args.Length > 0 && args[0].Equals("seed", StringComparison.OrdinalIgnoreCase
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Display time zone. The API stores and returns UTC everywhere; it needs AppTime only where it composes
-// user-facing TEXT from an instant (the negotiation history rows the PO History tab renders verbatim).
+// Display time zone. The API stores and returns UTC everywhere; it needs AppTime in two places: where it composes
+// user-facing TEXT from an instant (the negotiation history rows the PO History tab renders verbatim), and where it
+// turns a calendar day into a UTC window (the ASN list's expectedFrom / expectedTo filter).
 MerinoOne.SupplierPortal.Contracts.Common.AppTime.Configure(
     builder.Configuration[MerinoOne.SupplierPortal.Contracts.Common.AppTime.ConfigKey]);
 

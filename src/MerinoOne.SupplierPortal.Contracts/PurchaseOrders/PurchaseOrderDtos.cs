@@ -138,7 +138,10 @@ public record PurchaseOrderLineDto(
     decimal? TaxAmount = null,
     // mdm.Unit.decimalPlaces for this line's OrderUnit, resolved server-side (IUnitDecimalsResolver); 3 when the
     // unit is unknown/blank. The UI formats and validates the line's quantities to this precision.
-    int UnitDecimalPlaces = 3);
+    int UnitDecimalPlaces = 3,
+    // R18 (2026-11-03) — Σ AsnLine.ReceivedQty over this line's non-cancelled ASN lines, as LN reported it on
+    // /inbound/asn-update. Null when no ASN line carries a received figure (distinct from a received total of 0).
+    decimal? AsnReceivedQty = null);
 
 /// <summary>
 /// Lightweight PO row for lookup / picker controls: identity, supplier, date and status only (no lines, no totals).

@@ -6,15 +6,28 @@
 @inject NotificationService Notif
 
 @* ------------------------------------------------------------------------------------------------
-   Buyer review detail, also opened READ-ONLY by the supplier (alias route /po-negotiations/{id}, linked
-   from My PO change requests). Header + a per-line "original → negotiated" diff. The API returns ONE line
-   per PO line: the lines the supplier changed carry the stored original → negotiated values (IsChanged),
-   every other line repeats the live PO line on both sides and renders muted — so any "proposed" count
-   filters IsChanged, never Lines.Count. The negotiated values live only on this record until ERP re-syncs
-   (ERP stays the line master). Changed cells are highlighted. Approve / Reject (reason) are gated on
-   PurchaseOrder.ApproveNegotiation AND the state machine (only while Submitted). 409 (concurrent
-   approve / wrong state) + 403 surface via toast, then reload so the now-stale actions reflect reality.
-   Mirrors SupplierChangeRequestDetail.
+   Buyer review detail, also opened by the supplier (alias route /po-negotiations/{id}, linked from My PO
+   change requests). Header + a per-line "original → negotiated" diff. The API returns ONE line per PO
+   line: the lines the round changed carry the stored original → negotiated values (IsChanged: differs from the
+   PO), every other line repeats the live PO line on both sides — so the header's "proposed" count filters
+   IsChanged, never Lines.Count. On round 1 the unchanged lines render muted; a later round mutes the lines that
+   did not move against the round it answered (see the R18 note below). The negotiated values live only on this
+   record until ERP re-syncs (ERP stays the line master). Changed cells are highlighted. 409 (concurrent answer /
+   wrong state) + 403 surface via toast, then reload so the now-stale actions reflect reality. Mirrors
+   SupplierChangeRequestDetail.
+
+   R18 (2026-11-04) — rounds. A negotiation is a chain of rounds: the supplier opens round 1 and each side may
+   answer the other's OPEN round (Submitted) instead of ending it. This page shows ONE round (Id may be any
+   round of the chain; the DTO carries the chain's history and the latest round's id):
+     - Buyer, on an open SUPPLIER round (PurchaseOrder.ApproveNegotiation): Reject (reason) / Counter / Approve.
+     - Supplier, on an open BUYER round (PurchaseOrder.Negotiate): Decline (reason) / Counter / Accept.
+     - Anyone else sees an info hint (awaiting the other side, or why the round is closed).
+   Counter turns the lines table into an editor seeded with THIS round's values; submitting opens a NEW round
+   (the answered one becomes Countered) and lands on it. Round 1 is diffed against the PO; a later round is
+   diffed against the round it answered (PreviousRound*) with the PO kept for reference. A Countered round shows
+   a banner linking to the latest round; the round-history card links every round of the chain. Round links stay
+   on the route base the page was opened with, and are followed in place (this component is re-used, so the
+   load is keyed on Id).
 ------------------------------------------------------------------------------------------------ *@
 
 <PageTitle>@(detail is null ? "PO negotiation" : $"Negotiation · {detail.PoNumber}")</PageTitle>
@@ -29,6 +42,45 @@
     .ponego-chip { display:inline-block; margin-left:8px; padding:1px 7px; border-radius:999px; vertical-align:middle;
                    background:var(--mer-surface); color:var(--mer-blue-700); border:1px solid var(--mer-blue);
                    font:700 10.5px/1.5 'Plus Jakarta Sans', sans-serif; }
+
+    /* R18 (2026-11-04) — rounds. The "Round N · Party" pill beside the status badge, and the superseded banner. */
+    .ponego-round { display:inline-block; padding:2px 8px; border-radius:999px; background:var(--mer-surface);
+                    color:var(--mer-ink-700); border:1px solid var(--mer-ink-300);
+                    font:600 11px/1.6 'Plus Jakarta Sans', sans-serif; }
+    .ponego-banner { display:flex; align-items:flex-start; gap:8px; margin-bottom:16px; padding:10px 14px;
+                     border-radius:var(--mer-radius); background:var(--mer-blue-50); color:var(--mer-blue-700);
+                     font-size:12.5px; }
+    .ponego-banner a { margin-left:6px; color:var(--mer-blue); font-weight:700; }
+
+    /* Round history: one grid row per round (R-no · party · status · audit + notes). The round being viewed is tinted
+       and has no href; every other row is a link to its own page. */
+    .ponego-hist__row { display:grid; grid-template-columns:44px 84px 110px 1fr; gap:10px; align-items:start;
+                        padding:8px 10px; border-bottom:1px solid var(--mer-line-soft); border-radius:var(--mer-radius);
+                        font-size:12.5px; color:var(--mer-ink-900); text-decoration:none; }
+    .ponego-hist__row:last-child { border-bottom:0; }
+    a.ponego-hist__row[href]:hover { background:var(--mer-ink-50); }
+    .ponego-hist__row--current { background:var(--mer-blue-50); }
+    .ponego-hist__no { font-family:Inter, monospace; font-weight:700; }
+    .ponego-hist__body { display:flex; flex-direction:column; gap:2px; min-width:0; }
+    .ponego-hist__meta { font-family:Inter, monospace; font-size:12px; color:var(--mer-ink-600); }
+    .ponego-hist__note { overflow-wrap:anywhere; white-space:pre-wrap; }
+    .ponego-hist__note--reason { color:var(--mer-red); }
+
+    /* Counter editor: the "was" caption under an edited cell, and the delivery picker (RadzenDatePicker) dressed to match
+       the .rz-textbox qty input beside it. The picker rules follow PurchaseOrderDetail's podt-dt (page-scoped styles do
+       not travel between pages): merino.css boxes the .rz-datepicker WRAPPER too, which doubles up with the border Radzen
+       draws on the input inside; its .rz-button rule turns the calendar trigger into a boxed button; and that trigger
+       then overlaps the clear icon. The popup is appended to the page body, out of this page's reach, so merino.css
+       themes it globally (the .rz-datepicker-popup-container block). */
+    .ponego-was { margin:3px 0 0 auto; max-width:190px; font-size:10.5px; line-height:1.3; color:var(--mer-ink-500); }
+    .ponego-dt { width:216px; border:0; background:transparent; box-shadow:none; }
+    .ponego-dt:focus-within { border:0; box-shadow:none; }
+    .ponego-dt > .rz-inputtext { border:1px solid var(--mer-ink-300); border-radius:var(--mer-radius);
+                                 padding:4px 56px 4px 10px; font-family:Inter, monospace; }
+    .ponego-dt:focus-within > .rz-inputtext { border-color:var(--mer-blue); box-shadow:var(--mer-focus-ring); }
+    .ponego-dt .rz-datepicker-trigger { border:0; background:transparent; padding:0; width:24px; height:24px;
+                                        inset-inline-end:8px; }
+    .ponego-dt .rz-dropdown-clear-icon { inset-inline-end:32px; }
 </style>
 
 @if (loading)
@@ -51,34 +103,70 @@ else
                 <div class="tl-title-row">
                     <h1 class="tl-title">@detail.PoNumber</h1>
                     <span class="tlg-status @PoNegotiationStatus.CssClass(detail.NegotiationStatus)">@PoNegotiationStatus.Label(detail.NegotiationStatus)</span>
+                    <span class="ponego-round">Round @detail.RoundNo · @detail.ProposedBy</span>
                 </div>
                 <p class="tl-sub">
                     <a href="purchase-orders/@detail.PurchaseOrderId" style="color:var(--mer-blue);text-decoration:none;">@(string.IsNullOrWhiteSpace(detail.SupplierName) ? "View purchase order" : detail.SupplierName)</a>
                     · @ChangedCount line@(ChangedCount == 1 ? "" : "s") proposed
                 </p>
             </div>
-            @if (CanReview && PoNegotiationStatus.IsReviewable(detail.NegotiationStatus))
+            @* R18 (2026-11-04) — the action set follows the round's ProposedBy, not just the viewer's permissions: only
+               the party that did NOT propose an open round may answer it, so a user holding both permissions gets
+               whichever set the round calls for. *@
+            @if (CanBuyerAct)
             {
                 <div class="tl-header__actions">
-                    <button class="mbtn mbtn--danger" @onclick="OpenReject" disabled="@busy">
+                    <button class="mbtn mbtn--danger" @onclick="OpenReject" disabled="@ActionsLocked">
                         <span class="material-symbols-outlined">block</span> Reject
                     </button>
-                    <button class="mbtn mbtn--primary" @onclick="OpenApprove" disabled="@busy">
+                    <button class="mbtn mbtn--accent" @onclick="EnterCounter" disabled="@ActionsLocked">
+                        <span class="material-symbols-outlined">swap_horiz</span> Counter
+                    </button>
+                    <button class="mbtn mbtn--primary" @onclick="OpenApprove" disabled="@ActionsLocked">
                         <span class="material-symbols-outlined">task_alt</span> Approve
                     </button>
                 </div>
             }
-            else if (CanReview)
+            else if (CanSupplierAct)
             {
-                @* Reviewer is present but the negotiation is not in a reviewable state — explain WHY there
-                   are no actions (already approved / rejected / cancelled by the supplier). *@
+                <div class="tl-header__actions">
+                    <button class="mbtn mbtn--danger" @onclick="OpenDecline" disabled="@ActionsLocked">
+                        <span class="material-symbols-outlined">block</span> Decline
+                    </button>
+                    <button class="mbtn mbtn--accent" @onclick="EnterCounter" disabled="@ActionsLocked">
+                        <span class="material-symbols-outlined">swap_horiz</span> Counter
+                    </button>
+                    <button class="mbtn mbtn--primary" @onclick="OpenAccept" disabled="@ActionsLocked">
+                        <span class="material-symbols-outlined">task_alt</span> Accept
+                    </button>
+                </div>
+            }
+            else if (CanReview || CanNegotiate)
+            {
+                @* The viewer is on a negotiation but has no action on this round — explain WHY there are no actions
+                   (already approved / rejected / cancelled, countered, or waiting on the other side). *@
                 <div class="tl-header__actions">
                     <span class="tlg-status tlg-status--info" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;max-width:420px;line-height:1.3;white-space:normal;">
-                        <span class="material-symbols-outlined" style="font-size:16px;">info</span> @ReviewHint(detail.NegotiationStatus)
+                        <span class="material-symbols-outlined" style="font-size:16px;">info</span> @ActionHint(detail.NegotiationStatus, detail.ProposedBy)
                     </span>
                 </div>
             }
         </header>
+
+        @* R18 (2026-11-04) — a countered round is history: point at the round that replaced it. *@
+        @if (detail.NegotiationStatus == "Countered")
+        {
+            <div class="ponego-banner">
+                <span class="material-symbols-outlined" style="font-size:18px;">info</span>
+                <span>
+                    This round was countered — @(LatestRoundNo is { } latest ? $"round {latest}" : "a later round") is the latest.
+                    @if (detail.HeadNegotiationId is { } headId && headId != detail.Id)
+                    {
+                        <a href="@RoundHref(headId)">Open the latest round</a>
+                    }
+                </span>
+            </div>
+        }
 
         @* ---------------- Header meta ---------------- *@
         <div class="rz-card" style="padding:20px;margin-bottom:16px;">
@@ -100,9 +188,67 @@ else
             }
         </div>
 
-        @* ---------------- Diff table (one row per PO line; IsChanged marks the ones the supplier proposed a change to) ---------------- *@
+        @* ---------------- Round history (R18, 2026-11-04) — only once the chain has a second round ---------------- *@
+        @if (detail.Rounds is { Count: >= 2 } rounds)
+        {
+            <div class="rz-card" style="padding:20px;margin-bottom:16px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Round history (@rounds.Count)</h3>
+                @foreach (var round in rounds)
+                {
+                    var current = round.Id == detail.Id;
+                    <a class="@("ponego-hist__row" + (current ? " ponego-hist__row--current" : ""))" href="@(current ? null : RoundHref(round.Id))" aria-current="@(current ? "true" : null)">
+                        <span class="ponego-hist__no">@($"R{round.RoundNo}")</span>
+                        <span>@round.ProposedBy</span>
+                        <span><span class="tlg-status @PoNegotiationStatus.CssClass(round.NegotiationStatus)">@PoNegotiationStatus.Label(round.NegotiationStatus)</span></span>
+                        <span class="ponego-hist__body">
+                            <span class="ponego-hist__meta">@Audit("Submitted", round.SubmittedAt, round.SubmittedBy)</span>
+                            @if (round.ReviewedAt is not null)
+                            {
+                                <span class="ponego-hist__meta">@Audit("Reviewed", round.ReviewedAt, round.ReviewedBy)</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(round.Notes))
+                            {
+                                <span class="ponego-hist__note"><b>Notes:</b> @round.Notes</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(round.RejectionReason))
+                            {
+                                <span class="ponego-hist__note ponego-hist__note--reason"><b>Reason:</b> @round.RejectionReason</span>
+                            }
+                        </span>
+                    </a>
+                }
+            </div>
+        }
+
+        @* ---------------- Counter editor bar (R18, 2026-11-04) ---------------- *@
+        @if (countering)
+        {
+            <div class="rz-card" style="padding:16px 20px;margin-bottom:16px;border:1px solid var(--mer-blue);background:var(--mer-blue-50);">
+                <div style="display:flex;align-items:flex-start;gap:10px;">
+                    <span class="material-symbols-outlined" style="font-size:20px;color:var(--mer-blue);">swap_horiz</span>
+                    <div style="flex:1;">
+                        <div style="font-size:13px;font-weight:700;color:var(--mer-blue-darker);">Counter-offer</div>
+                        <p style="font-size:12px;color:var(--mer-ink-700);margin:2px 0 10px;">Edit the <b>Qty</b> and <b>Delivery date &amp; time</b> on the lines you want to change from round @detail.RoundNo. Only changed lines are sent. Times are @AppTime.OffsetLabel.</p>
+                        <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);display:block;margin-bottom:4px;">Notes for the @(CanBuyerAct ? "supplier" : "buyer") (optional)</label>
+                        <textarea class="rz-textbox" rows="2" style="width:100%;max-width:560px;padding:8px 10px;font-family:inherit;" @bind="counterNotes"></textarea>
+                        @if (!string.IsNullOrEmpty(counterError))
+                        {
+                            <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;max-width:560px;">@counterError</div>
+                        }
+                    </div>
+                    <div style="display:flex;gap:8px;flex-shrink:0;">
+                        <button class="mbtn mbtn--outline" @onclick="CancelCounter" disabled="@busy">Cancel</button>
+                        <button class="mbtn mbtn--primary" @onclick="SubmitCounter" disabled="@busy">
+                            <span class="material-symbols-outlined">send</span> @(busy ? "Sending…" : "Submit counter-offer")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @* ---------------- Diff table (one row per PO line; RowMoved marks the ones that move against the round's baseline) ---------------- *@
         <div class="rz-card" style="padding:20px;overflow-x:auto;">
-            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)<span style="font-weight:500;color:var(--mer-ink-500);"> · @ChangedCount changed</span></h3>
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--mer-blue-darker);">Lines (@detail.Lines.Count)<span style="font-weight:500;color:var(--mer-ink-500);"> · @MovedCount changed@(IsCounterRound ? $" since round {detail.RoundNo - 1}" : "")</span></h3>
             @if (detail.Lines.Count == 0)
             {
                 <div class="tl-empty"><span class="material-symbols-outlined" style="font-size:32px;">difference</span><div>No lines on this negotiation.</div></div>
@@ -119,34 +265,113 @@ else
                             @* Price columns removed 2026-08-12 (feedback (2)): price is no longer negotiable, so a
                                diff of it is always a no-op. The DTO still carries Original/NegotiatedPrice and the
                                stored history is intact — this is a display change only. *@
-                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Original Qty</th>
-                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Negotiated Qty</th>
-                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Original Delivery</th>
-                            <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Negotiated Delivery</th>
+                            @* R18 (2026-11-04) — a counter round compares against the round it answered: PO | Prev. round |
+                               Proposed. Round 1 has no parent round and keeps its Original | Negotiated pair. *@
+                            @if (IsCounterRound)
+                            {
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">PO qty</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Prev. round qty</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Proposed qty</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">PO delivery</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Prev. round delivery</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Proposed delivery</th>
+                            }
+                            else
+                            {
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Original Qty</th>
+                                <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Negotiated Qty</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Original Delivery</th>
+                                <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Negotiated Delivery</th>
+                            }
                         </tr>
                     </thead>
                     <tbody>
                     @foreach (var ln in detail.Lines.OrderBy(l => l.PositionNo).ThenBy(l => l.SequenceNo))
                     {
-                        var qtyChanged = ln.NegotiatedQty != ln.OriginalQty;
-                        var dateChanged = ln.NegotiatedDeliveryDate != ln.OriginalDeliveryDate;
-                        <tr class="@(ln.IsChanged ? "ponego-row--changed" : "ponego-row--same")" style="border-bottom:1px solid var(--mer-line-soft);">
+                        var qtyChanged = QtyMoved(ln);
+                        var dateChanged = DateMoved(ln);
+                        var edit = countering ? edits.GetValueOrDefault(ln.PurchaseOrderLineId) : null;
+                        <tr class="@(RowMoved(ln) ? "ponego-row--changed" : "ponego-row--same")" style="border-bottom:1px solid var(--mer-line-soft);">
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.PositionNo</td>
                             <td style="padding:6px 4px;font-family:Inter,monospace;">@ln.SequenceNo</td>
                             <td style="padding:6px 4px;font-family:Inter,monospace;white-space:nowrap;">
                                 @ln.ItemCode
-                                @if (ln.IsChanged)
+                                @if (RowMoved(ln))
                                 {
                                     <span class="ponego-chip">Changed</span>
                                 }
                             </td>
                             <td class="ponego-desc" style="padding:6px 4px;">@(string.IsNullOrWhiteSpace(ln.ItemDescription) ? "—" : ln.ItemDescription)</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);@(qtyChanged ? "text-decoration:line-through;" : "")">@FormatQty(ln.OriginalQty, ln.UnitDecimalPlaces)</td>
-                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:@(qtyChanged ? "700" : "400");color:@(qtyChanged ? "var(--mer-green-dark)" : "var(--ponego-ink)");background:@(qtyChanged ? "var(--mer-green-50)" : "transparent");">@FormatQty(ln.NegotiatedQty, ln.UnitDecimalPlaces)</td>
+                            @* The PO column is struck through only where it is the baseline (round 1); on a counter round the
+                               replaced value is the previous round's, so that column carries the strike instead. *@
+                            <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);@(qtyChanged && !IsCounterRound ? "text-decoration:line-through;" : "")">@FormatQty(ln.OriginalQty, ln.UnitDecimalPlaces)</td>
+                            @if (IsCounterRound)
+                            {
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;color:var(--mer-ink-500);@(qtyChanged ? "text-decoration:line-through;" : "")">@(ln.PreviousRoundQty is { } prevQty ? FormatQty(prevQty, ln.UnitDecimalPlaces) : "—")</td>
+                            }
+                            @if (edit is not null)
+                            {
+                                @* Editable Qty: the step follows the unit of the line (1, 0.1, 0.01…) but a step is only a
+                                   spinner hint, so QtyTooPrecise flags a typed value as soon as @bind commits it (blur /
+                                   Enter), and SubmitCounter refuses it too. *@
+                                var tooPreciseHere = QtyTooPrecise(edit);
+                                <td style="padding:6px 4px;text-align:right;">
+                                    <input type="number" step="@QtyStep(edit.UnitDecimalPlaces)" min="0" class="rz-textbox"
+                                           style="width:90px;padding:4px 6px;text-align:right;font-family:Inter,monospace;@(tooPreciseHere ? "border:1px solid var(--mer-red);background:var(--mer-red-50);" : "")"
+                                           @bind="edit.Qty" />
+                                    @if (tooPreciseHere)
+                                    {
+                                        <div style="font-size:10.5px;color:var(--mer-red);margin:3px 0 0 auto;max-width:110px;line-height:1.3;">
+                                            Allows at most @edit.UnitDecimalPlaces decimal@(edit.UnitDecimalPlaces == 1 ? "" : "s")@(string.IsNullOrWhiteSpace(ln.OrderUnit) ? "" : $" ({ln.OrderUnit})")
+                                        </div>
+                                    }
+                                    else if (edit.Qty != edit.CurrentQty)
+                                    {
+                                        <div class="ponego-was">Round @detail.RoundNo: @FormatQty(edit.CurrentQty, ln.UnitDecimalPlaces)</div>
+                                    }
+                                </td>
+                            }
+                            else
+                            {
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;font-weight:@(qtyChanged ? "700" : "400");color:@(qtyChanged ? "var(--mer-green-dark)" : "var(--ponego-ink)");background:@(qtyChanged ? "var(--mer-green-50)" : "transparent");">@FormatQty(ln.NegotiatedQty, ln.UnitDecimalPlaces)</td>
+                            }
                             @* To the minute: the supplier can now propose a TIME, and a date-only cell would show
                                an 09:00 → 17:00 move as two identical values. *@
-                            <td style="padding:6px 4px;font-family:Inter,monospace;color:var(--mer-ink-500);@(dateChanged ? "text-decoration:line-through;" : "")">@AppTime.Stamp(ln.OriginalDeliveryDate)</td>
-                            <td style="padding:6px 4px;font-family:Inter,monospace;font-weight:@(dateChanged ? "700" : "400");color:@(dateChanged ? "var(--mer-green-dark)" : "var(--ponego-ink)");background:@(dateChanged ? "var(--mer-green-50)" : "transparent");">@AppTime.Stamp(ln.NegotiatedDeliveryDate)</td>
+                            <td style="padding:6px 4px;font-family:Inter,monospace;color:var(--mer-ink-500);@(dateChanged && !IsCounterRound ? "text-decoration:line-through;" : "")">@AppTime.Stamp(ln.OriginalDeliveryDate)</td>
+                            @if (IsCounterRound)
+                            {
+                                <td style="padding:6px 4px;font-family:Inter,monospace;color:var(--mer-ink-500);@(dateChanged ? "text-decoration:line-through;" : "")">@AppTime.Stamp(ln.PreviousRoundDeliveryDate)</td>
+                            }
+                            @if (edit is not null)
+                            {
+                                @* Editable Delivery date AND time, the PurchaseOrderDetail negotiation editor's picker: a WALL-CLOCK
+                                   time in the display zone (CounterEdit.DeliveryDateUtc converts it back for the wire). Bound
+                                   one-way (Value + Change), NOT @bind-Value: Change goes through OnDeliveryPicked, which cuts the
+                                   value to the minute, since the picker keeps the seconds of a typed value and DateChanged compares
+                                   against the minute-truncated seed. Culture is pinned to Invariant, as AppTime does, so a server
+                                   locale cannot change the box text; OnDemand builds the popup only when opened (Initial would put
+                                   ~47KB of hidden calendar markup behind every row). No `Min`: a floor would make the picker refuse
+                                   the value outright, while the PO-date rule is the server's to judge and report (the DTO does not
+                                   carry the PO date). AllowClear is on because removing the date is meaningful. *@
+                                <td style="padding:6px 4px;">
+                                    <RadzenDatePicker TValue="DateTime?" ShowTime="true" ShowSeconds="false" HourFormat="24"
+                                                      DateFormat="yyyy-MM-dd HH:mm" AllowClear="true"
+                                                      Culture="System.Globalization.CultureInfo.InvariantCulture"
+                                                      PopupRenderMode="PopupRenderMode.OnDemand"
+                                                      class="ponego-dt"
+                                                      title="@($"Delivery date and time, in {AppTime.OffsetLabel}")"
+                                                      Value="@edit.LocalDeliveryDate"
+                                                      Change="@(v => OnDeliveryPicked(edit, v))" />
+                                    @if (edit.DateChanged)
+                                    {
+                                        <div class="ponego-was" style="margin-left:0;">Round @detail.RoundNo: @AppTime.Stamp(ln.NegotiatedDeliveryDate)</div>
+                                    }
+                                </td>
+                            }
+                            else
+                            {
+                                <td style="padding:6px 4px;font-family:Inter,monospace;font-weight:@(dateChanged ? "700" : "400");color:@(dateChanged ? "var(--mer-green-dark)" : "var(--ponego-ink)");background:@(dateChanged ? "var(--mer-green-50)" : "transparent");">@AppTime.Stamp(ln.NegotiatedDeliveryDate)</td>
+                            }
                         </tr>
                     }
                     </tbody>
@@ -212,29 +437,137 @@ else
             </div>
         </div>
     }
+
+    @* ---------------- Accept dialog (R18, 2026-11-04 — supplier accepts the buyer's counter-offer) ---------------- *@
+    @if (showAccept)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="success" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--success"><span class="material-symbols-outlined">task_alt</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">PO negotiation</div>
+                        <h2 class="merino-dialog__title">Accept counter-offer on @detail.PoNumber?</h2>
+                        <p class="merino-dialog__subtitle">The PO moves to <b>Approved</b> and these terms are pushed to ERP. The PO lines are not changed locally — ERP re-syncs the revised PO.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showAccept = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    @if (!string.IsNullOrEmpty(actionError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;">@actionError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showAccept = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="primary" @onclick="DoAccept" disabled="@busy">@(busy ? "Accepting…" : "Accept & push")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
+
+    @* ---------------- Decline dialog (R18, 2026-11-04 — supplier declines the buyer's counter-offer) ---------------- *@
+    @if (showDecline)
+    {
+        <div style="position:fixed;inset:0;background:var(--mer-modal-backdrop);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div class="merino-dialog" data-variant="danger" style="width:480px;">
+                <div class="merino-dialog__accent"></div>
+                <header class="merino-dialog__header">
+                    <div class="merino-dialog__icon merino-dialog__icon--danger"><span class="material-symbols-outlined">block</span></div>
+                    <div class="merino-dialog__head-text">
+                        <div class="merino-dialog__eyebrow">PO negotiation</div>
+                        <h2 class="merino-dialog__title">Decline counter-offer on @detail.PoNumber?</h2>
+                        <p class="merino-dialog__subtitle">No changes are applied. The PO reverts to <b>@PoStatusLabels.Label(detail.PreviousPoStatus)</b> and the reason is recorded for the buyer.</p>
+                    </div>
+                    <button class="merino-dialog__close" @onclick="() => showDecline = false"><span class="material-symbols-outlined">close</span></button>
+                </header>
+                <div class="merino-dialog__body">
+                    <label style="font-size:12px;font-weight:600;color:var(--mer-ink-700);">Reason (required)</label>
+                    <textarea class="rz-textbox" rows="4" style="width:100%;padding:8px 10px;font-family:inherit;" @bind="reasonText"></textarea>
+                    @if (!string.IsNullOrEmpty(actionError)) { <div style="background:var(--mer-red-50);color:var(--mer-red);padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;">@actionError</div> }
+                </div>
+                <footer class="merino-dialog__footer">
+                    <div class="merino-dialog__actions">
+                        <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showDecline = false">Cancel</button>
+                        <button class="merino-dialog__btn" data-intent="danger" @onclick="DoDecline" disabled="@busy">@(busy ? "Declining…" : "Decline")</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    }
 }
 
 @code {
+    private const string BuyerRoute = "po-negotiation-review";
+    private const string SupplierRoute = "po-negotiations";
+
     [Parameter] public Guid Id { get; set; }
 
     private PoNegotiationDto? detail;
     private bool loading = true;
     private bool busy;
 
+    // R18 (2026-11-04) — the Id the current `detail` was loaded for, and the route base (BuyerRoute / SupplierRoute) the
+    // page was opened on, which every round link and the post-counter navigation stay on.
+    private Guid loadedId;
+    private string routeBase = SupplierRoute;
+
     private bool showApprove;
     private bool showReject;
+    private bool showAccept;
+    private bool showDecline;
     private string reasonText = string.Empty;
     private string actionError = string.Empty;
 
-    private bool CanReview => Token.HasPermission("PurchaseOrder.ApproveNegotiation");
+    // R18 (2026-11-04) — counter editor state. `edits` is keyed by PurchaseOrderLineId and seeded from THIS round's
+    // effective values when the editor opens; on submit only the lines that differ from them are sent.
+    private bool countering;
+    private string counterNotes = string.Empty;
+    private string counterError = string.Empty;
+    private Dictionary<Guid, CounterEdit> edits = new();
 
-    // The DTO lists EVERY PO line (so the grid shows the whole order); only the ones the supplier actually changed are
-    // IsChanged. Every "proposed" / "changed" count on this page comes from here, never from Lines.Count.
+    private bool CanReview => Token.HasPermission("PurchaseOrder.ApproveNegotiation");
+    private bool CanNegotiate => Token.HasPermission("PurchaseOrder.Negotiate");
+
+    // R18 (2026-11-04) — whose move it is: the buyer answers an open SUPPLIER round, the supplier an open BUYER round, so
+    // the two are mutually exclusive even for a user holding both permissions.
+    private bool CanBuyerAct => detail is not null && CanReview && PoNegotiationStatus.IsBuyerActionable(detail.NegotiationStatus, detail.ProposedBy);
+    private bool CanSupplierAct => detail is not null && CanNegotiate && PoNegotiationStatus.IsSupplierActionable(detail.NegotiationStatus, detail.ProposedBy);
+
+    // The header actions stay disabled while a request is in flight and while the counter editor is open.
+    private bool ActionsLocked => busy || countering;
+
+    // The DTO lists EVERY PO line (so the grid shows the whole order); only the ones the round actually changed from the
+    // PO are IsChanged. ChangedCount (IsChanged = differs from the PO) feeds the header's "N lines proposed", never
+    // Lines.Count; the lines card's "N changed" is MovedCount below, which follows the round's own baseline.
     private int ChangedCount => detail?.Lines.Count(l => l.IsChanged) ?? 0;
 
     // A reviewer arrives from the review queue; a supplier (no ApproveNegotiation) from its own change-request list.
-    private string BackHref => CanReview ? "po-negotiation-review" : "po-negotiations";
+    private string BackHref => CanReview ? BuyerRoute : SupplierRoute;
     private string BackLabel => CanReview ? "Back to PO negotiations" : "Back to PO change requests";
+
+    // R18 (2026-11-04) — round 1 is diffed against the live PO line (Original*); a counter round against the round it
+    // answered (PreviousRound*, the parent round's effective values), with the PO kept for reference. The change
+    // highlight, the row tint / chip and the "changed" count all read the same baseline.
+    private bool IsCounterRound => detail is { RoundNo: >= 2 };
+    private decimal BaselineQty(PoNegotiationLineDto ln) => IsCounterRound ? (ln.PreviousRoundQty ?? ln.OriginalQty) : ln.OriginalQty;
+    private DateTime? BaselineDate(PoNegotiationLineDto ln) => IsCounterRound ? ln.PreviousRoundDeliveryDate : ln.OriginalDeliveryDate;
+    private bool QtyMoved(PoNegotiationLineDto ln) => ln.NegotiatedQty != BaselineQty(ln);
+    private bool DateMoved(PoNegotiationLineDto ln) => ln.NegotiatedDeliveryDate != BaselineDate(ln);
+
+    // Round 1 keeps the server's IsChanged (it also covers a stored line whose only difference is the retired price).
+    private bool RowMoved(PoNegotiationLineDto ln) => IsCounterRound ? QtyMoved(ln) || DateMoved(ln) : ln.IsChanged;
+    private int MovedCount => detail?.Lines.Count(RowMoved) ?? 0;
+
+    // The RoundNo of the chain's latest round, found in the history by HeadNegotiationId; null when the history is absent.
+    private int? LatestRoundNo => detail is { HeadNegotiationId: { } head } ? detail.Rounds?.FirstOrDefault(r => r.Id == head)?.RoundNo : null;
+
+    // Relative to <base href>, like BackHref: another round of this negotiation on the route base the page was opened on.
+    private string RoundHref(Guid roundId) => $"{routeBase}/{roundId}";
+
+    // "Submitted 2026-11-04 03:34 PM by buyer@x" — the "by" part is dropped when the audit name is blank.
+    private static string Audit(string verb, DateTime? at, string? by)
+        => string.IsNullOrWhiteSpace(by) ? $"{verb} {AppTime.Stamp(at)}" : $"{verb} {AppTime.Stamp(at)} by {by}";
 
     // Quantity at the line's unit precision (mdm.Unit.decimalPlaces, carried on the line), trailing zeros trimmed. Never
     // fewer than the 3 places this grid always showed: with a 4-6 dp unit, two different quantities would otherwise print
@@ -242,21 +575,42 @@ else
     private static string FormatQty(decimal qty, int unitDecimalPlaces)
         => qty.ToString("0." + new string('#', Math.Max(unitDecimalPlaces, 3)));
 
-    // Why a reviewer sees no Approve/Reject buttons for a non-reviewable negotiation (only Submitted acts).
-    private static string ReviewHint(string status) => status switch
+    // Why a viewer sees no action buttons on a round. Only Submitted acts (and only for the party that did not propose it);
+    // a Submitted round that reaches here is waiting on the other side.
+    private static string ActionHint(string status, string proposedBy) => status switch
     {
         "Approved"  => "Already approved — negotiated terms have been pushed to ERP.",
         "Rejected"  => "Already rejected — no further review actions.",
         "Cancelled" => "Cancelled by the supplier — no further review actions.",
+        "Countered" => "Countered — open the latest round.",
+        "Submitted" => proposedBy == "Buyer"
+                           ? "Awaiting the supplier's response to your counter-offer."
+                           : "Awaiting the buyer's review.",
         _           => "No review actions available for this status.",
     };
 
-    protected override Task OnInitializedAsync() => Load();
+    // R18 (2026-11-04) — the page is re-used when a round link (or a submitted counter) navigates to another round of the
+    // same route, so the load is keyed on Id: OnInitializedAsync would not run again. A new round also drops any open
+    // dialog / editor, which belonged to the round just left.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id == loadedId) return;
+        loadedId = Id;
+        routeBase = Nav.ToBaseRelativePath(Nav.Uri).StartsWith(BuyerRoute, StringComparison.OrdinalIgnoreCase) ? BuyerRoute : SupplierRoute;
+        showApprove = showReject = showAccept = showDecline = false;
+        reasonText = actionError = string.Empty;
+        CancelCounter();
+        await Load();
+    }
 
     private async Task Load()
     {
         loading = true;
-        var resp = await Api.GetAsync<PoNegotiationDto>($"api/purchase-orders/negotiations/{Id}");
+        // Keyed on the id this request is for: Blazor does not queue SetParametersAsync, so two round links followed back to
+        // back run two loads at once, and an earlier round's slow response must not overwrite the round the page moved to.
+        var id = Id;
+        var resp = await Api.GetAsync<PoNegotiationDto>($"api/purchase-orders/negotiations/{id}");
+        if (id != Id) return;
         detail = resp?.Data;
         loading = false;
     }
@@ -264,6 +618,8 @@ else
     // ---------------- Review actions ----------------
     private void OpenApprove() { actionError = string.Empty; showApprove = true; }
     private void OpenReject() { reasonText = string.Empty; actionError = string.Empty; showReject = true; }
+    private void OpenAccept() { actionError = string.Empty; showAccept = true; }
+    private void OpenDecline() { reasonText = string.Empty; actionError = string.Empty; showDecline = true; }
 
     private async Task DoApprove()
     {
@@ -306,6 +662,221 @@ else
         }
         busy = false;
     }
+
+    // R18 (2026-11-04) — the supplier's answers to a buyer's counter-offer, handled exactly like DoApprove / DoReject.
+    private async Task DoAccept()
+    {
+        busy = true; actionError = string.Empty;
+        var resp = await Api.PostAsync<object?>($"api/purchase-orders/negotiations/{Id}/accept", new { });
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Accepted", Detail = "Counter-offer accepted — PO approved and the terms queued for ERP push." });
+            showAccept = false;
+            await Load();
+        }
+        else
+        {
+            actionError = FirstError(resp?.Errors, "Accepting failed.");
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not accept", Detail = actionError, Duration = 6000 });
+            await Load();
+        }
+        busy = false;
+    }
+
+    private async Task DoDecline()
+    {
+        if (string.IsNullOrWhiteSpace(reasonText)) { actionError = "A reason is required."; return; }
+        busy = true; actionError = string.Empty;
+        var resp = await Api.PostAsync($"api/purchase-orders/negotiations/{Id}/decline", new DeclinePoNegotiationRequest(reasonText.Trim()));
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "Declined", Detail = "Counter-offer declined — PO reverted to its previous status." });
+            showDecline = false;
+            await Load();
+        }
+        else
+        {
+            actionError = FirstError(resp?.Errors, "Decline failed.");
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not decline", Detail = actionError, Duration = 6000 });
+            await Load();
+        }
+        busy = false;
+    }
+
+    // ---------------- Counter editor (R18, 2026-11-04) ----------------
+    // One row per PO line, seeded from THIS round's effective values. Mirrors PurchaseOrderDetail's LineEdit: the date is held
+    // as a wall-clock time in the display zone for the picker and converted back (AppTime.ToUtc) for the wire, and an
+    // untouched date is re-sent as the stored instant verbatim.
+    private sealed class CounterEdit
+    {
+        /// <summary>This round's own qty — the baseline a counter line is compared with (<see cref="Changed"/>).</summary>
+        public decimal CurrentQty;
+
+        /// <summary>This round's stored (UTC) delivery instant, kept verbatim so an untouched date is re-sent to the
+        /// byte, not as the minute-truncated value the picker would hand back.</summary>
+        public DateTime? CurrentDate;
+
+        /// <summary>Carried through unchanged — a counter never changes price (the server ignores it) but the request
+        /// contract still takes it, so the round's own value rides along.</summary>
+        public decimal Price;
+
+        public decimal Qty;
+
+        /// <summary>The unit decimal places (3 when unknown): the most fractional digits a quantity may carry.</summary>
+        public int UnitDecimalPlaces;
+
+        /// <summary>What the picker was seeded with, already minute-truncated. The change test compares against THIS
+        /// rather than against <see cref="CurrentDate"/>: the picker works to the minute, so a stored 11:00:30 would
+        /// come back as 11:00 and read as an edit nobody made.</summary>
+        public DateTime? SeededLocalDate;
+
+        /// <summary>Bound to the picker — a WALL-CLOCK time in the display zone, never persisted in this form.</summary>
+        public DateTime? LocalDeliveryDate { get; set; }
+
+        public bool DateChanged => LocalDeliveryDate != SeededLocalDate;
+
+        /// <summary>The value for the wire. An untouched date returns the round's instant untouched.</summary>
+        public DateTime? DeliveryDateUtc => DateChanged ? AppTime.ToUtc(LocalDeliveryDate) : CurrentDate;
+
+        public bool Changed => Qty != CurrentQty || DateChanged;
+    }
+
+    private void EnterCounter()
+    {
+        if (detail is null) return;
+        counterError = string.Empty;
+        counterNotes = string.Empty;
+        edits = detail.Lines.ToDictionary(
+            l => l.PurchaseOrderLineId,
+            l =>
+            {
+                // The picker speaks wall-clock in the display zone; storage and the wire stay UTC.
+                var seeded = TruncateToMinute(AppTime.ToLocal(l.NegotiatedDeliveryDate));
+                return new CounterEdit
+                {
+                    CurrentQty = l.NegotiatedQty,
+                    CurrentDate = l.NegotiatedDeliveryDate,
+                    Price = l.NegotiatedPrice,
+                    // The input opens at the quantity's natural scale ("14", not "14.0000"). CurrentQty stays verbatim:
+                    // Changed compares decimals by value, so an untouched line is still not sent.
+                    Qty = TrimScale(l.NegotiatedQty),
+                    UnitDecimalPlaces = l.UnitDecimalPlaces,
+                    SeededLocalDate = seeded,
+                    LocalDeliveryDate = seeded,
+                };
+            });
+        countering = true;
+    }
+
+    // Discard local edits, no API call. Also the reset when the page moves to another round.
+    private void CancelCounter()
+    {
+        countering = false;
+        edits = new();
+        counterNotes = string.Empty;
+        counterError = string.Empty;
+    }
+
+    // The buyer counters an open supplier round (/counter), the supplier an open buyer round (/supplier-counter). Unlike the
+    // answers above, a failure keeps the editor open with the server's message so the edits are not lost; it still reloads
+    // like they do, and the editor closes only if the reloaded round is no longer the viewer's to answer.
+    private async Task SubmitCounter()
+    {
+        if (detail is null || busy) return;
+        var changed = edits.Where(kv => kv.Value.Changed).ToList();
+        if (changed.Count == 0) { counterError = "Change at least one line, or accept the round instead."; return; }
+
+        var notPositive = changed.Where(kv => kv.Value.Qty <= 0).Select(kv => LineLabel(kv.Key)).ToList();
+        if (notPositive.Count > 0)
+        {
+            counterError = $"Quantity must be greater than zero. {CheckLines(notPositive)}";
+            return;
+        }
+
+        // The spinner step does not stop a typed value, so a quantity is judged against the unit's decimal places here
+        // (only lines whose quantity CHANGED, as QtyTooPrecise) and the offending lines are named. The server judges the
+        // delivery against the PO date, which this page does not carry, and reports it in the same inline slot.
+        var tooPrecise = changed.Where(kv => QtyTooPrecise(kv.Value)).Select(kv => LineLabel(kv.Key)).ToList();
+        if (tooPrecise.Count > 0)
+        {
+            counterError = $"Quantity has more decimals than the unit allows. {CheckLines(tooPrecise)}";
+            return;
+        }
+
+        var buyer = CanBuyerAct;
+        busy = true; counterError = string.Empty;
+        var req = new CounterPoNegotiationRequest(
+            string.IsNullOrWhiteSpace(counterNotes) ? null : counterNotes.Trim(),
+            changed.Select(kv => new PoNegotiationLineInput(kv.Key, kv.Value.Qty, kv.Value.DeliveryDateUtc, kv.Value.Price)).ToList());
+        var resp = await Api.PostAsync<PoNegotiationDto, CounterPoNegotiationRequest>(
+            $"api/purchase-orders/negotiations/{Id}/{(buyer ? "counter" : "supplier-counter")}", req);
+        if (resp?.Success == true)
+        {
+            Notif.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Success,
+                Summary = "Counter-offer sent",
+                Detail = buyer ? "The supplier will respond to your counter-offer." : "The buyer will review your counter-offer.",
+            });
+            CancelCounter();   // also closes the editor, so the submit button cannot be hit twice while the navigation lands
+            // Land on the round just opened; success without a body stays here and shows this round as Countered.
+            if (resp.Data is { } next) Nav.NavigateToRoute($"/{routeBase}/{next.Id}");
+            else await Load();
+        }
+        else
+        {
+            counterError = FirstError(resp?.Errors, "Counter-offer failed.");
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Could not send counter-offer", Detail = counterError, Duration = 6000 });
+            // A 409 means the round was answered or withdrawn meanwhile: refresh so the header reflects reality, and drop an
+            // editor that would only fail the same way again. `countering` / `edits` are otherwise left as they are.
+            await Load();
+            if (!CanBuyerAct && !CanSupplierAct) CancelCounter();
+        }
+        busy = false;
+    }
+
+    // "PO position/sequence" of a line, for naming the rows an inline error is about.
+    private string LineLabel(Guid purchaseOrderLineId)
+        => detail?.Lines.FirstOrDefault(l => l.PurchaseOrderLineId == purchaseOrderLineId) is { } l
+            ? $"{l.PositionNo}/{l.SequenceNo}"
+            : purchaseOrderLineId.ToString();
+
+    private static string CheckLines(List<string> labels)
+        => $"Check line{(labels.Count == 1 ? "" : "s")} {string.Join(", ", labels)}.";
+
+    /// <summary>
+    /// Reads the picker back. It already hands over a <c>DateTime?</c>, so there is nothing to parse; what matters is the
+    /// minute precision and the null. The picker keeps the SECONDS of whatever it was given (a typed value), and
+    /// <see cref="CounterEdit.DateChanged"/> compares against the minute-truncated seed, so the value is cut to the minute
+    /// here or an untouched date would read as an edit. NULL is meaningful (the date is being removed) and passes through.
+    /// </summary>
+    private static void OnDeliveryPicked(CounterEdit edit, DateTime? picked) =>
+        edit.LocalDeliveryDate = TruncateToMinute(picked);
+
+    /// <summary>Drops seconds so the seeded value and whatever the picker returns are comparable.</summary>
+    private static DateTime? TruncateToMinute(DateTime? value) => value is { } d
+        ? new DateTime(d.Year, d.Month, d.Day, d.Hour, d.Minute, 0, d.Kind)
+        : null;
+
+    /// <summary>
+    /// True when a quantity was TYPED with more decimals than the line's unit allows. Gated on the quantity having changed:
+    /// a line carrying the round's quantity verbatim proposes nothing, and flagging it would block a date-only edit over a
+    /// figure that was never touched.
+    /// </summary>
+    private static bool QtyTooPrecise(CounterEdit edit) =>
+        edit.Qty != edit.CurrentQty
+        && edit.Qty != decimal.Round(edit.Qty, Math.Clamp(edit.UnitDecimalPlaces, 0, 28));
+
+    /// <summary>The number input step for a unit that allows <paramref name="places"/> decimals: 1, 0.1, 0.01…
+    /// An HTML attribute, so always dot-decimal whatever the culture of the server.</summary>
+    private static string QtyStep(int places) => places <= 0 ? "1" : "0." + new string('0', places - 1) + "1";
+
+    /// <summary>
+    /// A stored quantity is decimal(18,4) and the value binding renders a decimal at its own scale, so a quantity of 14
+    /// opened as "14.0000". Dividing by a 1 that carries many trailing zeros is the standard way to normalise a decimal's
+    /// scale (14.0000 → 14, 12.5000 → 12.5). It never changes the VALUE, only its representation.
+    /// </summary>
+    private static decimal TrimScale(decimal v) => v / 1.000000000000000000000000000000m;
 
     private static string FirstError(List<string>? errors, string fallback)
         => errors is { Count: > 0 } ? errors[0] : fallback;

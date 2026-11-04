@@ -158,6 +158,15 @@ app.MapGet("/files/invoice-pdf/{id:guid}", (Guid id, HttpContext http, IHttpClie
     => ProxyApiAsync(http, factory, $"api/invoices/{id}/pdf", requireAuth: true, ct,
         activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null));
 
+// R18 — ASN packing-list PDF. Same cookie-JWT -> bearer proxy and ?company= -> X-Active-Company conversion as the invoice
+// PDF above: the API endpoint (GET api/asns/{id}/packing-list, policy Asn.Read, seccode-scoped) returns application/pdf,
+// 404 outside the caller's scope and 409 when PackingListRules says the packing list is not available for the ASN's status
+// yet, with a Content-Disposition filename (PackingList-{asnNumber}.pdf) — ProxyApiAsync passes the status codes and the header
+// through, so AsnDetail's header link (shown only where the rule allows it, a plain <a download>) streams the file same-origin.
+app.MapGet("/files/packing-list/{id:guid}", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
+    => ProxyApiAsync(http, factory, $"api/asns/{id}/packing-list", requireAuth: true, ct,
+        activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null));
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

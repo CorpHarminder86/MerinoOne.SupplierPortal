@@ -5,6 +5,21 @@ using Xunit;
 namespace MerinoOne.SupplierPortal.Tests.Unit;
 
 /// <summary>
+/// <see cref="AppTime.Zone"/> is process-wide, and this test process has another reader whose ASSERTED output
+/// depends on it: the ASN list's expected-delivery filter (<c>AsnListSearchTests</c>) stores instants computed with
+/// <see cref="AppTime.ToUtc(DateTime)"/> and the in-process API cuts the day window with the same call at request
+/// time, so a zone flipped between those two moments shifts the window and fails the test. xUnit runs a
+/// <c>DisableParallelization</c> collection only after every parallel collection has finished, so
+/// <see cref="AppTimeTests"/> can never overlap <c>IntegrationCollection</c>. Any other test that asserts on
+/// <see cref="AppTime"/> output should join this collection, or run inside a parallel one that never sets the zone.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class AppTimeStateCollection
+{
+    public const string Name = "AppTime process-wide state";
+}
+
+/// <summary>
 /// The portal's UTC-in-store / local-on-screen rule, pinned.
 ///
 /// <para>Every case here guards a silent-wrongness failure: a date/time bug does not throw, it just shows a
@@ -13,13 +28,18 @@ namespace MerinoOne.SupplierPortal.Tests.Unit;
 /// <c>Unspecified</c> for a value with no offset — treating that as local would double-convert) and the
 /// round-trip, which is what makes a picker safe to bind.</para>
 ///
-/// <para>These tests set the process-wide display zone. That is safe today because <see cref="AppTime"/> is read
-/// for ASSERTED output in no other test — server-side its only consumer is <c>PoNegotiationHistory</c>, whose
-/// audit strings nothing asserts on. If that changes, this class needs its own non-parallel collection.</para>
+/// <para>These tests set the process-wide display zone, so the class lives in <see cref="AppTimeStateCollection"/>
+/// (non-parallel; see there for why). It also restores the zone that was in effect on entry rather than resetting
+/// to the machine zone: the integration host configures <see cref="AppTime"/> from appsettings, and
+/// <c>Configure(null)</c> would leave a later test with the host's own zone instead.</para>
 /// </summary>
+[Collection(AppTimeStateCollection.Name)]
 public class AppTimeTests : IDisposable
 {
     private const string IndiaZoneId = "India Standard Time";
+
+    // Captured by a field initializer, so it runs BEFORE the constructor body sets this class's own zone.
+    private readonly string _zoneIdOnEntry = AppTime.Zone.Id;
 
     /// <summary>2026-08-12 10:04 UTC — a real inbound <c>poDate</c> from merino-supplier-dev (PUR000355).</summary>
     private static readonly DateTime PoDateUtc = new(2026, 8, 12, 10, 4, 0, DateTimeKind.Unspecified);
@@ -29,8 +49,8 @@ public class AppTimeTests : IDisposable
 
     public AppTimeTests() => AppTime.Configure(IndiaZoneId);
 
-    // Return the process to its configured default so a later test never inherits this class's zone.
-    public void Dispose() => AppTime.Configure(null);
+    // Put back the zone this test found, so a later test never inherits this class's zone.
+    public void Dispose() => AppTime.Configure(_zoneIdOnEntry);
 
     [Fact]
     public void ToLocal_treats_an_Unspecified_value_as_UTC()
