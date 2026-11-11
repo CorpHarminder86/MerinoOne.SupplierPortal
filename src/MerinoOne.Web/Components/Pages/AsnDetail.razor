@@ -149,7 +149,7 @@
                     <span class="material-symbols-outlined">task_alt</span> Confirm
                 </button>
             }
-            @* Cancel — supplier-side, available on any of the supplier's active states (Draft / Rejected / PendingApproval).
+            @* Cancel — supplier-side, available only before Post (Draft / Rejected / PendingApproval / Approved).
                A Rejected ASN renders the editable wizard (IsLocked=false); a PendingApproval ASN renders the read-only
                view (IsLocked=true) but the supplier can still withdraw it via Cancel, so this is gated on status, not IsLocked. *@
             @if (!IsNew && detail != null && CanWrite && CanCancel)
@@ -1105,10 +1105,10 @@
                 else
                 {
                     @* R5 (§10.1/§10.2) — the supplier no longer submits directly. "Send for approval" moves the ASN to
-                       PendingApproval (running the §10.3 attachment check here) for a buyer to Approve (which submits)
-                       or Reject. The shipment is locked while it awaits the decision. *@
+                       PendingApproval (running the §10.3 attachment check here) for a buyer to Confirm or Reject (R14:
+                       confirming no longer submits — the supplier's Post does). Locked while it awaits the decision. *@
                     <div style="background:var(--mer-blue-50);color:var(--mer-blue-darker);padding:10px 12px;border-radius:6px;font-size:12px;margin-top:12px;">
-                        Sending for approval locks this ASN (header, lines and attachments become read-only) and routes it to the PO buyer(s). On <b>Approve</b> the shipment is submitted and a draft invoice spanning its PO(s) is created.
+                        Sending for approval locks this ASN (header, lines and attachments become read-only) and routes it to the PO buyer(s). Once the buyer <b>confirms</b>, you complete the documents and <b>post</b> the ASN — posting sends it to the ERP and creates the draft invoice.
                     </div>
                 }
 
@@ -1351,7 +1351,7 @@
             <footer class="merino-dialog__footer">
                 <div class="merino-dialog__actions">
                     <button class="merino-dialog__btn" data-intent="ghost" @onclick="() => showApprove = false">Cancel</button>
-                    <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApprove" disabled="@busy">@(busy ? "Approving…" : "Approve & submit")</button>
+                    <button class="merino-dialog__btn" data-intent="primary" @onclick="DoApprove" disabled="@busy">@(busy ? "Confirming…" : "Confirm")</button>
                 </div>
             </footer>
         </div>
@@ -1646,10 +1646,11 @@
     // R5 (§10.2) — buyer decision permission. Asn.Approve is seeded to SuperAdmin/Admin/Buyer (not Supplier). The
     // server AsnApprovalGate additionally asserts the caller is a MAPPED PO buyer; we only gate the affordance here.
     private bool CanApprove => Token.HasPermission("Asn.Approve");
-    // Cancel is supplier-side and valid on any of the supplier's active states.
+    // Cancel is supplier-side and valid only BEFORE Post — exactly AsnLifecycle.Cancellable.
     // R14 — Approved joins them: a confirmed-but-unposted ASN has consumed nothing and dispatched nothing, so the
-    // supplier must still be able to withdraw it (mirrors AsnLifecycle.Cancellable).
-    // Submitted/InTransit/Delivered/Cancelled are terminal-for-cancel here (the read-only view hides it via this flag).
+    // supplier must still be able to withdraw it.
+    // Submitted/InTransit are already in the ERP (and a portal cancel does not reach LN), so the server refuses them;
+    // Delivered/Received/Cancelled are terminal. The read-only view hides Cancel via this flag.
     private bool CanCancel => detail?.AsnStatus is "Draft" or "Rejected" or "PendingApproval" or "Approved";
 
     // R18 (AC7) — same-origin packing-list PDF href, built like InvoiceDetail.InvoicePdfHref: a plain link bypasses ApiClient (which
@@ -2607,9 +2608,9 @@
     private void OpenApproveDialog() { approveError = string.Empty; showApprove = true; }
     private void OpenRejectDialog() { rejectReason = string.Empty; rejectError = string.Empty; showReject = true; }
 
-    // Approve runs the SUBMIT path server-side: the over-ship atomic guard consumes balance, the ASN flips to
-    // Submitted and a draft invoice is created. If the balance was lost after approval (UC-AP-05) Submit fails and the
-    // ASN stays PendingApproval — we surface that message in the dialog.
+    // R14 — Approve only records the buyer's confirmation (PendingApproval → Approved). Nothing is consumed, sent to
+    // the ERP or invoiced here: the supplier's Post does all of that afterwards. Any server refusal (not a mapped
+    // buyer, PO no longer shippable) is surfaced in the dialog.
     private async Task DoApprove()
     {
         busy = true; approveError = string.Empty;
@@ -2617,12 +2618,12 @@
         if (resp?.Success == true && resp.Data != null)
         {
             showApprove = false;
-            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN approved", Detail = resp.Data.DraftInvoiceId.HasValue ? "The shipment was submitted and a draft invoice created." : "The shipment was submitted." });
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN confirmed", Detail = "The supplier can now complete the documents and post the ASN, which sends it to the ERP and creates the draft invoice." });
             await Reload();
         }
         else
         {
-            approveError = resp?.Errors?.FirstOrDefault() ?? "Could not approve (the shipment balance may have changed, or you are not a mapped buyer for this ASN).";
+            approveError = resp?.Errors?.FirstOrDefault() ?? "Could not confirm (the PO may no longer be shippable, or you are not a mapped buyer for this ASN).";
         }
         busy = false;
     }

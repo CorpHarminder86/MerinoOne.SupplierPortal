@@ -9,9 +9,12 @@ using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions
 namespace MerinoOne.SupplierPortal.Application.Shipments.Commands;
 
 /// <summary>
-/// R4 (2026-06-22) — Module 3. Cancels an ASN (Draft or Submitted -> Cancelled). Terminal for supplier edits
-/// (Q2: no un-submit; Cancel is the only exit once Submitted). A Cancelled ASN's auto-created draft invoice is
-/// left as-is (it is portal-internal and never auto-posted; admin handles it separately).
+/// Cancels an ASN that has not been posted yet (Draft / PendingApproval / Approved / Rejected -> Cancelled).
+/// Terminal for supplier edits.
+/// <para>2026-11-11 — a posted ASN (Submitted / InTransit) is refused (409, see <see cref="AsnLifecycle.Cancellable"/>):
+/// it is already in LN and this command never notified LN, so cancelling it here only made the portal and the ERP
+/// disagree. Balance is consumed only at Post (§10.4), so no cancellable ASN ever holds balance and no reversal is
+/// needed — the Submitted-ASN reversal this handler used to run (UC-ASN-11) is gone with it.</para>
 /// </summary>
 public record CancelAsnCommand(Guid Id) : IRequest<Unit>;
 
@@ -35,51 +38,14 @@ public class CancelAsnCommandHandler : IRequestHandler<CancelAsnCommand, Unit>
         var asn = await _db.Asns.FirstOrDefaultAsync(a => a.Id == request.Id, ct)
                   ?? throw new NotFoundException("Asn", request.Id);
 
-        // R5 (§10.1) — any active (non-terminal) ASN may be cancelled; a Cancelled/Delivered ASN is rejected here,
-        // so the cumulative reversal (when applicable) can only ever run once per ASN (UC-ASN-11 — never double).
+        // Only a not-yet-posted ASN may be cancelled; a posted (Submitted / InTransit) or terminal ASN is a 409.
         AsnLifecycle.AssertCanCancel(asn.AsnStatus);
 
-        var now = DateTime.UtcNow;
-
-        // R5 (TSD R5 Addendum §10.4) — balance is consumed ONLY at final Submit, so ONLY a previously-consumed ASN
-        // (Submitted / InTransit) needs a reversal on cancel. A Draft / PendingApproval / Rejected ASN never touched
-        // shippedQtyToDate, so cancelling it needs NO reversal. The reversal (when it runs) restores each covered PO
-        // line's balance by Σ(this ASN's line ShippedQty), as in R4 §4.4 — one atomic ExecuteUpdateAsync per line.
-        var consumedBalance = asn.AsnStatus is AsnStatus.Submitted or AsnStatus.InTransit;
-
-        if (consumedBalance)
-        {
-            var reversalByPoLine = await _db.AsnLines
-                .Where(l => l.AsnId == asn.Id && !l.IsDeleted)
-                .GroupBy(l => l.PurchaseOrderLineId)
-                .Select(g => new { PoLineId = g.Key, Qty = g.Sum(x => x.ShippedQty) })
-                .ToListAsync(ct);
-
-            await using var tx = await _db.BeginTransactionAsync(ct);
-
-            // DI-02 — lock ordering: reverse in ascending PurchaseOrderLineId, matching the acquisition loops,
-            // so concurrent multi-line cancel/submit never acquire the line X-locks in opposite orders.
-            foreach (var r in reversalByPoLine.OrderBy(r => r.PoLineId))
-            {
-                await _db.PurchaseOrderLines
-                    .Where(l => l.Id == r.PoLineId)
-                    .ExecuteUpdateAsync(s => s.SetProperty(
-                        l => l.ShippedQtyToDate, l => l.ShippedQtyToDate - r.Qty), ct);
-            }
-
-            asn.AsnStatus = AsnStatus.Cancelled;
-            asn.UpdatedBy = _user.UserCode;
-            asn.UpdatedOn = now;
-
-            await _db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
-            return Unit.Value;
-        }
-
-        // No reversal needed — a single SaveChanges flips the status.
+        // §10.4 — balance is consumed only at Post, so a cancellable ASN never touched shippedQtyToDate:
+        // a single SaveChanges flips the status, nothing to reverse.
         asn.AsnStatus = AsnStatus.Cancelled;
         asn.UpdatedBy = _user.UserCode;
-        asn.UpdatedOn = now;
+        asn.UpdatedOn = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return Unit.Value;
     }

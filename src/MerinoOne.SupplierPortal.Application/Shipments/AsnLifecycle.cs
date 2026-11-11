@@ -20,8 +20,10 @@ namespace MerinoOne.SupplierPortal.Application.Shipments;
 /// required = false:
 ///   Draft ──────────────────────────────(Post)──────────────────────────▶ Submitted ──▶ InTransit ──▶ Delivered
 ///
-/// Any active state ──(Cancel)──▶ Cancelled
+/// Any pre-Post state (Draft / PendingApproval / Approved / Rejected) ──(Cancel)──▶ Cancelled
 /// </code>
+/// A posted ASN (Submitted / InTransit) is already in the ERP and a portal cancel does not reach LN, so it can no
+/// longer be cancelled here — it must be withdrawn in LN.
 /// </para>
 ///
 /// <para><see cref="Asn.AsnStatus"/> remains the SINGLE lifecycle source of truth; the
@@ -31,13 +33,22 @@ namespace MerinoOne.SupplierPortal.Application.Shipments;
 public static class AsnLifecycle
 {
     /// <summary>
-    /// States an ASN may still be Cancelled from (§10.1 "any active state"). R14 adds
-    /// <see cref="AsnStatus.Approved"/> — a confirmed-but-unposted ASN is very much active, and the supplier
-    /// must be able to withdraw it (nothing has been consumed or dispatched yet).
+    /// States an ASN may still be Cancelled from. R14 adds <see cref="AsnStatus.Approved"/> — a
+    /// confirmed-but-unposted ASN is very much active, and the supplier must be able to withdraw it (nothing has
+    /// been consumed or dispatched yet).
+    /// <para>2026-11-11 — <see cref="AsnStatus.Submitted"/> and <see cref="AsnStatus.InTransit"/> were removed
+    /// (narrowing §10.1 "any active state"): by then Post has sent the ASN to LN, and cancelling only in the portal
+    /// left the two systems disagreeing. The ASN detail screen offered Cancel only up to Approved; the server now
+    /// agrees.</para>
     /// </summary>
     public static readonly IReadOnlySet<AsnStatus> Cancellable = new HashSet<AsnStatus>
     {
         AsnStatus.Draft, AsnStatus.PendingApproval, AsnStatus.Approved, AsnStatus.Rejected,
+    };
+
+    /// <summary>States reached by Post — the ASN is in the ERP. Cancel refuses these with a specific message.</summary>
+    private static readonly IReadOnlySet<AsnStatus> Posted = new HashSet<AsnStatus>
+    {
         AsnStatus.Submitted, AsnStatus.InTransit,
     };
 
@@ -97,11 +108,13 @@ public static class AsnLifecycle
             : $"Cannot post: ASN is '{actual}'. This supplier does not require buyer confirmation, so only a Draft or Approved ASN can be posted.");
     }
 
-    /// <summary>Cancel: any active state → Cancelled (the single-cancel guard against a terminal ASN).</summary>
+    /// <summary>Cancel: any pre-Post state → Cancelled. Refuses a posted ASN (in the ERP) and a terminal one.</summary>
     public static void AssertCanCancel(AsnStatus actual)
     {
-        if (!Cancellable.Contains(actual))
-            throw new ConflictException(
-                $"Cannot cancel: ASN is '{actual}'; only an active (non-terminal) ASN can be cancelled.");
+        if (Cancellable.Contains(actual)) return;
+
+        throw new ConflictException(Posted.Contains(actual)
+            ? $"Cannot cancel: ASN is '{actual}'. It has already been posted to the ERP, so it must be withdrawn in LN."
+            : $"Cannot cancel: ASN is '{actual}'; only an ASN that has not been posted yet can be cancelled.");
     }
 }

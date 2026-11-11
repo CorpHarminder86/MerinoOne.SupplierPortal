@@ -5,13 +5,14 @@
    make the type ambiguous, not resolve to Integration). *@
 @using InforSyncLogDto = MerinoOne.SupplierPortal.Contracts.Integration.InforSyncLogDto
 @inject ApiClient Api
+@using MerinoOne.SupplierPortal.Contracts.Authorization
 @inject TokenAccessor Token
 
 <PageTitle>Sync Log</PageTitle>
 
-@if (!Token.IsAdmin)
+@if (!Token.HasPermission(Perm.IntegrationRead))
 {
-    <div class="tl-empty">Access denied — admin only.</div>
+    <div class="tl-empty">Access denied — requires the Integration.Read permission.</div>
 }
 else
 {

@@ -33,19 +33,34 @@ public class GetDashboardSummaryQueryHandler : IRequestHandler<GetDashboardSumma
             || p.PoStatus == PoStatus.Acknowledged
             || p.PoStatus == PoStatus.Accepted
             || p.PoStatus == PoStatus.PartiallyDelivered, ct);
+        // "Submitted" = submitted and still awaiting a decision. Submit runs the match straight away and lands the
+        // invoice in Matched or MatchExceptions (it rarely rests in Submitted), so those count too; Approved /
+        // Rejected / Paid / Cancelled have left the queue and Draft was never submitted.
         var submittedInvoices30 = await _db.Invoices.CountAsync(i =>
-            (i.InvoiceStatus == InvoiceStatus.Submitted || i.InvoiceStatus == InvoiceStatus.UnderReview)
+            (i.InvoiceStatus == InvoiceStatus.Submitted
+             || i.InvoiceStatus == InvoiceStatus.UnderReview
+             || i.InvoiceStatus == InvoiceStatus.Matched
+             || i.InvoiceStatus == InvoiceStatus.MatchExceptions)
             && i.CreatedOn > last30, ct);
         var payments30Net = await _db.Payments
             .Where(p => p.PaymentDate > last30)
             .SumAsync(p => (decimal?)p.NetPaid, ct) ?? 0m;
-        // R5 (TSD R5 Addendum §4.4): DeliverySchedule is now always Approved at creation; pre-R5
-        // "Proposed" status removed. Count all non-deleted R5 schedules (status=Approved) as "open".
-        var openSchedules = await _db.DeliverySchedules.CountAsync(d => d.Status == DeliveryScheduleStatus.Approved, ct);
+        // R5 (TSD R5 Addendum §4.4): DeliverySchedule is always Approved at creation. "Open" = the schedule's PO line
+        // still has something left to ship (orderQty − shippedQtyToDate > 0) — the same expression the Delivery
+        // Schedules screen's "only with balance" filter uses, so the tile matches that list.
+        var openSchedules = await (
+            from d in _db.DeliverySchedules
+            join line in _db.PurchaseOrderLines on d.PurchaseOrderLineId equals line.Id
+            where d.Status == DeliveryScheduleStatus.Approved
+                  && line.OrderQty - line.ShippedQtyToDate > 0
+            select d.Id).CountAsync(ct);
 
         // ---- previous-period values (30..60 days ago) ---------------------------
         var submittedInvoicesPrev = await _db.Invoices.CountAsync(i =>
-            (i.InvoiceStatus == InvoiceStatus.Submitted || i.InvoiceStatus == InvoiceStatus.UnderReview)
+            (i.InvoiceStatus == InvoiceStatus.Submitted
+             || i.InvoiceStatus == InvoiceStatus.UnderReview
+             || i.InvoiceStatus == InvoiceStatus.Matched
+             || i.InvoiceStatus == InvoiceStatus.MatchExceptions)
             && i.CreatedOn > last60 && i.CreatedOn <= last30, ct);
         var paymentsPrevNet = await _db.Payments
             .Where(p => p.PaymentDate > last60 && p.PaymentDate <= last30)
@@ -60,10 +75,14 @@ public class GetDashboardSummaryQueryHandler : IRequestHandler<GetDashboardSumma
             new("Open delivery schedules",   openSchedules,              null,                       Sign(openSchedules, null)),
         };
 
-        // ---- recent activity (TOP 10 across PO / Invoice / Payment) -------------
+        // ---- recent activity (TOP 10 across PO / ASN / Invoice / Payment) -------
         var recentPos = await _db.PurchaseOrders
             .OrderByDescending(p => p.CreatedOn).Take(10)
             .Select(p => new DashboardActivityDto("PurchaseOrder", p.PoNumber, p.PoStatus.ToString(), p.CreatedOn))
+            .ToListAsync(ct);
+        var recentAsns = await _db.Asns
+            .OrderByDescending(a => a.CreatedOn).Take(10)
+            .Select(a => new DashboardActivityDto("Asn", a.AsnNumber, a.AsnStatus.ToString(), a.CreatedOn))
             .ToListAsync(ct);
         var recentInvoices = await _db.Invoices
             .OrderByDescending(i => i.CreatedOn).Take(10)
@@ -74,7 +93,7 @@ public class GetDashboardSummaryQueryHandler : IRequestHandler<GetDashboardSumma
             .Select(p => new DashboardActivityDto("Payment", p.PaymentReference, p.NetPaid > 0 ? "Paid" : "Pending", p.CreatedOn))
             .ToListAsync(ct);
 
-        var recent = recentPos.Concat(recentInvoices).Concat(recentPayments)
+        var recent = recentPos.Concat(recentAsns).Concat(recentInvoices).Concat(recentPayments)
             .OrderByDescending(a => a.When)
             .Take(10)
             .ToList();

@@ -148,26 +148,28 @@ public class AsnQuantityTests
         (await ShippedToDate(setup.PoLineId)).Should().Be(100m, because: "the rejected over-ship left the cumulative at 100");
     }
 
-    // ── UC-ASN-11 — CancelAsn_ReversesCumulative (Submitted reversal) ────────────────────────────────────
+    // ── 2026-11-11 — CancelPostedAsn_Refused (replaces UC-ASN-11's Submitted reversal) ─────────────────────
+    // A posted ASN is already in LN and the portal cancel never notified LN, so the server now refuses it (409) and
+    // leaves both the status and the consumed balance untouched — the ASN detail screen never offered it either.
     [SkippableFact]
-    public async Task CancelAsn_ReversesCumulative()
+    public async Task CancelPostedAsn_Refused()
     {
         Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
 
         var setup = await ProcureToPayFlow.SeedPoAsync(_fx, orderQty: 100m);
         var client = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
 
-        // Ship 40 and submit (via approval) → cumulative 40.
+        // Ship 40 and submit (via approval + post) → cumulative 40.
         var submit = await ProcureToPayFlow.CreateAndSubmitAsync(_fx, client, setup, shippedQty: 40m);
         submit.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(submit));
         var asnId = (await Read<AsnDetailDto>(submit)).Data!.Id;
         (await ShippedToDate(setup.PoLineId)).Should().Be(40m);
 
-        // Cancel a SUBMITTED ASN → cumulative decremented by 40 → balance restored to 100.
         var cancel = await client.PostAsync($"/api/asns/{asnId}/cancel", null);
-        cancel.StatusCode.Should().Be(HttpStatusCode.OK, because: await Body(cancel));
-        (await ShippedToDate(setup.PoLineId)).Should().Be(0m, because: "cancel reverses a consumed (Submitted) ASN (UC-ASN-11)");
-        await AssertAsnStatus(asnId, AsnStatus.Cancelled);
+        cancel.StatusCode.Should().Be(HttpStatusCode.Conflict, because: await Body(cancel));
+        (await Body(cancel)).Should().Contain("posted to the ERP");
+        (await ShippedToDate(setup.PoLineId)).Should().Be(40m, because: "a refused cancel reverses nothing");
+        await AssertAsnStatus(asnId, AsnStatus.Submitted);
     }
 
     // ── §10.4 — CancelDraft_NoReversal (a Draft never consumed, so nothing to reverse) ───────────────────

@@ -53,7 +53,8 @@
             <RadzenCheckBox @bind-Value="_remember" Name="remember" />
             <label for="remember" style="margin-left:6px;">Remember me</label>
             <span style="flex:1;"></span>
-            <a class="mer-auth-link">Forgot password?</a>
+            @* No self-service reset: an administrator resets the password (Users → Set password). *@
+            <span>Forgot password? Contact your administrator.</span>
         </div>
 
         <RadzenButton ButtonStyle="ButtonStyle.Primary"

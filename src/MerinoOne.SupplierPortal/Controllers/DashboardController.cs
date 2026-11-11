@@ -19,6 +19,11 @@ public class DashboardController : ControllerBase
     [HttpGet("summary")]
     [EndpointSummary("Dashboard summary")]
     [EndpointDescription(@"KPI tiles + recent activity for the current user's home dashboard.
+Tiles:
+- **Submitted invoices (30d)**: invoices created in the last 30 days that are awaiting a decision
+  (Submitted / UnderReview / Matched / MatchExceptions), with the previous 30 days for the trend arrow.
+- **Open delivery schedules**: schedules whose PO line still has quantity left to ship (orderQty - shippedQtyToDate > 0).
+Recent activity: the 10 newest records across purchase orders, ASNs, invoices and payments.
 Side effects:
 - Seccode-scoped: counts reflect only entities the caller can see.
 - Role-aware: privileged roles (SuperAdmin/Admin/Buyer/Finance) see organisation-wide tiles; supplier users see their own.

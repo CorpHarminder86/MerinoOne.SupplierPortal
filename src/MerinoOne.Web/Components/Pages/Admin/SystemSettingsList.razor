@@ -1,5 +1,6 @@
 @page "/admin/settings"
 @inject ApiClient Api
+@using MerinoOne.SupplierPortal.Contracts.Authorization
 @inject TokenAccessor Token
 @inject NotificationService Notif
 @inject NavigationManager Nav
@@ -16,11 +17,11 @@
         </div>
     </header>
 
-    @if (!Token.IsAdmin)
+    @if (!Token.HasPermission(Perm.SettingsRead))
     {
         <div class="tl-empty">
             <span class="material-symbols-outlined" style="font-size:32px;">lock</span>
-            <div>Administrator access required.</div>
+            <div>Requires the Settings.Read permission.</div>
         </div>
     }
     else
@@ -274,7 +275,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!Token.IsAdmin) { loading = false; return; }
+        if (!Token.HasPermission(Perm.SettingsRead)) { loading = false; return; }
         // Deep-link support: /admin/settings?category=KillSwitches opens straight to that tab (the redirect
         // from the retired /integrations/switches route lands here).
         var q = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);

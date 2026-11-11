@@ -162,8 +162,8 @@
 
     private string StatusClass(string status) => status switch
     {
-        "Active" or "Approved" or "Accepted" or "Delivered" or "Closed" or "Paid" => "tlg-status--active",
-        "Submitted" or "UnderReview" or "Pending" or "Released" or "Acknowledged" or "PartiallyDelivered" or "Registering" or "Invited" => "tlg-status--pending",
+        "Active" or "Approved" or "Accepted" or "Delivered" or "Received" or "Closed" or "Paid" => "tlg-status--active",
+        "Submitted" or "UnderReview" or "Pending" or "PendingApproval" or "InTransit" or "Released" or "Acknowledged" or "PartiallyDelivered" or "Registering" or "Invited" => "tlg-status--pending",
         "Rejected" or "Cancelled" or "Suspended" or "Failed" => "tlg-status--danger",
         _ => "tlg-status--info"
     };

@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@using MerinoOne.SupplierPortal.Contracts.Authorization
 @inject TokenAccessor Token
 @inject ApiClient Api
 @inject CompanyState Company
@@ -75,7 +76,9 @@ else
                     <span class="mer-nav-item__icon material-symbols-outlined">groups</span>
                     <span class="mer-nav-item__label">Suppliers</span>
                 </NavLink>
-                @if (Token.IsAdmin)
+                @* Gated by permission, never by built-in role name, so custom roles work: the queue is where
+                   registrations are approved (Supplier.Approve). *@
+                @if (Token.HasPermission(Perm.SupplierApprove))
                 {
                     <NavLink class="mer-nav-item" href="suppliers/onboarding" Match="NavLinkMatch.All" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">how_to_reg</span>
@@ -199,27 +202,18 @@ else
                 }
                 </div>
 
-                @* R8 — supplier-reachable IDM sync log (RLS-scoped). Internal users see the same screen
-                   inside the admin Integrations group below, so this branch is non-admin only. *@
-                @if (!Token.IsAdmin && Token.HasPermission("Integration.IdmSync.View"))
+                @* Integrations / Administration / Master Data / System are gated by PERMISSION, never by built-in role
+                   name: a custom role holding admin permissions sees exactly the screens its API calls allow, and a
+                   Buyer holding Supplier.Invite sees Supplier Invites. Each item uses the permission of the API its page
+                   reads; a group header shows only when at least one of its items does. *@
+                @if (ShowIntegrationsGroup)
                 {
                     <button type="button" class="mer-nav-grp @(IsGroupOpen("Integrations") ? "is-open" : null)" @onclick='() => ToggleGroup("Integrations")'>
                         <span>Integrations</span><span class="material-symbols-outlined mer-nav-grp__caret">expand_more</span>
                     </button>
                     <div class="mer-nav-grp__items @(IsGroupOpen("Integrations") ? null : "collapsed")">
-                    <NavLink class="mer-nav-item" href="integrations/idm-sync-log" ActiveClass="active">
-                        <span class="mer-nav-item__icon material-symbols-outlined">cloud_sync</span>
-                        <span class="mer-nav-item__label">IDM Sync Log</span>
-                    </NavLink>
-                    </div>
-                }
-
-                @if (Token.IsAdmin)
-                {
-                    <button type="button" class="mer-nav-grp @(IsGroupOpen("Integrations") ? "is-open" : null)" @onclick='() => ToggleGroup("Integrations")'>
-                        <span>Integrations</span><span class="material-symbols-outlined mer-nav-grp__caret">expand_more</span>
-                    </button>
-                    <div class="mer-nav-grp__items @(IsGroupOpen("Integrations") ? null : "collapsed")">
+                    @if (Token.HasPermission(Perm.IntegrationRead))
+                    {
                     <NavLink class="mer-nav-item" href="integrations/sync-log" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">sync</span>
                         <span class="mer-nav-item__label">Sync Log</span>
@@ -243,11 +237,17 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">cable</span>
                         <span class="mer-nav-item__label">Endpoints</span>
                     </NavLink>
-                    @* R8 — Infor IDM outbound document sync (admin view). *@
+                    }
+                    @* R8 — Infor IDM outbound document sync. View is WIDE (suppliers too); the rows are RLS-scoped. *@
+                    @if (Token.HasPermission(Perm.IntegrationIdmSyncView))
+                    {
                     <NavLink class="mer-nav-item" href="integrations/idm-sync-log" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">cloud_sync</span>
                         <span class="mer-nav-item__label">IDM Sync Log</span>
                     </NavLink>
+                    }
+                    @if (Token.HasPermission(Perm.IntegrationRead))
+                    {
                     <NavLink class="mer-nav-item" href="integrations/share-groups" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">hub</span>
                         <span class="mer-nav-item__label">Table Sharing</span>
@@ -262,20 +262,34 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">rule_settings</span>
                         <span class="mer-nav-item__label">LN Backfill</span>
                     </NavLink>
+                    }
                     </div>
+                }
 
+                @if (ShowAdministrationGroup)
+                {
                     <button type="button" class="mer-nav-grp @(IsGroupOpen("Administration") ? "is-open" : null)" @onclick='() => ToggleGroup("Administration")'>
                         <span>Administration</span><span class="material-symbols-outlined mer-nav-grp__caret">expand_more</span>
                     </button>
                     <div class="mer-nav-grp__items @(IsGroupOpen("Administration") ? null : "collapsed")">
+                    @if (Token.HasPermission(Perm.UserRead))
+                    {
                     <NavLink class="mer-nav-item" href="admin/users" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">group</span>
                         <span class="mer-nav-item__label">Users</span>
                     </NavLink>
+                    }
+                    @* The tenant's LN logistic companies (drive the active-company selector) — not the same screen as
+                       System → Company Addresses, hence the distinct label. *@
+                    @if (Token.HasPermission(Perm.SettingsRead))
+                    {
                     <NavLink class="mer-nav-item" href="admin/companies" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">apartment</span>
-                        <span class="mer-nav-item__label">Companies</span>
+                        <span class="mer-nav-item__label">Logistic Companies</span>
                     </NavLink>
+                    }
+                    @if (Token.HasPermission(Perm.RoleRead))
+                    {
                     <NavLink class="mer-nav-item" href="admin/roles" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">admin_panel_settings</span>
                         <span class="mer-nav-item__label">Roles</span>
@@ -284,13 +298,20 @@ else
                         <span class="mer-nav-item__icon material-symbols-outlined">key</span>
                         <span class="mer-nav-item__label">Permissions</span>
                     </NavLink>
+                    }
+                    @if (Token.HasPermission(Perm.SupplierInvite))
+                    {
                     <NavLink class="mer-nav-item" href="admin/supplier-invites" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">mail_outline</span>
                         <span class="mer-nav-item__label">Supplier Invites</span>
                     </NavLink>
-                   
+                    }
                     </div>
+                }
 
+                @* Every master-data screen reads api/masters/* (Settings.Read). *@
+                @if (Token.HasPermission(Perm.SettingsRead))
+                {
                     <button type="button" class="mer-nav-grp @(IsGroupOpen("Master Data") ? "is-open" : null)" @onclick='() => ToggleGroup("Master Data")'>
                         <span>Master Data</span><span class="material-symbols-outlined mer-nav-grp__caret">expand_more</span>
                     </button>
@@ -345,17 +366,23 @@ else
                         <span class="mer-nav-item__label">Postal Codes</span>
                     </NavLink>
                     </div>
+                }
 
+                @if (ShowSystemGroup)
+                {
                     <button type="button" class="mer-nav-grp @(IsGroupOpen("System") ? "is-open" : null)" @onclick='() => ToggleGroup("System")'>
                         <span>System</span><span class="material-symbols-outlined mer-nav-grp__caret">expand_more</span>
                     </button>
                     <div class="mer-nav-grp__items @(IsGroupOpen("System") ? null : "collapsed")">
+                    @if (Token.HasPermission(Perm.SettingsRead))
+                    {
                     <NavLink class="mer-nav-item" href="admin/settings" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">tune</span>
                         <span class="mer-nav-item__label">System Settings</span>
                     </NavLink>
+                    }
                     @* R4 (2026-06-26) — Phase 5b: fulfilment-control settings (Settings.Write). *@
-                    @if (Token.HasPermission("Settings.Write"))
+                    @if (Token.HasPermission(Perm.SettingsWrite))
                     {
                         <NavLink class="mer-nav-item" href="settings/supplier-item-tolerances" ActiveClass="active">
                             <span class="mer-nav-item__icon material-symbols-outlined">straighten</span>
@@ -365,10 +392,11 @@ else
                             <span class="mer-nav-item__icon material-symbols-outlined">attach_file</span>
                             <span class="mer-nav-item__label">Attachment Requirements</span>
                         </NavLink>
-                        @* R5 (TSD R5 §5 — Component 1, Company Master): customer / ship-to maintenance (Settings.Write). *@
+                        @* R5 (TSD R5 §5 — Component 1, Company Master): each ERP company's base identity address +
+                           warehouse pool (Settings.Write). Labelled apart from Administration → Logistic Companies. *@
                         <NavLink class="mer-nav-item" href="settings/companies" ActiveClass="active">
                             <span class="mer-nav-item__icon material-symbols-outlined">domain</span>
-                            <span class="mer-nav-item__label">Companies</span>
+                            <span class="mer-nav-item__label">Company Addresses</span>
                         </NavLink>
                         @* R5 (TSD R5 §11 — Component 7): ERP→portal PO-status mapping editor (Settings.Write). *@
                         <NavLink class="mer-nav-item" href="settings/po-status-mappings" ActiveClass="active">
@@ -378,14 +406,18 @@ else
                         @* R10 — IDM Entity Type + LN Outbound Endpoints merged into the Endpoints hub
                            (Integrations → Endpoints → Outbound); old routes redirect. *@
                     }
+                    @if (Token.HasPermission(Perm.SettingsRead))
+                    {
                     <NavLink class="mer-nav-item" href="admin/email-templates" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">mail</span>
                         <span class="mer-nav-item__label">Email Templates</span>
                     </NavLink>
+                    @* whoami needs no permission; kept with the other admin tools. *@
                     <NavLink class="mer-nav-item" href="admin/diagnostics" ActiveClass="active">
                         <span class="mer-nav-item__icon material-symbols-outlined">bug_report</span>
                         <span class="mer-nav-item__label">Scope Diagnostics</span>
                     </NavLink>
+                    }
                     </div>
                 }
                 }
@@ -584,6 +616,16 @@ else
         var g = GroupForPath(Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].TrimEnd('/').ToLowerInvariant());
         if (g is not null) _openGroups.Add(g);
     }
+
+    // Admin-group headers: shown when the user can open at least one item inside (each item is gated on the permission
+    // of the API its page reads — see the nav markup). Permission-based, never role-name-based.
+    private bool ShowIntegrationsGroup =>
+        Token.HasPermission(Perm.IntegrationRead) || Token.HasPermission(Perm.IntegrationIdmSyncView);
+    private bool ShowAdministrationGroup =>
+        Token.HasPermission(Perm.UserRead) || Token.HasPermission(Perm.SettingsRead)
+        || Token.HasPermission(Perm.RoleRead) || Token.HasPermission(Perm.SupplierInvite);
+    private bool ShowSystemGroup =>
+        Token.HasPermission(Perm.SettingsRead) || Token.HasPermission(Perm.SettingsWrite);
 
     // Route → group. Longest matching prefix wins (so admin/settings → System, not a bare admin match).
     private static readonly (string Group, string[] Prefixes)[] RouteGroups =

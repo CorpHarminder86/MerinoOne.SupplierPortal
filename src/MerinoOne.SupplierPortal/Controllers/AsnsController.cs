@@ -226,8 +226,12 @@ PendingApproval. Requires **Asn.Approve**.")]
     [HttpPost("{id:guid}/cancel")]
     [Authorize(Policy = Perm.AsnWrite)]
     [EndpointSummary("Cancel ASN")]
-    [EndpointDescription(@"Cancels an ASN (Draft or Submitted -> Cancelled). Terminal for supplier edits.
-Returns: empty success; 404 if not found; 409 if already Cancelled. Requires **Asn.Write**.")]
+    [EndpointDescription(@"Cancels an ASN that has not been posted yet (Draft / PendingApproval / Approved / Rejected -> Cancelled).
+Terminal for supplier edits. No PO balance is touched (balance is consumed only at Post).
+A posted ASN (Submitted / InTransit) is refused: it is already in the ERP and this call does not notify LN, so it
+must be withdrawn in LN instead.
+Returns: empty success; 404 if not found; 409 if posted (Submitted / InTransit) or already terminal
+(Delivered / Received / Cancelled). Requires **Asn.Write**.")]
     public async Task<Result> Cancel(Guid id, CancellationToken ct)
     {
         await _mediator.Send(new CancelAsnCommand(id), ct);
