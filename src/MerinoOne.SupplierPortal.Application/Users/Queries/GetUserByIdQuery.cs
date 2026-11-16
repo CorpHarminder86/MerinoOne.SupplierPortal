@@ -1,6 +1,7 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -12,12 +13,14 @@ public record GetUserByIdQuery(Guid Id) : IRequest<UserDetailDto>;
 public class GetUserByIdQueryHandler : IRequestHandler<GetUserByIdQuery, UserDetailDto>
 {
     private readonly IAppDbContext _db;
-    public GetUserByIdQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetUserByIdQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<UserDetailDto> Handle(GetUserByIdQuery request, CancellationToken ct)
     {
-        var user = await _db.AppUsers.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(u => u.Id == request.Id, ct)
+        // Tenant rule re-applied explicitly (IgnoreQueryFilters drops it): another tenant's user is a 404.
+        var user = await _db.AppUsers.IgnoreQueryFilters().InCallerTenant(_user)
+            .FirstOrDefaultAsync(u => u.Id == request.Id && !u.IsDeleted, ct)
             ?? throw new NotFoundException("User", request.Id);
 
         // IgnoreQueryFilters() drops the SECCODE filter (admin needs cross-tenant view) but

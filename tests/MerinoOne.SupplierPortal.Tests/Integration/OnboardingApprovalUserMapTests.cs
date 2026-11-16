@@ -116,6 +116,36 @@ public class OnboardingApprovalUserMapTests
         usersWithEmail.Should().Be(1, because: "the existing user is reused, not duplicated");
     }
 
+    // -------------------- cross-tenant: another tenant's user is never linked --------------------
+
+    [SkippableFact]
+    public async Task Approve_does_not_link_an_existing_user_from_another_tenant()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var legalName = $"Onboard XTenant {tag} Pvt Ltd";
+        var email = $"onboard-xt-{tag}@supplier.test";
+
+        // The invite email is owned by an ACTIVE user of tenant B. Email is globally unique, so the approve-time
+        // lookup finds it — but the tenant-A supplier must never be bound to a tenant-B user.
+        var foreignUserId = await SeedActiveUserAsync($"xt-link-{tag}", email, SecurityTestHarness.TenantBId);
+
+        var (_, token) = await CreateInviteAsync(legalName, email);
+        var supplierId = await RegisterAsync(token, legalName, primaryContactEmail: email);
+
+        await ApproveAsync(supplierId);
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.SupplierUserMaps.IgnoreQueryFilters()
+                .AnyAsync(m => m.SupplierId == supplierId && m.AppUserId == foreignUserId && !m.IsDeleted))
+            .Should().BeFalse(because: "a tenant-B user must not be linked to a tenant-A supplier");
+        (await db.UserCompanyMaps.IgnoreQueryFilters()
+                .AnyAsync(m => m.AppUserId == foreignUserId && !m.IsDeleted))
+            .Should().BeFalse(because: "a tenant-B user must not be granted a tenant-A company");
+    }
+
     // -------------------- C7 SECURITY: an arbitrary victim is never linked --------------------
 
     [SkippableFact]
@@ -307,7 +337,7 @@ public class OnboardingApprovalUserMapTests
     }
 
     /// <summary>Seeds an ACTIVE, non-MFA portal user with the given email directly via the DbContext.</summary>
-    private async Task<Guid> SeedActiveUserAsync(string userCode, string email)
+    private async Task<Guid> SeedActiveUserAsync(string userCode, string email, Guid? tenantId = null)
     {
         using var scope = _fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -323,7 +353,7 @@ public class OnboardingApprovalUserMapTests
             IsInternal = false,
             IsMfaEnabled = false,
             IsActive = true,
-            TenantId = IntegrationTestFixture.TenantId,
+            TenantId = tenantId ?? IntegrationTestFixture.TenantId,
             CreatedBy = "seed",
             CreatedOn = now,
         });

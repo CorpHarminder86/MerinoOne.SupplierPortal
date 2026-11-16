@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using Microsoft.EntityFrameworkCore;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
 
@@ -11,15 +12,21 @@ public class UnmapSupplierCommandHandler : IRequestHandler<UnmapSupplierCommand,
 {
     private readonly IAppDbContext _db;
     private readonly SupplierMapService _maps;
+    private readonly ICurrentUser _user;
 
-    public UnmapSupplierCommandHandler(IAppDbContext db, SupplierMapService maps)
+    public UnmapSupplierCommandHandler(IAppDbContext db, SupplierMapService maps, ICurrentUser user)
     {
         _db = db;
         _maps = maps;
+        _user = user;
     }
 
     public async Task<Unit> Handle(UnmapSupplierCommand request, CancellationToken ct)
     {
+        // Tenant rule (IgnoreQueryFilters below drops it): the target user must belong to the caller's tenant.
+        if (!await _db.AppUsers.IgnoreQueryFilters().InCallerTenant(_user).AnyAsync(u => u.Id == request.UserId, ct))
+            throw new NotFoundException("User", request.UserId);
+
         var map = await _db.SupplierUserMaps.IgnoreQueryFilters()
             .FirstOrDefaultAsync(m => m.AppUserId == request.UserId && m.SupplierId == request.SupplierId, ct)
             ?? throw new NotFoundException("SupplierUserMap", $"{request.UserId}|{request.SupplierId}");

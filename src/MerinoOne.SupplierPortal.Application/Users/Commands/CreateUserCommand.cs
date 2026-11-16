@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -51,7 +52,8 @@ public class CreateUserCommandHandler : IRequestHandler<CreateUserCommand, Guid>
 
         // Accept role identifiers as either Name or Guid string.
         var requested = body.Roles.Distinct().ToArray();
-        var roleRows = await _db.Roles.IgnoreQueryFilters()
+        // Only roles the caller may assign (own tenant + legacy shared built-ins, never PlatformAdmin).
+        var roleRows = await _db.Roles.IgnoreQueryFilters().ReadableBy(_user).Where(r => !r.IsDeleted)
             .Select(r => new { r.Id, r.Name })
             .ToListAsync(ct);
         var matched = roleRows

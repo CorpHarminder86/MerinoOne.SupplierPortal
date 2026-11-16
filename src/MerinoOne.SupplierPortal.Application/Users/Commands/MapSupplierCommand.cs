@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -38,7 +39,8 @@ public class MapSupplierCommandHandler : IRequestHandler<MapSupplierCommand, Uni
 
     public async Task<Unit> Handle(MapSupplierCommand request, CancellationToken ct)
     {
-        var user = await _db.AppUsers.IgnoreQueryFilters()
+        // Tenant rule re-applied (IgnoreQueryFilters drops it): another tenant's user is a 404.
+        var user = await _db.AppUsers.IgnoreQueryFilters().InCallerTenant(_user)
             .FirstOrDefaultAsync(u => u.Id == request.UserId, ct)
             ?? throw new NotFoundException("User", request.UserId);
 

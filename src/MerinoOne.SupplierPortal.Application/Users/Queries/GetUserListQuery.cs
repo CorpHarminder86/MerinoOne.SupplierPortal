@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using Microsoft.EntityFrameworkCore;
@@ -16,15 +17,17 @@ public record GetUserListQuery(
 public class GetUserListQueryHandler : IRequestHandler<GetUserListQuery, PagedResult<UserListItemDto>>
 {
     private readonly IAppDbContext _db;
-    public GetUserListQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetUserListQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<PagedResult<UserListItemDto>> Handle(GetUserListQuery request, CancellationToken ct)
     {
         var page = request.Page < 1 ? 1 : request.Page;
         var pageSize = request.PageSize is < 1 or > 200 ? 50 : request.PageSize;
 
-        // IgnoreQueryFilters bypasses BOTH seccode AND soft-delete; re-apply !IsDeleted manually.
-        var q = _db.AppUsers.IgnoreQueryFilters().Where(u => !u.IsDeleted);
+        // IgnoreQueryFilters drops EVERY global filter (tenant, seccode, soft-delete) — re-apply the tenant rule
+        // and !IsDeleted explicitly, or a tenant admin lists every tenant's users.
+        var q = _db.AppUsers.IgnoreQueryFilters().InCallerTenant(_user).Where(u => !u.IsDeleted);
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {

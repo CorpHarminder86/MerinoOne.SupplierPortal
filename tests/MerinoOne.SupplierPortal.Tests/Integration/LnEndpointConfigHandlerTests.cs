@@ -207,9 +207,16 @@ public class OutboundIntegrationConfigHandlerTests
         var (s5, db5, u5, _, builders5, _, _) = Services();
         using (s5)
         {
-            var pinned = await new PinLnSampleDocumentCommandHandler(db5, u5, builders5)
-                .Handle(new PinLnSampleDocumentCommand(id, IntegrationTestFixture.InvoiceId), CancellationToken.None);
-            pinned.Should().BeTrue();
+            // This config lives in a SYNTHETIC tenant, so pinning the fixture-tenant invoice is (correctly) refused as
+            // cross-tenant. Freeze the sample from the real builder output directly; the pin handler itself is covered
+            // by CrossTenantAdminIsolationTests (own-tenant pins, foreign-tenant refused).
+            await Assert.ThrowsAsync<ValidationException>(() => new PinLnSampleDocumentCommandHandler(db5, u5, builders5)
+                .Handle(new PinLnSampleDocumentCommand(id, IntegrationTestFixture.InvoiceId), CancellationToken.None));
+            var builder = builders5.TryGet(LnPortalEntity.Invoice)!;
+            var json = await builder.BuildJsonAsync(db5, IntegrationTestFixture.InvoiceId, OutboxTransactionType.InvoicePost, null);
+            await db5.OutboundIntegrationConfigs.IgnoreQueryFilters().Where(c => c.Id == id)
+                .ExecuteUpdateAsync(s => s.SetProperty(c => c.SampleDocumentJson, json)
+                                          .SetProperty(c => c.SampleBuilderVersion, builder.BuilderVersion));
             var row = await db5.OutboundIntegrationConfigs.IgnoreQueryFilters().AsNoTracking().FirstAsync(c => c.Id == id);
             row.SampleDocumentJson.Should().NotBeNullOrWhiteSpace();
             row.SampleBuilderVersion.Should().Be(LnInputDocumentVersions.Invoice);

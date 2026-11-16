@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using Microsoft.EntityFrameworkCore;
@@ -24,12 +25,14 @@ public class AssignRoleCommandHandler : IRequestHandler<AssignRoleCommand, Unit>
 
     public async Task<Unit> Handle(AssignRoleCommand request, CancellationToken ct)
     {
-        var user = await _db.AppUsers.IgnoreQueryFilters()
+        // Tenant rule re-applied (IgnoreQueryFilters drops it): another tenant's user is a 404.
+        var user = await _db.AppUsers.IgnoreQueryFilters().InCallerTenant(_user)
             .FirstOrDefaultAsync(u => u.Id == request.UserId, ct)
             ?? throw new NotFoundException("User", request.UserId);
 
-        var role = await _db.Roles.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.Id == request.Body.RoleId, ct)
+        // Own-tenant roles (+ legacy shared built-ins) only — never another tenant's role, never PlatformAdmin.
+        var role = await _db.Roles.IgnoreQueryFilters().ReadableBy(_user)
+            .FirstOrDefaultAsync(r => r.Id == request.Body.RoleId && !r.IsDeleted, ct)
             ?? throw new NotFoundException("Role", request.Body.RoleId);
 
         // Load existing link INCLUDING soft-deleted. If active → idempotent. If soft-deleted →

@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using Microsoft.EntityFrameworkCore;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
@@ -34,7 +35,8 @@ public class SetPasswordCommandHandler : IRequestHandler<SetPasswordCommand, Uni
 
     public async Task<Unit> Handle(SetPasswordCommand request, CancellationToken ct)
     {
-        var user = await _db.AppUsers.IgnoreQueryFilters()
+        // Tenant rule re-applied (IgnoreQueryFilters drops it): another tenant's user is a 404.
+        var user = await _db.AppUsers.IgnoreQueryFilters().InCallerTenant(_user)
             .FirstOrDefaultAsync(u => u.Id == request.UserId, ct)
             ?? throw new NotFoundException("User", request.UserId);
 

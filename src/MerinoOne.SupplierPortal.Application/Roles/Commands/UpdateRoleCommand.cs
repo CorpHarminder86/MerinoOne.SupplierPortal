@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using Microsoft.EntityFrameworkCore;
 using ConflictException = MerinoOne.SupplierPortal.Application.Common.Exceptions.ConflictException;
@@ -33,8 +34,9 @@ public class UpdateRoleCommandHandler : IRequestHandler<UpdateRoleCommand, Unit>
 
     public async Task<Unit> Handle(UpdateRoleCommand request, CancellationToken ct)
     {
-        var role = await _db.Roles.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.Id == request.Id, ct)
+        // Only the caller's OWN tenant roles are editable; a foreign or shared (null-tenant) role is a 404.
+        var role = await _db.Roles.IgnoreQueryFilters().OwnedBy(_user)
+            .FirstOrDefaultAsync(r => r.Id == request.Id && !r.IsDeleted, ct)
             ?? throw new NotFoundException("Role", request.Id);
 
         if (!string.Equals(role.Name, request.Body.Name, StringComparison.Ordinal))

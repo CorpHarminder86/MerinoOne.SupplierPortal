@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Application.Roles.Common;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using Microsoft.EntityFrameworkCore;
@@ -36,8 +37,9 @@ public class AssignPermissionsCommandHandler : IRequestHandler<AssignPermissions
 
     public async Task<Unit> Handle(AssignPermissionsCommand request, CancellationToken ct)
     {
-        var role = await _db.Roles.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.Id == request.RoleId, ct)
+        // Only the caller's OWN tenant roles are editable; a foreign or shared (null-tenant) role is a 404.
+        var role = await _db.Roles.IgnoreQueryFilters().OwnedBy(_user)
+            .FirstOrDefaultAsync(r => r.Id == request.RoleId && !r.IsDeleted, ct)
             ?? throw new NotFoundException("Role", request.RoleId);
 
         var permIds = await _writer.ResolveAsync(request.Body.PermissionCodes, ct);

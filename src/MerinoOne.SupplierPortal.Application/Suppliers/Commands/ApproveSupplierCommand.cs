@@ -5,6 +5,7 @@ using MerinoOne.SupplierPortal.Application.Common.Documents;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Documents;
 using MerinoOne.SupplierPortal.Application.Users.Commands;
+using MerinoOne.SupplierPortal.Contracts.Authorization;
 using MerinoOne.SupplierPortal.Contracts.Suppliers;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Enums;
@@ -117,6 +118,8 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
             var contactEmail = primaryContact.Email.Trim().ToLowerInvariant();
             var actor = string.IsNullOrEmpty(_user.UserCode) ? "system" : _user.UserCode;
 
+            // Email is GLOBALLY unique (UQ_AppUser_email), so this lookup must stay cross-tenant — but a match in
+            // ANOTHER tenant is never linked (below): that would bind a foreign tenant's user to this supplier.
             var existingUser = await _db.AppUsers.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(u => u.Email.ToLower() == contactEmail && !u.IsDeleted, ct);
 
@@ -139,14 +142,20 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
                     IsMfaEnabled = false,
                     IsActive = true,
                     MustChangePassword = true,
+                    TenantId = supplier.TenantId,   // explicit — the supplier's tenant, not whatever the caller is
                     CreatedBy = actor,
                     CreatedOn = now,
                 };
                 _db.AppUsers.Add(newUser);
 
                 // Assign Supplier role
+                // The SUPPLIER'S tenant's "Supplier" role; a legacy shared (null-tenant) built-in only as fallback.
+                // Never another tenant's role (the name is per-tenant unique, not global).
+                var supplierTenantId = supplier.TenantId;
                 var supplierRoleId = await _db.Roles.IgnoreQueryFilters()
-                    .Where(r => r.Name == "Supplier")
+                    .Where(r => r.Name == RoleNames.Supplier && !r.IsDeleted
+                                && (r.TenantId == supplierTenantId || r.TenantId == null))
+                    .OrderBy(r => r.TenantId == null ? 1 : 0)
                     .Select(r => (Guid?)r.Id)
                     .FirstOrDefaultAsync(ct);
                 if (supplierRoleId.HasValue)
@@ -228,7 +237,9 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
                 var inviteBound = !string.IsNullOrWhiteSpace(inviteEmail)
                                   && string.Equals(inviteEmail.Trim(), contactEmail, StringComparison.OrdinalIgnoreCase);
 
-                if (existingUser.IsActive && inviteBound)
+                var sameTenant = existingUser.TenantId.HasValue && existingUser.TenantId == supplier.TenantId;
+
+                if (existingUser.IsActive && inviteBound && sameTenant)
                 {
                     await _mapService.CreateOrRestoreMapAsync(existingUser, supplier, canWrite: false, actor, now, ct);
                     var company = await _db.TenantEntities.IgnoreQueryFilters()
@@ -242,9 +253,9 @@ public class ApproveSupplierCommandHandler : IRequestHandler<ApproveSupplierComm
                 else
                 {
                     _logger.LogWarning(
-                        "Not auto-linking existing user {Email} to supplier {SupplierCode}: active={Active}, inviteBound={Bound} " +
-                        "(the primary-contact email must match the OTP-verified invite address).",
-                        contactEmail, supplier.SupplierCode, existingUser.IsActive, inviteBound);
+                        "Not auto-linking existing user {Email} to supplier {SupplierCode}: active={Active}, inviteBound={Bound}, sameTenant={SameTenant} " +
+                        "(the primary-contact email must match the OTP-verified invite address, and the user must belong to the supplier's tenant).",
+                        contactEmail, supplier.SupplierCode, existingUser.IsActive, inviteBound, sameTenant);
                 }
             }
         }

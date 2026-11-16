@@ -474,8 +474,17 @@ public class PinLnSampleDocumentCommandHandler : IRequestHandler<PinLnSampleDocu
 
         var builder = _builders.TryGet(row.PortalEntity)
             ?? throw new ValidationException($"No input-document builder for portal entity '{row.PortalEntity}'.");
+
+        // The builders load their root with IgnoreQueryFilters (they also serve the cross-tenant dispatchers), so
+        // they cannot tell a foreign tenant's entity from our own. Probe the root's tenant HERE, before building —
+        // otherwise a tenant-A admin could freeze a tenant-B document (e.g. supplier bank details) into this
+        // config's sample and read it back. Same message as "not found" so the probe is not an existence oracle.
+        const string notFound = "Entity not found (or deleted) — pick a live entity to pin.";
+        if (!await EntityBelongsToTenantAsync(row.PortalEntity, request.EntityId, tid, ct))
+            throw new ValidationException(notFound);
+
         var json = await builder.BuildJsonAsync(_db, request.EntityId, row.TransactionType, null, ct)
-            ?? throw new ValidationException("Entity not found (or deleted) — pick a live entity to pin.");
+            ?? throw new ValidationException(notFound);
 
         row.SampleDocumentJson = json;
         row.SampleBuilderVersion = builder.BuilderVersion;
@@ -484,6 +493,18 @@ public class PinLnSampleDocumentCommandHandler : IRequestHandler<PinLnSampleDocu
         await _db.SaveChangesAsync(ct);
         return true;
     }
+
+    /// <summary>Root-entity tenant probe per portal entity. An entity type with no probe fails closed.</summary>
+    private Task<bool> EntityBelongsToTenantAsync(string portalEntity, Guid id, Guid tid, CancellationToken ct) => portalEntity switch
+    {
+        LnPortalEntity.Invoice        => _db.Invoices.IgnoreQueryFilters().AnyAsync(e => e.Id == id && e.TenantId == tid && !e.IsDeleted, ct),
+        LnPortalEntity.Asn            => _db.Asns.IgnoreQueryFilters().AnyAsync(e => e.Id == id && e.TenantId == tid && !e.IsDeleted, ct),
+        LnPortalEntity.PurchaseOrder  => _db.PurchaseOrders.IgnoreQueryFilters().AnyAsync(e => e.Id == id && e.TenantId == tid && !e.IsDeleted, ct),
+        LnPortalEntity.Supplier       => _db.Suppliers.IgnoreQueryFilters().AnyAsync(e => e.Id == id && e.TenantId == tid && !e.IsDeleted, ct),
+        LnPortalEntity.SupplierChange => _db.SupplierChangeRequests.IgnoreQueryFilters().AnyAsync(e => e.Id == id && e.TenantId == tid && !e.IsDeleted, ct),
+        LnPortalEntity.PoNegotiation  => _db.PurchaseOrderNegotiations.IgnoreQueryFilters().AnyAsync(e => e.Id == id && e.TenantId == tid && !e.IsDeleted, ct),
+        _ => Task.FromResult(false),
+    };
 }
 
 /// <summary>D-R9-17 + D-R9-21 — record the manual dry-post attestation. The system records; it does not verify.</summary>

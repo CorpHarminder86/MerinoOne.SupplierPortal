@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using Microsoft.EntityFrameworkCore;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
 
@@ -25,7 +26,8 @@ public class DeactivateUserCommandHandler : IRequestHandler<DeactivateUserComman
 
     public async Task<Unit> Handle(DeactivateUserCommand request, CancellationToken ct)
     {
-        var user = await _db.AppUsers.IgnoreQueryFilters()
+        // Tenant rule re-applied (IgnoreQueryFilters drops it): another tenant's user is a 404.
+        var user = await _db.AppUsers.IgnoreQueryFilters().InCallerTenant(_user)
             .FirstOrDefaultAsync(u => u.Id == request.Id, ct)
             ?? throw new NotFoundException("User", request.Id);
 

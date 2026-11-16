@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.PurchaseOrders;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using Microsoft.EntityFrameworkCore;
@@ -12,14 +13,16 @@ public record GetRoleListQuery(int Page = 1, int PageSize = 50)
 public class GetRoleListQueryHandler : IRequestHandler<GetRoleListQuery, PagedResult<RoleListItemDto>>
 {
     private readonly IAppDbContext _db;
-    public GetRoleListQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetRoleListQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<PagedResult<RoleListItemDto>> Handle(GetRoleListQuery request, CancellationToken ct)
     {
         var page = request.Page < 1 ? 1 : request.Page;
         var pageSize = request.PageSize is < 1 or > 200 ? 50 : request.PageSize;
 
-        var baseQ = _db.Roles.IgnoreQueryFilters().Where(r => !r.IsDeleted);
+        // IgnoreQueryFilters drops the tenant filter too — re-apply it (own roles + legacy shared built-ins).
+        var baseQ = _db.Roles.IgnoreQueryFilters().ReadableBy(_user).Where(r => !r.IsDeleted);
         var total = await baseQ.CountAsync(ct);
 
         var pageRoles = await baseQ
@@ -39,8 +42,10 @@ public class GetRoleListQueryHandler : IRequestHandler<GetRoleListQuery, PagedRe
             .Select(g => new { RoleId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.RoleId, x => x.Count, ct);
 
+        // Count only the caller's tenant's users — a shared (null-tenant) built-in role is held across tenants.
+        var tenantUsers = _db.AppUsers.IgnoreQueryFilters().InCallerTenant(_user).Where(u => !u.IsDeleted).Select(u => u.Id);
         var userCounts = await _db.UserRoles.IgnoreQueryFilters()
-            .Where(ur => !ur.IsDeleted && ids.Contains(ur.RoleId))
+            .Where(ur => !ur.IsDeleted && ids.Contains(ur.RoleId) && tenantUsers.Contains(ur.AppUserId))
             .GroupBy(ur => ur.RoleId)
             .Select(g => new { RoleId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.RoleId, x => x.Count, ct);

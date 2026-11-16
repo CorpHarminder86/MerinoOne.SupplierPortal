@@ -1,5 +1,6 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using Microsoft.EntityFrameworkCore;
 using NotFoundException = MerinoOne.SupplierPortal.Application.Common.Exceptions.NotFoundException;
 
@@ -25,6 +26,10 @@ public class RemoveUserCompanyCommandHandler : IRequestHandler<RemoveUserCompany
 
     public async Task<Unit> Handle(RemoveUserCompanyCommand request, CancellationToken ct)
     {
+        // Tenant rule (IgnoreQueryFilters below drops it): the target user must belong to the caller's tenant.
+        if (!await _db.AppUsers.IgnoreQueryFilters().InCallerTenant(_user).AnyAsync(u => u.Id == request.UserId, ct))
+            throw new NotFoundException("User", request.UserId);
+
         var map = await _db.UserCompanyMaps.IgnoreQueryFilters()
             .FirstOrDefaultAsync(m => m.AppUserId == request.UserId
                                       && m.TenantEntityId == request.TenantEntityId

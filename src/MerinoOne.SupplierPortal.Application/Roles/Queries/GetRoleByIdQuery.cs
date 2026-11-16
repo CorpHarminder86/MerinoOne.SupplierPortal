@@ -1,6 +1,7 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.Common.Security;
 using MerinoOne.SupplierPortal.Contracts.Users;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,11 +12,13 @@ public record GetRoleByIdQuery(Guid Id) : IRequest<RoleDetailDto>;
 public class GetRoleByIdQueryHandler : IRequestHandler<GetRoleByIdQuery, RoleDetailDto>
 {
     private readonly IAppDbContext _db;
-    public GetRoleByIdQueryHandler(IAppDbContext db) => _db = db;
+    private readonly ICurrentUser _user;
+    public GetRoleByIdQueryHandler(IAppDbContext db, ICurrentUser user) { _db = db; _user = user; }
 
     public async Task<RoleDetailDto> Handle(GetRoleByIdQuery request, CancellationToken ct)
     {
-        var role = await _db.Roles.IgnoreQueryFilters()
+        // Tenant rule re-applied (IgnoreQueryFilters drops it): another tenant's role is a 404.
+        var role = await _db.Roles.IgnoreQueryFilters().ReadableBy(_user)
             .FirstOrDefaultAsync(r => r.Id == request.Id && !r.IsDeleted, ct)
             ?? throw new NotFoundException("Role", request.Id);
 
