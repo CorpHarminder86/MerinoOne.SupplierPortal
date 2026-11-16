@@ -55,7 +55,9 @@ public class GetPoNegotiationByIdQueryHandler : IRequestHandler<GetPoNegotiation
             : _db.Suppliers.AsQueryable();
 
         var n = await negs
-            .Include(x => x.Lines)
+            // Filtered include: the reviewer path above is IgnoreQueryFilters, which also switches off the soft-delete filter on
+            // the included lines — a line removed from the round by the inbound PO sync must not come back.
+            .Include(x => x.Lines.Where(l => !l.IsDeleted))
             .FirstOrDefaultAsync(x => x.Id == request.Id, ct)
             ?? throw new NotFoundException("PurchaseOrderNegotiation", request.Id);
 

@@ -48,7 +48,9 @@ public class GetPurchaseOrderByIdQueryHandler : IRequestHandler<GetPurchaseOrder
         var poCompany = row.po.TenantEntityId;
         var poSupplierId = row.po.SupplierId;
         var lineRows = await (from l in _db.PurchaseOrderLines
-                           where l.PurchaseOrderId == request.Id
+                           // Explicit !IsDeleted: the IgnoreQueryFilters() joins below switch off EVERY global filter of this
+                           // query (including the soft-delete filter on PurchaseOrderLines), not just the joined source's.
+                           where l.PurchaseOrderId == request.Id && !l.IsDeleted
                            join itm in _db.Items.IgnoreQueryFilters().Where(i => i.TenantEntityId == poCompany && !i.IsDeleted)
                                on l.ItemCode equals itm.Code into itemGroup
                            from item in itemGroup.DefaultIfEmpty()

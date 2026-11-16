@@ -45,8 +45,10 @@ public static class PoMaterialChange
             if (!existingByPos.ContainsKey(pos))
                 return true;
 
-        // Line REMOVED — a persisted position absent from the push (material: the order shrank). Soft-handled by the
-        // upsert, but still a material change for re-confirmation purposes (§6.4).
+        // Line REMOVED — a persisted position absent from the push (material: the order shrank, §6.4). 2026-11-16 — the
+        // upsert soft-deletes such a line ONLY while the PO is still before supplier acceptance (Draft / Released /
+        // Negotiation); past that it keeps the line, so the CALLER excludes kept-absent lines from existingLines and they
+        // never count as material here.
         foreach (var pos in existingByPos.Keys)
             if (!incomingByPos.ContainsKey(pos))
                 return true;

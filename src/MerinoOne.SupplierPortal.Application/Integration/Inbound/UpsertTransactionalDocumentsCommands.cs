@@ -3,8 +3,10 @@ using FluentValidation;
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Integration;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
+using MerinoOne.SupplierPortal.Application.PurchaseOrders.Negotiations;
 using MerinoOne.SupplierPortal.Application.PurchaseOrders.StatusMapping;
 using MerinoOne.SupplierPortal.Contracts.Integration;
+using MerinoOne.SupplierPortal.Domain.Common;
 using MerinoOne.SupplierPortal.Domain.Entities.Admin;
 using MerinoOne.SupplierPortal.Domain.Entities.Integration;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
@@ -368,20 +370,52 @@ public class UpsertPurchaseOrdersCommandHandler(
                     // 0-0 no-op) against the current stored qty, and REJECT the whole PO if any position would drop below
                     // its already-shipped cumulative or go negative. Done BEFORE any header/line mutation so a reject leaves
                     // the PO untouched (mirrors the supplier-not-found early-out above).
+                    var prePushStatus = po.PoStatus;   // captured before ANY mutation — the line-removal rule keys off it.
                     var (resolvedQty, qtyError) = ResolvePoLineQuantities(po, rec);
                     if (qtyError != null) { results.Add(new RowResult(poNum, RowOutcome.Failed, qtyError)); continue; }
+
+                    // 2026-11-16 — LINE REMOVAL on a re-push. A stored line whose positionNo is ABSENT from a non-empty push
+                    // was removed in LN. Until the supplier has accepted (Draft / Released / Negotiation) it is soft-deleted
+                    // (with its schedule + any open-negotiation line) so the portal mirrors LN; once the PO is past that
+                    // (Acknowledged / Accepted / shipping …) the lines are KEPT (a warning says so) because the supplier has
+                    // committed to them. The shipped / received / invoiced guard runs HERE, before any mutation of the tracked
+                    // PO — a `continue` after a header edit would still persist the partial edits (the entity is tracked).
+                    var absentPositions = FindAbsentPositions(po, rec);
+                    var removable = IsLineRemovalStatus(prePushStatus);
+                    var removedLines = removable && absentPositions.Count > 0
+                        ? po.Lines.Where(l => !l.IsDeleted && absentPositions.Contains(l.PositionNo)).ToList()
+                        : new List<PurchaseOrderLine>();
+                    if (removedLines.Count > 0)
+                    {
+                        var blocked = await FindLinesWithActivityAsync(db, removedLines, token);
+                        if (blocked.Count > 0)
+                        {
+                            results.Add(new RowResult(poNum, RowOutcome.Failed,
+                                $"Cannot remove PO line(s) {string.Join(", ", blocked)}: already shipped, received or invoiced (ASN/GRN/invoice activity). Fix in LN and re-push."));
+                            continue;
+                        }
+                    }
+                    // Not removable (PO already past supplier acceptance): the absent lines stay, are NOT material, and the
+                    // row carries a warning. Excluded from the material / diff inputs below.
+                    var keptAbsent = !removable && absentPositions.Count > 0 ? absentPositions : new List<int>();
+                    if (keptAbsent.Count > 0)
+                    {
+                        var keptWarning = $"PO is {prePushStatus}: line(s) {string.Join(", ", keptAbsent)} absent from the payload were kept (lines are only removed before supplier acceptance).";
+                        rowWarning = CapLength(rowWarning is null ? keptWarning : $"{rowWarning}; {keptWarning}", 2000);
+                    }
+                    var storedForDiff = po.Lines.Where(l => !l.IsDeleted && !keptAbsent.Contains(l.PositionNo)).ToList();
 
                     // R4 (2026-06-26) — §6.3/§6.4 (UC-PO-06/07, UC-ASN-08). Snapshot the BEFORE line state (qty / price /
                     // delivery date / cumulative) so we can (a) decide whether this re-push is MATERIAL and (b) render the
                     // supplier diff ("100→120; 60 remaining") AFTER the in-place upsert overwrites the line. The cumulative
                     // (ShippedQtyToDate) is read from the snapshot — SyncLines NEVER touches it (preserved across a qty
                     // revision, §5.2 / DI-01).
-                    var beforeSnap = po.Lines.Where(l => !l.IsDeleted)
+                    var beforeSnap = storedForDiff
                         .Select(l => new PoLineChangeSnapshot(l.PositionNo, l.SequenceNo, l.OrderQty, l.PriceUnit, l.Price, l.DeliveryDate, l.ShippedQtyToDate))
                         .ToList();
                     // Compare against the RESOLVED target qty (not raw incoming) — a cumulative-add push carries orderQty=0
                     // and would otherwise look like a qty→0 drop, wrongly resetting the gate + spamming re-confirm emails.
-                    var isMaterial = PoMaterialChange.IsMaterial(po.Lines.Where(l => !l.IsDeleted).ToList(), rec.Lines, resolvedQty);
+                    var isMaterial = PoMaterialChange.IsMaterial(storedForDiff, rec.Lines, resolvedQty);
 
                     po.SupplierId = sup.Id; po.SeccodeId = sup.SeccodeId;
                     po.TenantId = tenantId; po.TenantEntityId = sourceId;
@@ -392,6 +426,12 @@ public class UpsertPurchaseOrdersCommandHandler(
                     po.DeliveryTermId = delId; po.DeliveryTerms = delSnap;
                     po.CurrencyId = curId; po.CurrencyCode = rec.CurrencyCode?.Trim();
                     po.Notes = rec.Notes; po.ErpSyncId = rec.ErpSyncId ?? po.ErpSyncId;
+                    // 2026-11-16 — soft-delete the removed lines + their schedules and cancel any open negotiation round that
+                    // proposed changes to them. MUST run BEFORE the status derivation below: a round cancelled here reverts the
+                    // PO to its pre-negotiation status, and the resolver can then still override it (e.g. a material change → Released).
+                    var removedSchedules = removedLines.Count == 0
+                        ? new List<DeliverySchedule>()
+                        : await RemoveLinesAsync(db, po, removedLines, now, token);
                     // R5 (§11.3) — PoStatus DERIVATION on a re-receipt is now resolver-driven (was the R4 hardcoded
                     // "isMaterial → Released"). Resolve the raw erpStatus via the configurable PoStatusMapping, then
                     // PoStatusResolver applies the §11.3 rule: terminal (Cancelled/Closed) wins unconditionally;
@@ -437,6 +477,12 @@ public class UpsertPurchaseOrdersCommandHandler(
                         // §6.2 / UC-PO-10 — re-released material PO: AutoAccept suppliers are auto-stamped Accepted again.
                         await AutoAcceptIfConfiguredAsync(db, po, sup.PoConfirmationMode, tenantId, now, token);
                     }
+
+                    // 2026-11-16 — the by-id schedule refresh above re-reads lines from the DB, where the soft-delete is not yet
+                    // flushed, so it can match a removed line's schedule and refresh it in place (identity resolution hands it
+                    // the tracked instance). It never touches IsDeleted, but it does overwrite the audit stamp / qty — re-assert.
+                    foreach (var sched in removedSchedules)
+                        SoftDelete(sched, now);
 
                     results.Add(new RowResult(poNum, RowOutcome.Updated, rowWarning));
                 }
@@ -569,7 +615,10 @@ public class UpsertPurchaseOrdersCommandHandler(
     // the unique index (purchaseOrderId, positionNo, sequenceNo) is functionally (po, positionNo) and can never be
     // violated. Multiple inbound lines sharing a positionNo are FOLDED into the one stored line: the LAST line wins
     // for attributes (item/price/etc.) and the RESOLVED qty (from ResolvePoLineQuantities) is the absolute total.
-    // SyncLines NEVER deletes lines absent from the push, and NEVER touches ShippedQtyToDate (§5.2 / DI-01).
+    // SyncLines itself NEVER deletes lines absent from the push, and NEVER touches ShippedQtyToDate (§5.2 / DI-01).
+    // 2026-11-16 — removal of absent lines is decided by the CALLER (RemoveLinesAsync), and only while the PO is still
+    // Draft / Released / Negotiation (before supplier acceptance); removed lines are already soft-deleted by the time
+    // SyncLines runs, so they never reach byPosition. Past that point absent lines are simply left alone (kept + warned).
     //
     // NEW lines are added straight to the DbSet with an explicit PurchaseOrderId — NOT via the tracked po.Lines
     // navigation. Adding to the loaded navigation of an ALREADY-PERSISTED, change-tracked PurchaseOrder makes EF emit
@@ -604,6 +653,88 @@ public class UpsertPurchaseOrdersCommandHandler(
                 db.PurchaseOrderLines.Add(newLine);
             }
         }
+    }
+
+    // 2026-11-16 — lines are only removable before the supplier has accepted the PO.
+    private static bool IsLineRemovalStatus(PoStatus status)
+        => status is PoStatus.Draft or PoStatus.Released or PoStatus.Negotiation;
+
+    // 2026-11-16 — positionNos of stored (non-deleted) lines absent from the push. An EMPTY lines array never removes
+    // anything (a header-only push must not wipe the PO).
+    private static List<int> FindAbsentPositions(PurchaseOrder po, PoRecord rec)
+    {
+        if (rec.Lines.Count == 0) return new List<int>();
+        var incoming = rec.Lines.Select(l => l.PositionNo).ToHashSet();
+        return po.Lines.Where(l => !l.IsDeleted && !incoming.Contains(l.PositionNo))
+            .Select(l => l.PositionNo).Distinct().OrderBy(p => p).ToList();
+    }
+
+    // 2026-11-16 — positionNos (ordered) of the given lines that carry shipped / received / invoiced history: a cumulative
+    // shipped or invoiced qty > 0, or a live (non-deleted, non-Cancelled) ASN line, a non-deleted GRN, or a live (non-deleted,
+    // not Cancelled / Rejected) invoice line. One batched query per table; IgnoreQueryFilters + explicit !IsDeleted because the
+    // service principal has no seccode.
+    private static async Task<List<int>> FindLinesWithActivityAsync(
+        IAppDbContext db, IReadOnlyCollection<PurchaseOrderLine> lines, CancellationToken token)
+    {
+        var active = lines.Where(l => l.ShippedQtyToDate > 0m || l.InvoicedQtyToDate > 0m).Select(l => l.Id).ToHashSet();
+        var ids = lines.Select(l => l.Id).ToList();
+
+        active.UnionWith(await db.AsnLines.IgnoreQueryFilters()
+            .Where(a => !a.IsDeleted && ids.Contains(a.PurchaseOrderLineId)
+                        && !a.Asn!.IsDeleted && a.Asn.AsnStatus != AsnStatus.Cancelled)
+            .Select(a => a.PurchaseOrderLineId).Distinct().ToListAsync(token));
+        active.UnionWith(await db.GoodsReceipts.IgnoreQueryFilters()
+            .Where(g => !g.IsDeleted && ids.Contains(g.PurchaseOrderLineId))
+            .Select(g => g.PurchaseOrderLineId).Distinct().ToListAsync(token));
+        active.UnionWith(await db.InvoiceLines.IgnoreQueryFilters()
+            .Where(i => !i.IsDeleted && ids.Contains(i.PurchaseOrderLineId)
+                        && !i.Invoice!.IsDeleted
+                        && i.Invoice.InvoiceStatus != InvoiceStatus.Cancelled && i.Invoice.InvoiceStatus != InvoiceStatus.Rejected)
+            .Select(i => i.PurchaseOrderLineId).Distinct().ToListAsync(token));
+
+        return lines.Where(l => active.Contains(l.Id)).Select(l => l.PositionNo).Distinct().OrderBy(p => p).ToList();
+    }
+
+    private static void SoftDelete(AuditableEntity e, DateTime now)
+    {
+        e.IsDeleted = true; e.UpdatedBy = "infor:inbound"; e.UpdatedOn = now;
+    }
+
+    // 2026-11-16 — soft-deletes the removed lines and their non-deleted delivery schedules, and prunes them from any OPEN
+    // (Submitted) negotiation round: a round left with no live lines is Cancelled by ERP (history row + the PO reverts to the
+    // status captured when the round opened). Mutates the tracked aggregate only — no SaveChanges and NOT the Revert/Save
+    // negotiation commands, which reload/save inside the caller's unit of work. Returns the tracked schedule entities so the
+    // caller can re-assert the delete after the by-id schedule refresh (which can touch them).
+    private static async Task<List<DeliverySchedule>> RemoveLinesAsync(
+        IAppDbContext db, PurchaseOrder po, IReadOnlyCollection<PurchaseOrderLine> removed, DateTime now, CancellationToken token)
+    {
+        var removedIds = removed.Select(l => l.Id).ToHashSet();
+        var idList = removedIds.ToList();
+
+        var schedules = await db.DeliverySchedules.IgnoreQueryFilters()
+            .Where(s => !s.IsDeleted && idList.Contains(s.PurchaseOrderLineId))
+            .ToListAsync(token);
+        foreach (var s in schedules) SoftDelete(s, now);
+
+        var rounds = await db.PurchaseOrderNegotiations.IgnoreQueryFilters().Include(n => n.Lines)
+            .Where(n => n.PurchaseOrderId == po.Id && !n.IsDeleted && n.NegotiationStatus == PoNegotiationStatus.Submitted)
+            .ToListAsync(token);
+        foreach (var round in rounds)
+        {
+            var hit = round.Lines.Where(nl => !nl.IsDeleted && removedIds.Contains(nl.PurchaseOrderLineId)).ToList();
+            if (hit.Count == 0) continue;
+            foreach (var nl in hit) SoftDelete(nl, now);
+            if (round.Lines.Any(nl => !nl.IsDeleted)) continue;
+
+            var positions = string.Join(", ", hit.Select(nl => nl.PositionNo).Distinct().OrderBy(p => p));
+            PoNegotiationRounds.Close(round, PoNegotiationStatus.Cancelled, "infor:inbound", now);
+            PoNegotiationHistory.RecordOutcome(db, po, round, "cancelled",
+                $"Cancelled by ERP — line(s) {positions} removed from the PO.", "infor:inbound", now);
+            po.PoStatus = round.PreviousPoStatus;
+        }
+
+        foreach (var line in removed) SoftDelete(line, now);
+        return schedules;
     }
 
     // Fold the payload's lines by positionNo (the storage key), keeping each position's LAST line for attributes.
