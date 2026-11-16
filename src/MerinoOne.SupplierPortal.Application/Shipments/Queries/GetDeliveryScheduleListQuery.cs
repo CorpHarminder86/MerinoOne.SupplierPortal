@@ -48,17 +48,18 @@ public class GetDeliveryScheduleListQueryHandler
         var page = f.Page < 1 ? 1 : f.Page;
         var pageSize = f.PageSize is < 1 or > 500 ? 50 : f.PageSize;
 
-        // Base join: schedule → its PO line (for position / item / order qty / shipped) → its PO (number / supplier)
-        // → the WAREHOUSE address (name) → the supplier (name). Projection only; no entity loads. The schedule's own
-        // RLS filters apply (it is BaseAggregateRoot, seccode-owned), so a supplier sees only its rows.
+        // Base join: schedule → its PO line (for position / item / order qty / shipped) → its PO (number / supplier).
+        // Projection only; no entity loads. Every global filter applies (seccode RLS, tenant, soft delete), so a supplier
+        // sees only its own rows.
+        // 2026-11-16 — SECURITY: this query must NOT contain IgnoreQueryFilters(). In EF Core it switches off EVERY global
+        // filter of the WHOLE query, not just the source it is called on — the warehouse-address / supplier joins it used to
+        // carry stripped the seccode RLS from DeliverySchedules + PurchaseOrders, so a supplier user could list (and filter
+        // by id into) another supplier's schedules. Warehouse name + supplier name/mode are looked up for the PAGE below,
+        // in separate queries keyed by ids that already passed RLS here.
         var baseQuery =
-            from sch in _db.DeliverySchedules.Where(s => !s.IsDeleted)
+            from sch in _db.DeliverySchedules
             join line in _db.PurchaseOrderLines on sch.PurchaseOrderLineId equals line.Id
             join po in _db.PurchaseOrders on sch.PurchaseOrderId equals po.Id
-            join addr in _db.CompanyAddresses.IgnoreQueryFilters() on sch.WarehouseAddressId equals (Guid?)addr.Id into addrJoin
-            from addr in addrJoin.DefaultIfEmpty()
-            join sup in _db.Suppliers.IgnoreQueryFilters() on po.SupplierId equals sup.Id into supJoin
-            from sup in supJoin.DefaultIfEmpty()
             select new
             {
                 sch,
@@ -67,10 +68,7 @@ public class GetDeliveryScheduleListQueryHandler
                 // R13 (D4) — the receiving warehouse is now the PO LINE's code (was the retired PO-header warehouse).
                 LineWarehouse = line.Warehouse,
                 SupplierId = po.SupplierId,
-                SupplierName = sup != null ? sup.LegalName : null,
-                WarehouseAddressName = addr != null ? addr.AddressName : null,
                 PoStatus = po.PoStatus,
-                PoConfirmationMode = sup != null ? sup.PoConfirmationMode : PoConfirmationMode.AcceptToShip,
             };
 
         // Filters (§7). Supplier / PO / ship-to / status / delivery-date range — all optional.
@@ -126,36 +124,52 @@ public class GetDeliveryScheduleListQueryHandler
                 x.line.OrderQty,
                 x.line.ShippedQtyToDate,
                 x.sch.WarehouseAddressId,
-                x.WarehouseAddressName,
                 // R13 (D4) — the PO LINE's receiving warehouse code.
                 x.LineWarehouse,
                 x.SupplierId,
-                x.SupplierName,
                 x.sch.ScheduledQty,
                 x.sch.DeliveryDate,
                 Status = x.sch.Status,
                 x.sch.CreatedOn,
                 x.PoStatus,
-                x.PoConfirmationMode,
             })
             .ToListAsync(ct);
+
+        // Display lookups for the PAGE only, each its OWN query (IgnoreQueryFilters is safe here: it cannot widen the
+        // RLS-scoped row set above, and it is keyed by ids that row set already returned). The warehouse address is a
+        // company master a supplier may not otherwise read; the supplier row carries the confirmation mode IsShippable needs.
+        var addrIds = raw.Where(r => r.WarehouseAddressId != null).Select(r => r.WarehouseAddressId!.Value).Distinct().ToList();
+        var addrNames = addrIds.Count == 0 ? new Dictionary<Guid, string?>()
+            : await _db.CompanyAddresses.IgnoreQueryFilters().Where(a => addrIds.Contains(a.Id))
+                .ToDictionaryAsync(a => a.Id, a => (string?)a.AddressName, ct);
+        var supIds = raw.Select(r => r.SupplierId).Distinct().ToList();
+        var suppliers = supIds.Count == 0 ? new Dictionary<Guid, (string? Name, PoConfirmationMode Mode)>()
+            : (await _db.Suppliers.IgnoreQueryFilters().Where(s => supIds.Contains(s.Id))
+                .Select(s => new { s.Id, s.LegalName, s.PoConfirmationMode }).ToListAsync(ct))
+                .ToDictionary(s => s.Id, s => ((string?)s.LegalName, s.PoConfirmationMode));
 
         // 2026-10-10 — decimal precision per row (mdm.Unit.decimalPlaces of the PO line's OrderUnit): ONE batched lookup for
         // the page; an unknown/blank unit falls back to the resolver's default (3).
         var unitPlaces = await _units.ResolveAsync(raw.Select(r => r.OrderUnit), ct);
 
-        var rows = raw.Select(r => new DeliveryScheduleDto(
-            r.Id, r.Seq, r.PurchaseOrderId, r.PoNumber, r.PurchaseOrderLineId, r.PositionNo,
-            r.ItemCode, r.ItemDescription, r.OrderUnit, r.OrderQty, r.ShippedQtyToDate,
-            // RemainingToShip DERIVED from the R4 line balance — MAX(0, orderQty − shippedQtyToDate).
-            r.OrderQty - r.ShippedQtyToDate > 0 ? r.OrderQty - r.ShippedQtyToDate : 0m,
-            r.SupplierId, r.SupplierName, r.ScheduledQty,
-            r.DeliveryDate, r.Status.ToString(), r.CreatedOn,
-            PoConfirmationPolicy.AllowsShipping(r.PoStatus, r.PoConfirmationMode),
-            // R13 (D4) — warehouse: the PO LINE's code + the warehouse address FK/name (was ship-to).
-            r.LineWarehouse, r.WarehouseAddressId, r.WarehouseAddressName,
-            UnitDecimalPlaces: !string.IsNullOrWhiteSpace(r.OrderUnit) && unitPlaces.TryGetValue(r.OrderUnit, out var places)
-                ? places : _units.Fallback)).ToList();
+        var rows = raw.Select(r =>
+        {
+            // A missing supplier row keeps the old LEFT JOIN defaults: no name, AcceptToShip.
+            var (supName, mode) = suppliers.TryGetValue(r.SupplierId, out var s) ? s : (null, PoConfirmationMode.AcceptToShip);
+            var addrName = r.WarehouseAddressId is Guid aid && addrNames.TryGetValue(aid, out var an) ? an : null;
+            return new DeliveryScheduleDto(
+                r.Id, r.Seq, r.PurchaseOrderId, r.PoNumber, r.PurchaseOrderLineId, r.PositionNo,
+                r.ItemCode, r.ItemDescription, r.OrderUnit, r.OrderQty, r.ShippedQtyToDate,
+                // RemainingToShip DERIVED from the R4 line balance — MAX(0, orderQty − shippedQtyToDate).
+                r.OrderQty - r.ShippedQtyToDate > 0 ? r.OrderQty - r.ShippedQtyToDate : 0m,
+                r.SupplierId, supName, r.ScheduledQty,
+                r.DeliveryDate, r.Status.ToString(), r.CreatedOn,
+                PoConfirmationPolicy.AllowsShipping(r.PoStatus, mode),
+                // R13 (D4) — warehouse: the PO LINE's code + the warehouse address FK/name (was ship-to).
+                r.LineWarehouse, r.WarehouseAddressId, addrName,
+                UnitDecimalPlaces: !string.IsNullOrWhiteSpace(r.OrderUnit) && unitPlaces.TryGetValue(r.OrderUnit, out var places)
+                    ? places : _units.Fallback);
+        }).ToList();
 
         var totalPages = pageSize == 0 ? 0 : (int)Math.Ceiling(total / (double)pageSize);
         var paged = new PagedResult<DeliveryScheduleDto>(rows, page, pageSize, total, totalPages);

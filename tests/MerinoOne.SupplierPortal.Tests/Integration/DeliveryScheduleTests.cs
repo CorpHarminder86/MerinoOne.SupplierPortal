@@ -333,6 +333,36 @@ public class DeliveryScheduleTests
     /// position 10 → WH-TEST-01 / unit UT-DSCH-0, position 20 → WH-TEST-02 / unit UT-DSCH-2, position 30 → WH-TEST-01 /
     /// a unit that is NOT in the master. Two warehouses, three precisions.
     /// </summary>
+    // ── RLS — a supplier user never sees ANOTHER supplier's schedules ────────────────────────────────────
+    // 2026-11-16 — the grid joins CompanyAddresses/Suppliers with IgnoreQueryFilters(), which in EF Core switches off
+    // EVERY global filter of the whole query — including the seccode RLS on DeliverySchedules / PurchaseOrders. A supplier
+    // user must still only see schedules of suppliers it is granted, even when it names a foreign supplierId / PO id.
+    [SkippableFact]
+    public async Task Grid_never_returns_another_suppliers_schedules()
+    {
+        Skip.IfNot(_fx.DbAvailable, $"needs SQL test DB ({_fx.DbUnavailableReason})");
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        // NOT granted to the supplier test user — this supplier's rows sit under a seccode sec-supplier-a cannot see.
+        var foreign = await _fx.CreateSupplierAsync(tag,
+            IntegrationTestFixture.TenantId, IntegrationTestFixture.CompanyId, canWrite: true);
+        await SetConfirmationModeAsync(foreign.SupplierId, PoConfirmationMode.AutoAccept);
+        var poNumber = $"PO-DSRLS-{tag}";
+        await PushAsync(PoBody(poNumber, foreign.SupplierCode, tag, (10, 4m, DateTime.UtcNow.Date.AddDays(3))));
+        (await ScheduleCountAsync(await PoIdAsync(poNumber))).Should().Be(1, because: "AutoAccept created the foreign schedule");
+
+        var supplierClient = await _fx.ClientAsAsync(SecurityTestHarness.Users.Supplier, IntegrationTestFixture.CompanyId);
+        var bySupplier = await GridAsync(supplierClient, $"supplierId={foreign.SupplierId}&pageSize=200");
+        bySupplier.Page.Items.Should().BeEmpty(because: "seccode RLS must hide another supplier's schedules");
+        bySupplier.Page.TotalCount.Should().Be(0);
+
+        var byPo = await GridAsync(supplierClient, $"purchaseOrderId={await PoIdAsync(poNumber)}&pageSize=200");
+        byPo.Page.Items.Should().BeEmpty(because: "naming the foreign PO id must not bypass RLS");
+
+        var all = await GridAsync(supplierClient, "pageSize=500");
+        all.Page.Items.Should().NotContain(r => r.PoNumber == poNumber, because: "the unfiltered grid is RLS-scoped too");
+    }
+
     private async Task<(Guid SupplierId, string PoNumber, string UnknownUnit)> SeedTwoWarehouseGridAsync()
     {
         await UnitMasterDecimalsTests.EnsureUnitAsync(_fx, ZeroDecimalsUnit, 0);
