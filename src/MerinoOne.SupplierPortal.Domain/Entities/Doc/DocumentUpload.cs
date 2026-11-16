@@ -35,4 +35,10 @@ public class DocumentUpload : BaseAggregateRoot
     // subsequent Update/Delete.
     public string? IdmEntityType { get; set; }
     public string? Pid { get; set; }
+
+    /// <summary>
+    /// R19 — true for portal-generated report PDFs (Packing List / Supplier Invoice) attached on download.
+    /// Replace semantics (regenerate-and-swap) target only these rows; user uploads are never touched.
+    /// </summary>
+    public bool IsSystemGenerated { get; set; }
 }

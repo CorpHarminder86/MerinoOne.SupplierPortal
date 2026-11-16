@@ -6,6 +6,7 @@
 @inject NotificationService Notif
 @inject IJSRuntime JS
 @inject CompanyState Company
+@inject DialogService Dialog
 
 <PageTitle>@(IsNew ? "New ASN" : detail?.AsnNumber)</PageTitle>
 
@@ -87,6 +88,20 @@
         .asnro-facts > div + div { border-left:0; padding-left:0; margin-left:0;
                                    border-top:1px solid var(--mer-line-soft); padding-top:14px; }
     }
+
+    /* R19 — Invoice report button + invoice picker menu (several invoices on one ASN). Anchored under the button; capped to the viewport
+       so it never forces horizontal page scroll on a phone. */
+    .asnro-invpick { position:relative; display:inline-flex; }
+    .asnro-invpick__backdrop { position:fixed; inset:0; z-index:40; }
+    .asnro-invpick__menu { position:absolute; top:calc(100% + 4px); right:0; z-index:41; margin:0; padding:4px; list-style:none;
+                           min-width:220px; max-width:min(320px, calc(100vw - 32px)); max-height:50vh; overflow-y:auto;
+                           background:var(--mer-surface, #fff); border:1px solid var(--mer-line); border-radius:var(--mer-radius, 6px);
+                           box-shadow:var(--mer-shadow-lg, 0 8px 24px rgba(0,0,0,.15)); }
+    .asnro-invpick__item { display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%; padding:8px 10px;
+                           background:transparent; border:0; border-radius:var(--mer-radius, 6px); cursor:pointer; text-align:left; }
+    .asnro-invpick__item:hover, .asnro-invpick__item:focus-visible { background:var(--mer-ink-100); outline:none; }
+    .asnro-invpick__no { font:600 13px/1.2 Inter, monospace; color:var(--mer-ink-900, #1b2431); word-break:break-all; }
+    .asnro-invpick__meta { font:500 11.5px/1.2 'Plus Jakarta Sans', sans-serif; color:var(--mer-ink-500); }
 </style>
 
 <div class="tl-page">
@@ -126,15 +141,43 @@
                                   Satisfied="@(railSummary?.SatisfiedSlots ?? 0)"
                                   Total="@(railSummary?.TotalSlots ?? 0)" />
             }
-            @* R18 (AC7) — the Packing List PDF of an existing ASN, offered only where PackingListRules says it is available (the same
-               rule the API's 409 guard applies, so the button and the endpoint cannot disagree). A same-origin download link through
-               the /files/packing-list proxy (the API answers with Content-Disposition: attachment, so — like the invoice PDF — it is
-               a <a download>, not a new tab); the active company rides ?company= as on the invoice PDF link. *@
+            @* R18 (AC7) / R19 — the Packing List PDF of an existing ASN, offered only where PackingListRules says it is available (the same
+               rule the API's 409 guard applies, so the button and the endpoint cannot disagree). Opens PdfPreviewDialog (inline preview via
+               the /files/packing-list proxy; its Download POSTs the .../download twin, which also auto-attaches the PDF to the ASN); the
+               active company rides ?company= because the proxy turns it back into X-Active-Company. *@
             @if (!IsNew && detail != null && PackingListRules.IsAvailable(detail.AsnStatus, detail.AsnConfirmationRequired))
             {
-                <a class="mbtn mbtn--outline" href="@PackingListHref" download title="Download the packing list (PDF)">
+                <button type="button" class="mbtn mbtn--outline" @onclick="OpenPackingListPreviewAsync" title="Preview the packing list (PDF)">
                     <span class="material-symbols-outlined">description</span> Packing List
-                </a>
+                </button>
+            }
+            @* R19 — the Supplier Invoice report of this ASN's invoice(s). Hidden when the ASN has none (or the caller cannot read invoices);
+               one invoice previews directly, several open a small picker first. Download here auto-attaches the PDF to the ASN. *@
+            @if (!IsNew && detail != null && asnInvoices.Count > 0)
+            {
+                <span class="asnro-invpick">
+                    <button type="button" class="mbtn mbtn--outline" @onclick="OnInvoiceButtonClickAsync"
+                            title="@(asnInvoices.Count == 1 ? "Preview the supplier invoice (PDF)" : "Choose an invoice to preview (PDF)")"
+                            aria-haspopup="@(asnInvoices.Count > 1 ? "true" : null)" aria-expanded="@(asnInvoices.Count > 1 ? (showInvoicePicker ? "true" : "false") : null)">
+                        <span class="material-symbols-outlined">receipt_long</span> Invoice
+                    </button>
+                    @if (showInvoicePicker && asnInvoices.Count > 1)
+                    {
+                        <div class="asnro-invpick__backdrop" @onclick="() => showInvoicePicker = false"></div>
+                        <ul class="asnro-invpick__menu" role="menu">
+                            @foreach (var inv in asnInvoices)
+                            {
+                                var invoice = inv;
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="asnro-invpick__item" @onclick="() => OpenInvoicePreviewAsync(invoice)">
+                                        <span class="asnro-invpick__no">@invoice.InvoiceNumber</span>
+                                        <span class="asnro-invpick__meta">@invoice.InvoiceStatus · @AppTime.Date(invoice.InvoiceDate)</span>
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </span>
             }
             @* R5 (§10.2) — buyer decision actions on a PendingApproval ASN. Any mapped PO buyer may decide (Phase 1);
                the server gate (AsnApprovalGate) is authoritative, so we only gate the affordance on Asn.Approve. *@
@@ -509,7 +552,7 @@
         @* R7 (§13.5 semantics unchanged) — the read-only document surface for the locked view (PendingApproval:
            supplier read-only + deciding buyer; Submitted+: view-only for everyone) now lives in the rail. The
            panel inside still renders nothing when no policy rows exist; Editable=false ⇒ no upload/remove. *@
-        <DocumentRail EntityCode="Asn"
+        <DocumentRail @key="_railReloadKey" EntityCode="Asn"
                       EntityId="@detail.Id"
                       Editable="false"
                       SupplierId="@detail.SupplierId"
@@ -1169,7 +1212,7 @@
            brand-new ASN (policy slots + "save the draft" hint), attachSupplierId stamps the upload seccode,
            OnPanelChanged keeps the step-4 review count fresh. The "Choose a supplier first." pre-condition
            renders inside the rail body via GuardMessage (same condition as before). *@
-        <DocumentRail EntityCode="Asn"
+        <DocumentRail @key="_railReloadKey" EntityCode="Asn"
                       EntityId="@(Id ?? Guid.Empty)"
                       Editable="@(CanWrite)"
                       SupplierId="@attachSupplierId"
@@ -1653,13 +1696,77 @@
     // Delivered/Received/Cancelled are terminal. The read-only view hides Cancel via this flag.
     private bool CanCancel => detail?.AsnStatus is "Draft" or "Rejected" or "PendingApproval" or "Approved";
 
-    // R18 (AC7) — same-origin packing-list PDF href, built like InvoiceDetail.InvoicePdfHref: a plain link bypasses ApiClient (which
-    // stamps X-Active-Company per call), so the active company rides a ?company= query param that the /files/packing-list proxy turns
-    // back into the header. No selection => no param => the proxy behaves as before.
-    private string PackingListHref =>
-        Company.ActiveCompanyId is { } c && c != Guid.Empty
-            ? $"files/packing-list/{Id}?company={c}"
-            : $"files/packing-list/{Id}";
+    // R18 (AC7) / R19 — same-origin report URLs. The /files/... proxies bypass ApiClient (which stamps X-Active-Company per call), so the
+    // active company rides a ?company= query param that the proxy turns back into the header. No selection => no param.
+    private string CompanyQuery(string joiner) =>
+        Company.ActiveCompanyId is { } c && c != Guid.Empty ? $"{joiner}company={c}" : string.Empty;
+
+    // R19 — ASN-scoped Supplier Invoice report state. asnInvoices is loaded with the (existing-ASN) detail; the button is hidden at 0.
+    private List<AsnInvoiceRefDto> asnInvoices = new();
+    private bool showInvoicePicker;
+    // Bumped to remount the document rail (the AttachmentPanel inside re-fetches on a fresh mount) after a server-side auto-attach;
+    // the rail is nested in DocumentRail, so the page cannot hold a reference to the panel itself.
+    private int _railReloadKey;
+
+    private async Task LoadAsnInvoicesAsync()
+    {
+        asnInvoices = new();
+        showInvoicePicker = false;
+        if (!Id.HasValue || !Token.HasPermission("Invoice.Read")) return;
+        try
+        {
+            var resp = await Api.GetAsync<List<AsnInvoiceRefDto>>($"api/asns/{Id.Value}/invoices");
+            if (resp?.Success == true && resp.Data is { } list)
+                asnInvoices = list.OrderBy(i => i.InvoiceDate).ThenBy(i => i.InvoiceNumber, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch { /* the Invoice button is a convenience — a failed lookup just hides it */ }
+    }
+
+    private async Task OpenPackingListPreviewAsync()
+    {
+        if (!Id.HasValue || detail is null) return;
+        var asnNo = detail.AsnNumber;
+        var attached = await PdfPreviewDialog.OpenAsync(Dialog,
+            $"Packing List — {asnNo}",
+            $"files/packing-list/{Id}{CompanyQuery("?")}",
+            $"files/packing-list/{Id}/download{CompanyQuery("?")}",
+            $"PackingList-{asnNo}.pdf");
+        await AfterReportDownloadAsync(attached);
+    }
+
+    private async Task OnInvoiceButtonClickAsync()
+    {
+        if (asnInvoices.Count == 1) await OpenInvoicePreviewAsync(asnInvoices[0]);
+        else showInvoicePicker = !showInvoicePicker;
+    }
+
+    private async Task OpenInvoicePreviewAsync(AsnInvoiceRefDto inv)
+    {
+        showInvoicePicker = false;
+        var attached = await PdfPreviewDialog.OpenAsync(Dialog,
+            $"Supplier Invoice — {inv.InvoiceNumber}",
+            $"files/invoice-pdf/{inv.Id}{CompanyQuery("?")}",
+            $"files/invoice-pdf/{inv.Id}/download?attachTo=asn{CompanyQuery("&")}",
+            $"Invoice-{inv.InvoiceNumber}.pdf");
+        await AfterReportDownloadAsync(attached);
+    }
+
+    // attached == null => the dialog was closed without downloading. true => saved AND auto-attached to this ASN: refresh the rail + count.
+    private async Task AfterReportDownloadAsync(bool? attached)
+    {
+        if (attached is null) return;
+        if (attached == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Downloaded and attached to the ASN." });
+            _railReloadKey++;
+            await OnPanelChanged();
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Downloaded." });
+        }
+        StateHasChanged();
+    }
 
     // The gate block message names the required action; the API stamps it under the "poStatus" error key. Match the
     // stable prefix so we route it to the override dialog rather than the generic error banner.
@@ -1997,6 +2104,7 @@
 
                 attachments.Clear();
                 attachments.AddRange(detail.Attachments);
+                await LoadAsnInvoicesAsync();
 
                 // R15 — reset the schedule-grid state for this ASN's supplier.
                 selectedSchedules.Clear();

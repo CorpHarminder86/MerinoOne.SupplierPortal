@@ -84,6 +84,10 @@ public static class DependencyInjection
         // line / ASN line / delivery-schedule / negotiation-line read DTOs. Batch-first: one query per request; an unknown
         // or blank unit resolves to 3. Scoped (per-request IAppDbContext).
         services.AddScoped<Masters.UnitDecimals.IUnitDecimalsResolver, Masters.UnitDecimals.UnitDecimalsResolver>();
+
+        // R19 — auto-attaches a generated report PDF (Packing List / Supplier Invoice) to the owner's attachment panel on a
+        // supplier download. Scoped (per-request IAppDbContext / ICurrentUser / IFileStorageService).
+        services.AddScoped<Documents.GeneratedReportAttacher>();
         return services;
     }
 }

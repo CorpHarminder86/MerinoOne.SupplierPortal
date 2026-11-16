@@ -635,6 +635,11 @@ public class InvoiceLineConfiguration : IEntityTypeConfiguration<InvoiceLine>
         b.Property(x => x.TaxId).HasColumnName("taxId").HasColumnType("uniqueidentifier");
         b.Property(x => x.TaxDescription).HasColumnName("taxDescription").HasMaxLength(200);
 
+        // R19 — PO-line discount snapshot: pct (display) + TOTAL line discount amount (per-unit x BilledQty).
+        // CLR default (0m) == DB default (0), so no HasSentinel needed.
+        b.Property(x => x.DiscountPct).HasColumnName("discountPct").HasColumnType("decimal(9,4)");
+        b.Property(x => x.DiscountAmount).HasColumnName("discountAmount").HasColumnType("decimal(18,4)").HasDefaultValue(0m);
+
         b.HasOne(x => x.Invoice).WithMany(i => i.Lines).HasForeignKey(x => x.InvoiceId)
             .HasConstraintName("FK_InvoiceLine_Invoice_InvoiceId").OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.PurchaseOrderLine).WithMany().HasForeignKey(x => x.PurchaseOrderLineId)

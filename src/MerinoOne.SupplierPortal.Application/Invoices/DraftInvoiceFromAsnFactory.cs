@@ -1,5 +1,6 @@
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Shipments;
+using MerinoOne.SupplierPortal.Contracts.Invoices;
 using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -88,6 +89,8 @@ public sealed class DraftInvoiceFromAsnFactory
                                      pol.ItemDescription,
                                      pol.ItemId,
                                      pol.PriceUnit,
+                                     pol.DiscountPct,
+                                     pol.DiscountAmount,
                                      pol.TaxCode,
                                      pol.TaxId,
                                      pol.ShippedQtyToDate,
@@ -180,8 +183,12 @@ public sealed class DraftInvoiceFromAsnFactory
             foreach (var x in billable)
             {
                 var tax = resolved[x.Line.TaxId!.Value];
-                var lineAmount = decimal.Round(x.BilledQty * x.Line.PriceUnit, 2);
-                var lineTax = decimal.Round(lineAmount * tax.Rate!.Value / 100m, 2);
+                // R19 — the PO line's DiscountAmount is PER UNIT; the invoice line stores the TOTAL discount and the
+                // taxable amount (gross − discount). Tax is levied on the taxable amount.
+                var lineDiscount = InvoiceLineMath.LineDiscount(
+                    InvoiceLineMath.PerUnitDiscount(x.Line.DiscountAmount, x.Line.DiscountPct, x.Line.PriceUnit), x.BilledQty);
+                var lineAmount = InvoiceLineMath.Taxable(x.BilledQty, x.Line.PriceUnit, lineDiscount);
+                var lineTax = InvoiceLineMath.Tax(lineAmount, tax.Rate);
                 invoiceAmount += lineAmount;
                 taxAmount += lineTax;
                 invoiceLines.Add(new InvoiceLine
@@ -195,6 +202,8 @@ public sealed class DraftInvoiceFromAsnFactory
                     BilledQty = x.BilledQty,
                     UnitPrice = x.Line.PriceUnit,
                     LineAmount = lineAmount,
+                    DiscountPct = x.Line.DiscountPct,
+                    DiscountAmount = lineDiscount,
                     TaxCode = tax.Code,
                     TaxDescription = tax.Description,
                     TaxId = x.Line.TaxId,

@@ -45,15 +45,18 @@ public class CreateInvoiceCommandValidator : AbstractValidator<CreateInvoiceComm
     }
 }
 
+internal sealed record ResolvedTaxSnapshot(Guid TaxId, string Code, string Description, decimal Rate);
+
 public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand, InvoiceDetailDto>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _user;
     private readonly IMediator _mediator;
+    private readonly TaxRateResolver _taxResolver;
 
-    public CreateInvoiceCommandHandler(IAppDbContext db, ICurrentUser user, IMediator mediator)
+    public CreateInvoiceCommandHandler(IAppDbContext db, ICurrentUser user, IMediator mediator, TaxRateResolver taxResolver)
     {
-        _db = db; _user = user; _mediator = mediator;
+        _db = db; _user = user; _mediator = mediator; _taxResolver = taxResolver;
     }
 
     public async Task<InvoiceDetailDto> Handle(CreateInvoiceCommand request, CancellationToken ct)
@@ -68,10 +71,12 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
 
         // Validate all PO lines belong to this PO
         var requestedLineIds = body.Lines.Select(l => l.PurchaseOrderLineId).ToList();
-        var validPoLineIds = await _db.PurchaseOrderLines
+        var poLines = await _db.PurchaseOrderLines
             .Where(l => l.PurchaseOrderId == po.Id && requestedLineIds.Contains(l.Id))
-            .Select(l => l.Id)
+            .Select(l => new { l.Id, l.DiscountPct, l.DiscountAmount, l.TaxId })
             .ToListAsync(ct);
+        var poLineById = poLines.GroupBy(l => l.Id).ToDictionary(g => g.Key, g => g.First());
+        var validPoLineIds = poLineById.Keys.ToList();
 
         var invalid = requestedLineIds.Except(validPoLineIds).ToList();
         if (invalid.Count > 0)
@@ -131,9 +136,10 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
             AsnId = body.AsnId,
             SupplierId = po.SupplierId,
             InvoiceDate = body.InvoiceDate,
-            InvoiceAmount = body.InvoiceAmount,
-            TaxAmount = body.TaxAmount,
-            NetAmount = body.NetAmount,
+            // Header totals are set below from the server-recomputed lines (R19) — never the client's figures.
+            InvoiceAmount = 0m,
+            TaxAmount = 0m,
+            NetAmount = 0m,
             CurrencyCode = body.CurrencyCode,
             MatchingType = matchingType,
             // R4: REFACTORED — created as Draft (was Submitted). The supplier submits via SubmitInvoiceCommand;
@@ -149,8 +155,36 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
             CreatedOn = DateTime.UtcNow,
         };
 
+        // R19 — the server snapshots the PO line's discount and recomputes the taxable LineAmount (gross − discount);
+        // the client's LineAmount is NOT trusted. The PO line's DiscountAmount is PER UNIT, so the stored line discount
+        // is perUnit × billedQty. Tax: the request carries only a tax CODE + amount (no rate), so the client TaxAmount
+        // is kept as-is (the code-only behaviour); Submit re-resolves the governed rate and recomputes it.
+        // Tax: the governed rate is resolved server-side from the PO line's TaxId (same source as the ASN generator) and
+        // levied on the NET (discounted) LineAmount, snapshotting TaxId/Code/Description/Rate on the line. When the
+        // client typed a DIFFERENT tax code than the PO line's governed one, or no rate resolves, it is a code-only tax:
+        // the client TaxCode/TaxAmount are kept as-is (existing behaviour — no rate to recompute with).
+        var resolvedTaxes = await _taxResolver.ResolveAsync(
+            poLineById.Values.Where(p => p.TaxId.HasValue).Select(p => p.TaxId!.Value), po.TenantId, ct);
+
+        decimal invoiceAmount = 0m, taxAmount = 0m;
         foreach (var line in body.Lines)
         {
+            var pol = poLineById[line.PurchaseOrderLineId];
+            var lineDiscount = InvoiceLineMath.LineDiscount(
+                InvoiceLineMath.PerUnitDiscount(pol.DiscountAmount, pol.DiscountPct, line.UnitPrice), line.BilledQty);
+            var lineAmount = InvoiceLineMath.Taxable(line.BilledQty, line.UnitPrice, lineDiscount);
+
+            ResolvedTaxSnapshot? snap = null;
+            if (pol.TaxId.HasValue
+                && resolvedTaxes.TryGetValue(pol.TaxId.Value, out var rt)
+                && rt.Rate is not null
+                && (string.IsNullOrWhiteSpace(line.TaxCode)
+                    || string.Equals(line.TaxCode.Trim(), rt.Code, StringComparison.OrdinalIgnoreCase)))
+                snap = new ResolvedTaxSnapshot(pol.TaxId.Value, rt.Code, rt.Description, rt.Rate.Value);
+
+            var lineTax = snap is null ? line.TaxAmount : InvoiceLineMath.Tax(lineAmount, snap.Rate);
+            invoiceAmount += lineAmount;
+            taxAmount += lineTax;
             invoice.Lines.Add(new InvoiceLine
             {
                 Id = Guid.NewGuid(),
@@ -160,13 +194,22 @@ public class CreateInvoiceCommandHandler : IRequestHandler<CreateInvoiceCommand,
                 ItemDescription = line.ItemDescription,
                 BilledQty = line.BilledQty,
                 UnitPrice = line.UnitPrice,
-                LineAmount = line.LineAmount,
-                TaxCode = line.TaxCode,
-                TaxAmount = line.TaxAmount,
+                LineAmount = lineAmount,
+                DiscountPct = pol.DiscountPct,
+                DiscountAmount = lineDiscount,
+                TaxCode = snap?.Code ?? line.TaxCode,
+                TaxDescription = snap?.Description,
+                TaxId = snap?.TaxId,
+                TaxRatePct = snap?.Rate,
+                TaxAmount = lineTax,
                 CreatedBy = _user.UserCode,
                 CreatedOn = DateTime.UtcNow,
             });
         }
+
+        invoice.InvoiceAmount = invoiceAmount;
+        invoice.TaxAmount = taxAmount;
+        invoice.NetAmount = invoiceAmount + taxAmount;
 
         _db.Invoices.Add(invoice);
 

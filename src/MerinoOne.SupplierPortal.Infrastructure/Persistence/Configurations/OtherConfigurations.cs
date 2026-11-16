@@ -32,6 +32,10 @@ public class DocumentUploadConfiguration : IEntityTypeConfiguration<DocumentUplo
         b.Property(x => x.IdmEntityType).HasColumnName("idmEntityType").HasMaxLength(100);
         b.Property(x => x.Pid).HasColumnName("pid").HasMaxLength(100);
 
+        // R19 — portal-generated report PDF marker (replace semantics target only these rows). CLR default
+        // (false) == DB default (0), so no HasSentinel needed.
+        b.Property(x => x.IsSystemGenerated).HasColumnName("isSystemGenerated").HasColumnType("bit").HasDefaultValue(false);
+
         b.ToTable(t => t.HasCheckConstraint("CK_DocumentUpload_aiValidationStatus",
             "[aiValidationStatus] IN ('Pending','Valid','Flagged','Skipped')"));
 

@@ -30,6 +30,8 @@
     <!-- R8 — IHttpClientFactory / AddHttpClient for the Live IDM transport client. -->
     <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.0" />
     <PackageReference Include="QuestPDF" Version="2026.6.1" />
+    <!-- R19 — QR code for the Packing List letterhead (PngByteQRCode: pure-managed PNG, no System.Drawing). -->
+    <PackageReference Include="QRCoder" Version="1.6.0" />
     <!-- SECURITY (NU1903): pin the transitive System.Security.Cryptography.Xml (pulled in at the vulnerable 9.0.0
          via Azure.Identity / IdentityModel) to a patched 9.0.x servicing release.
          Advisories GHSA-37gx-xxp4-5rgx, GHSA-w3x6-4m5h-cxqf. -->

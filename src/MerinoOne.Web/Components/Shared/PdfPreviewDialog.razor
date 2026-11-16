@@ -1,0 +1,122 @@
+@*
+    R19 — preview-then-download dialog for server-generated report PDFs (Packing List, Supplier Invoice).
+
+    Opened through Radzen DialogService (see PdfPreviewDialog.Open below — hosts call the static helper so the size/css options
+    live in one place). The body embeds the GET preview (PreviewUrl — inline PDF, no side effects, the same pattern as
+    DocumentPreviewer). "Download" POSTs DownloadUrl through merino-download.js (the endpoint saves the file AND may auto-attach
+    it to the entity, answering X-Report-Attached); on success the dialog closes returning that bool (true = also attached) so the
+    host can notify + refresh its attachment rail. Closing without downloading returns null.
+    Both URLs are same-origin /files/... proxy paths (cookie JWT -> bearer; ?company= already stamped by the host).
+*@
+@inject DialogService Dialog
+@inject NotificationService Notif
+@inject IJSRuntime JS
+
+<style>
+    .mer-pdfprev-dialog .rz-dialog-content { padding: 0 !important; overflow: hidden; }
+    .mer-pdfprev-dialog .rz-dialog-titlebar { display: none !important; }
+    .pdfprev { display: flex; flex-direction: column; height: 90vh; max-height: 90vh; font-family: 'Plus Jakarta Sans', sans-serif; }
+    .pdfprev__head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--mer-line); }
+    .pdfprev__title { flex: 1; min-width: 0; margin: 0; font-size: 15px; font-weight: 700; color: var(--mer-ink-900, #1b2431); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pdfprev__body { flex: 1; min-height: 0; background: var(--mer-ink-50); padding: 8px; }
+    .pdfprev__pdf { width: 100%; height: 100%; border: 0; background: #fff; display: block; }
+    .pdfprev__foot { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--mer-line); }
+</style>
+
+<div class="pdfprev">
+    <div class="pdfprev__head">
+        <span class="material-symbols-outlined" style="color:var(--mer-blue);">picture_as_pdf</span>
+        <h2 class="pdfprev__title" title="@Title">@Title</h2>
+        <button type="button" class="mbtn mbtn--outline" @onclick="Close" title="Close" aria-label="Close">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+    </div>
+    <div class="pdfprev__body">
+        <embed src="@PreviewUrl" type="application/pdf" class="pdfprev__pdf" />
+    </div>
+    <div class="pdfprev__foot">
+        <button type="button" class="mbtn mbtn--primary" @onclick="DownloadAsync" disabled="@_busy">
+            <span class="material-symbols-outlined">download</span> @(_busy ? "Downloading…" : "Download")
+        </button>
+        <button type="button" class="mbtn mbtn--outline" @onclick="Close" disabled="@_busy">Close</button>
+    </div>
+</div>
+
+@code {
+    /// <summary>Same-origin GET URL of the inline PDF preview.</summary>
+    [Parameter, EditorRequired] public string PreviewUrl { get; set; } = string.Empty;
+    /// <summary>Same-origin POST URL that returns the PDF attachment (+ X-Report-Attached).</summary>
+    [Parameter, EditorRequired] public string DownloadUrl { get; set; } = string.Empty;
+    /// <summary>Fallback file name when the response carries no Content-Disposition.</summary>
+    [Parameter] public string FileName { get; set; } = "report.pdf";
+    [Parameter] public string Title { get; set; } = "PDF preview";
+
+    private bool _busy;
+
+    private sealed class DownloadResult
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public bool Attached { get; set; }
+    }
+
+    /// <summary>
+    /// Opens the dialog and returns true when the report was downloaded AND auto-attached, false when downloaded only,
+    /// null when the user closed it without downloading (or the download failed).
+    /// </summary>
+    public static async Task<bool?> OpenAsync(DialogService dialog, string title, string previewUrl, string downloadUrl, string fileName)
+    {
+        object? result = await dialog.OpenAsync<PdfPreviewDialog>(title,
+            new Dictionary<string, object?>
+            {
+                ["PreviewUrl"] = previewUrl,
+                ["DownloadUrl"] = downloadUrl,
+                ["FileName"] = fileName,
+                ["Title"] = title,
+            },
+            new DialogOptions
+            {
+                Width = "90vw",
+                Height = "90vh",
+                ShowTitle = false,
+                ShowClose = false,
+                CloseDialogOnOverlayClick = false,
+                CssClass = "mer-pdfprev-dialog",
+            });
+        if (result is bool attached) return attached;
+        return null;
+    }
+
+    private void Close() => Dialog.Close(null);
+
+    private async Task DownloadAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var r = await JS.InvokeAsync<DownloadResult>("merinoDownload.fetchAndSave", DownloadUrl, FileName);
+            if (r is { Ok: true })
+            {
+                Dialog.Close(r.Attached);
+                return;
+            }
+            var detail = r?.Status switch
+            {
+                409 => "Not available for the ASN's current status.",
+                404 or 403 => "The document could not be generated or you no longer have access to it.",
+                _ => "The download failed. Please try again."
+            };
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Download failed", Detail = detail });
+        }
+        catch (Exception ex)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Download failed", Detail = ex.Message });
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

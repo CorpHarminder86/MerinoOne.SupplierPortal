@@ -47,7 +47,8 @@ public static class ProcureToPayFlow
     /// </summary>
     public static async Task<Setup> SeedPoAsync(
         IntegrationTestFixture fx, decimal orderQty = 10m, decimal priceUnit = 100m, bool confirm = true,
-        decimal? taxRate = 18m, bool seedTax = true, string currencyCode = "INR")
+        decimal? taxRate = 18m, bool seedTax = true, string currencyCode = "INR",
+        decimal discountAmount = 0m, decimal discountPct = 0m)
     {
         var tag = Guid.NewGuid().ToString("N")[..8];
 
@@ -56,14 +57,15 @@ public static class ProcureToPayFlow
             grantUserCode: SecurityTestHarness.Users.Supplier, canWrite: true);
 
         return await SeedPoCoreAsync(fx, tag, supplier, IntegrationTestFixture.ShipToErpCode,
-            orderQty, priceUnit, confirm, taxRate, seedTax, currencyCode, itemCodeSuffix: null);
+            orderQty, priceUnit, confirm, taxRate, seedTax, currencyCode, itemCodeSuffix: null,
+            discountAmount, discountPct);
     }
 
     /// <summary>Shared PO push + tax seed used by <see cref="SeedPoAsync"/> and <see cref="SeedPoForSupplierAsync"/>.</summary>
     private static async Task<Setup> SeedPoCoreAsync(
         IntegrationTestFixture fx, string tag, SecurityTestHarness.SeededSupplier supplier, string shipToErpCode,
         decimal orderQty, decimal priceUnit, bool confirm, decimal? taxRate, bool seedTax, string currencyCode,
-        string? itemCodeSuffix)
+        string? itemCodeSuffix, decimal discountAmount = 0m, decimal discountPct = 0m)
     {
         // R17 — SimpleAsn() picks TestCarrierCode, which the create handler validates against the Carrier master.
         await EnsureTestCarrierAsync(fx);
@@ -92,7 +94,13 @@ public static class ProcureToPayFlow
                     // R13 — warehouse is per LINE now (header ship-to retired). shipToErpCode resolves to a warehouse
                     // CompanyAddress; every schedule / ASN raised off this PO inherits that resolved warehouse address.
                     new PoLineRecord(PositionNo: positionNo, SequenceNo: 1, ItemCode: item.ItemCode,
-                        OrderUnit: "EA", OrderQty: orderQty, PriceUnit: priceUnit, Price: priceUnit * orderQty,
+                        OrderUnit: "EA", OrderQty: orderQty, PriceUnit: priceUnit,
+                        // R19 — DiscountAmount is PER UNIT (LN: Price = qty*priceUnit - qty*discountAmount); a pct-only line
+                        // (amount 0) has Price = qty*priceUnit*(1 - pct/100).
+                        Price: discountAmount > 0m || discountPct <= 0m
+                            ? orderQty * priceUnit - orderQty * discountAmount
+                            : orderQty * priceUnit * (1m - discountPct / 100m),
+                        DiscountPct: discountPct, DiscountAmount: discountAmount,
                         TaxCode: taxCode, Warehouse: shipToErpCode),
                 },
                 PoStatus: nameof(PoStatus.Released), CurrencyCode: currencyCode),

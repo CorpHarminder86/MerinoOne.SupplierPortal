@@ -1,4 +1,5 @@
 using MerinoOne.SupplierPortal.Domain.Entities.Doc;
+using MerinoOne.SupplierPortal.Domain.Entities.Proc;
 using MerinoOne.SupplierPortal.Domain.Enums;
 using MerinoOne.SupplierPortal.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -129,7 +130,7 @@ public static class AttachmentGovernanceHarness
     /// </summary>
     public static async Task<Guid> AddUploadAsync(
         this IntegrationTestFixture fx, string ownerEntityType, Guid ownerEntityId, string typeCode,
-        Guid? seccodeId = null)
+        Guid? seccodeId = null, bool isSystemGenerated = false)
     {
         using var scope = fx.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -143,9 +144,77 @@ public static class AttachmentGovernanceHarness
             SeccodeId = seccodeId ?? IntegrationTestFixture.SeccodeId,
             TenantId = IntegrationTestFixture.TenantId, TenantEntityId = IntegrationTestFixture.CompanyId,
             AiValidationStatus = AiValidationStatus.Pending, CreatedBy = "seed", CreatedOn = now,
+            IsSystemGenerated = isSystemGenerated,
         });
         await db.SaveChangesAsync();
         return id;
+    }
+
+    /// <summary>
+    /// R19 — flips a (test-owned) attachment type's IsActive. Only ever call this with a type code the test created itself
+    /// (a fresh GUID-tagged code): the suite shares ONE DB, so toggling a shared master type would change other tests' panels.
+    /// </summary>
+    public static async Task SetAttachmentTypeActiveAsync(this IntegrationTestFixture fx, string typeCode, bool isActive)
+    {
+        using var scope = fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.AttachmentTypes.IgnoreQueryFilters()
+            .Where(t => t.TenantId == IntegrationTestFixture.TenantId && t.Code == typeCode)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.IsActive, isActive));
+    }
+
+    /// <summary>
+    /// R19 — every DocumentUpload row (INCLUDING soft-deleted) for (ownerEntityType, ownerEntityId), oldest first, so a test can
+    /// assert the replace-on-regenerate semantics (old system-generated row IsDeleted, manual row untouched).
+    /// </summary>
+    public static async Task<List<DocumentUpload>> LoadUploadsAsync(
+        this IntegrationTestFixture fx, string ownerEntityType, Guid ownerEntityId)
+    {
+        using var scope = fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.DocumentUploads.IgnoreQueryFilters().AsNoTracking()
+            .Where(d => d.OwnerEntityType == ownerEntityType && d.OwnerEntityId == ownerEntityId)
+            .OrderBy(d => d.CreatedOn).ThenBy(d => d.Seq)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// R19 — a bare ASN row (no lines, no PO) owned by <paramref name="supplier"/>, in the fixture tenant/company: enough for the
+    /// owner lookup the generated-report attacher does, none of the lifecycle.
+    /// </summary>
+    public static async Task<Guid> CreateBareAsnAsync(
+        this IntegrationTestFixture fx, SecurityTestHarness.SeededSupplier supplier, string asnNumber, AsnStatus status)
+    {
+        using var scope = fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var asn = new Asn
+        {
+            Id = Guid.NewGuid(), AsnNumber = asnNumber, SupplierId = supplier.SupplierId,
+            ExpectedDeliveryDate = DateTime.UtcNow.Date.AddDays(1), AsnStatus = status,
+            SeccodeId = supplier.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+            TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+        };
+        db.Asns.Add(asn);
+        await db.SaveChangesAsync();
+        return asn.Id;
+    }
+
+    /// <summary>R19 — a bare invoice header (no lines) owned by <paramref name="supplier"/>, in the fixture tenant/company.</summary>
+    public static async Task<Guid> CreateBareInvoiceAsync(
+        this IntegrationTestFixture fx, SecurityTestHarness.SeededSupplier supplier, string invoiceNumber, InvoiceStatus status)
+    {
+        using var scope = fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var inv = new Invoice
+        {
+            Id = Guid.NewGuid(), InvoiceNumber = invoiceNumber, SupplierId = supplier.SupplierId,
+            InvoiceDate = DateTime.UtcNow.Date, InvoiceStatus = status,
+            SeccodeId = supplier.SeccodeId, TenantId = IntegrationTestFixture.TenantId,
+            TenantEntityId = IntegrationTestFixture.CompanyId, CreatedBy = "seed", CreatedOn = DateTime.UtcNow,
+        };
+        db.Invoices.Add(inv);
+        await db.SaveChangesAsync();
+        return inv.Id;
     }
 
     /// <summary>Counts the "Attachment warning skipped" audit rows for an instance (asserts the skip is audited).</summary>

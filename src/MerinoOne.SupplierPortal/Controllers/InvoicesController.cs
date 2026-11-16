@@ -1,12 +1,17 @@
 using MediatR;
 using MerinoOne.SupplierPortal.Application.Common.Documents;
+using MerinoOne.SupplierPortal.Application.Common.Exceptions;
 using MerinoOne.SupplierPortal.Application.Common.Interfaces;
 using MerinoOne.SupplierPortal.Application.Common.Models;
+using MerinoOne.SupplierPortal.Application.Documents;
 using MerinoOne.SupplierPortal.Application.Invoices.Commands;
 using MerinoOne.SupplierPortal.Application.Invoices.Queries;
+using MerinoOne.SupplierPortal.Contracts.Documents;
 using MerinoOne.SupplierPortal.Contracts.Invoices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Net.Http.Headers;
 using ContractsPagedResult = MerinoOne.SupplierPortal.Contracts.PurchaseOrders.PagedResult<MerinoOne.SupplierPortal.Contracts.Invoices.InvoiceListItemDto>;
 using MerinoOne.SupplierPortal.Contracts.Authorization;
 
@@ -66,16 +71,129 @@ Returns: InvoiceDetailDto on success; 404 if not found; 403 if seccode mismatch.
 
     [HttpGet("{id:guid}/pdf")]
     [Authorize(Policy = Perm.InvoiceRead)]
-    [EndpointSummary("Invoice PDF (frozen snapshot)")]
-    [EndpointDescription(@"Renders the invoice's FROZEN snapshot (header, supplier, lines with tax rate/amounts,
-per-line PO, totals, IRN/ack/e-way) as a PDF. Seccode-scoped through the normal detail query (404 via filters,
-never a leak). Returns: application/pdf file named '{invoiceNumber}.pdf'. Requires **Invoice.Read**.")]
+    [EndpointSummary("Supplier Invoice report (PDF preview)")]
+    [EndpointDescription(@"R19 — renders the invoice's FROZEN values as the supplier-format Invoice report (supplier, bill-to, ship-to and
+ship-from blocks, invoice / ASN / shipment header, one row per line with discount, taxable amount and tax, totals and the amount
+in words) as an A4 PDF for **preview**. A pure read: nothing is written and nothing is attached. Seccode-scoped through the normal
+invoice read (an invoice the caller cannot see is a 404, never a leak).
+Filters / params:
+- **id**: Required — invoice GUID.
+Returns: application/pdf served **inline** (Content-Disposition: inline; filename 'Invoice-{invoiceNumber}.pdf'); 404 if the invoice
+does not exist or is outside the caller's scope. To download it (and, for a supplier user, auto-attach it) use
+POST api/invoices/{id}/pdf/download. Requires **Invoice.Read**.")]
     public async Task<IActionResult> GetPdf(
-        Guid id, [FromServices] IInvoicePdfGenerator pdfGenerator, CancellationToken ct)
+        Guid id, [FromServices] ISupplierInvoicePdfGenerator pdfGenerator, CancellationToken ct)
     {
-        var invoice = await _mediator.Send(new GetInvoiceByIdQuery(id), ct);
-        var bytes = pdfGenerator.Generate(invoice);
-        return File(bytes, "application/pdf", $"{invoice.InvoiceNumber}.pdf");
+        var report = await _mediator.Send(new GetSupplierInvoiceReportQuery(id), ct);
+        var bytes = pdfGenerator.Generate(report);
+
+        Response.Headers.ContentDisposition = new ContentDispositionHeaderValue("inline")
+        {
+            FileName = InvoiceReportFileName(report.InvoiceNumber),
+        }.ToString();
+        return File(bytes, "application/pdf");
+    }
+
+    [HttpPost("{id:guid}/pdf/download")]
+    [Authorize(Policy = Perm.InvoiceRead)]
+    [EndpointSummary("Download Supplier Invoice report (PDF) + auto-attach for supplier users")]
+    [EndpointDescription(@"R19 — the **download** twin of the Invoice report preview: renders the same PDF and returns it as an attachment
+(Content-Disposition: attachment; filename 'Invoice-{invoiceNumber}.pdf').
+Side effect (supplier users only): the generated file is auto-attached as a **system-generated** document of type 'EInvoice' to the
+owner chosen by **attachTo** — but only when that attachment slot is enabled for the invoice's supplier (active type + entity + a
+policy). A repeat download REPLACES the earlier system-generated file (a manual upload of the same type is never touched); the
+owner's lock state (ASN posted / invoice submitted) is ignored. An internal / buyer / admin download never attaches. The attach is
+best-effort: a storage failure never fails the download. The response header **X-Report-Attached** is 'true' when the file was
+attached and 'false' otherwise.
+Filters / params:
+- **id**: Required — invoice GUID.
+- **attachTo**: Optional — 'invoice' (default; the file lands on this invoice) or 'asn' (it lands on the invoice's ASN); case-insensitive.
+Returns: application/pdf attachment; 400 for an unknown attachTo, or attachTo=asn on an invoice that has no ASN ('Invoice has no ASN.');
+404 if the invoice does not exist or is outside the caller's scope. Requires **Invoice.Read**.")]
+    public async Task<IActionResult> DownloadPdf(
+        Guid id,
+        [FromServices] ISupplierInvoicePdfGenerator pdfGenerator,
+        [FromServices] GeneratedReportAttacher attacher,
+        [FromServices] IAppDbContext db,
+        [FromServices] ILogger<InvoicesController> logger,
+        [FromQuery] string? attachTo = null,
+        CancellationToken ct = default)
+    {
+        var toAsn = false;
+        if (!string.IsNullOrWhiteSpace(attachTo)
+            && !string.Equals(attachTo, "invoice", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(attachTo, "asn", StringComparison.OrdinalIgnoreCase))
+                return BadRequest(Result.Fail("attachTo must be 'invoice' or 'asn'."));
+            toAsn = true;
+        }
+
+        // The owner is resolved BEFORE the (heavier) report is built, so a bad attachTo never costs a render. The invoice read is
+        // RLS-scoped: an invoice the caller cannot see is a 404 here exactly as it is in the report query.
+        var ownerType = DocumentOwnerTypes.Invoice;
+        var ownerId = id;
+        if (toAsn)
+        {
+            var row = await db.Invoices.AsNoTracking()
+                .Where(i => i.Id == id && !i.IsDeleted)
+                .Select(i => new { i.AsnId }).FirstOrDefaultAsync(ct)
+                ?? throw new NotFoundException("Invoice", id);
+            if (row.AsnId is not { } asnId)
+                return BadRequest(Result.Fail("Invoice has no ASN."));
+            ownerType = DocumentOwnerTypes.Asn;
+            ownerId = asnId;
+        }
+
+        var report = await _mediator.Send(new GetSupplierInvoiceReportQuery(id), ct);
+        var bytes = pdfGenerator.Generate(report);
+        var fileName = InvoiceReportFileName(report.InvoiceNumber);
+
+        var attached = false;
+        try
+        {
+            attached = await attacher.AttachAsync(ownerType, ownerId, GeneratedReportTypes.EInvoice, fileName, bytes, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Invoice report for invoice {InvoiceId} was generated but could not be auto-attached to {OwnerType} {OwnerId}.",
+                id, ownerType, ownerId);
+        }
+
+        Response.Headers["X-Report-Attached"] = attached ? "true" : "false";
+        return File(bytes, "application/pdf", fileName);
+    }
+
+    [HttpGet("~/api/asns/{id:guid}/invoices")]
+    [Authorize(Policy = Perm.InvoiceRead)]
+    [EndpointSummary("Invoices of an ASN")]
+    [EndpointDescription(@"R19 — the (non-deleted) invoices generated from / raised against one ASN, as light references (id, invoice number,
+status, date), ordered by invoice date then invoice number. Used by the ASN screen to link to its invoice(s) and offer the Invoice report.
+Filters / params:
+- **id**: Required — ASN GUID.
+Side effects:
+- Seccode-scoped: only invoices the caller can see are returned, so an ASN of another supplier yields an empty list (never a leak).
+Returns: List<AsnInvoiceRefDto> (empty when none). Requires permission **Invoice.Read**.")]
+    public async Task<Result<IReadOnlyList<AsnInvoiceRefDto>>> ListForAsn(
+        Guid id, [FromServices] IAppDbContext db, CancellationToken ct)
+    {
+        var rows = await db.Invoices.AsNoTracking()
+            .Where(i => i.AsnId == id && !i.IsDeleted)
+            .OrderBy(i => i.InvoiceDate).ThenBy(i => i.InvoiceNumber)
+            .Select(i => new { i.Id, i.InvoiceNumber, i.InvoiceStatus, i.InvoiceDate })
+            .ToListAsync(ct);
+
+        IReadOnlyList<AsnInvoiceRefDto> data = rows
+            .Select(r => new AsnInvoiceRefDto(r.Id, r.InvoiceNumber, r.InvoiceStatus.ToString(), r.InvoiceDate))
+            .ToList();
+        return Result<IReadOnlyList<AsnInvoiceRefDto>>.Ok(data, HttpContext.TraceIdentifier);
+    }
+
+    /// <summary>'Invoice-{number}.pdf' with any character a file name cannot carry (e.g. '/' in 'GST/24/001') replaced.</summary>
+    private static string InvoiceReportFileName(string invoiceNumber)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var safe = new string(invoiceNumber.Select(c => Array.IndexOf(invalid, c) >= 0 ? '_' : c).ToArray());
+        return $"Invoice-{safe}.pdf";
     }
 
     [HttpPost]

@@ -106,6 +106,25 @@ public class SubmitInvoiceCommandHandler : IRequestHandler<SubmitInvoiceCommand,
         {
             var lines = await _db.InvoiceLines.Where(l => l.InvoiceId == invoice.Id).ToListAsync(ct);
 
+            // ---- R19 — re-derive the discount + taxable amount of EVERY line from its PO line, so a pre-R19 Draft
+            // (gross LineAmount, DiscountAmount 0) is stored net-of-discount once submitted. The PO line's
+            // DiscountAmount is PER UNIT; a line with no resolvable PO line keeps its stored amounts. -------------
+            var discPoLineIds = lines.Select(l => l.PurchaseOrderLineId).Distinct().ToList();
+            var poDiscounts = await _db.PurchaseOrderLines
+                .Where(p => discPoLineIds.Contains(p.Id))
+                .Select(p => new { p.Id, p.DiscountPct, p.DiscountAmount })
+                .ToDictionaryAsync(p => p.Id, ct);
+            foreach (var line in lines)
+            {
+                if (!poDiscounts.TryGetValue(line.PurchaseOrderLineId, out var pd)) continue;
+                line.DiscountPct = pd.DiscountPct;
+                line.DiscountAmount = InvoiceLineMath.LineDiscount(
+                    InvoiceLineMath.PerUnitDiscount(pd.DiscountAmount, pd.DiscountPct, line.UnitPrice), line.BilledQty);
+                line.LineAmount = InvoiceLineMath.Taxable(line.BilledQty, line.UnitPrice, line.DiscountAmount);
+                line.UpdatedBy = _user.UserCode;
+                line.UpdatedOn = now;
+            }
+
             // ---- Re-resolve + FREEZE the current tax rate per line (drift ⇒ advisory, last write wins) ---
             var resolved = await _taxResolver.ResolveAsync(
                 lines.Where(l => l.TaxId.HasValue).Select(l => l.TaxId!.Value), invoice.TenantId, ct);
@@ -135,18 +154,18 @@ public class SubmitInvoiceCommandHandler : IRequestHandler<SubmitInvoiceCommand,
                     line.TaxRatePct = tax.Rate;
                     line.TaxCode = tax.Code;
                     line.TaxDescription = tax.Description;
-                    line.TaxAmount = decimal.Round(line.LineAmount * tax.Rate.Value / 100m, 2);
                     line.UpdatedBy = _user.UserCode;
                     line.UpdatedOn = now;
                 }
             }
 
-            if (notices.Count > 0)
-            {
-                invoice.InvoiceAmount = lines.Sum(l => l.LineAmount);
-                invoice.TaxAmount = lines.Sum(l => l.TaxAmount);
-                invoice.NetAmount = invoice.InvoiceAmount + invoice.TaxAmount;
-            }
+            // Tax on the NET (taxable) amount wherever a rate is known (the just-frozen rate, else the stored snapshot
+            // rate); a code-only tax (no rate) keeps its stored TaxAmount. Header totals are ALWAYS recomputed.
+            foreach (var line in lines.Where(l => l.TaxRatePct.HasValue))
+                line.TaxAmount = InvoiceLineMath.Tax(line.LineAmount, line.TaxRatePct);
+            invoice.InvoiceAmount = lines.Sum(l => l.LineAmount);
+            invoice.TaxAmount = lines.Sum(l => l.TaxAmount);
+            invoice.NetAmount = invoice.InvoiceAmount + invoice.TaxAmount;
 
             // ---- ATOMIC per-PO-line over-invoice reservation (mirrors the ASN over-ship guard) -----------
             // Aggregate billed per PO line FIRST (an invoice normally holds one line per PO line — be safe),

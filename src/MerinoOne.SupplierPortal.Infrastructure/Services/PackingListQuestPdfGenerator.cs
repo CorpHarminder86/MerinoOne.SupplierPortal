@@ -11,9 +11,9 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Services;
 
 /// <summary>
 /// R18 (2026-11-03) — QuestPDF renderer for an ASN's Packing List (A4 portrait): the supplier's centred letterhead
-/// (name, address, contact, GST / CIN), a light-blue "PACKING LIST" title band, the shipment facts in two columns, the
+/// (name, address, contact, GST / CIN) with the ASN's QR code at its top right (R19), a light-blue "PACKING LIST" title band, the shipment facts in two columns, the
 /// Ship From / Ship To boxes, the lines table (header repeated on every page), the Packing Summary beside the Package
-/// Details, numbered remarks, the signature lines and a "Generated on / Page x of y" footer. No logo and no QR code.
+/// Details, numbered remarks, the signature lines and a "Generated on / Page x of y" footer. No logo.
 ///
 /// <para>Renders EXACTLY what <see cref="PackingListDto"/> carries — it looks nothing up. Every null or blank value
 /// prints as "-". Dates go through <see cref="AppTime"/> (local display) and quantities through
@@ -58,7 +58,7 @@ public sealed class PackingListQuestPdfGenerator : IPackingListPdfGenerator
                 page.Content().Column(col =>
                 {
                     col.Spacing(8);
-                    col.Item().Element(c => SupplierHeader(c, packingList.Supplier));
+                    col.Item().Element(c => SupplierHeader(c, packingList.Supplier, packingList.AsnNumber));
                     col.Item().Element(TitleBand);
                     col.Item().Element(c => ShipmentFacts(c, packingList));
                     col.Item().Element(c => PartyBoxes(c, packingList));
@@ -86,14 +86,38 @@ public sealed class PackingListQuestPdfGenerator : IPackingListPdfGenerator
 
     // ── Letterhead + title ───────────────────────────────────────────────────────────────────────────
 
-    private static void SupplierHeader(IContainer c, PackingListPartyDto supplier)
-        => c.Column(col =>
+    /// <summary>Width of the QR column at the letterhead's right; an equal spacer on the left keeps the text centred on the page.</summary>
+    private const float QrColumnWidth = 84;
+
+    private const float QrSize = 64;
+
+    /// <summary>
+    /// The centred letterhead with the ASN's QR code (value = the ASN number) and its caption at the top right. The left
+    /// spacer is as wide as the QR column so the text stays centred on the page; a blank ASN number renders no QR.
+    /// </summary>
+    private static void SupplierHeader(IContainer c, PackingListPartyDto supplier, string? asnNumber)
+        => c.Row(row =>
         {
-            col.Item().Text(Show(supplier.Name)).FontSize(14).Bold().FontColor(Navy).AlignCenter();
-            foreach (var line in AddressOrBlank(supplier.AddressLines))
-                col.Item().Text(line).AlignCenter();
-            col.Item().Text($"Call: {Show(supplier.Phone)} | Email: {Show(supplier.Email)}").AlignCenter();
-            col.Item().Text($"GST No.: {Show(supplier.GstNo)} | CIN No.: {Show(supplier.Cin)}").AlignCenter();
+            row.ConstantItem(QrColumnWidth);
+
+            row.RelativeItem().Column(col =>
+            {
+                col.Item().Text(Show(supplier.Name)).FontSize(14).Bold().FontColor(Navy).AlignCenter();
+                foreach (var line in AddressOrBlank(supplier.AddressLines))
+                    col.Item().Text(line).AlignCenter();
+                col.Item().Text($"Call: {Show(supplier.Phone)} | Email: {Show(supplier.Email)}").AlignCenter();
+                col.Item().Text($"GST No.: {Show(supplier.GstNo)} | CIN No.: {Show(supplier.Cin)}").AlignCenter();
+            });
+
+            row.ConstantItem(QrColumnWidth).Element(qr =>
+            {
+                if (string.IsNullOrWhiteSpace(asnNumber)) return;
+                qr.Column(col =>
+                {
+                    col.Item().AlignCenter().Width(QrSize).Height(QrSize).Image(QrCodeImage.Png(asnNumber.Trim()));
+                    col.Item().Text("Scan for Shipment Details").FontSize(6.5f).FontColor(Navy).AlignCenter();
+                });
+            });
         });
 
     private static void TitleBand(IContainer c)

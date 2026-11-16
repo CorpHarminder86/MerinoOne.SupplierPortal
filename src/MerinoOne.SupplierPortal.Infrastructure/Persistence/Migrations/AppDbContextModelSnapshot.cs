@@ -2416,6 +2416,12 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("isDeleted");
 
+                    b.Property<bool>("IsSystemGenerated")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("isSystemGenerated");
+
                     b.Property<string>("MimeType")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -7267,6 +7273,16 @@ namespace MerinoOne.SupplierPortal.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("DeletedOn")
                         .HasColumnType("datetime2")
                         .HasColumnName("deletedOn");
+
+                    b.Property<decimal>("DiscountAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18,4)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("discountAmount");
+
+                    b.Property<decimal?>("DiscountPct")
+                        .HasColumnType("decimal(9,4)")
+                        .HasColumnName("discountPct");
 
                     b.Property<Guid>("InvoiceId")
                         .HasColumnType("uniqueidentifier")

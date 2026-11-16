@@ -104,7 +104,11 @@ public record InvoiceLineDto(
     string? TaxDescription = null,
     Guid? PurchaseOrderId = null,
     string? PoNumber = null,
-    decimal RemainingQty = 0);
+    decimal RemainingQty = 0,
+    // R19 (2026-11-16) — per-line discount: DiscountPct is the PO line's discount percentage (informational),
+    // DiscountAmount is the TOTAL line discount stored on the invoice line (per-unit PO discount x billed qty).
+    decimal? DiscountPct = null,
+    decimal DiscountAmount = 0);
 
 public record CreateInvoiceRequest(
     Guid PurchaseOrderId,

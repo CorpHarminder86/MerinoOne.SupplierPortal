@@ -103,7 +103,7 @@ app.MapStaticAssets();
 //
 // Anonymous /by-token variant exists for Register.razor previews before login — no cookie needed.
 async Task<IResult> ProxyApiAsync(HttpContext http, IHttpClientFactory factory, string apiPath, bool requireAuth, CancellationToken ct,
-    Guid? activeCompanyId = null)
+    Guid? activeCompanyId = null, HttpMethod? method = null)
 {
     var apiBase = http.RequestServices.GetRequiredService<IConfiguration>()["SUPPLIERPORTAL_API_BASE_URL"]
                   ?? http.RequestServices.GetRequiredService<IConfiguration>()["SupplierPortal:ApiBaseUrl"]
@@ -112,7 +112,7 @@ async Task<IResult> ProxyApiAsync(HttpContext http, IHttpClientFactory factory, 
     var client = factory.CreateClient(nameof(ApiClient));
     if (client.BaseAddress is null) client.BaseAddress = new Uri(apiBase, UriKind.Absolute);
 
-    using var req = new HttpRequestMessage(HttpMethod.Get, apiPath);
+    using var req = new HttpRequestMessage(method ?? HttpMethod.Get, apiPath);
     if (requireAuth)
     {
         var jwt = http.Request.Cookies["merino-jwt"];
@@ -139,6 +139,12 @@ async Task<IResult> ProxyApiAsync(HttpContext http, IHttpClientFactory factory, 
     {
         http.Response.Headers["Content-Disposition"] = contentDisposition;
     }
+    // R19 — the report download endpoints answer X-Report-Attached: true|false (did the PDF also land in the entity's
+    // attachments). Forward it so the page can refresh the attachment rail; other responses simply have none.
+    if (resp.Headers.TryGetValues("X-Report-Attached", out var attached))
+    {
+        http.Response.Headers["X-Report-Attached"] = attached.FirstOrDefault();
+    }
     return Results.File(bytes, contentType);
 }
 
@@ -148,24 +154,44 @@ app.MapGet("/files/proxy/{id:guid}", (Guid id, HttpContext http, IHttpClientFact
 app.MapGet("/files/proxy/{id:guid}/by-token/{token}", (Guid id, string token, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
     => ProxyApiAsync(http, factory, $"api/document-uploads/{id}/by-token/{token}", requireAuth: false, ct));
 
-// R6 — invoice PDF (frozen snapshot). Same cookie-JWT → bearer proxy as /files/proxy: the API endpoint
-// (GET api/invoices/{id}/pdf, policy Invoice.Read, seccode-scoped) returns application/pdf with a
-// Content-Disposition filename ({invoiceNumber}.pdf) — both forwarded by ProxyApiAsync, so a plain
-// <a download> on InvoiceDetail streams the file same-origin. The ?company=<guid> query param (stamped by
-// InvoiceDetail from CompanyState) is forwarded as X-Active-Company so a multi-company principal's company
-// filter resolves the invoice's company instead of 404ing; absent/invalid ⇒ header omitted (legacy behaviour).
+// R6/R19 — Supplier Invoice report PDF. Same cookie-JWT -> bearer proxy as /files/proxy. GET api/invoices/{id}/pdf (policy
+// Invoice.Read, seccode-scoped) is an INLINE PREVIEW with no side effects (InvoiceDetail / AsnDetail embed it in
+// PdfPreviewDialog); the POST .../download twin below returns the attachment, optionally auto-attaching it to the invoice or
+// its ASN. The ?company=<guid> query param (stamped by the page from CompanyState) is forwarded as X-Active-Company so a
+// multi-company principal's company filter resolves the invoice's company instead of 404ing; absent/invalid => header omitted.
 app.MapGet("/files/invoice-pdf/{id:guid}", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
     => ProxyApiAsync(http, factory, $"api/invoices/{id}/pdf", requireAuth: true, ct,
         activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null));
 
-// R18 — ASN packing-list PDF. Same cookie-JWT -> bearer proxy and ?company= -> X-Active-Company conversion as the invoice
-// PDF above: the API endpoint (GET api/asns/{id}/packing-list, policy Asn.Read, seccode-scoped) returns application/pdf,
-// 404 outside the caller's scope and 409 when PackingListRules says the packing list is not available for the ASN's status
-// yet, with a Content-Disposition filename (PackingList-{asnNumber}.pdf) — ProxyApiAsync passes the status codes and the header
-// through, so AsnDetail's header link (shown only where the rule allows it, a plain <a download>) streams the file same-origin.
+// R19 — download twin of the preview: POST api/invoices/{id}/pdf/download?attachTo=invoice|asn. attachTo is whitelisted
+// (anything else => 400, absent => omitted so the API default applies); X-Report-Attached + Content-Disposition are forwarded.
+// No form binding, so UseAntiforgery() does not apply to it (driven same-origin by merino-download.js).
+app.MapPost("/files/invoice-pdf/{id:guid}/download", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    var attachTo = http.Request.Query["attachTo"].ToString();
+    string suffix;
+    if (string.IsNullOrEmpty(attachTo)) suffix = string.Empty;
+    else if (attachTo is "invoice" or "asn") suffix = $"?attachTo={attachTo}";
+    else return Task.FromResult(Results.BadRequest());
+    return ProxyApiAsync(http, factory, $"api/invoices/{id}/pdf/download{suffix}", requireAuth: true, ct,
+        activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null,
+        method: HttpMethod.Post);
+});
+
+// R18/R19 — ASN packing-list PDF. Same cookie-JWT -> bearer proxy and ?company= -> X-Active-Company conversion as the invoice
+// PDF above. GET api/asns/{id}/packing-list (policy Asn.Read, seccode-scoped) is an INLINE PREVIEW with no side effects: 404
+// outside the caller's scope and 409 when PackingListRules says the packing list is not available for the ASN's status yet
+// (ProxyApiAsync passes the status codes through). AsnDetail embeds it in PdfPreviewDialog and downloads via the POST twin below.
 app.MapGet("/files/packing-list/{id:guid}", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
     => ProxyApiAsync(http, factory, $"api/asns/{id}/packing-list", requireAuth: true, ct,
         activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null));
+
+// R19 — download twin of the packing-list preview: POST api/asns/{id}/packing-list/download (attachment, auto-attached to the
+// ASN; X-Report-Attached + Content-Disposition forwarded).
+app.MapPost("/files/packing-list/{id:guid}/download", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
+    => ProxyApiAsync(http, factory, $"api/asns/{id}/packing-list/download", requireAuth: true, ct,
+        activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null,
+        method: HttpMethod.Post));
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

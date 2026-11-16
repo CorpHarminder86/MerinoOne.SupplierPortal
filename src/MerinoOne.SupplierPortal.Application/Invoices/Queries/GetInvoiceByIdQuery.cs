@@ -73,7 +73,8 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
                                    ? 0m
                                    : pol.ShippedQtyToDate - pol.InvoicedQtyToDate > 0
                                        ? pol.ShippedQtyToDate - pol.InvoicedQtyToDate
-                                       : 0m))
+                                       : 0m,
+                               l.DiscountPct, l.DiscountAmount))
             .ToListAsync(ct);
 
         // Covered POs = distinct PO of the invoice's lines (∪ legacy header PO for single-PO back-compat).

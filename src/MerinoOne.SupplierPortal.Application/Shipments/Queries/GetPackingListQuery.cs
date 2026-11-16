@@ -31,19 +31,8 @@ public record GetPackingListQuery(Guid AsnId) : IRequest<PackingListDto>;
 
 public class GetPackingListQueryHandler : IRequestHandler<GetPackingListQuery, PackingListDto>
 {
-    // The SupplierAddress.AddressType values the portal itself produces (registration form + change-request editor):
-    // Registered / Billing / Shipping / Other. The header prints the Registered address, Ship From the Shipping one.
-    private const string RegisteredAddressType = "Registered";
-    private const string ShippingAddressType = "Shipping";
-
     private readonly IAppDbContext _db;
     public GetPackingListQueryHandler(IAppDbContext db) => _db = db;
-
-    private sealed record SupplierAddressRow(
-        string AddressType, string? Line1, string? Line2, string? Area, string? City, string? Pincode, string? State, string? Country)
-    {
-        public IReadOnlyList<string> Lines => PackingListFormat.AddressLines(Line1, Line2, Area, City, Pincode, State, Country);
-    }
 
     public async Task<PackingListDto> Handle(GetPackingListQuery request, CancellationToken ct)
     {
@@ -57,23 +46,8 @@ public class GetPackingListQueryHandler : IRequestHandler<GetPackingListQuery, P
         // The customer company and the frozen receiving-warehouse snapshot live on the ASN row, not on the DTO.
         var header = await _db.Asns.AsNoTracking().FirstAsync(a => a.Id == asn.Id, ct);
 
-        var supplier = await _db.Suppliers.AsNoTracking().Where(s => s.Id == asn.SupplierId)
-            .Select(s => new { s.SupplierCode, s.GstNumber, s.DeliveryTermCode })
-            .FirstOrDefaultAsync(ct);
-
-        var addresses = await _db.SupplierAddresses.AsNoTracking()
-            .Where(a => a.SupplierId == asn.SupplierId)
-            .OrderBy(a => a.Seq)
-            .Select(a => new SupplierAddressRow(
-                a.AddressType, a.AddressLine1, a.AddressLine2, a.Area, a.City, a.Pincode, a.State, a.Country))
-            .ToListAsync(ct);
-
-        // The primary contact, else the first one (IsPrimary DESC, then creation order).
-        var contact = await _db.SupplierContacts.AsNoTracking()
-            .Where(c => c.SupplierId == asn.SupplierId)
-            .OrderByDescending(c => c.IsPrimary).ThenBy(c => c.Seq)
-            .Select(c => new { c.Phone, c.Email })
-            .FirstOrDefaultAsync(ct);
+        var supplierName = PackingListFormat.Blank(asn.SupplierName);
+        var parties = await PackingListParties.LoadSupplierAsync(_db, asn.SupplierId, supplierName, ct);
 
         var coveredPoIds = asn.PurchaseOrders.Select(p => p.PurchaseOrderId).ToList();
         var poDeliveryTerms = await _db.PurchaseOrders.AsNoTracking()
@@ -81,15 +55,11 @@ public class GetPackingListQueryHandler : IRequestHandler<GetPackingListQuery, P
             .Select(p => new { p.Id, p.DeliveryTerms })
             .ToDictionaryAsync(p => p.Id, p => p.DeliveryTerms, ct);
 
-        var (warehouseName, shipToLines) = await ResolveWarehouseAsync(header, ct);
+        var (warehouseName, shipToLines) = await PackingListParties.ResolveWarehouseAsync(
+            _db, header.WarehouseAddressSnapshot, header.WarehouseAddressId, header.TenantEntityId, ct);
         var companyName = header.TenantEntityId is { } companyId
             ? await _db.TenantEntities.AsNoTracking().Where(e => e.Id == companyId).Select(e => e.Name).FirstOrDefaultAsync(ct)
             : null;
-
-        // Supplier header: the Registered address, else the first one. Ship From: the Shipping address, else the header's.
-        var headerAddress = addresses.FirstOrDefault(a => IsType(a, RegisteredAddressType)) ?? addresses.FirstOrDefault();
-        var shipFromAddress = addresses.FirstOrDefault(a => IsType(a, ShippingAddressType)) ?? headerAddress;
-        var supplierName = PackingListFormat.Blank(asn.SupplierName);
 
         var lines = asn.Lines.Select((l, i) =>
         {
@@ -101,10 +71,8 @@ public class GetPackingListQueryHandler : IRequestHandler<GetPackingListQuery, P
         }).ToList();
 
         return new PackingListDto(
-            Supplier: new PackingListPartyDto(
-                supplierName, headerAddress?.Lines ?? [], contact?.Phone, contact?.Email, supplier?.GstNumber, Cin: null),
-            ShipFrom: new PackingListPartyDto(
-                supplierName, shipFromAddress?.Lines ?? [], null, null, null, null),
+            Supplier: parties.Supplier,
+            ShipFrom: parties.ShipFrom,
             ShipTo: new PackingListPartyDto(
                 PackingListFormat.Pair(companyName, warehouseName), shipToLines, null, null, null, null),
             PackingListNumber: asn.PackingList,
@@ -112,11 +80,11 @@ public class GetPackingListQueryHandler : IRequestHandler<GetPackingListQuery, P
             AsnNumber: asn.AsnNumber,
             PurchaseOrders: PackingListFormat.Blank(string.Join(", ", asn.PurchaseOrders.Select(p => p.PoNumber).Distinct())),
             ShipmentNumber: asn.ErpCode,
-            SupplierCode: supplier?.SupplierCode,
+            SupplierCode: parties.SupplierCode,
             Currency: asn.PurchaseOrders.Select(p => p.CurrencyCode).FirstOrDefault(c => !string.IsNullOrWhiteSpace(c)),
             DeliveryTerms: asn.PurchaseOrders.Select(p => poDeliveryTerms.GetValueOrDefault(p.PurchaseOrderId))
                                .FirstOrDefault(t => !string.IsNullOrWhiteSpace(t))
-                           ?? supplier?.DeliveryTermCode,
+                           ?? parties.DeliveryTermCode,
             Carrier: PackingListFormat.Carrier(asn.CarrierCode, asn.CarrierName),
             VehicleNo: asn.VehicleNumber,
             TrackingNo: asn.TrackingNumber,
@@ -130,42 +98,102 @@ public class GetPackingListQueryHandler : IRequestHandler<GetPackingListQuery, P
             Remarks: PackingListFormat.Remarks(asn.AsnNumber, asn.Notes),
             GeneratedAt: AppTime.UtcNow);
     }
+}
+
+/// <summary>
+/// R19 (2026-11-16) — the supplier-side and warehouse party resolution shared by the Packing List and the Supplier Invoice
+/// report, so both documents print the same supplier header, Ship From and Ship To for the same ASN. Extracted unchanged from
+/// <see cref="GetPackingListQueryHandler"/>; every method is a fixed number of small reads (none per line).
+/// </summary>
+internal static class PackingListParties
+{
+    // The SupplierAddress.AddressType values the portal itself produces (registration form + change-request editor):
+    // Registered / Billing / Shipping / Other. The header prints the Registered address, Ship From the Shipping one.
+    private const string RegisteredAddressType = "Registered";
+    private const string ShippingAddressType = "Shipping";
+
+    internal sealed record SupplierParties(
+        string? SupplierCode, string? GstNumber, string? DeliveryTermCode,
+        PackingListPartyDto Supplier, PackingListPartyDto ShipFrom);
+
+    private sealed record SupplierAddressRow(
+        string AddressType, string? Line1, string? Line2, string? Area, string? City, string? Pincode, string? State, string? Country)
+    {
+        public IReadOnlyList<string> Lines => PackingListFormat.AddressLines(Line1, Line2, Area, City, Pincode, State, Country);
+    }
+
+    /// <summary>
+    /// The supplier master row, its addresses and its primary contact, folded into the supplier header block and the Ship From
+    /// block. <paramref name="supplierName"/> is the already-trimmed name both blocks print.
+    /// </summary>
+    internal static async Task<SupplierParties> LoadSupplierAsync(
+        IAppDbContext db, Guid supplierId, string? supplierName, CancellationToken ct)
+    {
+        var supplier = await db.Suppliers.AsNoTracking().Where(s => s.Id == supplierId)
+            .Select(s => new { s.SupplierCode, s.GstNumber, s.DeliveryTermCode })
+            .FirstOrDefaultAsync(ct);
+
+        var addresses = await db.SupplierAddresses.AsNoTracking()
+            .Where(a => a.SupplierId == supplierId)
+            .OrderBy(a => a.Seq)
+            .Select(a => new SupplierAddressRow(
+                a.AddressType, a.AddressLine1, a.AddressLine2, a.Area, a.City, a.Pincode, a.State, a.Country))
+            .ToListAsync(ct);
+
+        // The primary contact, else the first one (IsPrimary DESC, then creation order).
+        var contact = await db.SupplierContacts.AsNoTracking()
+            .Where(c => c.SupplierId == supplierId)
+            .OrderByDescending(c => c.IsPrimary).ThenBy(c => c.Seq)
+            .Select(c => new { c.Phone, c.Email })
+            .FirstOrDefaultAsync(ct);
+
+        // Supplier header: the Registered address, else the first one. Ship From: the Shipping address, else the header's.
+        var headerAddress = addresses.FirstOrDefault(a => IsType(a, RegisteredAddressType)) ?? addresses.FirstOrDefault();
+        var shipFromAddress = addresses.FirstOrDefault(a => IsType(a, ShippingAddressType)) ?? headerAddress;
+
+        return new SupplierParties(
+            supplier?.SupplierCode, supplier?.GstNumber, supplier?.DeliveryTermCode,
+            new PackingListPartyDto(
+                supplierName, headerAddress?.Lines ?? [], contact?.Phone, contact?.Email, supplier?.GstNumber, Cin: null),
+            new PackingListPartyDto(supplierName, shipFromAddress?.Lines ?? [], null, null, null, null));
+    }
 
     private static bool IsType(SupplierAddressRow address, string type)
         => string.Equals(address.AddressType, type, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// The receiving warehouse's name and address lines: the ASN's frozen snapshot first, else the live
-    /// <c>CompanyAddress</c> the ASN points at, else (address only) the company's base address. A source counts only when
+    /// The receiving warehouse's name and address lines: the frozen snapshot first, else the live
+    /// <c>CompanyAddress</c> the document points at, else (address only) the company's base address. A source counts only when
     /// it yields at least one address line; the warehouse NAME is the first one any of the first two sources carries — a base
     /// address is the company's own, not a warehouse, so it never contributes one.
     /// </summary>
-    private async Task<(string? Name, IReadOnlyList<string> Lines)> ResolveWarehouseAsync(Asn header, CancellationToken ct)
+    internal static async Task<(string? Name, IReadOnlyList<string> Lines)> ResolveWarehouseAsync(
+        IAppDbContext db, WarehouseSnapshot? snapshot, Guid? warehouseAddressId, Guid? tenantEntityId, CancellationToken ct)
     {
-        var snapshot = header.WarehouseAddressSnapshot;
         var name = snapshot?.AddressName;
         IReadOnlyList<string> lines = snapshot is null
             ? []
             : PackingListFormat.AddressLines(
                 snapshot.Line1, snapshot.Line2, null, snapshot.City, snapshot.Pincode, snapshot.State, snapshot.Country);
 
-        if (lines.Count == 0 && header.WarehouseAddressId is { } warehouseId)
+        if (lines.Count == 0 && warehouseAddressId is { } warehouseId)
         {
-            var live = await CompanyAddressAsync(a => a.Id == warehouseId, ct);
+            var live = await CompanyAddressAsync(db, a => a.Id == warehouseId, ct);
             name ??= live.Name;
             lines = live.Lines;
         }
 
-        if (lines.Count == 0 && header.TenantEntityId is { } companyId)
-            lines = (await CompanyAddressAsync(a => a.TenantEntityId == companyId && a.IsBaseAddress, ct)).Lines;
+        if (lines.Count == 0 && tenantEntityId is { } companyId)
+            lines = (await CompanyAddressAsync(db, a => a.TenantEntityId == companyId && a.IsBaseAddress, ct)).Lines;
 
         return (name, lines);
     }
 
-    private async Task<(string? Name, IReadOnlyList<string> Lines)> CompanyAddressAsync(
-        Expression<Func<CompanyAddress, bool>> predicate, CancellationToken ct)
+    /// <summary>The first company address matching <paramref name="predicate"/>: its label and its printable lines.</summary>
+    internal static async Task<(string? Name, IReadOnlyList<string> Lines)> CompanyAddressAsync(
+        IAppDbContext db, Expression<Func<CompanyAddress, bool>> predicate, CancellationToken ct)
     {
-        var address = await _db.CompanyAddresses.AsNoTracking().Where(predicate)
+        var address = await db.CompanyAddresses.AsNoTracking().Where(predicate)
             .Select(a => new { a.AddressName, a.AddressLine1, a.AddressLine2, a.City, a.Pincode, a.State, a.Country })
             .FirstOrDefaultAsync(ct);
 

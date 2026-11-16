@@ -97,7 +97,7 @@ public class UpdateInvoiceCommandHandler : IRequestHandler<UpdateInvoiceCommand,
             var poLineIds = lines.Select(l => l.PurchaseOrderLineId).Distinct().ToList();
             var balances = await _db.PurchaseOrderLines
                 .Where(p => poLineIds.Contains(p.Id))
-                .Select(p => new { p.Id, p.ShippedQtyToDate, p.InvoicedQtyToDate })
+                .Select(p => new { p.Id, p.ShippedQtyToDate, p.InvoicedQtyToDate, p.DiscountPct, p.DiscountAmount })
                 .ToDictionaryAsync(p => p.Id, ct);
 
             // Change-detection: ONLY a genuinely reselected tax (non-null TaxId differing from the line's
@@ -132,7 +132,13 @@ public class UpdateInvoiceCommandHandler : IRequestHandler<UpdateInvoiceCommand,
                 }
 
                 line.BilledQty = req.BilledQty;
-                line.LineAmount = decimal.Round(line.BilledQty * line.UnitPrice, 2);
+                // R19 — re-derive the discount from the PO line's PER-UNIT DiscountAmount for the NEW billed qty; the
+                // line amount is the taxable value (gross − discount) and tax is levied on it.
+                line.DiscountPct = bal?.DiscountPct ?? line.DiscountPct;
+                line.DiscountAmount = InvoiceLineMath.LineDiscount(
+                    bal is null ? null : InvoiceLineMath.PerUnitDiscount(bal.DiscountAmount, bal.DiscountPct, line.UnitPrice),
+                    line.BilledQty);
+                line.LineAmount = InvoiceLineMath.Taxable(line.BilledQty, line.UnitPrice, line.DiscountAmount);
 
                 if (req.ClearTax)
                 {
@@ -149,7 +155,7 @@ public class UpdateInvoiceCommandHandler : IRequestHandler<UpdateInvoiceCommand,
                     // when the snapshot rate is known; a code-only tax (TaxCode set, TaxId null, no rate) keeps
                     // its stored TaxAmount as-is — it cannot be recomputed without a rate.
                     if (line.TaxRatePct is { } snapshotRate)
-                        line.TaxAmount = decimal.Round(line.LineAmount * snapshotRate / 100m, 2);
+                        line.TaxAmount = InvoiceLineMath.Tax(line.LineAmount, snapshotRate);
                 }
                 else
                 {
@@ -172,7 +178,7 @@ public class UpdateInvoiceCommandHandler : IRequestHandler<UpdateInvoiceCommand,
                     line.TaxRatePct = tax.Rate;
                     line.TaxCode = tax.Code;
                     line.TaxDescription = tax.Description;
-                    line.TaxAmount = decimal.Round(line.LineAmount * tax.Rate.Value / 100m, 2);
+                    line.TaxAmount = InvoiceLineMath.Tax(line.LineAmount, tax.Rate);
                 }
 
                 line.UpdatedBy = _user.UserCode;

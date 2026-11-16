@@ -4,6 +4,7 @@
 @inject NavigationManager Nav
 @inject NotificationService Notif
 @inject CompanyState Company
+@inject DialogService Dialog
 
 <PageTitle>@detail?.InvoiceNumber</PageTitle>
 
@@ -41,13 +42,13 @@ else
                                       Satisfied="@(railSummary?.SatisfiedSlots ?? 0)"
                                       Total="@(railSummary?.TotalSlots ?? 0)" />
                 }
-                @* R6 — frozen-snapshot PDF, any status. Same-origin proxy (/files/invoice-pdf/{id} in Program.cs)
-                   attaches the cookie-JWT as bearer; page access already implies Invoice.Read. ?company= carries
-                   the circuit's active company (the <a download> bypasses ApiClient's X-Active-Company stamping,
-                   so the proxy forwards it as the header — without it a multi-company principal 404s). *@
-                <a class="mbtn mbtn--outline" href="@InvoicePdfHref" download>
-                    <span class="material-symbols-outlined">download</span> Download PDF
-                </a>
+                @* R19 — Invoice Report: opens PdfPreviewDialog (inline preview of the Supplier Invoice report via the /files/invoice-pdf
+                   proxy in Program.cs, any status; page access already implies Invoice.Read). Its Download POSTs the .../download twin with
+                   attachTo=invoice, which also saves the PDF into this invoice's attachments. ?company= carries the circuit's active company
+                   (the proxy forwards it as X-Active-Company — without it a multi-company principal 404s). *@
+                <button type="button" class="mbtn mbtn--outline" @onclick="OpenInvoiceReportAsync" title="Preview the invoice report (PDF)">
+                    <span class="material-symbols-outlined">receipt_long</span> Invoice Report
+                </button>
                 @if (Token.HasPermission("Invoice.Submit") && detail.InvoiceStatus == "Draft")
                 {
                     <button class="mbtn mbtn--outline" @onclick="OpenEdit" disabled="@busy">
@@ -261,6 +262,8 @@ else
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">PO</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Billed Qty</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Unit Price</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Disc %</th>
+                            <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Disc Amt</th>
                             <th style="text-align:left;padding:6px 4px;color:var(--mer-ink-700);">Tax</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Rate %</th>
                             <th style="text-align:right;padding:6px 4px;color:var(--mer-ink-700);">Tax Amt</th>
@@ -294,6 +297,8 @@ else
                                     }
                                 </td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@AppMoney.Plain(ln.UnitPrice)</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.DiscountPct?.ToString("0.##") ?? "—")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@AppMoney.Format(EditLineDiscount(ed))</td>
                                 <td style="padding:6px 4px;">
                                     @if (ed.IsCodeOnly)
                                     {
@@ -330,6 +335,8 @@ else
                             {
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@ln.BilledQty.ToString("0.###")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@AppMoney.Plain(ln.UnitPrice)</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.DiscountPct?.ToString("0.##") ?? "—")</td>
+                                <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@AppMoney.Plain(ln.DiscountAmount)</td>
                                 <td style="padding:6px 4px;font-family:Inter,monospace;" title="@ln.TaxDescription">@(ln.TaxCode ?? "—")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@(ln.TaxRatePct?.ToString("0.####") ?? "—")</td>
                                 <td style="padding:6px 4px;text-align:right;font-family:Inter,monospace;">@AppMoney.Plain(ln.TaxAmount)</td>
@@ -340,13 +347,13 @@ else
                     </tbody>
                     <tfoot>
                         <tr style="border-top:2px solid var(--mer-line);">
-                            <td colspan="6" style="padding:8px 4px;text-align:right;font-weight:700;color:var(--mer-ink-700);">Totals</td>
+                            <td colspan="8" style="padding:8px 4px;text-align:right;font-weight:700;color:var(--mer-ink-700);">Totals</td>
                             <td></td>
                             <td style="padding:8px 4px;text-align:right;font-family:Inter,monospace;font-weight:600;">@AppMoney.Format(DisplayTaxTotal)</td>
                             <td style="padding:8px 4px;text-align:right;font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@AppMoney.Format(DisplayLineTotal)</td>
                         </tr>
                         <tr>
-                            <td colspan="8" style="padding:2px 4px 6px;text-align:right;font-size:11.5px;color:var(--mer-ink-500);">Net (amount + tax)</td>
+                            <td colspan="10" style="padding:2px 4px 6px;text-align:right;font-size:11.5px;color:var(--mer-ink-500);">Net (amount + tax)</td>
                             <td style="padding:2px 4px 6px;text-align:right;font-family:Inter,monospace;font-weight:700;color:var(--mer-blue-darker);">@AppMoney.Format(DisplayLineTotal + DisplayTaxTotal)</td>
                         </tr>
                     </tfoot>
@@ -359,7 +366,7 @@ else
            document rail. Same component keyed by EntityCode="Invoice"; renders nothing when no policy rows exist.
            R6 (D16) editability rides through: editable exactly while the invoice is Draft and the caller can submit
            it (mirrors the ASN Draft-only rule). Enforcement stays at the invoice-submit site (§13.7), never here. *@
-        <DocumentRail EntityCode="Invoice"
+        <DocumentRail @key="_railReloadKey" EntityCode="Invoice"
                       EntityId="@detail.Id"
                       Editable="@(detail.InvoiceStatus == "Draft" && Token.HasPermission("Invoice.Submit"))"
                       SupplierId="@detail.SupplierId"
@@ -752,13 +759,36 @@ else
     private bool CanEditLines => detail?.InvoiceStatus == "Draft" && Token.HasPermission("Invoice.Submit");
     private bool AnyLineErrors => lineEdits.Values.Any(e => e.Error != null);
 
-    // R6 — same-origin PDF proxy href. The plain <a download> bypasses ApiClient (which stamps X-Active-Company
-    // per call), so the active company rides a ?company= query param that the /files/invoice-pdf proxy converts
-    // back into the header. No selection ⇒ no param ⇒ the proxy behaves as before.
-    private string InvoicePdfHref =>
-        Company.ActiveCompanyId is { } c && c != Guid.Empty
-            ? $"files/invoice-pdf/{Id}?company={c}"
-            : $"files/invoice-pdf/{Id}";
+    // R6/R19 — same-origin report URLs. The /files/invoice-pdf proxy bypasses ApiClient (which stamps X-Active-Company per call), so the
+    // active company rides a ?company= query param that the proxy converts back into the header. No selection => no param.
+    private string CompanyQuery(string joiner) =>
+        Company.ActiveCompanyId is { } c && c != Guid.Empty ? $"{joiner}company={c}" : string.Empty;
+
+    // R19 — Invoice Report: inline preview first, then Download (POST ...?attachTo=invoice), which also saves the PDF into this invoice's
+    // attachments. The rail is nested in DocumentRail, so a server-side auto-attach is surfaced by remounting it via @key (the
+    // AttachmentPanel inside re-fetches on a fresh mount).
+    private int _railReloadKey;
+
+    private async Task OpenInvoiceReportAsync()
+    {
+        if (detail is null) return;
+        var attached = await PdfPreviewDialog.OpenAsync(Dialog,
+            $"Invoice Report — {detail.InvoiceNumber}",
+            $"files/invoice-pdf/{Id}{CompanyQuery("?")}",
+            $"files/invoice-pdf/{Id}/download?attachTo=invoice{CompanyQuery("&")}",
+            $"Invoice-{detail.InvoiceNumber}.pdf");
+        if (attached is null) return;   // closed without downloading
+        if (attached == true)
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Downloaded and attached to the invoice." });
+            _railReloadKey++;
+        }
+        else
+        {
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "Downloaded." });
+        }
+        StateHasChanged();
+    }
 
     // R6 (D5) — both provisional prefixes are rejected server-side on submit; mirror the block client-side.
     private bool HasPlaceholderNumber =>
@@ -787,6 +817,9 @@ else
         public bool IsCodeOnly { get; init; }
         // The stored TaxAmount — the preview "keep as-is" value for code-only / rate-less snapshots.
         public decimal OriginalTaxAmount { get; init; }
+        // R19 — PO-line discount %, and the PER-UNIT discount derived from the loaded DTO (DiscountAmount / original BilledQty; 0 when qty was 0).
+        public decimal? DiscountPct { get; init; }
+        public decimal DiscountPerUnit { get; init; }
     }
 
     private void BuildLineEdits()
@@ -813,6 +846,8 @@ else
                 SnapshotRate = ln.TaxRatePct,
                 IsCodeOnly = isCodeOnly,
                 OriginalTaxAmount = ln.TaxAmount,
+                DiscountPct = ln.DiscountPct,
+                DiscountPerUnit = ln.BilledQty > 0 ? ln.DiscountAmount / ln.BilledQty : 0m,
             };
             // A sibling submit may have shrunk the live balance below this draft's billed qty — flag immediately.
             ValidateQty(st);
@@ -839,14 +874,17 @@ else
         e.Rate = t?.TaxRate ?? (e.TaxIdStr == e.SnapshotTaxIdStr ? e.SnapshotRate : null);
     }
 
-    private static decimal EditLineAmount(LineEditState e) => decimal.Round(e.BilledQty * e.UnitPrice, 2);
+    // R19 — preview of the line's taxable amount: gross (qty x price) less the line discount, via the shared InvoiceLineMath
+    // (the server recompute on save is authoritative). The per-unit discount is derived from the loaded DTO (DiscountAmount / original BilledQty).
+    private static decimal EditLineDiscount(LineEditState e) => InvoiceLineMath.LineDiscount(e.DiscountPerUnit, e.BilledQty);
+    private static decimal EditLineAmount(LineEditState e) => InvoiceLineMath.Taxable(e.BilledQty, e.UnitPrice, EditLineDiscount(e));
 
     // Client-side preview mirroring the server change-detection recompute: known rate ⇒ recompute; "(no tax)" /
     // cleared ⇒ 0; code-only keep-as-is or an unchanged rate-less snapshot ⇒ the stored amount survives as-is.
     private static decimal EditTaxAmount(LineEditState e)
     {
         if (e.TaxIdStr == KeepCodeOnlyValue) return e.OriginalTaxAmount;
-        if (e.Rate is { } r) return decimal.Round(EditLineAmount(e) * r / 100m, 2);
+        if (e.Rate is { } r) return InvoiceLineMath.Tax(EditLineAmount(e), r);
         if (e.TaxIdStr.Length == 0) return 0m;
         return e.TaxIdStr == e.SnapshotTaxIdStr ? e.OriginalTaxAmount : 0m;
     }

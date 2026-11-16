@@ -27,4 +27,10 @@ public class InvoiceLine : AuditableEntity
     public Guid? TaxId { get; set; }
     public Tax? Tax { get; set; }
     public string? TaxDescription { get; set; }
+
+    /// <summary>R19 — snapshot of the PO line's DiscountPct at invoice-draft time (display only; null when the PO line carries none).</summary>
+    public decimal? DiscountPct { get; set; }
+
+    /// <summary>R19 — TOTAL line discount = PO per-unit DiscountAmount x BilledQty (not per-unit). 0 when no discount.</summary>
+    public decimal DiscountAmount { get; set; }
 }

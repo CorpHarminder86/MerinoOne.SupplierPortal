@@ -158,9 +158,10 @@ public static class DependencyInjection
         // hosts call AddInfrastructure). NOTE: Community licensing is revenue-gated (<$1M USD/yr) — flagged to
         // the owner in the build plan; WeasyPrint is the documented fallback if the terms stop fitting.
         QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
-        services.AddSingleton<IInvoicePdfGenerator, Services.InvoiceQuestPdfGenerator>();
         // R18 (2026-11-03) — ASN Packing List PDF (same QuestPDF license as above; stateless, so a singleton).
         services.AddSingleton<IPackingListPdfGenerator, Services.PackingListQuestPdfGenerator>();
+        // R19 (2026-11-16) — Supplier Invoice PDF (same license; stateless singleton).
+        services.AddSingleton<ISupplierInvoicePdfGenerator, Services.SupplierInvoiceQuestPdfGenerator>();
 
         // In-process memory cache — backs the IEmailTemplateRenderer 60s lookup. Safe to call
         // twice; Microsoft.Extensions registers a single MemoryCache + IMemoryCache pair.

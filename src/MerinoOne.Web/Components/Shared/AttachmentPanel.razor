@@ -293,6 +293,16 @@
         }
     }
 
+    /// <summary>
+    /// R19 — host-driven refresh: re-fetches the panel and raises OnChanged exactly as after an upload (used when a
+    /// document was attached server-side, e.g. an auto-attached report PDF).
+    /// </summary>
+    public async Task ReloadAsync()
+    {
+        await LoadPanel();
+        if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+    }
+
     private async Task LoadPanel()
     {
         // EntityId.Empty still loads the slot descriptors (policy is entity-keyed, not instance-keyed) so the
