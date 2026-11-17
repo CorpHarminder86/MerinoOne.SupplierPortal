@@ -193,6 +193,21 @@ app.MapPost("/files/packing-list/{id:guid}/download", (Guid id, HttpContext http
         activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null,
         method: HttpMethod.Post));
 
+// 2026-11-17 — the ASN's pre-Post Supplier Invoice report (one per currency / payment-term group; ?group=n, 1-based). Same proxy
+// and ?company= conversion as the packing list. GET is the inline preview; the POST twin downloads + auto-attaches it to the ASN.
+// group is parsed as an int so nothing but a number is forwarded.
+static string AsnInvoiceGroup(HttpContext http) =>
+    int.TryParse(http.Request.Query["group"], out var g) && g > 0 ? $"?group={g}" : string.Empty;
+
+app.MapGet("/files/asn-invoice-report/{id:guid}", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
+    => ProxyApiAsync(http, factory, $"api/asns/{id}/invoice-report{AsnInvoiceGroup(http)}", requireAuth: true, ct,
+        activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null));
+
+app.MapPost("/files/asn-invoice-report/{id:guid}/download", (Guid id, HttpContext http, IHttpClientFactory factory, CancellationToken ct)
+    => ProxyApiAsync(http, factory, $"api/asns/{id}/invoice-report/download{AsnInvoiceGroup(http)}", requireAuth: true, ct,
+        activeCompanyId: Guid.TryParse(http.Request.Query["company"], out var companyId) ? companyId : null,
+        method: HttpMethod.Post));
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

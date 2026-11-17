@@ -179,6 +179,36 @@
                     }
                 </span>
             }
+            @* 2026-11-17 — before Post there is no draft invoice yet, so the ASN prints its invoice straight from its own lines (same
+               availability rule as the Packing List: Approved, or Draft for a supplier needing no buyer confirmation). One report per
+               currency / payment-term group, numbered like the drafts Post will create. Once real invoices exist the block above wins. *@
+            @if (!IsNew && detail != null && asnInvoices.Count == 0 && (asnInvoiceReports.Count > 0 || asnInvoiceReportError is not null))
+            {
+                <span class="asnro-invpick">
+                    <button type="button" class="mbtn mbtn--outline" @onclick="OnInvoiceReportButtonClickAsync"
+                            disabled="@(asnInvoiceReports.Count == 0)"
+                            title="@(asnInvoiceReportError ?? (asnInvoiceReports.Count == 1 ? "Preview the supplier invoice (PDF)" : "Choose an invoice to preview (PDF)"))"
+                            aria-haspopup="@(asnInvoiceReports.Count > 1 ? "true" : null)" aria-expanded="@(asnInvoiceReports.Count > 1 ? (showInvoicePicker ? "true" : "false") : null)">
+                        <span class="material-symbols-outlined">receipt_long</span> Invoice
+                    </button>
+                    @if (showInvoicePicker && asnInvoiceReports.Count > 1)
+                    {
+                        <div class="asnro-invpick__backdrop" @onclick="() => showInvoicePicker = false"></div>
+                        <ul class="asnro-invpick__menu" role="menu">
+                            @foreach (var rep in asnInvoiceReports)
+                            {
+                                var report = rep;
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="asnro-invpick__item" @onclick="() => OpenInvoiceReportPreviewAsync(report)">
+                                        <span class="asnro-invpick__no">@report.InvoiceNumber</span>
+                                        <span class="asnro-invpick__meta">@report.Currency@(string.IsNullOrWhiteSpace(report.PaymentTerms) ? "" : $" · {report.PaymentTerms}") · @AppMoney.Format(report.GrandTotal)</span>
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </span>
+            }
             @* R5 (§10.2) — buyer decision actions on a PendingApproval ASN. Any mapped PO buyer may decide (Phase 1);
                the server gate (AsnApprovalGate) is authoritative, so we only gate the affordance on Asn.Approve. *@
             @if (!IsNew && detail != null && CanApprove && detail.AsnStatus == "PendingApproval")
@@ -1172,9 +1202,14 @@
             <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--mer-line);">
                 <button class="mbtn mbtn--outline" @onclick="PrevStep" disabled="@(currentStep == FirstStep)">Back</button>
                 <div style="display:flex;gap:8px;">
+                    @* Footer actions are gated by permission as well as state: a read-only viewer (e.g. a buyer
+                       reviewing a confirmed ASN) must not be offered Save / Send / Post the API would 403. *@
                     @if (currentStep == LastStep)
                     {
-                        <button class="mbtn mbtn--outline" @onclick="SaveDraft" disabled="@(busy || (!IsNew && detail?.ShipBlocked == true))">@(busy && savingDraft ? "Saving…" : (IsNew ? "Save draft" : "Save changes"))</button>
+                        @if (CanWrite)
+                        {
+                            <button class="mbtn mbtn--outline" @onclick="SaveDraft" disabled="@(busy || (!IsNew && detail?.ShipBlocked == true))">@(busy && savingDraft ? "Saving…" : (IsNew ? "Save draft" : "Save changes"))</button>
+                        }
                         @if (!IsNew && detail is not null)
                         {
                             @* R14 — which final action the supplier gets depends on the supplier's ASN-confirmation
@@ -1183,13 +1218,13 @@
                                  • confirmation NOT required + Draft       → Post (no buyer in the loop at all);
                                  • Approved (either mode)                  → Post (the buyer has confirmed).
                                CanPost comes from the server and mirrors AsnLifecycle.AssertCanPost exactly. *@
-                            @if (detail.CanPost)
+                            @if (detail.CanPost && CanPostAsn)
                             {
                                 <button class="mbtn mbtn--primary-success" @onclick="PostAsn" disabled="@(busy || detail.ShipBlocked)" title="@(detail.ShipBlocked ? detail.ShipBlockReason : "Posts the shipment to the ERP and records today as the shipping date")">
                                     <span class="material-symbols-outlined">local_shipping</span> @(busy && !savingDraft ? "Posting…" : "Post")
                                 </button>
                             }
-                            else if (detail.AsnConfirmationRequired)
+                            else if (!detail.CanPost && detail.AsnConfirmationRequired && CanWrite)
                             {
                                 @* R5 (§10.2) — Draft/Rejected → PendingApproval. No documents or shipment refs
                                    required at this point (R14); both are enforced at Post. *@
@@ -1685,6 +1720,7 @@
     private bool IsNew => !Id.HasValue;
     private bool IsLocked => detail?.IsLocked == true;
     private bool CanWrite => Token.IsSupplier || Token.HasPermission("Asn.Write");
+    private bool CanPostAsn => Token.HasPermission("Asn.Post");
     private bool CanOverrideGate => Token.HasPermission("PurchaseOrder.OverrideGate");
     // R5 (§10.2) — buyer decision permission. Asn.Approve is seeded to SuperAdmin/Admin/Buyer (not Supplier). The
     // server AsnApprovalGate additionally asserts the caller is a MAPPED PO buyer; we only gate the affordance here.
@@ -1720,6 +1756,43 @@
                 asnInvoices = list.OrderBy(i => i.InvoiceDate).ThenBy(i => i.InvoiceNumber, StringComparer.OrdinalIgnoreCase).ToList();
         }
         catch { /* the Invoice button is a convenience — a failed lookup just hides it */ }
+        await LoadAsnInvoiceReportsAsync();
+    }
+
+    // 2026-11-17 — pre-Post invoice report(s), only while no real invoice exists and the Packing List rule allows it.
+    private List<AsnInvoiceReportRefDto> asnInvoiceReports = new();
+    private string? asnInvoiceReportError;
+
+    private async Task LoadAsnInvoiceReportsAsync()
+    {
+        asnInvoiceReports = new();
+        asnInvoiceReportError = null;
+        if (!Id.HasValue || detail is null || asnInvoices.Count > 0 || !Token.HasPermission("Invoice.Read")
+            || !PackingListRules.IsAvailable(detail.AsnStatus, detail.AsnConfirmationRequired)) return;
+        try
+        {
+            var resp = await Api.GetAsync<List<AsnInvoiceReportRefDto>>($"api/asns/{Id.Value}/invoice-report/groups");
+            if (resp?.Success == true && resp.Data is { } list) asnInvoiceReports = list;
+            else asnInvoiceReportError = resp?.Errors?.FirstOrDefault();
+        }
+        catch { /* convenience only — a failed lookup hides the button */ }
+    }
+
+    private async Task OnInvoiceReportButtonClickAsync()
+    {
+        if (asnInvoiceReports.Count == 1) await OpenInvoiceReportPreviewAsync(asnInvoiceReports[0]);
+        else showInvoicePicker = !showInvoicePicker;
+    }
+
+    private async Task OpenInvoiceReportPreviewAsync(AsnInvoiceReportRefDto report)
+    {
+        showInvoicePicker = false;
+        var attached = await PdfPreviewDialog.OpenAsync(Dialog,
+            $"Supplier Invoice — {report.InvoiceNumber}",
+            $"files/asn-invoice-report/{Id}?group={report.Group}{CompanyQuery("&")}",
+            $"files/asn-invoice-report/{Id}/download?group={report.Group}{CompanyQuery("&")}",
+            $"Invoice-{report.InvoiceNumber}.pdf");
+        await AfterReportDownloadAsync(attached);
     }
 
     private async Task OpenPackingListPreviewAsync()
@@ -2726,8 +2799,11 @@
         if (resp?.Success == true && resp.Data != null)
         {
             showApprove = false;
-            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN confirmed", Detail = "The supplier can now complete the documents and post the ASN, which sends it to the ERP and creates the draft invoice." });
-            await Reload();
+            Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Success, Summary = "ASN confirmed", Detail = "The supplier can now print the invoice and packing list, complete the documents and post the ASN, which sends it to the ERP and creates the draft invoice." });
+            // 2026-11-17 feedback — back to the approvals queue so the buyer can take the next pending ASN.
+            busy = false;
+            NavMgr.NavigateTo("/asn-approvals");
+            return;
         }
         else
         {
@@ -2747,7 +2823,9 @@
         {
             showReject = false;
             Notif.Notify(new NotificationMessage { Severity = NotificationSeverity.Warning, Summary = "ASN rejected", Detail = "The supplier can edit and re-send it for approval." });
-            await Reload();
+            busy = false;
+            NavMgr.NavigateTo("/asn-approvals");
+            return;
         }
         else
         {

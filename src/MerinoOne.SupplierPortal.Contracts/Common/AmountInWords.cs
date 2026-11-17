@@ -4,9 +4,12 @@ using System.Text;
 namespace MerinoOne.SupplierPortal.Contracts.Common;
 
 /// <summary>
-/// R19 (2026-11-16) — spells an invoice amount out in words for the invoice PDF, using the Indian numbering system
-/// (Thousand / Lakh / Crore). INR (or a null / blank currency) reads "Indian Rupees ... Only" with paise as
-/// "and Fifty Paise"; any other currency reads "USD ... Only" with the fraction as "and 25/100".
+/// R19 (2026-11-16) — spells an invoice amount out in words for the invoice PDF. INR (or a null / blank currency) uses the
+/// Indian numbering system (Thousand / Lakh / Crore) and reads "Indian Rupees ... and Fifty Paise Only".
+/// <para>2026-11-17 feedback — every other currency is written in full words too: the currency name spelled out, the
+/// international numbering system (Thousand / Million / Billion) and the minor unit in words — "Euro Eight Hundred Forty
+/// Eight and Forty Five Cents Only". A currency missing from <see cref="Currencies"/> falls back to its code and an
+/// "and 45/100" fraction, because its minor-unit name is not known.</para>
 /// </summary>
 public static class AmountInWords
 {
@@ -21,10 +24,30 @@ public static class AmountInWords
         "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety",
     };
 
+    /// <summary>Currency name + minor unit (singular, plural) for the non-INR currencies the portal trades in.</summary>
+    private static readonly Dictionary<string, (string Name, string MinorOne, string MinorMany)> Currencies =
+        new(StringComparer.Ordinal)
+        {
+            ["EUR"] = ("Euro", "Cent", "Cents"),
+            ["USD"] = ("US Dollars", "Cent", "Cents"),
+            ["GBP"] = ("Pound Sterling", "Penny", "Pence"),
+            ["AUD"] = ("Australian Dollars", "Cent", "Cents"),
+            ["CAD"] = ("Canadian Dollars", "Cent", "Cents"),
+            ["SGD"] = ("Singapore Dollars", "Cent", "Cents"),
+            ["HKD"] = ("Hong Kong Dollars", "Cent", "Cents"),
+            ["NZD"] = ("New Zealand Dollars", "Cent", "Cents"),
+            ["CHF"] = ("Swiss Francs", "Rappen", "Rappen"),
+            ["AED"] = ("UAE Dirhams", "Fils", "Fils"),
+            ["SAR"] = ("Saudi Riyals", "Halala", "Halalas"),
+            ["CNY"] = ("Chinese Yuan", "Fen", "Fen"),
+            ["JPY"] = ("Japanese Yen", "Sen", "Sen"),
+        };
+
     public static string Format(decimal amount, string? currencyCode)
     {
         var code = string.IsNullOrWhiteSpace(currencyCode) ? "INR" : currencyCode.Trim().ToUpperInvariant();
         var isInr = code == "INR";
+        var known = Currencies.TryGetValue(code, out var cur);
 
         var abs = Math.Abs(amount);
         var whole = decimal.Truncate(abs);
@@ -34,16 +57,37 @@ public static class AmountInWords
         var negative = amount < 0 && (whole > 0 || fraction > 0);
 
         var sb = new StringBuilder();
-        sb.Append(isInr ? "Indian Rupees" : code).Append(' ');
+        sb.Append(isInr ? "Indian Rupees" : known ? cur.Name : code).Append(' ');
         if (negative) sb.Append("Minus ");
-        sb.Append(Spell((long)whole));
+        sb.Append(isInr ? Spell((long)whole) : SpellInternational((long)whole));
         if (fraction > 0)
         {
             if (isInr) sb.Append(" and ").Append(Spell(fraction)).Append(" Paise");
+            else if (known) sb.Append(" and ").Append(Below1000(fraction)).Append(' ').Append(fraction == 1 ? cur.MinorOne : cur.MinorMany);
             else sb.Append(" and ").Append(fraction.ToString("00", CultureInfo.InvariantCulture)).Append("/100");
         }
         sb.Append(" Only");
         return sb.ToString();
+    }
+
+    // International grouping: billion / million / thousand / remainder; the billion part may exceed 999, so it recurses.
+    private static string SpellInternational(long n)
+    {
+        if (n == 0) return "Zero";
+
+        var parts = new List<string>();
+        var billion = n / 1_000_000_000;
+        n %= 1_000_000_000;
+        var million = n / 1_000_000;
+        n %= 1_000_000;
+        var thousand = n / 1_000;
+        n %= 1_000;
+
+        if (billion > 0) parts.Add(SpellInternational(billion) + " Billion");
+        if (million > 0) parts.Add(Below1000(million) + " Million");
+        if (thousand > 0) parts.Add(Below1000(thousand) + " Thousand");
+        if (n > 0) parts.Add(Below1000(n));
+        return string.Join(' ', parts);
     }
 
     // Indian grouping: crore (1,00,00,000) / lakh (1,00,000) / thousand / remainder. The crore part may itself exceed

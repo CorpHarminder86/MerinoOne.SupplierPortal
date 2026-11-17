@@ -34,11 +34,22 @@ public class AmountInWordsTests
     public void Blank_currency_means_inr(string? currency)
         => AmountInWords.Format(16840m, currency).Should().Be("Indian Rupees Sixteen Thousand Eight Hundred Forty Only");
 
+    // 2026-11-17 feedback — the reported invoice: EUR 848.45 printed "EUR Eight Hundred Forty Eight and 45/100 Only".
+    [Theory]
+    [InlineData(848.45, "EUR", "Euro Eight Hundred Forty Eight and Forty Five Cents Only")]
+    [InlineData(10.25, "USD", "US Dollars Ten and Twenty Five Cents Only")]
+    [InlineData(10.01, "usd", "US Dollars Ten and One Cent Only")]
+    [InlineData(3.50, "GBP", "Pound Sterling Three and Fifty Pence Only")]
+    [InlineData(1234567, "EUR", "Euro One Million Two Hundred Thirty Four Thousand Five Hundred Sixty Seven Only")]
+    [InlineData(2500000000, "USD", "US Dollars Two Billion Five Hundred Million Only")]
+    public void Other_currencies_are_written_in_full_words_with_international_numbering(decimal amount, string currency, string expected)
+        => AmountInWords.Format(amount, currency).Should().Be(expected);
+
     [Fact]
-    public void Other_currencies_use_the_code_and_a_hundredths_fraction()
-        => AmountInWords.Format(10.25m, "USD").Should().Be("USD Ten and 25/100 Only");
+    public void An_unknown_currency_keeps_its_code_and_a_hundredths_fraction()
+        => AmountInWords.Format(10.25m, "XYZ").Should().Be("XYZ Ten and 25/100 Only");
 
     [Fact]
     public void Negative_amounts_carry_a_minus_prefix_after_the_currency_label()
-        => AmountInWords.Format(-10m, "USD").Should().Be("USD Minus Ten Only");
+        => AmountInWords.Format(-10m, "USD").Should().Be("US Dollars Minus Ten Only");
 }

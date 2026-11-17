@@ -41,7 +41,7 @@ public sealed class GeneratedReportAttacher
     /// <summary>True when attached; false when not enabled or the caller is not a supplier user. Never throws for those cases.</summary>
     public async Task<bool> AttachAsync(
         string ownerEntityType, Guid ownerEntityId, string documentType,
-        string fileName, byte[] pdf, CancellationToken ct)
+        string fileName, byte[] pdf, CancellationToken ct, IReadOnlyCollection<string>? keepFileNames = null)
     {
         if (ownerEntityId == Guid.Empty || string.IsNullOrWhiteSpace(documentType)
             || string.IsNullOrWhiteSpace(fileName) || pdf is null || pdf.Length == 0)
@@ -120,7 +120,13 @@ public sealed class GeneratedReportAttacher
             .Where(d => d.OwnerEntityType == canonicalOwnerType && d.OwnerEntityId == ownerEntityId
                         && !d.IsDeleted && d.IsSystemGenerated)
             .ToListAsync(ct);
-        foreach (var old in previous.Where(d => string.Equals(d.DocumentType, documentType, StringComparison.OrdinalIgnoreCase)))
+        // keepFileNames: an owner that carries SEVERAL generated reports of one type (the pre-Post ASN invoice report, one per
+        // currency / payment-term group) keeps the OTHER current reports named here; everything else of the type — the same
+        // file, and any stale one (e.g. printed before the Invoice No. was entered, so its name changed) — is replaced.
+        foreach (var old in previous.Where(d => string.Equals(d.DocumentType, documentType, StringComparison.OrdinalIgnoreCase)
+                                                && (keepFileNames is null
+                                                    || string.Equals(d.FileName, fileName, StringComparison.OrdinalIgnoreCase)
+                                                    || !keepFileNames.Contains(d.FileName, StringComparer.OrdinalIgnoreCase))))
             _db.DocumentUploads.Remove(old);   // AuditableEntityInterceptor converts to a soft delete
 
         var now = DateTime.UtcNow;

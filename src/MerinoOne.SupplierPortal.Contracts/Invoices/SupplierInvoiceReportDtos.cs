@@ -72,3 +72,9 @@ public record SupplierInvoiceReportDto(
 /// R19 (2026-11-16) — one invoice of an ASN, for the ASN page's invoice picker (an ASN can carry several invoices).
 /// </summary>
 public record AsnInvoiceRefDto(Guid Id, string InvoiceNumber, string InvoiceStatus, DateTime InvoiceDate);
+
+/// <summary>
+/// 2026-11-17 — one pre-Post Invoice report of an ASN (one per currency / payment-term group, numbered like the draft
+/// invoices Post will create), for the ASN page's report button / picker.
+/// </summary>
+public record AsnInvoiceReportRefDto(int Group, string InvoiceNumber, string Currency, string? PaymentTerms, decimal GrandTotal);
